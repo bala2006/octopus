@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import mimetypes
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -268,24 +267,13 @@ async def download_zip(run_id: str, db: AsyncSession = Depends(get_pdb), user: U
 
 
 @router.get("/{run_id}/preview/{path:path}")
-async def preview(run_id: str, path: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+async def preview(run_id: str, path: str, request: Request, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                   ctx: ProjectCtx = Depends(project_ctx)) -> Response:
-    """Serve project files (plan shadow first) for the sandboxed live-preview iframe (strict CSP)."""
+    """Serve the project as this run left it (plan shadow first) for the sandboxed live preview."""
     from app.core.config import PROJECT_DIRNAME
+    from app.services.preview import serve
 
     run = await owned_run(run_id, db, user)
     shadow = ctx.root / PROJECT_DIRNAME / "plans" / run_id if run.permission_level == "plan" else None
     fs = ProjectFS(ctx.root, shadow=shadow if shadow and shadow.is_dir() else None)
-    try:
-        rel, _ = fs.resolve(path or "index.html")
-        content = fs.current(rel)
-    except WorkspaceError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if content is None:
-        raise HTTPException(404, "File not found")
-    mime = mimetypes.guess_type(rel)[0] or "text/plain"
-    if mime not in ("text/html", "text/css", "application/javascript", "text/javascript", "image/svg+xml", "application/json"):
-        mime = "text/plain"
-    return Response(content, media_type=mime, headers={
-        "Content-Security-Policy": "sandbox allow-scripts allow-forms; default-src 'self' 'unsafe-inline' data:; connect-src 'none'",
-        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+    return serve(fs, path, f"{str(request.base_url).rstrip('/')}/api/v1/w/{ctx.workspace.id}/runs/{run_id}/preview/")

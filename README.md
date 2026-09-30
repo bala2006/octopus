@@ -37,8 +37,8 @@ make dev                    # API :8000 (docs at /docs) + UI :5173
 make start                  # http://localhost:8000
 ```
 
-1. Click **Open project folder**, pick (or create) a directory, and choose a default permission level.
-2. **Create company** → *Software Startup*.
+1. Click **Open project folder**. Your operating system's folder dialog opens (Finder / Explorer / zenity or kdialog on Linux), where you can pick a folder or create a new one. Octopus creates and manages `<folder>/.octopus/` (database, plans, exports, browser output, a README, and a `.gitignore` of `*` so git skips it) and repairs it whenever the project is opened. When there's no desktop session (Docker, SSH, a browser on another machine), an in-app folder browser is used instead.
+2. **Create company** → pick one of 14 templates (Software Startup, Web App Studio, Indie Game Studio, Mobile App Team, SaaS Launch, Data Science Team, Security Audit, Content & Marketing Studio, Customer Support Desk, …).
 3. Press **Run**, enter a goal, keep **Demo Mode** on, and watch.
 
 New to Octopus? Open **Guide** in the top bar (or `/guide`) for an illustrated tour of every feature.
@@ -50,7 +50,13 @@ Go to **Settings → Model**:
 - **Azure OpenAI**: paste the endpoint exactly as the portal shows it (for example `https://<resource>.services.ai.azure.com/openai/v1/responses`, `…/openai/v1/chat/completions` or just `https://<resource>.openai.azure.com`), an API key or **Entra ID** (`az login`; the identity needs the *Cognitive Services OpenAI User* role), and the **deployment name** (`gpt-6-luna`, prefilled). Octopus calls the Azure **v1 API** directly (Responses API by default, Chat Completions if the URL ends in `/chat/completions`), with no `api-version`. Parameters a deployment rejects, like `temperature` on reasoning models, are dropped automatically. Legacy `…/openai/deployments/<name>/…` URLs still use the dated `api-version` path.
 - Azure OpenAI is the only real provider. Agents saved with another provider or model (older templates used `gpt-4.1-mini`) run on the configured deployment. Credentials entered on the old *Azure AI Foundry* card are moved to Azure OpenAI automatically.
 
+**Tokens and cost** use the exact usage Azure returns for each call: `input_tokens` (split into uncached, `cached_tokens` and `cache_write_tokens`) and `output_tokens` (incl. `reasoning_tokens`), priced at gpt-6-luna Standard rates: $0.10 input, $0.01 cached input, $0.125 cache writes and $0.50 output per 1M tokens. Prompts over 272K tokens are billed at 2× input and 1.5× output; Data Zone and regional deployments add 10%. Override the rates under *Advanced*. Click the tokens/cost meter of a run for the breakdown.
+
 Use **Test connection** to check it. Env vars (`AZURE_API_BASE`, `AZURE_API_KEY`, `DEFAULT_MODEL`) work too. Keys are Fernet-encrypted at rest and never returned to the browser.
+
+### Built-in browser (Playwright MCP)
+
+Octopus starts `@playwright/mcp` itself on `127.0.0.1` the first time an agent uses the browser (Node 18+ required). If needed it downloads a browser on first use; Chrome is used when it's installed. Agents with the **Browser** tool (on by default) each get a persistent tab. They open the project preview (`/api/v1/w/<id>/preview/…`), take snapshots, click, type and read console errors. The process stops when Octopus stops. Check it with **Settings → MCP servers → Test browser**. Env: `BROWSER_ENABLED`, `PLAYWRIGHT_BROWSER`, `PLAYWRIGHT_HEADLESS`, `PLAYWRIGHT_MCP_PACKAGE`.
 
 ### MCP servers
 

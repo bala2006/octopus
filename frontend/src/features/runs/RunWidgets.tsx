@@ -4,7 +4,7 @@ import { Coins, Cpu, Gauge, Radio, Timer } from "lucide-react";
 import { cn, formatCost, formatTokens } from "@/lib/utils";
 import type { AgentOut } from "@/types";
 import { AgentAvatar } from "@/components/common";
-import { Tip } from "@/components/ui/overlays";
+import { Popover, PopoverContent, PopoverTrigger, Tip } from "@/components/ui/overlays";
 import type { LiveTask, RunLive, TimelineItem } from "./runState";
 
 function Meter({ icon: Icon, label, value, max, fmt }: { icon: typeof Cpu; label: string; value: number; max?: number; fmt: (n: number) => string }) {
@@ -25,10 +25,53 @@ export function UsageMeter({ usage }: { usage: RunLive["usage"] }) {
   return (
     <div className="flex items-center gap-4">
       <Meter icon={Gauge} label="Turns" value={usage.turns} max={usage.max_turns} fmt={String} />
-      <Meter icon={Cpu} label="Tokens" value={usage.tokens} max={usage.max_tokens} fmt={formatTokens} />
-      <Meter icon={Coins} label="Cost" value={usage.cost_usd} max={usage.max_cost_usd || undefined} fmt={formatCost} />
+      <UsageBreakdown usage={usage}>
+        <button className="flex items-center gap-4 rounded-md px-1 py-0.5 transition hover:bg-accent" aria-label="Token and cost details">
+          <Meter icon={Cpu} label="Tokens" value={usage.tokens} max={usage.max_tokens} fmt={formatTokens} />
+          <Meter icon={Coins} label="Cost" value={usage.cost_usd} max={usage.max_cost_usd || undefined} fmt={formatCost} />
+        </button>
+      </UsageBreakdown>
       {usage.timeout_s ? <Meter icon={Timer} label="Active time" value={Math.round(usage.active_seconds ?? 0)} max={usage.timeout_s} fmt={(n) => `${n}s`} /> : null}
     </div>
+  );
+}
+
+/** Exact usage as reported by Azure (input incl. cached + cache writes, output incl. reasoning) and what it cost. */
+export function UsageBreakdown({ usage, children }: { usage: RunLive["usage"]; children: React.ReactNode }) {
+  const cb = usage.cost_breakdown ?? {};
+  const input = usage.input_tokens ?? 0, cached = usage.cached_tokens ?? 0, written = usage.cache_write_tokens ?? 0;
+  const rows: [string, number | undefined, number | undefined, string?][] = [
+    ["Input (uncached)", Math.max(0, input - cached - written), cb.input],
+    ["Cached input", cached, cb.cached_input, input ? `${Math.round((cached / input) * 100)}% of input` : undefined],
+    ["Cache writes", written, cb.cache_write],
+    ["Output", usage.output_tokens ?? 0, cb.output, usage.reasoning_tokens ? `${formatTokens(usage.reasoning_tokens)} reasoning` : undefined],
+  ];
+  return (
+    <Popover>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent align="end" className="w-80 p-0">
+        <div className="border-b border-border px-3 py-2 text-xs font-semibold">
+          {usage.estimated_calls && usage.estimated_calls === usage.llm_calls ? "Estimated usage (Demo Mode)" : "Usage from Azure"}
+          {usage.llm_calls ? <span className="font-normal text-muted-foreground"> · {usage.llm_calls} calls{usage.estimated_calls && usage.estimated_calls !== usage.llm_calls ? `, ${usage.estimated_calls} estimated` : ""}</span> : null}
+        </div>
+        <table className="w-full text-xs tabular-nums">
+          <thead><tr className="text-[10px] uppercase tracking-wide text-muted-foreground"><th className="px-3 py-1.5 text-left font-medium">Tokens</th><th className="px-2 text-right font-medium">Count</th><th className="px-3 text-right font-medium">Cost</th></tr></thead>
+          <tbody>
+            {rows.map(([label, n, c, hint]) => (
+              <tr key={label} className="border-t border-border/60">
+                <td className="px-3 py-1.5">{label}{hint && <div className="text-[10px] text-muted-foreground">{hint}</div>}</td>
+                <td className="px-2 text-right">{(n ?? 0).toLocaleString()}</td>
+                <td className="px-3 text-right">{formatCost(c ?? 0)}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-border font-semibold"><td className="px-3 py-1.5">Total</td><td className="px-2 text-right">{usage.tokens.toLocaleString()}</td><td className="px-3 text-right">{formatCost(usage.cost_usd)}</td></tr>
+          </tbody>
+        </table>
+        <p className="border-t border-border px-3 py-2 text-[10.5px] leading-snug text-muted-foreground">
+          gpt-6-luna Standard: $0.10 input, $0.01 cached, $0.125 cache writes, $0.50 output per 1M tokens (prompts over 272K: 2× input, 1.5× output). Change rates in Settings › Model › Advanced.
+        </p>
+      </PopoverContent>
+    </Popover>
   );
 }
 

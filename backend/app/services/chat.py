@@ -151,6 +151,7 @@ class ChatConnection:
         started = time.monotonic()
         tool_calls: list[dict[str, Any]] = []
         total_tokens, total_cost, text = 0, 0.0, ""
+        detail = {"input_tokens": 0, "cached_tokens": 0, "cache_write_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
         provider, model, warning = agent.provider, agent.model, None
         await self.send("stream_start", {"message_id": mid, "agent_id": agent.id})
         await self.send("status", {"message_id": mid, "phase": "thinking", "detail": f"{agent.name} is thinking…"})
@@ -174,8 +175,13 @@ class ChatConnection:
                         text += chunk.delta
                         await self.send("token_stream", {"message_id": mid, "delta": chunk.delta})
                     if chunk.usage:
-                        total_tokens += chunk.usage.total_tokens
-                        total_cost += chunk.usage.cost_usd
+                        u = chunk.usage
+                        total_tokens += u.total_tokens
+                        total_cost += u.cost_usd
+                        for k, v in (("input_tokens", u.prompt_tokens), ("cached_tokens", u.cached_tokens),
+                                     ("cache_write_tokens", u.cache_write_tokens), ("output_tokens", u.completion_tokens),
+                                     ("reasoning_tokens", u.reasoning_tokens)):
+                            detail[k] += v
                 match = TOOL_RE.match(text)
                 if not match or _round == MAX_TOOL_ROUNDS:
                     break
@@ -193,7 +199,7 @@ class ChatConnection:
             await self.send("error", {"message": f"LLM error: {exc}", "message_id": mid})
             if not text:
                 return
-        meta = {"provider": provider, "model": model, "tokens": total_tokens, "cost_usd": round(total_cost, 6),
+        meta = {"provider": provider, "model": model, "tokens": total_tokens, "cost_usd": round(total_cost, 8), "usage": detail,
                 "tool_calls": tool_calls, "duration_ms": int((time.monotonic() - started) * 1000), "stopped": stopped}
         if warning:
             meta["warning"] = warning

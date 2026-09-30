@@ -226,7 +226,7 @@ export const useCanvas = create<CanvasState>()((set, get) => {
         data: {
           id, name, role: tpl.role, description: tpl.description ?? "", avatar: tpl.avatar ?? "bot", color: tpl.color ?? "#D97756",
           system_prompt: tpl.system_prompt ?? "", provider: "mock", model: "mock/demo", temperature: 0.4, max_tokens: 2048,
-          tools: tpl.tools ?? { file_read: true, file_write: true, list_files: true, terminal: false, web_search: false, calculator: true, ask_user: false, send_message: true, manage_team: false, mcp_servers: [] },
+          tools: tpl.tools ?? { file_read: true, file_write: true, list_files: true, terminal: false, web_search: false, calculator: true, ask_user: false, send_message: true, manage_team: false, browser: true, mcp_servers: [] },
           behavior: { assertiveness: 0.5, creativity: 0.5, strictness: 0.5, debate_style: "balanced", max_autonomous_turns: 12, template_key: tpl.key ?? "" },
           permission_level: "inherit", is_entry: n.length === 0, department: "", is_manager: !!tpl.tools?.manage_team, reports_to: null, active: true, created_by: null,
           ...defaults,

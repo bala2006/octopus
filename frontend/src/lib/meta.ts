@@ -48,13 +48,14 @@ export const PERMISSIONS: Record<PermissionLevel, PermMeta> = {
   danger: { label: "Danger mode", short: "Danger", description: "Everything auto-approved, network allowed for commands. Still sandboxed to the project directory.", icon: Flame, tone: "text-destructive" },
 };
 
-export interface ToolMeta { key: "file_read" | "file_write" | "list_files" | "terminal" | "web_search" | "calculator" | "ask_user" | "send_message" | "manage_team"; label: string; icon: LucideIcon; hint: string; danger?: boolean }
+export interface ToolMeta { key: "file_read" | "file_write" | "list_files" | "terminal" | "web_search" | "calculator" | "ask_user" | "send_message" | "manage_team" | "browser"; label: string; icon: LucideIcon; hint: string; danger?: boolean }
 export const TOOLS: ToolMeta[] = [
   { key: "file_read", label: "Read files", icon: FileSearch, hint: "read_file inside the project" },
   { key: "list_files", label: "List files", icon: FolderTree, hint: "Browse the project tree" },
   { key: "file_write", label: "Write files", icon: FilePen, hint: "Create / modify files (subject to permission level)", danger: true },
   { key: "terminal", label: "Terminal", icon: Terminal, hint: "Run sandboxed commands (python, node, npm test, pytest…)", danger: true },
-  { key: "web_search", label: "Web search", icon: Globe, hint: "Keyless web search" },
+  { key: "web_search", label: "Web search", icon: Search, hint: "Keyless web search" },
+  { key: "browser", label: "Browser", icon: Globe, hint: "A real browser tab (Playwright, run by Octopus): open the project preview, click, type, read console errors" },
   { key: "calculator", label: "Calculator", icon: Calculator, hint: "Exact arithmetic" },
   { key: "ask_user", label: "Ask user", icon: UserRoundSearch, hint: "Pause the run to ask you a question" },
   { key: "send_message", label: "Messaging", icon: Send, hint: "Talk to connected teammates" },

@@ -202,7 +202,7 @@ ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "w
 ACTION_TOOL = {"send_message": "send_message", "write_file": "file_write", "read_file": "file_read", "list_files": "list_files",
                "run_code": "terminal", "request_user_input": "ask_user", "web_search": "web_search", "calculate": "calculator",
                "create_agent": "manage_team"}
-TOOL_DEFAULTS = {"send_message": True, "file_read": True, "file_write": True, "list_files": True, "calculator": True}
+TOOL_DEFAULTS = {"send_message": True, "file_read": True, "file_write": True, "list_files": True, "calculator": True, "browser": True}
 
 
 def tool_enabled(tools: dict[str, Any], key: str) -> bool:
@@ -319,6 +319,15 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
                      '  (reconfigure or deactivate your reports)')
     for srv in mcp_servers or []:
         tools = srv.get("tools") or []
+        if srv.get("builtin"):  # compact: name(required args, optional args)
+            def sig(t: dict[str, Any]) -> str:
+                props = list((t.get("input_schema") or {}).get("properties", {}))
+                req = set((t.get("input_schema") or {}).get("required") or [])
+                return f"{t['name']}(" + ", ".join(p if p in req else f"{p}?" for p in props[:6]) + ")"
+            lines.append(f'{{"action":"mcp_call","server":"{srv["name"]}","tool":"browser_navigate","arguments":{{"url":"..."}}}}  '
+                         f'your browser tab. Tools: ' + "; ".join(sig(t) for t in tools[:22]) +
+                         '. "target" is the element ref from browser_snapshot (e.g. "e12").')
+            continue
         listing = "; ".join(f"{t['name']}: {t.get('description', '')[:120]} args={json.dumps(t.get('input_schema', {}).get('properties', {}))[:300]}"
                             for t in tools[:25]) or "(tool list unavailable)"
         lines.append(f'{{"action":"mcp_call","server":"{srv["name"]}","tool":"<tool name>","arguments":{{...}}}}  MCP server "{srv["name"]}" tools: {listing}')

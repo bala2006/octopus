@@ -73,6 +73,9 @@ async def load_project(workspace_id: str, user: User, rdb: AsyncSession, *, touc
     if not root.is_dir():
         raise HTTPException(410, f"Project directory is missing: {ws.path}")
     if touch:
+        from app.services.projects import ensure_layout
+
+        ensure_layout(root)  # self-managed .octopus: recreate anything the user deleted
         ws.last_opened_at = utcnow()
         await rdb.commit()
     sf = await project_factory(str(root), root)

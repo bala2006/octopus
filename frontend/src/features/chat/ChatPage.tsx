@@ -8,7 +8,7 @@ import {
   Play, Radio,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
-import { clockTime, cn, download, formatTokens, timeAgo } from "@/lib/utils";
+import { clockTime, cn, download, formatCost, formatTokens, timeAgo } from "@/lib/utils";
 import { qk, useCanvas as useCanvasQuery, useCompanyId, useRuns, useSessionMessages, useSessions, useWorkspaceId } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
 import type { AgentOut, MessageOut, SessionOut } from "@/types";
@@ -224,7 +224,11 @@ function ChatMessage({ m, agent, isLast, onRegenerate, busy }: { m: MessageOut; 
         <Markdown>{m.content}</Markdown>
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground opacity-0 transition group-hover:opacity-100">
           <span>{clockTime(m.created_at)}</span>
-          {meta.tokens ? <span>{formatTokens(meta.tokens)} tokens</span> : null}
+          {meta.tokens ? (
+            <Tip content={meta.usage ? `Input ${meta.usage.input_tokens} (cached ${meta.usage.cached_tokens}, cache writes ${meta.usage.cache_write_tokens}) · Output ${meta.usage.output_tokens} (reasoning ${meta.usage.reasoning_tokens})` : "Tokens"}>
+              <span>{formatTokens(meta.tokens)} tokens{meta.cost_usd ? ` · ${formatCost(meta.cost_usd)}` : ""}</span>
+            </Tip>
+          ) : null}
           {meta.duration_ms ? <span>{(meta.duration_ms / 1000).toFixed(1)}s</span> : null}
           <button onClick={copy} className="flex items-center gap-0.5 rounded px-1 hover:bg-accent hover:text-foreground" aria-label="Copy message">{copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}Copy</button>
           {isLast && !busy && <button onClick={onRegenerate} className="flex items-center gap-0.5 rounded px-1 hover:bg-accent hover:text-foreground"><RefreshCw className="h-3 w-3" />Regenerate</button>}

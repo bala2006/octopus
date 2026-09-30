@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from app.llm.base import LLMChunk, LLMRequest, Usage, estimate_tokens
 from app.llm.demo_script import decide
 
-MOCK_PRICE_PER_1K = 0.002  # fictional price so the cost meter is meaningful in demos
 
 ROLE_TIPS: dict[str, list[str]] = {
     "ceo": ["Define the outcome and a single success metric", "Cut scope ruthlessly to hit the date", "Delegate, then inspect the results"],
@@ -91,4 +90,7 @@ class MockProvider:
                 await asyncio.sleep(delay)
         prompt_tokens = estimate_tokens("".join(m.get("content", "") for m in req.messages))
         completion_tokens = estimate_tokens(text)
-        yield LLMChunk(usage=Usage(prompt_tokens, completion_tokens, (prompt_tokens + completion_tokens) / 1000 * MOCK_PRICE_PER_1K))
+        from app.llm.pricing import apply
+
+        # Demo Mode: estimated token counts, priced like the real deployment so the cost meter is realistic
+        yield LLMChunk(usage=apply(Usage(prompt_tokens, completion_tokens, estimated=True), "gpt-6-luna"))

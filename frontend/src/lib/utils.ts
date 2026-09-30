@@ -16,9 +16,10 @@ export function formatTokens(n: number): string {
 }
 
 export function formatCost(usd: number): string {
-  if (usd === 0) return "$0";
+  if (!usd) return "$0";
+  if (usd < 0.0001) return `$${usd.toFixed(6)}`;
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(2)}`;
+  return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
 }
 
 export function timeAgo(iso: string | Date): string {

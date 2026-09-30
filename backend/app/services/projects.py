@@ -8,7 +8,9 @@ Layout::
         octopus.db        # companies, agents, edges, sessions, runs, messages, events, tasks, artifacts, memory
         plans/<run_id>/   # shadow files written in "plan" permission mode
         exports/          # company exports / run reports (on demand)
-        .gitignore        # keeps the DB and plans out of git by default
+        browser/          # screenshots / traces from the agents' browser (Playwright MCP)
+        README.md         # what this folder is
+        .gitignore        # "*": git ignores the whole folder, like .venv
 """
 from __future__ import annotations
 
@@ -32,7 +34,8 @@ def allowed_roots() -> list[Path]:
     return [Path(r).expanduser().resolve() for r in get_settings().workspace_allowed_roots]
 
 
-def validate_project_dir(raw: str, *, must_exist: bool = True) -> Path:
+def validate_project_dir(raw: str, *, must_exist: bool = True, any_root: bool = False) -> Path:
+    """``any_root``: the user picked the folder in their own OS dialog, so the allowed-roots list doesn't apply."""
     if not raw or not raw.strip():
         raise ProjectPathError("Choose a directory")
     p = Path(raw.strip()).expanduser()
@@ -47,7 +50,7 @@ def validate_project_dir(raw: str, *, must_exist: bool = True) -> Path:
     if PROJECT_DIRNAME in p.parts:
         raise ProjectPathError(f"Pick the project folder, not its {PROJECT_DIRNAME} directory")
     roots = allowed_roots()
-    if not any(p == r or r in p.parents for r in roots):
+    if not any_root and not any(p == r or r in p.parents for r in roots):
         raise ProjectPathError("Directory is outside the allowed roots: " + ", ".join(str(r) for r in roots))
     if must_exist and not p.is_dir():
         raise ProjectPathError("Directory does not exist")
@@ -64,9 +67,41 @@ class ProjectMeta:
     existing: bool
 
 
-def init_project(root: Path, name: str | None = None) -> ProjectMeta:
-    """Create (or re-open) ``<root>/.octopus``. Re-opening keeps all existing data."""
+GITIGNORE = "# Managed by Octopus. Everything in this folder is local app data.\n*\n"
+README = """# .octopus
+
+This folder is created and managed by Octopus, like `.git` for git. It holds everything Octopus knows about
+this project: companies (agent teams), chats, run history, file versions and plans.
+
+- `project.json`  project id and name
+- `octopus.db`    companies, agents, channels, chats, runs, events, tasks, artifact history
+- `plans/`        files proposed in Plan mode (applied to the project only when you approve)
+- `exports/`      exported companies and run reports
+- `browser/`      screenshots and traces from the agents' browser
+
+Deleting this folder resets the project in Octopus; your own files are never stored here.
+Git ignores this folder automatically (see `.gitignore` in here).
+"""
+
+
+def ensure_layout(root: Path) -> Path:
+    """Create or repair ``<root>/.octopus`` (idempotent, runs every time a project is opened)."""
     data_dir = root / PROJECT_DIRNAME
+    data_dir.mkdir(exist_ok=True)
+    for sub in ("plans", "exports", "browser"):
+        (data_dir / sub).mkdir(exist_ok=True)
+    gi = data_dir / ".gitignore"
+    if not gi.exists() or gi.read_text(errors="ignore").strip() in ("", "# Octopus local data\noctopus.db*\nplans/"):
+        gi.write_text(GITIGNORE)
+    rd = data_dir / "README.md"
+    if not rd.exists():
+        rd.write_text(README)
+    return data_dir
+
+
+def init_project(root: Path, name: str | None = None) -> ProjectMeta:
+    """Create (or re-open) ``<root>/.octopus``. Re-opening keeps all existing data and repairs missing pieces."""
+    data_dir = ensure_layout(root)
     meta_file = data_dir / "project.json"
     if meta_file.is_file():
         try:
@@ -74,12 +109,6 @@ def init_project(root: Path, name: str | None = None) -> ProjectMeta:
             return ProjectMeta(id=d["id"], name=d.get("name") or root.name, created_at=d.get("created_at", ""), existing=True)
         except (json.JSONDecodeError, KeyError):
             pass  # corrupted → rewrite below, DB (if any) is kept
-    data_dir.mkdir(exist_ok=True)
-    (data_dir / "plans").mkdir(exist_ok=True)
-    (data_dir / "exports").mkdir(exist_ok=True)
-    gi = data_dir / ".gitignore"
-    if not gi.exists():
-        gi.write_text("# Octopus local data\noctopus.db*\nplans/\n")
     meta = {"id": new_id(), "name": name or root.name, "created_at": datetime.now(timezone.utc).isoformat(), "app": "octopus", "schema": 1}
     meta_file.write_text(json.dumps(meta, indent=2))
     return ProjectMeta(id=meta["id"], name=meta["name"], created_at=meta["created_at"], existing=False)

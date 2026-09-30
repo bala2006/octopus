@@ -10,11 +10,11 @@ import type { PermissionLevel, WorkspaceOut } from "@/types";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog, Tip } from "@/components/ui/overlays";
 import { PermissionBadge } from "@/components/common";
-import { DirectoryPicker } from "./DirectoryPicker";
+import { useOpenFolder } from "./useOpenFolder";
 
 export function WelcomePage() {
   const { data, isLoading } = useWorkspaces();
-  const [open, setOpen] = React.useState(false);
+  const folder = useOpenFolder();
   const [forget, setForget] = React.useState<WorkspaceOut | null>(null);
   const qc = useQueryClient();
   const del = useMutation({
@@ -33,7 +33,7 @@ export function WelcomePage() {
             Octopus builds a small team of AI agents (a CEO, engineers, a reviewer…) that plan, talk to each other and write real files in a project folder you choose.
           </p>
           <div className="flex justify-center gap-2 pt-1">
-            <Button size="lg" onClick={() => setOpen(true)} data-testid="open-folder"><FolderOpen />Open project folder</Button>
+            <Button size="lg" onClick={folder.open} loading={folder.busy} data-testid="open-folder"><FolderOpen />Open project folder</Button>
             <Button size="lg" variant="outline" asChild><Link to="/guide"><BookOpen />How it works</Link></Button>
           </div>
         </div>
@@ -56,7 +56,7 @@ export function WelcomePage() {
         <div className="rounded-2xl border border-border bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold">Your projects</h2>
-            {!!data?.length && <Button size="sm" variant="outline" onClick={() => setOpen(true)}><FolderOpen />Open another folder</Button>}
+            {!!data?.length && <Button size="sm" variant="outline" onClick={folder.open}><FolderOpen />Open another folder</Button>}
           </div>
           {isLoading ? (
             <div className="space-y-2 p-4">{[0, 1].map((i) => <div key={i} className="skeleton h-12" />)}</div>
@@ -93,7 +93,7 @@ export function WelcomePage() {
         </div>
         <p className="text-center text-[11px] text-muted-foreground">Runs locally · Works offline in Demo Mode · Connect Azure OpenAI or another model any time in Settings</p>
       </div>
-      <DirectoryPicker open={open} onOpenChange={setOpen} />
+      {folder.element}
       <ConfirmDialog open={!!forget} onOpenChange={(o) => !o && setForget(null)} title={`Remove "${forget?.name}" from Octopus?`}
         description="The folder and its .octopus data stay on disk; you can re-open it any time to restore everything."
         confirmLabel="Remove" destructive onConfirm={() => forget && del.mutate(forget.id)} />

@@ -76,5 +76,11 @@ export const useArtifacts = (w: string, r: string) =>
 export const useProjectFiles = (w: string) =>
   useQuery({ queryKey: qk.files(w), enabled: !!w, queryFn: () => unwrap(api.GET("/api/v1/w/{workspace_id}/files", { params: { path: { workspace_id: w } } })) });
 
+/** The project folder as agents see it; polled so files written during a run appear without a reload. */
+export const useProjectTree = (w: string, live = true) =>
+  useQuery({
+    queryKey: [...qk.files(w), "tree"], enabled: !!w, refetchInterval: live ? 4000 : false, refetchOnWindowFocus: true,
+    queryFn: () => unwrap(api.GET("/api/v1/w/{workspace_id}/tree", { params: { path: { workspace_id: w } } })),
+  });
 export const useSettings = () => useQuery({ queryKey: qk.settings, queryFn: () => unwrap(api.GET("/api/v1/settings")) });
 export const useMcpServers = () => useQuery({ queryKey: qk.mcp, queryFn: () => unwrap(api.GET("/api/v1/mcp-servers")) });

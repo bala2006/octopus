@@ -55,6 +55,19 @@ class Settings(BaseSettings):
     sandbox_memory_mb: int = 1024
     sandbox_docker_image: str = "python:3.11-slim"
 
+    # URL the browser uses to reach this backend (agents open project previews here); updated from real requests
+    public_url: str = "http://127.0.0.1:8000"
+
+    # Open the operating system's folder dialog from the local backend (off for shared / remote deployments)
+    native_dialogs: bool = True
+
+    # Built-in browser for agents: Playwright MCP, started and managed by Octopus on 127.0.0.1
+    browser_enabled: bool = True
+    playwright_mcp_package: str = "@playwright/mcp@latest"
+    playwright_mcp_port: int = 0  # 0 = pick a free port
+    playwright_browser: str = ""  # chrome | msedge | chromium | firefox | webkit ("" = chrome if installed, else chromium)
+    playwright_headless: bool = True
+
     # MCP: allow stdio servers (spawns user-configured commands on the backend host)
     mcp_allow_stdio: bool = True
 

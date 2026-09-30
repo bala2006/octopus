@@ -33,7 +33,8 @@ export function PermissionPicker({ value, onChange, compact }: { value: Permissi
   );
 }
 
-export function DirectoryPicker({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+/** In-app folder browser: the fallback when the OS folder dialog isn't available (Docker, SSH, remote browser). */
+export function DirectoryPicker({ open, onOpenChange, notice }: { open: boolean; onOpenChange: (o: boolean) => void; notice?: string }) {
   const [path, setPath] = React.useState<string | undefined>();
   const [selected, setSelected] = React.useState<string | null>(null);
   const [name, setName] = React.useState("");
@@ -104,6 +105,7 @@ export function DirectoryPicker({ open, onOpenChange }: { open: boolean; onOpenC
           <DialogDescription>
             Agents are sandboxed to this folder. Octopus stores everything for the project in <code className="rounded bg-muted px-1">.octopus/</code> inside it.
           </DialogDescription>
+          {notice && <p className="rounded-md bg-muted/60 px-2.5 py-1.5 text-[11px] text-muted-foreground">Using the built-in browser because the system folder dialog isn't available: {notice}</p>}
         </DialogHeader>
 
         <div className="flex items-center gap-1 border-y border-border bg-surface px-3 py-2 text-xs">

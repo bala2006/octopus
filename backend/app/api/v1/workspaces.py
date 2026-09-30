@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,11 @@ from app.core.deps import ProjectCtx, current_user, load_project, project_ctx
 from app.db.session import close_project, get_registry_db
 from app.models import User, Workspace
 from app.orchestrator.engine import manager
-from app.schemas import BrowseOut, DirEntryOut, FileContentOut, FileNode, MkdirIn, WorkspaceIn, WorkspaceOut, WorkspacePatch
+from app.schemas import (
+    BrowseOut, DirEntryOut, FileContentOut, FileNode, MkdirIn, NativeDialogOut, NativeOpenIn, NativeOpenOut, ProjectTreeOut, WorkspaceIn,
+    WorkspaceOut, WorkspacePatch,
+)
+from app.services import native_dialog
 from app.services.projects import ProjectPathError, allowed_roots, browse, init_project, make_dir, rename_project, validate_project_dir
 from app.tools.workspace import ProjectFS, WorkspaceError
 
@@ -49,6 +53,39 @@ async def list_workspaces(db: AsyncSession = Depends(get_registry_db), user: Use
     return [ws_out(w) for w in rows]
 
 
+def _is_local(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost", "testclient") or host.startswith("127.")
+
+
+@router.get("/fs/native", response_model=NativeDialogOut)
+async def native_status(request: Request, user: User = Depends(current_user)) -> NativeDialogOut:
+    """Can this backend show the OS folder dialog? (Only for browsers on the same machine.)"""
+    if not _is_local(request):
+        return NativeDialogOut(available=False, reason="The folder dialog opens on the machine running Octopus; use the browser below")
+    av = native_dialog.availability()
+    return NativeDialogOut(available=av.available, method=av.method, reason=av.reason)
+
+
+@router.post("/workspaces/native", response_model=NativeOpenOut)
+async def open_native(body: NativeOpenIn, request: Request, db: AsyncSession = Depends(get_registry_db),
+                      user: User = Depends(current_user)) -> NativeOpenOut:
+    """Show the OS "choose folder" dialog (the user can create a new folder there) and open the chosen folder as a project."""
+    if not _is_local(request):
+        raise HTTPException(403, "The system folder dialog is only available on the machine running Octopus")
+    try:
+        picked = await native_dialog.pick_directory()
+    except native_dialog.DialogError as exc:
+        raise HTTPException(501, str(exc)) from exc
+    if picked is None:
+        return NativeOpenOut(cancelled=True)
+    try:
+        root = validate_project_dir(str(picked), any_root=True)
+    except ProjectPathError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return NativeOpenOut(cancelled=False, workspace=await _register(root, None, body.default_permission, db, user))
+
+
 @router.post("/workspaces", response_model=WorkspaceOut, status_code=201)
 async def create_workspace(body: WorkspaceIn, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> WorkspaceOut:
     """Select a directory as a project. Creates ``<dir>/.octopus`` (or re-opens an existing one with all its data)."""
@@ -56,11 +93,15 @@ async def create_workspace(body: WorkspaceIn, db: AsyncSession = Depends(get_reg
         root = validate_project_dir(body.path)
     except ProjectPathError as exc:
         raise HTTPException(400, str(exc)) from exc
+    return await _register(root, body.name, body.default_permission, db, user)
+
+
+async def _register(root: Path, name: str | None, permission: str, db: AsyncSession, user: User) -> WorkspaceOut:
     existing_row = (await db.execute(select(Workspace).where(Workspace.user_id == user.id, Workspace.path == str(root)))).scalar_one_or_none()
-    meta = init_project(root, body.name)
+    meta = init_project(root, name)
     if existing_row:
         return ws_out(existing_row, existing=True)
-    w = Workspace(user_id=user.id, name=body.name or meta.name, path=str(root), default_permission=body.default_permission)
+    w = Workspace(user_id=user.id, name=name or meta.name, path=str(root), default_permission=permission)
     db.add(w)
     await db.commit()
     await db.refresh(w)
@@ -104,6 +145,15 @@ async def forget_workspace(workspace_id: str, db: AsyncSession = Depends(get_reg
 
 
 # ---------------- project files (what agents see; .octopus/.git hidden)
+@router.get("/w/{workspace_id}/tree", response_model=ProjectTreeOut, tags=["project files"])
+async def project_tree(ctx: ProjectCtx = Depends(project_ctx)) -> ProjectTreeOut:
+    """The whole project folder as the agents see it (``.octopus``, ``.git``, dependency folders and secrets hidden)."""
+    files = await project_files(ctx)
+    from app.tools.workspace import MAX_LIST
+
+    return ProjectTreeOut(root=str(ctx.root), name=ctx.root.name, files=files, truncated=len(files) >= MAX_LIST)
+
+
 @router.get("/w/{workspace_id}/files", response_model=list[FileNode], tags=["project files"])
 async def project_files(ctx: ProjectCtx = Depends(project_ctx)) -> list[FileNode]:
     fs = ProjectFS(ctx.root)
@@ -125,6 +175,14 @@ async def project_file(path: str = Query(...), ctx: ProjectCtx = Depends(project
     except WorkspaceError as exc:
         raise HTTPException(404 if "not found" in str(exc) else 400, str(exc)) from exc
     return FileContentOut(path=path, content=content, size=len(content))
+
+
+@router.get("/w/{workspace_id}/preview/{path:path}", tags=["project files"])
+async def project_preview(path: str, request: Request, ctx: ProjectCtx = Depends(project_ctx)) -> Response:
+    """Live preview of the project folder (HTML apps with their CSS/JS/images, Markdown, images…)."""
+    from app.services.preview import serve
+
+    return serve(ProjectFS(ctx.root), path, f"{str(request.base_url).rstrip('/')}/api/v1/w/{ctx.workspace.id}/preview/")
 
 
 @router.get("/w/{workspace_id}/files.zip", tags=["project files"])

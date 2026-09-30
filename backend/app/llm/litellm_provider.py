@@ -109,6 +109,10 @@ class LiteLLMProvider:
         if usage is None:
             prompt_text = "".join(m.get("content", "") for m in req.messages)
             usage = Usage(prompt_tokens=estimate_tokens(prompt_text), completion_tokens=estimate_tokens("".join(text_parts)))
-        pricing_model = req.extra.get("pricing_model") or kwargs["model"]
-        usage.cost_usd = compute_cost(pricing_model, usage.prompt_tokens, usage.completion_tokens)
+        from app.llm.pricing import apply, rates_for
+
+        if rates_for(req.model, req.extra):
+            apply(usage, req.model, req.extra)
+        else:
+            usage.cost_usd = compute_cost(req.extra.get("pricing_model") or kwargs["model"], usage.prompt_tokens, usage.completion_tokens)
         yield LLMChunk(usage=usage)

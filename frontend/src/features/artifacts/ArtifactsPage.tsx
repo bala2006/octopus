@@ -10,7 +10,8 @@ import {
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
 import { cn, download, languageFor, timeAgo } from "@/lib/utils";
-import { qk, useArtifacts, useCompanyId, useProjectFiles, useRun, useRuns, useWorkspaceId } from "@/hooks/queries";
+import { qk, useArtifacts, useCompanyId, useProjectTree, useRun, useRuns, useWorkspaceId } from "@/hooks/queries";
+import { Markdown } from "@/components/Markdown";
 import { useApp } from "@/stores/app";
 import type { AgentOut, ArtifactOut } from "@/types";
 import { AgentAvatar, EmptyState } from "@/components/common";
@@ -37,6 +38,16 @@ function buildTree(files: TreeNode["file"][]): TreeNode {
   return root;
 }
 
+/** What the Preview tab can show for a file. */
+export function previewKind(path: string | null): "html" | "markdown" | "image" | "pdf" | null {
+  if (!path) return null;
+  if (/\.html?$/i.test(path)) return "html";
+  if (/\.(md|markdown)$/i.test(path)) return "markdown";
+  if (/\.(png|jpe?g|gif|webp|svg|avif|ico|bmp)$/i.test(path)) return "image";
+  if (/\.pdf$/i.test(path)) return "pdf";
+  return null;
+}
+
 export default function ArtifactsPage() {
   const w = useWorkspaceId();
   const { runId } = useParams();
@@ -47,7 +58,7 @@ export default function ArtifactsPage() {
   const selectedRun = runId ?? runs.data?.[0]?.id ?? "";
   const run = useRun(w, selectedRun);
   const arts = useArtifacts(w, source === "run" ? selectedRun : "");
-  const project = useProjectFiles(w);
+  const project = useProjectTree(w, source === "project");
   const [selected, setSelected] = React.useState<string | null>(null);
   const [version, setVersion] = React.useState<number | null>(null);
   const [mode, setMode] = React.useState<"view" | "diff" | "preview">("view");
@@ -63,7 +74,7 @@ export default function ArtifactsPage() {
   const files = React.useMemo(() => {
     const list = source === "run"
       ? [...byPath.entries()].map(([path, vs]) => ({ path, versions: vs.length, badge: vs[0].planned ? ("planned" as const) : undefined }))
-      : (project.data ?? []).map((f) => ({ path: f.path, badge: byPath.has(f.path) ? ("modified" as const) : undefined }));
+      : (project.data?.files ?? []).map((f) => ({ path: f.path, badge: byPath.has(f.path) ? ("modified" as const) : undefined }));
     return list.filter((f) => f.path.toLowerCase().includes(q.toLowerCase()));
   }, [source, byPath, project.data, q]);
   const tree = React.useMemo(() => buildTree(files), [files]);
@@ -109,7 +120,9 @@ export default function ArtifactsPage() {
       toast.success("Download ready", { id: t });
     } catch (e) { toast.error((e as Error).message, { id: t }); }
   };
-  const isHtml = !!selected && /\.html?$/i.test(selected);
+  const kind = previewKind(selected);
+  const previewBase = source === "run" ? `/api/v1/w/${w}/runs/${selectedRun}/preview/` : `/api/v1/w/${w}/preview/`;
+  const previewUrl = selected ? `${previewBase}${selected.split("/").map(encodeURIComponent).join("/")}` : "";
   const hasPlanned = (arts.data ?? []).some((a) => a.planned);
 
   return (
@@ -130,12 +143,22 @@ export default function ArtifactsPage() {
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-surface">
+          {source === "project" && project.data && (
+            <div className="flex items-start gap-2 border-b border-border px-3 py-2" title={project.data.root}>
+              <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold">{project.data.name}</div>
+                <div className="truncate font-mono text-[10px] text-muted-foreground">{project.data.root}</div>
+              </div>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{project.data.files.length}{project.data.truncated ? "+" : ""} files</span>
+            </div>
+          )}
           <div className="p-2"><div className="relative"><Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter files" className="h-7 pl-7 text-xs" aria-label="Filter files" /></div></div>
           <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2 text-[13px]" role="tree">
             {(arts.isLoading || project.isLoading) && <div className="space-y-1.5 p-2">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-5" />)}</div>}
-            {!files.length && !arts.isLoading && <p className="p-4 text-center text-xs text-muted-foreground">{source === "run" ? "This run didn't write any files." : "The project is empty."}</p>}
-            <TreeView node={tree} depth={0} selected={selected} onSelect={(p) => { setSelected(p); setVersion(null); setMode(/\.html?$/i.test(p) ? mode : mode === "preview" ? "view" : mode); }} />
+            {!files.length && !arts.isLoading && <p className="p-4 text-center text-xs text-muted-foreground">{source === "run" ? "This run didn't write any files." : "This folder has no files yet (.octopus, .git and dependency folders are hidden)."}</p>}
+            <TreeView node={tree} depth={0} selected={selected} onSelect={(p) => { setSelected(p); setVersion(null); setMode(previewKind(p) ? mode : mode === "preview" ? "view" : mode); }} />
           </div>
         </aside>
 
@@ -151,7 +174,7 @@ export default function ArtifactsPage() {
                     <TabsList>
                       <TabsTrigger value="view"><Code2 />Code</TabsTrigger>
                       <TabsTrigger value="diff" disabled={source !== "run" || shownVersion === null}><GitCompare />Diff</TabsTrigger>
-                      <TabsTrigger value="preview" disabled={!isHtml || source !== "run"}><Eye />Preview</TabsTrigger>
+                      <TabsTrigger value="preview" disabled={!kind || (source === "run" && !selectedRun)}><Eye />Preview</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
@@ -169,13 +192,22 @@ export default function ArtifactsPage() {
                     options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, fontSize: 12.5, scrollBeyondLastLine: false }}
                     loading={<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />} />
                 )}
-                {mode === "preview" && (
+                {mode === "preview" && kind && (
                   <div className="flex h-full flex-col">
                     <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1 text-[11px] text-muted-foreground">
-                      Sandboxed preview (scripts allowed, no network, no access to Octopus)
-                      <a className="ml-auto flex items-center gap-1 hover:text-foreground" href={`/api/v1/w/${w}/runs/${selectedRun}/preview/${selected}`} target="_blank" rel="noreferrer"><ExternalLink className="h-3 w-3" />Open</a>
+                      {kind === "html" ? "Live preview: scripts run in a sandbox without access to Octopus. Linked CSS, JS and images load from the project." : "Preview"}
+                      <a className="ml-auto flex items-center gap-1 hover:text-foreground" href={previewUrl} target="_blank" rel="noreferrer"><ExternalLink className="h-3 w-3" />Open in new tab</a>
                     </div>
-                    <iframe title="Live preview" className="min-h-0 flex-1 bg-white" sandbox="allow-scripts allow-forms" src={`/api/v1/w/${w}/runs/${selectedRun}/preview/${selected}?v=${shownVersion ?? 0}`} />
+                    {kind === "markdown" ? (
+                      <div className="min-h-0 flex-1 overflow-y-auto p-6"><div className="mx-auto max-w-3xl"><Markdown>{content.data ?? ""}</Markdown></div></div>
+                    ) : kind === "image" ? (
+                      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[repeating-conic-gradient(hsl(var(--muted))_0%_25%,transparent_0%_50%)] bg-[length:20px_20px] p-6">
+                        <img src={`${previewUrl}?v=${shownVersion ?? 0}`} alt={selected} className="max-h-full max-w-full object-contain shadow" />
+                      </div>
+                    ) : (
+                      <iframe key={`${previewUrl}:${shownVersion ?? 0}`} title="Live preview" className="min-h-0 flex-1 bg-white"
+                        sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock" src={`${previewUrl}?v=${shownVersion ?? 0}`} />
+                    )}
                   </div>
                 )}
               </div>

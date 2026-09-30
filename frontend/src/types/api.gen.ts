@@ -216,6 +216,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/browser": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Browser Status */
+        get: operations["browser_status_api_v1_settings_browser_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/browser/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Browser Test
+         * @description Start the browser if needed, open a test page in a throwaway tab and read it back.
+         */
+        post: operations["browser_test_api_v1_settings_browser_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp-servers": {
         parameters: {
             query?: never;
@@ -341,6 +378,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fs/native": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Native Status
+         * @description Can this backend show the OS folder dialog? (Only for browsers on the same machine.)
+         */
+        get: operations["native_status_api_v1_fs_native_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/native": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Native
+         * @description Show the OS "choose folder" dialog (the user can create a new folder there) and open the chosen folder as a project.
+         */
+        post: operations["open_native_api_v1_workspaces_native_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}": {
         parameters: {
             query?: never;
@@ -361,6 +438,26 @@ export interface paths {
         head?: never;
         /** Patch Workspace */
         patch: operations["patch_workspace_api_v1_workspaces__workspace_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/w/{workspace_id}/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Project Tree
+         * @description The whole project folder as the agents see it (``.octopus``, ``.git``, dependency folders and secrets hidden).
+         */
+        get: operations["project_tree_api_v1_w__workspace_id__tree_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/w/{workspace_id}/files": {
@@ -389,6 +486,26 @@ export interface paths {
         };
         /** Project File */
         get: operations["project_file_api_v1_w__workspace_id__files_content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/w/{workspace_id}/preview/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Project Preview
+         * @description Live preview of the project folder (HTML apps with their CSS/JS/images, Markdown, images…).
+         */
+        get: operations["project_preview_api_v1_w__workspace_id__preview__path__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1008,7 +1125,7 @@ export interface paths {
         };
         /**
          * Preview
-         * @description Serve project files (plan shadow first) for the sandboxed live-preview iframe (strict CSP).
+         * @description Serve the project as this run left it (plan shadow first) for the sandboxed live preview.
          */
         get: operations["preview_api_v1_w__workspace_id__runs__run_id__preview__path__get"];
         put?: never;
@@ -1352,6 +1469,11 @@ export interface components {
              * @default false
              */
             manage_team: boolean;
+            /**
+             * Browser
+             * @default true
+             */
+            browser: boolean;
             /** Mcp Servers */
             mcp_servers?: string[];
         };
@@ -1460,6 +1582,47 @@ export interface components {
             entries: components["schemas"]["DirEntryOut"][];
             /** Roots */
             roots: string[];
+        };
+        /** BrowserStatusOut */
+        BrowserStatusOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Status */
+            status: string;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Browser
+             * @default
+             */
+            browser: string;
+            /**
+             * Package
+             * @default
+             */
+            package: string;
+            /** Tools */
+            tools?: string[];
+            /**
+             * Node
+             * @default true
+             */
+            node: boolean;
+        };
+        /** BrowserTestOut */
+        BrowserTestOut: {
+            /** Ok */
+            ok: boolean;
+            /** Detail */
+            detail: string;
+            /**
+             * Latency Ms
+             * @default 0
+             */
+            latency_ms: number;
         };
         /** CanvasExport */
         "CanvasExport-Input": {
@@ -1924,6 +2087,36 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** NativeDialogOut */
+        NativeDialogOut: {
+            /** Available */
+            available: boolean;
+            /**
+             * Method
+             * @default
+             */
+            method: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /** NativeOpenIn */
+        NativeOpenIn: {
+            /**
+             * Default Permission
+             * @default ask
+             * @enum {string}
+             */
+            default_permission: "read_only" | "plan" | "ask" | "danger";
+        };
+        /** NativeOpenOut */
+        NativeOpenOut: {
+            /** Cancelled */
+            cancelled: boolean;
+            workspace?: components["schemas"]["WorkspaceOut"] | null;
+        };
         /** ParsedFileOut */
         ParsedFileOut: {
             /** Filename */
@@ -1933,6 +2126,20 @@ export interface components {
             /** Text */
             text: string;
             /** Truncated */
+            truncated: boolean;
+        };
+        /** ProjectTreeOut */
+        ProjectTreeOut: {
+            /** Root */
+            root: string;
+            /** Name */
+            name: string;
+            /** Files */
+            files: components["schemas"]["FileNode"][];
+            /**
+             * Truncated
+             * @default false
+             */
             truncated: boolean;
         };
         /** ProviderInfo */
@@ -2010,6 +2217,16 @@ export interface components {
             deployments?: string[];
             /** Reasoning Models */
             reasoning_models?: string[];
+            /**
+             * Deployment Type
+             * @default global
+             * @enum {string}
+             */
+            deployment_type: "global" | "data_zone" | "regional";
+            /** Pricing */
+            pricing?: {
+                [key: string]: number;
+            };
         };
         /** RevertIn */
         RevertIn: {
@@ -2841,6 +3058,46 @@ export interface operations {
             };
         };
     };
+    browser_status_api_v1_settings_browser_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserStatusOut"];
+                };
+            };
+        };
+    };
+    browser_test_api_v1_settings_browser_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserTestOut"];
+                };
+            };
+        };
+    };
     list_mcp_api_v1_mcp_servers_get: {
         parameters: {
             query?: never;
@@ -3140,6 +3397,59 @@ export interface operations {
             };
         };
     };
+    native_status_api_v1_fs_native_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeDialogOut"];
+                };
+            };
+        };
+    };
+    open_native_api_v1_workspaces_native_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NativeOpenIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeOpenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workspace_api_v1_workspaces__workspace_id__get: {
         parameters: {
             query?: never;
@@ -3235,6 +3545,37 @@ export interface operations {
             };
         };
     };
+    project_tree_api_v1_w__workspace_id__tree_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectTreeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     project_files_api_v1_w__workspace_id__files_get: {
         parameters: {
             query?: never;
@@ -3286,6 +3627,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FileContentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_preview_api_v1_w__workspace_id__preview__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

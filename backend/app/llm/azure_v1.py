@@ -142,6 +142,14 @@ async def _auth_headers(req: LLMRequest) -> dict[str, str]:
     return {"api-key": req.api_key}
 
 
+def usage_from_responses(u: dict[str, Any]) -> Usage:
+    """Responses API usage → Usage (input_tokens includes cached + cache-write tokens; output includes reasoning)."""
+    i, o = u.get("input_tokens_details") or {}, u.get("output_tokens_details") or {}
+    return Usage(prompt_tokens=u.get("input_tokens") or 0, completion_tokens=u.get("output_tokens") or 0,
+                 cached_tokens=i.get("cached_tokens") or 0, cache_write_tokens=i.get("cache_write_tokens") or 0,
+                 reasoning_tokens=o.get("reasoning_tokens") or 0)
+
+
 class AzureV1Provider:
     name = "azure_v1"
 
@@ -184,10 +192,10 @@ class AzureV1Provider:
                 raise LLMError("Azure OpenAI rejected the request parameters", retryable=False)
         if usage is None:
             prompt_text = "".join(str(m.get("content", "")) for m in req.messages)
-            usage = Usage(prompt_tokens=estimate_tokens(prompt_text), completion_tokens=estimate_tokens("".join(text_parts)))
-        from app.llm.litellm_provider import compute_cost
+            usage = Usage(prompt_tokens=estimate_tokens(prompt_text), completion_tokens=estimate_tokens("".join(text_parts)), estimated=True)
+        from app.llm.pricing import apply
 
-        usage.cost_usd = compute_cost(req.extra.get("pricing_model") or f"azure/{req.model}", usage.prompt_tokens, usage.completion_tokens)
+        apply(usage, req.model, req.extra)  # exact Azure usage × deployment rates (Settings → Model → Pricing)
         yield LLMChunk(usage=usage)
 
     async def _events(self, resp: httpx.Response, style: ApiStyle, text_parts: list[str]) -> AsyncIterator[LLMChunk]:
@@ -210,7 +218,10 @@ class AzureV1Provider:
                         yield LLMChunk(delta=content)
                 u = ev.get("usage")
                 if u and u.get("prompt_tokens") is not None:
-                    yield LLMChunk(usage=Usage(prompt_tokens=u.get("prompt_tokens") or 0, completion_tokens=u.get("completion_tokens") or 0))
+                    pd, cd = u.get("prompt_tokens_details") or {}, u.get("completion_tokens_details") or {}
+                    yield LLMChunk(usage=Usage(prompt_tokens=u.get("prompt_tokens") or 0, completion_tokens=u.get("completion_tokens") or 0,
+                                               cached_tokens=pd.get("cached_tokens") or 0, cache_write_tokens=pd.get("cache_write_tokens") or 0,
+                                               reasoning_tokens=cd.get("reasoning_tokens") or 0))
                 continue
             kind = ev.get("type", "")
             if kind == "response.output_item.added":
@@ -230,8 +241,7 @@ class AzureV1Provider:
                     reason = (r.get("incomplete_details") or {}).get("reason", "incomplete")
                     raise LLMError(f"Azure OpenAI returned no text ({reason}). For reasoning deployments raise the agent's Max tokens.",
                                    retryable=False)
-                u = r.get("usage") or {}
-                yield LLMChunk(usage=Usage(prompt_tokens=u.get("input_tokens") or 0, completion_tokens=u.get("output_tokens") or 0))
+                yield LLMChunk(usage=usage_from_responses(r.get("usage") or {}))
             elif kind == "response.failed":
                 err = (ev.get("response") or {}).get("error") or {}
                 raise LLMError(f"Azure OpenAI: {err.get('message') or 'response failed'}", retryable=False)
