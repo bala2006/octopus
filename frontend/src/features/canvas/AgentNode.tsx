@@ -10,6 +10,7 @@ import type { PermissionLevel } from "@/types";
 import { Tip } from "@/components/ui/overlays";
 import { useEditable, useLive } from "./live";
 import { NodeQuickConfig } from "./NodeQuickConfig";
+import { useEffectiveModel } from "./ModelPicker";
 
 const SIDES = [Position.Top, Position.Right, Position.Bottom, Position.Left];
 
@@ -30,6 +31,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
   const departments = useCanvas((s) => s.departments);
   const creatorName = useCanvas((s) => (data.created_by ? s.nodes.find((n) => n.id === data.created_by)?.data.name : undefined));
   const inactive = data.active === false;
+  const runModel = useEffectiveModel(data.provider, data.model);
   const glowing = !!status && meta.live && !inactive;
   const showQuick = editable && quickId === id;
   const dcolor = data.department ? tone(live?.departments?.[data.department]?.color ?? deptColor(data.department, departments)) : null;
@@ -87,7 +89,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
 
         <div className="space-y-2 px-3 pb-3">
           <div className="flex flex-wrap items-center gap-1">
-            <span className="max-w-[140px] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground" title={`${data.provider}/${data.model}`}>{data.model}</span>
+            <span className="max-w-[140px] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground" title={runModel}>{runModel}</span>
             {perm && <Tip content={`Permission: ${perm.label}`}><span className={cn("rounded bg-muted p-0.5", perm.tone)}><perm.icon className="h-3 w-3" /></span></Tip>}
             <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
               {tools.slice(0, 6).map((t) => (

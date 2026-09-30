@@ -354,18 +354,18 @@ const SECTIONS: Section[] = [
     body: <p><b>Runs</b> keeps every run with its full timeline. Open one to replay it step by step, see the cost and tokens, or read the final report again.</p>,
   },
   {
-    id: "models", title: "Connect a model (Azure OpenAI)", icon: Cloud,
+    id: "models", title: "Connect Azure OpenAI (gpt-6-luna)", icon: Cloud,
     body: <>
       <p>Out of the box Octopus runs in <b>Demo Mode</b>: a scripted offline model, so you can try everything for free. To use real models open
-        <b> Settings › Model providers</b> and fill in three things:</p>
+        <b> Settings › Model</b> and fill in three things:</p>
       <ol className="space-y-1.5 pl-5 [list-style:decimal]">
         <li><b>Endpoint</b>: paste it exactly as the Azure or Foundry portal shows it. Octopus detects the format and shows which URL it will call.</li>
         <li><b>API key</b>: from the resource's <i>Keys and Endpoint</i> page. Or switch to Microsoft Entra ID under Advanced.</li>
-        <li><b>Deployment name</b>: the name you gave the deployment, for example <code className="rounded bg-muted px-1 text-foreground">gpt-6-luna</code>.</li>
+        <li><b>Deployment name</b>: <code className="rounded bg-muted px-1 text-foreground">gpt-6-luna</code> (already filled in).</li>
       </ol>
       <EndpointExamples />
       <p>Click <b>Save</b>, then <b>Test connection</b>. The deployment now appears in every agent's model picker. Reasoning models that reject settings such as
-        temperature are handled automatically. OpenAI, Anthropic, Gemini, Ollama and others are under <i>Other providers</i>.</p>
+        temperature are handled automatically. Every agent runs on this deployment; the only other choice is the offline Demo model.</p>
       <Shot name="settings" alt="Azure OpenAI settings card" />
     </>,
   },

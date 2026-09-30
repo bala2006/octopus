@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     demo_mode: bool = True  # when true, the mock provider is used for any agent lacking a key
     default_provider: str = "azure"
-    default_model: str = "gpt-4.1-mini"
+    default_model: str = "gpt-6-luna"  # Azure OpenAI deployment name
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8080"])
     rate_limit_per_minute: int = 1200
@@ -68,7 +68,7 @@ class Settings(BaseSettings):
 
     # Azure OpenAI (azure/<deployment>) and Azure AI Foundry (azure_ai/<model>)
     azure_api_key: str | None = None
-    azure_api_base: str | None = None  # https://<resource>.openai.azure.com
+    azure_api_base: str | None = None  # e.g. https://<resource>.services.ai.azure.com/openai/v1/responses
     azure_api_version: str = "2024-10-21"
     azure_ai_api_key: str | None = None
     azure_ai_api_base: str | None = None  # https://<resource>.services.ai.azure.com/models

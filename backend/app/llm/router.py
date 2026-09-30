@@ -19,20 +19,15 @@ from app.models import ProviderKey
 
 log = get_logger("llm")
 
+# Octopus is wired to a single real provider: Azure OpenAI (v1 API) with the gpt-6-luna deployment.
+# "mock" is the offline Demo Mode model used when Azure isn't configured (or a run forces it).
+DEFAULT_DEPLOYMENT = "gpt-6-luna"
 PROVIDER_CATALOG: dict[str, dict] = {
     "mock": {"label": "Demo (mock, offline)", "needs_key": False, "models": ["mock/demo"]},
-    "azure": {"label": "Azure OpenAI", "needs_key": True, "needs_base": True,
-              "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "o4-mini", "gpt-5", "gpt-5-mini"]},
-    "azure_ai": {"label": "Azure AI Foundry", "needs_key": True, "needs_base": True,
-                 "models": ["DeepSeek-R1", "Llama-3.3-70B-Instruct", "Phi-4", "Mistral-Large-2411", "claude-sonnet-4-5"]},
-    "openai": {"label": "OpenAI", "needs_key": True, "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"]},
-    "anthropic": {"label": "Anthropic", "needs_key": True, "models": ["claude-sonnet-4-5", "claude-opus-4-1", "claude-3-5-haiku-latest"]},
-    "gemini": {"label": "Google Gemini", "needs_key": True, "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"]},
-    "ollama": {"label": "Ollama (local)", "needs_key": False, "needs_base": True, "models": ["llama3.1", "qwen2.5-coder", "mistral"]},
-    "openrouter": {"label": "OpenRouter", "needs_key": True, "models": ["openrouter/auto"]},
-    "groq": {"label": "Groq", "needs_key": True, "models": ["llama-3.3-70b-versatile"]},
-    "mistral": {"label": "Mistral", "needs_key": True, "models": ["mistral-large-latest"]},
+    "azure": {"label": "Azure OpenAI", "needs_key": True, "needs_base": True, "models": [DEFAULT_DEPLOYMENT]},
 }
+# Rows saved by earlier versions for other providers; the Azure credentials may live under "azure_ai" (Foundry card).
+LEGACY_AZURE_ROWS = ("azure_ai",)
 
 # Providers can be overridden (tests inject scripted providers).
 _override: LLMProvider | None = None
@@ -60,6 +55,11 @@ async def resolve_credentials(db: AsyncSession, user_id: str, provider: str) -> 
     """
     s = get_settings()
     row = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user_id, ProviderKey.provider == provider))).scalar_one_or_none()
+    if row is None and provider == "azure":  # credentials entered on the old "Azure AI Foundry" card
+        for legacy in LEGACY_AZURE_ROWS:
+            row = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user_id, ProviderKey.provider == legacy))).scalar_one_or_none()
+            if row is not None:
+                break
     key = decrypt_secret(row.encrypted_key) if row and row.encrypted_key else None
     base = (row.base_url if row else "") or None
     extra = dict(row.extra_json or {}) if row else {}
@@ -73,6 +73,11 @@ async def resolve_credentials(db: AsyncSession, user_id: str, provider: str) -> 
     if provider in ("azure", "azure_ai") and not row and s.azure_use_entra:
         extra.setdefault("auth", "entra")
     return key, base, extra
+
+
+def allowed_models(extra: dict) -> list[str]:
+    """Deployment names the user configured, else the default deployment."""
+    return [d for d in (extra.get("deployments") or []) if d] or [DEFAULT_DEPLOYMENT]
 
 
 def is_configured(provider: str, key: str | None, base: str | None, extra: dict) -> bool:
@@ -89,14 +94,18 @@ async def prepare_request(db: AsyncSession, user_id: str, req: LLMRequest) -> tu
     a provider isn't configured. Returns (request, warning)."""
     if req.provider == "mock":
         return req, None
+    req.provider = "azure"  # the only real provider; agents saved with openai/anthropic/azure_ai/... are routed here too
     key, base, extra = await resolve_credentials(db, user_id, req.provider)
     if not is_configured(req.provider, key, base, extra):
         if get_settings().demo_mode:
             req.provider, req.model = "mock", "mock/demo"
-            return req, "Provider not configured (Settings → Providers); using the Demo Mode mock."
+            return req, "Azure OpenAI is not connected (Settings → Model); using the Demo Mode mock."
         raise LLMError(f"Provider '{req.provider}' is not configured", retryable=False)
     req.api_key, req.base_url = key, base
     req.extra = {**extra, **req.extra}
+    allowed = allowed_models(extra)
+    if req.model not in allowed:  # e.g. gpt-4.1-mini from older templates → the configured deployment
+        req.model = allowed[0]
     if req.model in (extra.get("reasoning_models") or []):
         req.extra["reasoning_model"] = True
     return req, None

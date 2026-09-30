@@ -1957,9 +1957,9 @@ export interface components {
         ProviderKeyIn: {
             /**
              * Provider
-             * @enum {string}
+             * @constant
              */
-            provider: "azure" | "azure_ai" | "openai" | "anthropic" | "gemini" | "ollama" | "openrouter" | "groq" | "mistral";
+            provider: "azure";
             /**
              * Api Key
              * @default
