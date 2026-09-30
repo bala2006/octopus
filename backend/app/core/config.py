@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     default_max_cost_usd: float = 2.0
     default_timeout_s: int = 900
 
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str | None = None  # e.g. http://localhost:11434 (Ollama counts as configured once set)
 
     # Azure OpenAI (azure/<deployment>) and Azure AI Foundry (azure_ai/<model>)
     azure_api_key: str | None = None

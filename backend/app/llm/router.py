@@ -27,7 +27,7 @@ PROVIDER_CATALOG: dict[str, dict] = {
     "openai": {"label": "OpenAI", "needs_key": True, "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"]},
     "anthropic": {"label": "Anthropic", "needs_key": True, "models": ["claude-sonnet-4-5", "claude-opus-4-1", "claude-3-5-haiku-latest"]},
     "gemini": {"label": "Google Gemini", "needs_key": True, "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"]},
-    "ollama": {"label": "Ollama (local)", "needs_key": False, "models": ["llama3.1", "qwen2.5-coder", "mistral"]},
+    "ollama": {"label": "Ollama (local)", "needs_key": False, "needs_base": True, "models": ["llama3.1", "qwen2.5-coder", "mistral"]},
     "openrouter": {"label": "OpenRouter", "needs_key": True, "models": ["openrouter/auto"]},
     "groq": {"label": "Groq", "needs_key": True, "models": ["llama-3.3-70b-versatile"]},
     "mistral": {"label": "Mistral", "needs_key": True, "models": ["mistral-large-latest"]},
