@@ -122,6 +122,15 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
           <div className={cn("relative mt-1 text-[13px]", !open && "max-h-28 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}>
             <Markdown>{m.content}</Markdown>
           </div>
+          {Array.isArray(meta.options) && meta.options.length > 0 && (
+            <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Offered answers">
+              {(meta.options as { label: string; recommended?: boolean }[]).map((o, i) => (
+                <li key={i} className={cn("rounded-full border px-2 py-0.5 text-[11px]", o.recommended ? "border-olive/50 bg-olive/10 text-olive" : "border-border text-muted-foreground")}>
+                  {i + 1}. {o.label}{o.recommended ? " · recommended" : ""}
+                </li>
+              ))}
+            </ul>
+          )}
           {m.content.length >= 700 && m.type !== "final_report" && (
             <button onClick={() => setOpen(!open)} className="mt-0.5 text-[11px] font-medium text-primary hover:underline">{open ? "Show less" : "Show more"}</button>
           )}

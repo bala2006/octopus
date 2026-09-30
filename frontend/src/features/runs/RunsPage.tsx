@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { History, Play, Trash2 } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { RUN_STATUS } from "@/lib/meta";
-import { cn, formatCost, formatTokens, timeAgo, duration } from "@/lib/utils";
+import { cn, formatTokens, timeAgo, duration } from "@/lib/utils";
+import { useMoney } from "@/lib/money";
 import { qk, useCompanyId, useRuns, useWorkspaceId } from "@/hooks/queries";
 import type { PermissionLevel } from "@/types";
 import { EmptyState, LoadingRows, PermissionBadge } from "@/components/common";
@@ -15,6 +16,7 @@ import { ConfirmDialog, Tip } from "@/components/ui/overlays";
 import { RunDialog } from "./RunDialog";
 
 export default function RunsPage() {
+  const money = useMoney();
   const w = useWorkspaceId();
   const { companyId } = useCompanyId();
   const { data, isLoading } = useRuns(w, companyId || undefined, true);
@@ -51,7 +53,7 @@ export default function RunsPage() {
                       </div>
                     </div>
                     <PermissionBadge level={r.permission_level as PermissionLevel} />
-                    <div className="w-40 text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} turns · {formatTokens(r.tokens_used)} tok · {formatCost(r.cost_usd)}</div>
+                    <div className="w-40 text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} turns · {formatTokens(r.tokens_used)} tok · {money(r.cost_usd)}</div>
                   </Link>
                   {["completed", "failed", "cancelled"].includes(r.status) && (
                     <Tip content="Delete run">

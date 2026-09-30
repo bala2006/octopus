@@ -6,6 +6,7 @@ import {
   LayoutTemplate, Download, Upload, Pencil, Globe,
 } from "lucide-react";
 import { download } from "@/lib/utils";
+import { CURRENCIES, formatMoney, useFxRate } from "@/lib/money";
 import { useTemplates } from "@/hooks/queries";
 import { DepartmentChips } from "@/features/workspaces/NewCompanyDialog";
 import { api, unwrap } from "@/lib/api";
@@ -18,14 +19,19 @@ import { Badge, Field, Input, Switch, Textarea } from "@/components/ui/primitive
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select, Tip } from "@/components/ui/overlays";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
 
-const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", Plug], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Appearance", Palette]] as const;
+const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", Plug], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Appearance & currency", Palette]] as const;
 
 export default function SettingsPage() {
   const [section, setSection] = React.useState<string>(() => (location.hash.slice(1) || "providers"));
   React.useEffect(() => { history.replaceState(null, "", `#${section}`); }, [section]);
+  React.useEffect(() => { // in-app links like settings#providers while Settings is already open
+    const onHash = () => { const h = location.hash.slice(1); if (h && SECTIONS.some(([k]) => k === h)) setSection(h); };
+    addEventListener("hashchange", onHash);
+    return () => removeEventListener("hashchange", onHash);
+  }, []);
   return (
     <div className="flex h-full">
-      <nav className="w-52 shrink-0 space-y-0.5 border-r border-border bg-surface p-3" aria-label="Settings sections">
+      <nav className="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-border bg-surface p-3" aria-label="Settings sections">
         {SECTIONS.map(([k, label, Icon]) => (
           <button key={k} onClick={() => setSection(k)} className={cn("flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition hover:bg-accent", section === k && "bg-accent font-medium")}>
             <Icon className="h-4 w-4 text-muted-foreground" />{label}
@@ -431,6 +437,7 @@ function ProjectSettings() {
 function Appearance() {
   const { theme, setTheme } = useApp();
   return (
+    <>
     <Section title="Appearance">
       <div className="grid grid-cols-2 gap-3">
         {(["dark", "light"] as const).map((t) => (
@@ -439,6 +446,54 @@ function Appearance() {
             <span className="flex items-center gap-1.5 text-sm font-medium">{t === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}{t === "dark" ? "Dark" : "Light"}</span>
           </button>
         ))}
+      </div>
+    </Section>
+    <CurrencySection />
+    </>
+  );
+}
+
+/** Costs are billed and stored in USD; this only changes how they're displayed, using live exchange rates. */
+function CurrencySection() {
+  const { currency, setCurrency } = useApp();
+  const fx = useFxRate();
+  const known = CURRENCIES.some((c) => c.code === currency);
+  const [custom, setCustom] = React.useState(known ? "" : currency);
+  const [other, setOther] = React.useState(!known);
+  const sample = 1.2345;
+  return (
+    <Section title="Currency" description="Azure bills in US dollars. Costs are stored in USD and shown in your currency using live exchange rates.">
+      <div role="radiogroup" aria-label="Display currency" className="grid gap-2 sm:grid-cols-3">
+        {CURRENCIES.map((c) => (
+          <button key={c.code} type="button" role="radio" aria-checked={!other && currency === c.code} onClick={() => { setOther(false); setCurrency(c.code); }}
+            className={cn("flex items-center gap-2 rounded-xl border p-2.5 text-left text-sm transition hover:border-primary/50",
+              !other && currency === c.code ? "border-primary bg-primary/5" : "border-border")}>
+            <span className="w-9 font-mono text-xs font-semibold">{c.code}</span>
+            <span className="min-w-0 flex-1 truncate">{c.label}</span>
+            {c.code === "USD" && <span className="rounded-full bg-olive/15 px-1.5 py-px text-[10px] font-semibold uppercase text-olive">Recommended</span>}
+          </button>
+        ))}
+        <button type="button" role="radio" aria-checked={other} onClick={() => setOther(true)}
+          className={cn("flex items-center gap-2 rounded-xl border border-dashed p-2.5 text-left text-sm transition hover:border-primary/50", other ? "border-primary bg-primary/5" : "border-border")}>
+          <span className="w-9 font-mono text-xs font-semibold">···</span><span>Other currency</span>
+        </button>
+      </div>
+      {other && (
+        <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (/^[A-Za-z]{3}$/.test(custom)) setCurrency(custom); }}>
+          <Input value={custom} onChange={(e) => setCustom(e.target.value.toUpperCase().slice(0, 3))} placeholder="ISO code, e.g. BRL" className="h-8 w-40 font-mono text-xs" aria-label="Currency code" />
+          <Button size="sm" type="submit" disabled={!/^[A-Za-z]{3}$/.test(custom)}>Use</Button>
+        </form>
+      )}
+      <div className="rounded-xl border border-border bg-card px-3 py-2.5 text-xs">
+        {currency === "USD" ? <span className="text-muted-foreground">Showing costs in US dollars: {formatMoney(sample, "USD", 1)}.</span>
+          : fx.error ? <span className="text-destructive">Couldn't load the {currency} rate ({fx.error.message}). Costs are shown in USD until it's available.</span>
+          : fx.info ? (
+            <span className="text-muted-foreground">
+              1 USD = <b className="text-foreground">{fx.info.rate.toLocaleString(undefined, { maximumFractionDigits: 4 })} {fx.info.currency}</b>
+              {" · "}$1.2345 shows as <b className="text-foreground">{formatMoney(sample, fx.info.currency, fx.info.rate)}</b>
+              {" · "}{fx.info.source}{fx.info.date ? `, ${fx.info.date}` : ""}{fx.info.stale ? " (offline: last known rate)" : ""}
+            </span>
+          ) : <span className="text-muted-foreground">Loading the {currency} rate…</span>}
       </div>
     </Section>
   );

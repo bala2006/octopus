@@ -57,6 +57,8 @@ def build_kwargs(req: LLMRequest) -> dict[str, Any]:
             kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
     elif req.api_key:
         kwargs["api_key"] = req.api_key
+    if req.extra.get("reasoning_effort"):
+        kwargs["reasoning_effort"] = req.extra["reasoning_effort"]
     if req.json_mode and req.provider in {"openai", "azure", "groq", "mistral", "openrouter"}:
         kwargs["response_format"] = {"type": "json_object"}
     return kwargs

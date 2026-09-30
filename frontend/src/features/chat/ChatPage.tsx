@@ -8,7 +8,8 @@ import {
   Play, Radio,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
-import { clockTime, cn, download, formatCost, formatTokens, timeAgo } from "@/lib/utils";
+import { clockTime, cn, download, formatTokens, timeAgo } from "@/lib/utils";
+import { useMoney } from "@/lib/money";
 import { qk, useCanvas as useCanvasQuery, useCompanyId, useRuns, useSessionMessages, useSessions, useWorkspaceId } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
 import type { AgentOut, MessageOut, SessionOut } from "@/types";
@@ -22,6 +23,7 @@ import {
 } from "@/components/ui/overlays";
 import { RunFeed, type FeedFilter } from "@/features/runs/RunFeed";
 import { RunDialog } from "@/features/runs/RunDialog";
+import { QuestionCard } from "@/features/runs/QuestionCard";
 import { ApprovalCard } from "@/features/runs/ApprovalCard";
 import { useRunStream } from "@/features/runs/useRunStream";
 import { TERMINAL } from "@/features/runs/runState";
@@ -195,6 +197,7 @@ function DirectChat({ session, agent }: { session: SessionOut; agent?: AgentOut 
 }
 
 function ChatMessage({ m, agent, isLast, onRegenerate, busy }: { m: MessageOut; agent: AgentOut; isLast: boolean; onRegenerate: () => void; busy: boolean }) {
+  const money = useMoney();
   const [copied, setCopied] = React.useState(false);
   const meta = (m.meta ?? {}) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   if (m.sender === "user") {
@@ -226,7 +229,7 @@ function ChatMessage({ m, agent, isLast, onRegenerate, busy }: { m: MessageOut; 
           <span>{clockTime(m.created_at)}</span>
           {meta.tokens ? (
             <Tip content={meta.usage ? `Input ${meta.usage.input_tokens} (cached ${meta.usage.cached_tokens}, cache writes ${meta.usage.cache_write_tokens}) · Output ${meta.usage.output_tokens} (reasoning ${meta.usage.reasoning_tokens})` : "Tokens"}>
-              <span>{formatTokens(meta.tokens)} tokens{meta.cost_usd ? ` · ${formatCost(meta.cost_usd)}` : ""}</span>
+              <span>{formatTokens(meta.tokens)} tokens{meta.cost_usd ? ` · ${money(meta.cost_usd)}` : ""}</span>
             </Tip>
           ) : null}
           {meta.duration_ms ? <span>{(meta.duration_ms / 1000).toFixed(1)}s</span> : null}
@@ -289,7 +292,7 @@ function Composer({ placeholder, busy, onSend, onStop, disabled, extra }: {
     att.clear();
   };
   return (
-    <div className="border-t border-border bg-surface/80 p-3 backdrop-blur">
+    <div className="px-3 pb-3 pt-1">
       <div className={cn("mx-auto max-w-3xl rounded-xl border bg-background shadow-sm transition-colors focus-within:border-primary/50", drag ? "border-primary border-dashed" : "border-border")}
         onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
         onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void att.upload(e.dataTransfer.files); }}>
@@ -335,11 +338,12 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">Company Channel</div>
-          <div className="truncate text-xs text-muted-foreground">{shownRun ? `${live ? "Live" : "Last"} run: ${shownRun.goal}` : "Send a goal to the entry agent(s); watch the team work"}</div>
+          <div className="truncate text-xs text-muted-foreground">{shownRun ? `${live ? "Live" : "Finished, send a message to continue"}: ${shownRun.goal}` : "Send a goal to the entry agent(s); watch the team work"}</div>
         </div>
         {sessionRuns.length > 1 && <span className="text-[11px] text-muted-foreground">{sessionRuns.length} runs</span>}
         <Select ariaLabel="Feed filter" value={filter} onValueChange={(v) => setFilter(v as FeedFilter)} className="h-7 w-[150px] text-xs"
           options={[{ value: "all", label: "All messages" }, { value: "user", label: "User-facing only" }, { value: "internal", label: "Internal only" }]} />
+        {shownRun && !live && <Tip content="Start over with a new goal (the current run and its history stay in Runs)"><Button size="sm" variant="ghost" onClick={() => setGoal("")}><Play />New run</Button></Tip>}
         {shownRun && <Button size="sm" variant="secondary" onClick={() => nav(`/w/${w}/runs/${shownRun.id}`)}><Radio className={cn(live && "animate-pulse text-primary")} />Live view</Button>}
       </div>
       <div className="min-h-0 flex-1">
@@ -347,6 +351,12 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
           <EmptyState icon={Building2} title="No runs in this channel yet" description='Type a goal below, e.g. "Build a todo app with auth", and press Run.' />
         )}
       </div>
+      {live && stream.state.awaiting && (
+        <div className="mx-auto w-full max-w-3xl px-3 pb-2">
+          <QuestionCard key={stream.state.awaiting.question} awaiting={stream.state.awaiting} agent={agents[stream.state.awaiting.agent_id]}
+            onAnswer={(answer) => stream.send({ type: "interject", content: answer, to_agent_id: stream.state.awaiting!.agent_id })} />
+        </div>
+      )}
       {live && stream.state.pendingApproval && (
         <div className="mx-auto w-full max-w-3xl px-3 pb-2">
           <ApprovalCard key={stream.state.pendingApproval.id} approval={stream.state.pendingApproval} agent={agents[stream.state.pendingApproval.agent_id]}
@@ -354,11 +364,15 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
         </div>
       )}
       <Composer
-        placeholder={live ? "Interject: your message is injected into the run…" : "Give the company a goal…"}
-        onSend={(t) => { if (live) stream.send({ type: "interject", content: t, to_agent_id: target === "all" ? undefined : target }); else setGoal(t); }}
-        extra={live ? (
+        placeholder={live ? "Interject: your message is injected into the run…" : shownRun ? "Continue: ask for changes or the next step. The team keeps its context and files…" : "Give the company a goal…"}
+        onSend={(t) => {
+          // a finished run continues like a chat (same run, history and files); "New run" starts over explicitly
+          if (shownRun) stream.send({ type: "interject", content: t, to_agent_id: target === "all" ? undefined : target });
+          else setGoal(t);
+        }}
+        extra={shownRun ? (
           <Select ariaLabel="Send to" value={target} onValueChange={setTarget} className="h-7 w-[130px] text-xs"
-            options={[{ value: "all", label: "→ Everyone" }, ...Object.values(agents).map((a) => ({ value: a.id, label: `→ ${a.name}` }))]} />
+            options={[{ value: "all", label: live ? "Everyone" : "Entry agent" }, ...Object.values(agents).map((a) => ({ value: a.id, label: a.name }))]} />
         ) : (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Play className="h-3 w-3" />starts a run</span>
         )}

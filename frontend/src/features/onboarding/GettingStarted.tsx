@@ -35,7 +35,7 @@ export function GettingStarted({ onRun }: { onRun?: () => void }) {
   const expanded = open ?? !companies.data?.length; // start collapsed once a team exists, so the canvas stays clear
 
   return (
-    <div className="pointer-events-auto w-[290px] overflow-hidden rounded-2xl border border-border bg-card shadow-lg animate-fade-up" role="region" aria-label="Getting started">
+    <div className="pointer-events-auto flex max-h-[calc(100dvh-7rem)] w-[290px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-lg animate-fade-up" role="region" aria-label="Getting started">
       <div className="flex items-center gap-2 px-3.5 py-2.5">
         <button onClick={() => setOpen(!expanded)} className="flex min-w-0 flex-1 items-center gap-2 text-left" aria-expanded={expanded}>
           <Progress value={done / steps.length} />
@@ -51,7 +51,7 @@ export function GettingStarted({ onRun }: { onRun?: () => void }) {
       </div>
       {expanded && (
         <>
-          <ol className="space-y-0.5 border-t border-border px-2 py-2">
+          <ol className="min-h-0 space-y-0.5 overflow-y-auto overscroll-contain border-t border-border px-2 py-2">
             {steps.map((s, i) => (
               <li key={s.title} className={cn("flex items-start gap-2.5 rounded-lg px-1.5 py-1.5", i === next && "bg-accent/60")}>
                 <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold",

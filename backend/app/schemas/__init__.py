@@ -75,6 +75,10 @@ class AgentTools(BaseModel):
         return data
 
 
+ReasoningEffort = Literal["default", "none", "low", "medium", "high", "xhigh", "max"]
+EFFORTS = ("none", "low", "medium", "high", "xhigh", "max")
+
+
 class AgentBehavior(BaseModel):
     assertiveness: float = Field(0.5, ge=0, le=1)
     creativity: float = Field(0.5, ge=0, le=1)
@@ -82,6 +86,8 @@ class AgentBehavior(BaseModel):
     debate_style: DebateStyle = "balanced"
     max_autonomous_turns: int = Field(12, ge=1, le=200)
     template_key: str = ""
+    # reasoning effort for reasoning models (gpt-6-luna supports none..max); "default" = the model's own default (medium)
+    reasoning_effort: ReasoningEffort = "default"
 
 
 class AgentBase(BaseModel):
@@ -335,6 +341,7 @@ class RunBudget(BaseModel):
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
     persist_team: bool = True  # save agents hired / edited during the run back to the company
+    reasoning_effort: ReasoningEffort = "default"  # run-wide override; "default" = each agent's own setting
 
 
 class RunCreate(BaseModel):
@@ -481,6 +488,15 @@ class SettingsOut(BaseModel):
     sandbox_mode: str
     providers: list[ProviderInfo]
     keys: list[ProviderKeyOut]
+
+
+class FxRateOut(BaseModel):
+    base: str = "USD"
+    currency: str
+    rate: float  # 1 USD = rate × currency
+    date: str = ""
+    source: str = ""
+    stale: bool = False  # true when offline and the last known rate is used
 
 
 class BrowserStatusOut(BaseModel):

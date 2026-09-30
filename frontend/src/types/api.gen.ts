@@ -216,6 +216,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/fx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fx Rate */
+        get: operations["fx_rate_api_v1_settings_fx_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/browser": {
         parameters: {
             query?: never;
@@ -926,8 +943,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Interject */
+        /**
+         * Interject
+         * @description Message the team. On a finished run this continues it (same run, full history, files untouched).
+         */
         post: operations["interject_api_v1_w__workspace_id__runs__run_id__interject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/w/{workspace_id}/runs/{run_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Run
+         * @description Follow up on a run like a chat: the same team picks up where it left off.
+         */
+        post: operations["continue_run_api_v1_w__workspace_id__runs__run_id__continue_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1190,6 +1230,12 @@ export interface components {
              * @default
              */
             template_key: string;
+            /**
+             * Reasoning Effort
+             * @default default
+             * @enum {string}
+             */
+            reasoning_effort: "default" | "none" | "low" | "medium" | "high" | "xhigh" | "max";
         };
         /** AgentIn */
         AgentIn: {
@@ -1566,10 +1612,7 @@ export interface components {
         };
         /** Body_parse_upload_api_v1_files_parse_post */
         Body_parse_upload_api_v1_files_parse_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** BrowseOut */
@@ -1625,30 +1668,7 @@ export interface components {
             latency_ms: number;
         };
         /** CanvasExport */
-        "CanvasExport-Input": {
-            /**
-             * Format
-             * @default octopus.company/v1
-             */
-            format: string;
-            /** Name */
-            name: string;
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /** Agents */
-            agents: components["schemas"]["AgentIn"][];
-            /** Edges */
-            edges: components["schemas"]["EdgeIn"][];
-            /** Departments */
-            departments?: {
-                [key: string]: components["schemas"]["DepartmentMeta"];
-            };
-        };
-        /** CanvasExport */
-        "CanvasExport-Output": {
+        CanvasExport: {
             /**
              * Format
              * @default octopus.company/v1
@@ -1899,6 +1919,33 @@ export interface components {
              */
             planned: boolean;
         };
+        /** FxRateOut */
+        FxRateOut: {
+            /**
+             * Base
+             * @default USD
+             */
+            base: string;
+            /** Currency */
+            currency: string;
+            /** Rate */
+            rate: number;
+            /**
+             * Date
+             * @default
+             */
+            date: string;
+            /**
+             * Source
+             * @default
+             */
+            source: string;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+        };
         /** GenerateCompanyIn */
         GenerateCompanyIn: {
             /** Prompt */
@@ -1915,7 +1962,7 @@ export interface components {
         };
         /** GenerateCompanyOut */
         GenerateCompanyOut: {
-            spec: components["schemas"]["CanvasExport-Output"];
+            spec: components["schemas"]["CanvasExport"];
             /** Departments */
             departments: components["schemas"]["DepartmentSummary"][];
             /**
@@ -2308,6 +2355,12 @@ export interface components {
              * @default true
              */
             persist_team: boolean;
+            /**
+             * Reasoning Effort
+             * @default default
+             * @enum {string}
+             */
+            reasoning_effort: "default" | "none" | "low" | "medium" | "high" | "xhigh" | "max";
         };
         /** RunCreate */
         RunCreate: {
@@ -2598,7 +2651,7 @@ export interface components {
             description: string;
             /** Company Id */
             company_id?: string | null;
-            spec?: components["schemas"]["CanvasExport-Input"] | null;
+            spec?: components["schemas"]["CanvasExport"] | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -2608,6 +2661,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /** WorkspaceIn */
         WorkspaceIn: {
@@ -2865,7 +2922,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CanvasExport-Output"];
+                    "application/json": components["schemas"]["CanvasExport"];
                 };
             };
             /** @description Validation Error */
@@ -3045,6 +3102,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestProviderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fx_rate_api_v1_settings_fx_get: {
+        parameters: {
+            query?: {
+                currency?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FxRateOut"];
                 };
             };
             /** @description Validation Error */
@@ -4027,7 +4115,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CanvasExport-Output"];
+                    "application/json": components["schemas"]["CanvasExport"];
                 };
             };
             /** @description Validation Error */
@@ -4052,7 +4140,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CanvasExport-Input"];
+                "application/json": components["schemas"]["CanvasExport"];
             };
         };
         responses: {
@@ -4841,6 +4929,44 @@ export interface operations {
         };
     };
     interject_api_v1_w__workspace_id__runs__run_id__interject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InterjectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_run_api_v1_w__workspace_id__runs__run_id__continue_post: {
         parameters: {
             query?: never;
             header?: never;

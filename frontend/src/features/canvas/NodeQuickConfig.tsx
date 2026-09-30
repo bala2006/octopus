@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useStore } from "@xyflow/react";
 import { Link, useNavigate } from "react-router-dom";
 import { Braces, Crown, Flag, Maximize2, MessageSquare, Plug, Plus, Power, Trash2, X } from "lucide-react";
 import { useMcpServers, useWorkspaceId } from "@/hooks/queries";
@@ -11,11 +12,44 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { Select, Tip } from "@/components/ui/overlays";
 import { ModelPicker } from "./ModelPicker";
+import { EffortPicker, type Effort } from "./EffortPicker";
 
 const VARS = ["{{company_name}}", "{{goal}}", "{{team}}", "{{agent_name}}", "{{role}}", "{{department}}", "{{manager}}", "{{reports}}"];
 
 /** Mini configuration window rendered to the right of a clicked agent node. */
 export function NodeQuickConfig({ id, data, onClose }: { id: string; data: AgentData; onClose: () => void }) {
+  // The panel hangs next to its node, so it can start low on screen: fit it into the space left below its top edge.
+  const panelRef = React.useRef<HTMLDivElement>(null);
+  const transform = useStore((st) => st.transform);
+  React.useLayoutEffect(() => {
+    const fit = () => {
+      const el = panelRef.current;
+      if (!el) return;
+      // the toolbar is aligned to the node's top edge, so measure from the node (independent of our own shift)
+      const node = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+      const top = node ? node.getBoundingClientRect().top : el.getBoundingClientRect().top + (Number(el.dataset.shift) || 0);
+      const body = el.querySelector<HTMLElement>("[data-qc-body]");
+      const natural = el.offsetHeight - (body?.clientHeight ?? 0) + (body?.scrollHeight ?? 0);
+      const flow = el.closest(".react-flow")?.getBoundingClientRect();
+      const vh = Math.min(window.innerHeight, flow?.bottom ?? window.innerHeight), margin = 12;
+      const minTop = (flow?.top ?? 48) + 52; // stay below the canvas toolbar
+      const below = vh - top - margin;
+      // shift up (not past the header) when the panel would run off the bottom, then cap the height and scroll inside
+      const shift = natural > below ? Math.min(natural - below, Math.max(0, top - minTop)) : 0;
+      // applied directly (not via state) so the measured position and the applied shift always agree
+      el.dataset.shift = String(shift);
+      el.style.marginTop = shift ? `-${shift}px` : ""; // margin, not transform: the enter animation owns `transform`
+      el.style.maxHeight = `${Math.max(200, below + shift)}px`;
+    };
+    fit();
+    const raf = requestAnimationFrame(fit);
+    window.addEventListener("resize", fit);
+    // React Flow positions the toolbar after mount and on pan/zoom: re-fit whenever its position changes
+    const toolbar = panelRef.current?.closest(".react-flow__node-toolbar");
+    const mo = toolbar ? new MutationObserver(fit) : null;
+    if (toolbar && mo) mo.observe(toolbar, { attributes: true, attributeFilter: ["style"] });
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", fit); mo?.disconnect(); };
+  }, [transform]);
   const update = useCanvas((s) => s.updateAgent);
   const setInspector = useCanvas((s) => s.setInspector);
   const deleteNodes = useCanvas((s) => s.deleteNodes);
@@ -47,7 +81,7 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
   };
 
   return (
-    <div className="w-[340px] overflow-hidden rounded-xl border border-border bg-popover shadow-2xl animate-in fade-in-0 slide-in-from-left-2 zoom-in-95 duration-150"
+    <div ref={panelRef} className="flex max-h-[calc(100dvh-5rem)] w-[340px] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl animate-in fade-in-0 slide-in-from-left-2 zoom-in-95 duration-150"
       role="dialog" aria-label={`Configure ${data.name}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <AgentAvatar name={data.name} color={data.color} avatar={data.avatar} size={24} />
@@ -56,7 +90,7 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close"><X /></Button>
       </div>
 
-      <div className="max-h-[62vh] space-y-3 overflow-y-auto p-3">
+      <div data-qc-body className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Agent name"><Input value={data.name} onChange={(e) => update(id, { name: e.target.value })} className="h-8" autoFocus /></Field>
           <Field label="Agent role"><Input value={data.role ?? ""} onChange={(e) => update(id, { role: e.target.value })} className="h-8" placeholder="e.g. QA Engineer" /></Field>
@@ -156,6 +190,10 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
           </Field>
         </div>
         <Field label="Model"><ModelPicker provider={data.provider ?? "mock"} model={data.model ?? ""} onChange={(p, m) => update(id, { provider: p, model: m })} compact /></Field>
+        <Field label="Reasoning effort" hint="Higher = deeper thinking, more tokens and time">
+          <EffortPicker compact value={((data.behavior as { reasoning_effort?: Effort } | undefined)?.reasoning_effort ?? "default") as Effort}
+            onChange={(v) => update(id, { behavior: { ...(data.behavior ?? {}), reasoning_effort: v } as AgentData["behavior"] })} />
+        </Field>
       </div>
 
       <div className="flex items-center gap-1 border-t border-border bg-surface px-2 py-1.5">

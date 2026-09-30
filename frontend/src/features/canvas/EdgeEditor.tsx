@@ -36,12 +36,13 @@ export function EdgeEditor() {
   };
 
   return (
-    <div className="absolute right-3 top-14 z-20 w-[320px] overflow-hidden rounded-xl border border-border bg-popover shadow-2xl animate-in fade-in-0 slide-in-from-right-2" role="dialog" aria-label="Channel settings">
+    <div className="absolute bottom-3 right-3 top-14 z-20 flex w-[320px] max-w-[calc(100%-1.5rem)] flex-col pointer-events-none" role="presentation">
+    <div className="pointer-events-auto flex max-h-full flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl animate-in fade-in-0 slide-in-from-right-2" role="dialog" aria-label="Channel settings">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <span className="text-sm font-semibold">Channel</span>
         <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={close} aria-label="Close"><X /></Button>
       </div>
-      <div className="space-y-3 p-3">
+      <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain p-3">
         <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 p-2">
           <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">{src && <AgentAvatar name={src.name} color={src.color} avatar={src.avatar} size={20} />}<span className="truncate">{src?.name}</span></span>
           <button onClick={() => patch({ bidirectional: !d.bidirectional })} className="rounded-md border border-border px-2 py-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
@@ -77,9 +78,10 @@ export function EdgeEditor() {
           <Input className="h-8 text-xs" value={d.config.condition} onChange={(e) => patch({ config: { ...d.config, condition: e.target.value } })} placeholder="only if code is ready" />
         </Field>
       </div>
-      <div className="flex justify-end border-t border-border bg-surface px-2 py-1.5">
+      <div className="flex shrink-0 justify-end border-t border-border bg-surface px-2 py-1.5">
         <Button variant="ghost" size="xs" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => deleteEdge(id)}><Trash2 />Delete channel</Button>
       </div>
+    </div>
     </div>
   );
 }
