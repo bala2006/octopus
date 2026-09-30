@@ -66,7 +66,7 @@ export function TaskBoard({ tasks, agents }: { tasks: LiveTask[]; agents: Record
 }
 
 const TONE: Record<TimelineItem["tone"], string> = {
-  msg: "bg-sky-400", protocol: "bg-rose-400", file: "bg-emerald-400", tool: "bg-amber-400", status: "bg-muted-foreground", error: "bg-destructive", approval: "bg-warning",
+  msg: "bg-sky-400", protocol: "bg-rose-400", file: "bg-emerald-400", tool: "bg-amber-400", status: "bg-muted-foreground", error: "bg-destructive", approval: "bg-warning", org: "bg-fuchsia-400",
 };
 
 /** Timeline scrubber over persisted events. `cursor === null` means live. */

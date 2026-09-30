@@ -53,6 +53,15 @@ export function useRunStream(workspaceId: string, runId: string | undefined, nam
         if (e.type === "approval_requested") toast.warning("Approval needed", { description: e.data.summary, duration: 6000 });
         if (e.type === "error" && e.data.kind === "loop") toast.error("Loop detected", { description: e.data.message });
         if (e.type === "artifact_updated") qc.invalidateQueries({ queryKey: qk.artifacts(workspaceId, runId) });
+        if ((e.type === "agent_created" || e.type === "agent_updated") && e.data.persisted) {
+          qc.invalidateQueries({ queryKey: ["canvas", workspaceId] });
+          qc.invalidateQueries({ queryKey: qk.companies(workspaceId) });
+        }
+        if (e.type === "agent_created") {
+          const a = e.data.agent as { name: string; role: string; department?: string };
+          toast(`${namesRef.current[e.data.created_by] ?? "An agent"} hired ${a.name}`, { description: `${a.role}${a.department ? ` · ${a.department}` : ""}`, duration: 2500 });
+          namesRef.current = { ...namesRef.current, [(e.data.agent as { id: string }).id]: a.name };
+        }
       },
     });
     sock.current = s;

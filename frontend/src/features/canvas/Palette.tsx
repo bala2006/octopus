@@ -1,21 +1,38 @@
 import * as React from "react";
-import { GripVertical, Search } from "lucide-react";
+import { GripVertical, Network, Search, UsersRound } from "lucide-react";
 import { useRoleTemplates } from "@/hooks/queries";
 import { AgentAvatar } from "@/components/common";
 import { Input } from "@/components/ui/primitives";
-import { Tip } from "@/components/ui/overlays";
+import { Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
+import { OrgPanel } from "./OrgPanel";
 
 export const DND_MIME = "application/x-octopus-role";
 
-/** Drag role templates onto the canvas (or click to add at the centre). */
-export function Palette({ onAdd }: { onAdd: (roleKey: string) => void }) {
+/** Left panel: role palette (drag onto the canvas) and the org chart (departments, active/inactive agents). */
+export function Palette({ onAdd, onAddDepartment }: { onAdd: (roleKey: string) => void; onAddDepartment: () => void }) {
+  return (
+    <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface" aria-label="Agents and org">
+      <Tabs defaultValue="org" className="flex min-h-0 flex-1 flex-col">
+        <div className="border-b border-border p-2">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="org"><Network />Org</TabsTrigger>
+            <TabsTrigger value="roles"><UsersRound />Roles</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="org" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><OrgPanel onAddDepartment={onAddDepartment} /></TabsContent>
+        <TabsContent value="roles" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><RolePalette onAdd={onAdd} /></TabsContent>
+      </Tabs>
+    </aside>
+  );
+}
+
+function RolePalette({ onAdd }: { onAdd: (roleKey: string) => void }) {
   const { data, isLoading } = useRoleTemplates();
   const [q, setQ] = React.useState("");
   const items = (data ?? []).filter((r) => `${r.role} ${r.default_name} ${r.description}`.toLowerCase().includes(q.toLowerCase()));
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-surface" aria-label="Agent palette">
+    <div className="flex min-h-0 flex-1 flex-col" aria-label="Role palette">
       <div className="space-y-2 border-b border-border p-3">
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agents</div>
         <div className="relative">
           <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search roles" className="h-7 pl-7 text-xs" aria-label="Search roles" />
@@ -44,6 +61,6 @@ export function Palette({ onAdd }: { onAdd: (roleKey: string) => void }) {
         ))}
       </div>
       <p className="border-t border-border p-3 text-[10.5px] leading-snug text-muted-foreground">Drag onto the canvas, or right-click the canvas. Connect handles to create channels.</p>
-    </aside>
+    </div>
   );
 }

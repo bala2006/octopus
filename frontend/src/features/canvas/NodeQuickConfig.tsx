@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Braces, Flag, Maximize2, MessageSquare, Plug, Plus, Trash2, X } from "lucide-react";
+import { Braces, Crown, Flag, Maximize2, MessageSquare, Plug, Plus, Power, Trash2, X } from "lucide-react";
 import { useMcpServers, useWorkspaceId } from "@/hooks/queries";
 import { PERMISSIONS, TOOLS } from "@/lib/meta";
 import { cn } from "@/lib/utils";
@@ -12,7 +12,7 @@ import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { Select, Tip } from "@/components/ui/overlays";
 import { ModelPicker } from "./ModelPicker";
 
-const VARS = ["{{company_name}}", "{{goal}}", "{{team}}", "{{agent_name}}", "{{role}}"];
+const VARS = ["{{company_name}}", "{{goal}}", "{{team}}", "{{agent_name}}", "{{role}}", "{{department}}", "{{manager}}", "{{reports}}"];
 
 /** Mini configuration window rendered to the right of a clicked agent node. */
 export function NodeQuickConfig({ id, data, onClose }: { id: string; data: AgentData; onClose: () => void }) {
@@ -26,6 +26,10 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
   const tools = (data.tools ?? {}) as AgentTools;
   const setTool = (key: string, v: boolean | string[]) => update(id, { tools: { ...tools, [key]: v } as AgentTools });
   const mcpIds = tools.mcp_servers ?? [];
+  const nodes = useCanvas((s) => s.nodes);
+  const deptList = React.useMemo(() => [...new Set(nodes.map((n) => n.data.department).filter(Boolean) as string[])].sort(), [nodes]);
+  const managers = nodes.filter((n) => n.id !== id && (n.data.is_manager || n.data.is_entry));
+  const deptId = React.useId();
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -56,6 +60,33 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
         <div className="grid grid-cols-2 gap-2">
           <Field label="Agent name"><Input value={data.name} onChange={(e) => update(id, { name: e.target.value })} className="h-8" autoFocus /></Field>
           <Field label="Agent role"><Input value={data.role ?? ""} onChange={(e) => update(id, { role: e.target.value })} className="h-8" placeholder="e.g. QA Engineer" /></Field>
+        </div>
+
+        <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+          <Field label="Department">
+            <Input list={deptId} value={(data.department as string) ?? ""} onChange={(e) => update(id, { department: e.target.value })} className="h-8" placeholder="e.g. Engineering" />
+          </Field>
+          <datalist id={deptId}>{deptList.map((d) => <option key={d} value={d} />)}</datalist>
+          <Tip content="Managers lead a department: they delegate, review, and (with Manage team) hire">
+            <button role="switch" aria-checked={!!data.is_manager} aria-label="Department manager"
+              onClick={() => update(id, { is_manager: !data.is_manager, tools: { ...tools, manage_team: !data.is_manager ? true : tools.manage_team } as AgentTools }, { history: true })}
+              className={cn("flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition active:scale-95", data.is_manager ? "border-amber-400/50 bg-amber-400/10 text-amber-400" : "border-border text-muted-foreground hover:bg-accent/50")}>
+              <Crown className="h-3.5 w-3.5" />Manager
+            </button>
+          </Tip>
+        </div>
+        <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+          <Field label="Reports to">
+            <Select value={(data.reports_to as string) ?? "none"} onValueChange={(v) => update(id, { reports_to: v === "none" ? null : v }, { history: true })}
+              options={[{ value: "none", label: "Nobody (top level)" }, ...managers.map((m) => ({ value: m.id, label: m.data.name, hint: m.data.department || m.data.role }))]} className="h-8 text-xs" />
+          </Field>
+          <Tip content={data.active === false ? "Inactive: never takes turns or receives messages" : "Active"}>
+            <button role="switch" aria-checked={data.active !== false} aria-label="Active"
+              onClick={() => update(id, { active: data.active === false }, { history: true })}
+              className={cn("flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition active:scale-95", data.active !== false ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground")}>
+              <Power className="h-3.5 w-3.5" />{data.active !== false ? "Active" : "Inactive"}
+            </button>
+          </Tip>
         </div>
 
         <Field label="System prompt">

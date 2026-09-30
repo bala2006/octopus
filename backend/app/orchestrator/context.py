@@ -36,6 +36,13 @@ class AgentSpec:
     is_entry: bool
     color: str
     category: str = "generic"
+    department: str = ""
+    is_manager: bool = False
+    reports_to: str | None = None
+    active: bool = True
+    created_by: str | None = None
+    avatar: str = ""
+    permission_level: str = "inherit"
     memory: dict[str, str] = field(default_factory=dict)
     mcp: list[dict[str, Any]] = field(default_factory=list)  # [{id, name, tools}]
 
@@ -45,7 +52,17 @@ class AgentSpec:
                    system_prompt=d.get("system_prompt", ""), provider=d.get("provider", "mock"), model=d.get("model", "mock/demo"),
                    temperature=float(d.get("temperature", 0.4)), max_tokens=int(d.get("max_tokens", 2048)),
                    tools=d.get("tools") or {}, behavior=d.get("behavior") or {}, is_entry=bool(d.get("is_entry")),
-                   color=d.get("color", "#6366f1"), category=category)
+                   color=d.get("color", "#6366f1"), category=category, department=d.get("department") or "",
+                   is_manager=bool(d.get("is_manager")), reports_to=d.get("reports_to"), active=d.get("active", True) is not False,
+                   created_by=d.get("created_by"), avatar=d.get("avatar") or "", permission_level=d.get("permission_level") or "inherit")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise back to the AgentOut-like shape stored in run snapshots."""
+        return {"id": self.id, "name": self.name, "role": self.role, "description": self.description, "system_prompt": self.system_prompt,
+                "provider": self.provider, "model": self.model, "temperature": self.temperature, "max_tokens": self.max_tokens,
+                "tools": self.tools, "behavior": self.behavior, "is_entry": self.is_entry, "color": self.color, "avatar": self.avatar,
+                "department": self.department, "is_manager": self.is_manager, "reports_to": self.reports_to, "active": self.active,
+                "created_by": self.created_by, "permission_level": self.permission_level}
 
 
 def render_template(text: str, variables: dict[str, str]) -> str:
@@ -68,8 +85,20 @@ def personality(behavior: dict[str, Any]) -> str:
             f"Debate style: {style.replace('_', ' ')}: {style_text}")
 
 
-def team_roster(agents: dict[str, AgentSpec]) -> str:
-    return "\n".join(f"- {a.name}: {a.role}" + (" (entry)" if a.is_entry else "") for a in agents.values())
+def team_roster(agents: dict[str, AgentSpec], status: dict[str, str] | None = None) -> str:
+    lines = []
+    for a in agents.values():
+        tags = []
+        if a.department:
+            tags.append(a.department + (" manager" if a.is_manager else ""))
+        if a.is_entry:
+            tags.append("entry")
+        if not a.active:
+            tags.append("INACTIVE")
+        elif status:
+            tags.append(status.get(a.id, "idle"))
+        lines.append(f"- {a.name}: {a.role}" + (f" [{', '.join(tags)}]" if tags else ""))
+    return "\n".join(lines)
 
 
 def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500) -> str:
@@ -104,9 +133,18 @@ def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str,
     return "\n".join(reversed(out))
 
 
-def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec]) -> str:
+def org_variables(agent: AgentSpec, agents: dict[str, AgentSpec]) -> dict[str, str]:
+    mgr = agents.get(agent.reports_to or "")
+    reports = [a.name for a in agents.values() if a.reports_to == agent.id and a.active]
+    return {"department": agent.department or "company", "manager": mgr.name if mgr else "the user",
+            "reports": ", ".join(reports) or "nobody yet"}
+
+
+def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
+                        status: dict[str, str] | None = None) -> str:
     names = {a.id: a.name for a in agents.values()}
-    variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role}
+    variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role,
+                 **org_variables(agent, agents)}
     base = render_template(agent.system_prompt or f"You are {agent.name}, {agent.role} at {company}.", variables)
     allowed = allowed_recipients(edges, agent.id)
     channel_lines = []
@@ -131,8 +169,8 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 ## Personality
 {personality(agent.behavior)}
 
-## Team roster
-{team_roster(agents)}
+## Team roster (live status)
+{team_roster(agents, status)}
 
 ## Your communication channels (you may ONLY message these agents)
 {channels}
@@ -149,6 +187,8 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 6. On review channels: author sends `review_request`; reviewer replies `review_result` with `verdict` "approve" or "request_changes" and itemized `comments`.
 7. Delegation: tasks you send become entries on the task board. Keep statuses current with update_task_board.
 8. {finish_rule}
+9. Team: use `list_agents` to see who is active/idle/done. You may refine your own configuration with `update_agent`
+   (target "self"). {"You can hire teammates (`create_agent`) and reconfigure/deactivate agents you manage. Hire only for real capability gaps and keep departments to 2-3 people." if agent.tools.get("manage_team") else "Ask your manager if the team lacks a skill."}
 
 ## Response format
 Reply with ONE JSON object and nothing else:

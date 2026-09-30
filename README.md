@@ -15,6 +15,8 @@ Octopus lets you assemble a **company of AI agents** (CEO, PM, Architect, Develo
 | **Projects** | Pick any folder (server-side folder picker). Octopus creates `.octopus/` with its own SQLite DB, plans and exports. Re-opening a folder restores everything. |
 | **Agent Canvas** | React Flow graph. Agent nodes show avatar, role, model, tools, permission and **live status** (thinking / drafting a message / writing a file / running a command / using a tool / needs approval…). Drag roles from a palette, use the right-click menu, copy/paste, undo/redo, auto-layout, snap-to-grid, minimap, and JSON import/export. Changes autosave with visible save state. |
 | **Quick config** | Click a node to open a mini window next to it: name, role, system prompt (with `{{variables}}`), tools (read, write, list, terminal, web, calculator, ask-user, messaging), **MCP servers**, permission level, model, and the entry flag. The full inspector has 7 tabs (Profile, Prompt, Model, Tools, Behavior, Memory, Activity). |
+| **Departments & templates** | Companies are built from **departments**, each with one manager and 1-2 members. Seven built-in templates (Software Startup, Full Company with 6 departments, Self-organizing, Research Lab, Small Dev Team, Debate Panel, Blank). Design your own: use **Add department** on the canvas (auto-wired channels), then **Save as template**, or import/export JSON. **Generate with AI** turns a prompt into a full org (departments, prompts, tools, channels) you can review before creating. Department zones and an Org panel with active/inactive toggles show the structure. |
+| **Agents manage the team** | At runtime agents can `list_agents` (sees active, idle, done and inactive teammates), `create_agent` (hire into a department, with a brief and channels), and `update_agent` (edit their own config or that of agents they manage; deactivate reports). There is **no privilege escalation**: hires get at most the hirer's tools, nobody can grant themselves tools or raise limits, and permission levels apply (`ask` means approval before saving). Hires animate onto the live graph and are saved to the company. |
 | **Channels** | Edges are typed (`delegate`, `review`, `debate`, `report`, `consult`) and can be one-way or bidirectional. Each has a label, max turns, max rounds/revisions, handoff instructions, and an optional natural-language **condition** checked by a gatekeeper model. |
 | **Orchestrator** | Per-agent mailboxes and an event bus with replay. **The server enforces that agents only talk over edges.** Includes a debate protocol (explicit two-sided agreement or a moderator decision), a review loop, a task board, a loop detector, and budgets (turns, tokens, cost, time). Run modes: autonomous, step and supervised. |
 | **Permission levels** | `read_only`, `plan` (writes go to `.octopus/plans/<run>`; apply later), `ask` (approval card with diff; *always allow* per agent/action) and `danger` (auto-approve, network allowed, still sandboxed to the folder). Per-agent overrides can only be *more* restrictive. |
@@ -95,9 +97,9 @@ Details (orchestrator loop, protocols, sequence diagrams, security model) are in
 octopus/
 ├─ backend/app/{api,core,db,models,schemas,services,orchestrator,llm,tools,prompts}
 │  ├─ migrations/{registry,project}   Alembic (applied automatically)
-│  └─ tests/                          55 tests: routing, protocols, limits, security, MCP, full demo run
+│  └─ tests/                          67 tests: routing, protocols, limits, security, MCP, teams, full demo runs
 └─ frontend/src/{components,features/{canvas,chat,runs,artifacts,settings,workspaces},hooks,stores,lib,types}
-   └─ e2e/                            Playwright happy path + approval flow
+   └─ e2e/                            Playwright: happy path, approvals, org generation/templates, live hiring
 ```
 
 ## Testing
@@ -117,6 +119,8 @@ make e2e              # Playwright: folder → template → edit agent → chat 
 | ![Canvas quick config](docs/screenshots/03-canvas-quick-config.png) | ![Direct chat](docs/screenshots/04-direct-chat.png) |
 | ![Live run](docs/screenshots/05-live-run.png) | ![Approval](docs/screenshots/09-approval.png) |
 | ![Artifacts diff](docs/screenshots/07-artifacts-diff.png) | ![Settings](docs/screenshots/08-settings.png) |
+| ![Generate company](docs/screenshots/10-generate-company.png) | ![Org panel & department zones](docs/screenshots/11-org-panel.png) |
+| ![Self-organizing company hiring live](docs/screenshots/13-self-organizing-live.png) | ![Team view](docs/screenshots/14-team-view.png) |
 
 ## Security notes
 

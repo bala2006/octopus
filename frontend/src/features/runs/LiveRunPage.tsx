@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, MessageSquareReply, Pause, Play, Send, Wrench, History,
-  MessagesSquare,
+  MessagesSquare, UsersRound,
 } from "lucide-react";
 import { fetchRaw } from "@/lib/api";
 import { RUN_STATUS } from "@/lib/meta";
@@ -21,6 +21,7 @@ import { ApprovalCard } from "./ApprovalCard";
 import { RunFeed, ToolLog, type FeedFilter } from "./RunFeed";
 import { RunGraph } from "./RunGraph";
 import { TaskBoard, Timeline, UsageMeter } from "./RunWidgets";
+import { TeamView } from "./TeamView";
 import { replayTo, TERMINAL } from "./runState";
 import { useRunStream } from "./useRunStream";
 
@@ -28,13 +29,27 @@ export default function LiveRunPage() {
   const w = useWorkspaceId();
   const { runId = "" } = useParams();
   const run = useRun(w, runId);
-  const snap = run.data?.snapshot as { agents?: AgentOut[]; edges?: EdgeOut[] } | undefined;
-  const agentsList = React.useMemo(() => snap?.agents ?? [], [snap]);
-  const agents = React.useMemo(() => Object.fromEntries(agentsList.map((a) => [a.id, a])), [agentsList]);
-  const names = React.useMemo(() => Object.fromEntries(agentsList.map((a) => [a.id, a.name])), [agentsList]);
+  const snap = run.data?.snapshot as { agents?: AgentOut[]; edges?: EdgeOut[]; departments?: Record<string, { color: string }> } | undefined;
+  // snapshot at run start; agents hired mid-run come from events (the snapshot is also updated server-side for reloads)
+  const baseAgents = React.useMemo(() => snap?.agents ?? [], [snap]);
+  const names = React.useMemo(() => Object.fromEntries(baseAgents.map((a) => [a.id, a.name])), [baseAgents]);
   const { state: liveState, conn, send, events, eventCount } = useRunStream(w, run.data ? runId : undefined, names);
   const [cursor, setCursor] = React.useState<number | null>(null);
   const state = React.useMemo(() => (cursor === null ? liveState : replayTo(events, cursor, names)), [cursor, liveState, events, names, eventCount]); // eslint-disable-line react-hooks/exhaustive-deps
+  // during replay, only agents that existed at the cursor are shown
+  const hiredIds = React.useMemo(() => new Set(liveState.extraAgents.map((a) => a.id)), [liveState.extraAgents]);
+  const agentsList = React.useMemo(() => {
+    const visible = [...baseAgents.filter((a) => !hiredIds.has(a.id) || state.extraAgents.some((x) => x.id === a.id)),
+      ...state.extraAgents.filter((a) => !baseAgents.some((b) => b.id === a.id))];
+    return visible.map((a) => ({ ...a, ...(state.agentPatches[a.id] ?? {}) }) as AgentOut);
+  }, [baseAgents, hiredIds, state.extraAgents, state.agentPatches]);
+  const edgesList = React.useMemo(() => {
+    const ids = new Set(agentsList.map((a) => a.id));
+    const all = [...(snap?.edges ?? []), ...state.extraEdges.filter((e) => !(snap?.edges ?? []).some((x) => x.id === e.id))];
+    return all.filter((e) => ids.has(e.source_agent_id) && ids.has(e.target_agent_id));
+  }, [snap, state.extraEdges, agentsList]);
+  const agents = React.useMemo(() => Object.fromEntries(agentsList.map((a) => [a.id, a])), [agentsList]);
+  const departments = React.useMemo(() => ({ ...(snap?.departments ?? {}), ...state.departments }), [snap, state.departments]);
   const filter = useApp((s) => s.chatFilter);
   const setFilter = useApp((s) => s.setChatFilter);
   const [tab, setTab] = React.useState("feed");
@@ -48,7 +63,9 @@ export default function LiveRunPage() {
   const overlay = React.useMemo(() => ({
     status: state.agentStatus, activity: state.activity, lastMessage: state.lastMessage, streaming: state.streaming,
     activeEdges: state.activeEdges, tokens: state.usage.per_agent ?? {}, pendingApprovalAgent: state.pendingApproval?.agent_id ?? null,
-  }), [state]);
+    departments, names: Object.fromEntries(agentsList.map((a) => [a.id, a.name])),
+    fresh: Object.fromEntries(Object.entries(state.fresh).filter(([, t]) => Date.now() - t < 3000).map(([k]) => [k, true])),
+  }), [state, departments, agentsList]);
 
   const control = (action: "pause" | "resume" | "step" | "stop") => { send({ type: "control", action }); if (action === "stop") toast("Stopping run…"); };
 
@@ -112,7 +129,7 @@ export default function LiveRunPage() {
         <div className="relative flex min-h-0 flex-col border-r border-border">
           <AgentStrip agents={agentsList} state={state} />
           <div className="relative min-h-0 flex-1">
-          {agentsList.length ? <RunGraph agents={agentsList} edges={snap?.edges ?? []} overlay={overlay} /> : null}
+          {agentsList.length ? <RunGraph agents={agentsList} edges={edgesList} overlay={overlay} departments={departments} /> : null}
           {cursor !== null && (
             <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-primary/40 bg-elevated/95 px-3 py-1 text-xs shadow-lg backdrop-blur animate-in fade-in-0">
               Replaying · event #{cursor} <button className="ml-2 font-medium text-primary hover:underline" onClick={() => setCursor(null)}>Back to {isLive ? "live" : "end"}</button>
@@ -125,6 +142,7 @@ export default function LiveRunPage() {
           <div className="flex items-center gap-2 border-b border-border px-3 py-2">
             <TabsList>
               <TabsTrigger value="feed"><MessagesSquare />Feed</TabsTrigger>
+              <TabsTrigger value="team" data-testid="tab-team"><UsersRound />Team <span className="tabular-nums text-muted-foreground">{agentsList.filter((a) => a.active !== false).length}</span></TabsTrigger>
               <TabsTrigger value="tasks"><ListTodo />Tasks <span className="tabular-nums text-muted-foreground">{Object.keys(state.tasks).length}</span></TabsTrigger>
               <TabsTrigger value="tools"><Wrench />Tools</TabsTrigger>
               <TabsTrigger value="report" disabled={!terminal}><FileText />Report</TabsTrigger>
@@ -147,6 +165,7 @@ export default function LiveRunPage() {
               <div className="border-t border-border bg-success/5 px-4 py-3 text-sm"><span className="font-semibold">Outcome: </span>{state.summary}</div>
             )}
           </TabsContent>
+          <TabsContent value="team" className="min-h-0 flex-1 overflow-y-auto"><TeamView agents={agentsList} state={state} departments={departments} /></TabsContent>
           <TabsContent value="tasks" className="min-h-0 flex-1 overflow-y-auto"><TaskBoard tasks={Object.values(state.tasks)} agents={agents} /></TabsContent>
           <TabsContent value="tools" className="min-h-0 flex-1 overflow-y-auto"><ToolLog state={state} agents={agents} /></TabsContent>
           <TabsContent value="report" className="min-h-0 flex-1 overflow-y-auto"><ReportView w={w} runId={runId} enabled={terminal} /></TabsContent>

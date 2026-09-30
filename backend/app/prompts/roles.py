@@ -29,7 +29,7 @@ class RoleTemplate:
 
 def _tools(**kw: bool) -> dict:
     base: dict = {"file_read": True, "file_write": True, "list_files": True, "terminal": False, "web_search": False,
-                  "calculator": True, "ask_user": False, "send_message": True, "mcp_servers": []}
+                  "calculator": True, "ask_user": False, "send_message": True, "manage_team": False, "mcp_servers": []}
     base.update(kw)
     return base
 
@@ -38,7 +38,7 @@ ROLE_TEMPLATES: dict[str, RoleTemplate] = {
     "ceo": RoleTemplate(
         key="ceo", role="CEO", default_name="Ava", color="#f59e0b", avatar="crown",
         description="Sets vision, negotiates scope, owns the final outcome.",
-        tools=_tools(ask_user=True),
+        tools=_tools(ask_user=True, manage_team=True),
         behavior={"assertiveness": 0.8, "creativity": 0.6, "strictness": 0.5, "debate_style": "balanced"},
         system_prompt=f"""You are {{{{agent_name}}}}, CEO of {{{{company_name}}}}.
 
@@ -405,26 +405,37 @@ When your work is approved and reported.
 }
 
 
-def agent_from_role(key: str, *, name: str | None = None, entry: bool = False, x: float = 0, y: float = 0) -> dict:
+def all_roles() -> dict[str, RoleTemplate]:
+    from app.prompts.roles_org import ORG_ROLES
+
+    return {**ROLE_TEMPLATES, **ORG_ROLES}
+
+
+def agent_from_role(key: str, *, name: str | None = None, entry: bool = False, x: float = 0, y: float = 0,
+                    department: str = "", is_manager: bool | None = None, role: str | None = None) -> dict:
     from app.core.config import get_settings
 
     settings = get_settings()
-    t = ROLE_TEMPLATES[key]
+    t = all_roles()[key]
     behavior = {"assertiveness": 0.5, "creativity": 0.5, "strictness": 0.5, "debate_style": "balanced", "max_autonomous_turns": 12}
     behavior.update(t.behavior)
     behavior["template_key"] = key
+    tools = dict(t.tools or _tools())
+    manager = bool(tools.get("manage_team")) if is_manager is None else is_manager
     return {
         "name": name or t.default_name,
-        "role": t.role,
+        "role": role or t.role,
         "description": t.description,
         "avatar": t.avatar,
         "color": t.color,
         "system_prompt": t.system_prompt,
         "provider": settings.default_provider,
         "model": settings.default_model,
-        "tools": t.tools or _tools(),
+        "tools": tools,
         "behavior": behavior,
         "is_entry": entry,
+        "department": department,
+        "is_manager": manager,
         "position_x": x,
         "position_y": y,
     }

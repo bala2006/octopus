@@ -9,6 +9,9 @@ export interface LiveOverlay {
   activeEdges: Record<string, { at: number; from: string; type: string }>;
   tokens: Record<string, number>;
   pendingApprovalAgent?: string | null;
+  departments?: Record<string, { color: string }>;
+  names?: Record<string, string>;
+  fresh?: Record<string, boolean>; // agents hired moments ago (entrance animation)
 }
 
 export const LiveContext = React.createContext<LiveOverlay | null>(null);

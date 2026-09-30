@@ -33,7 +33,7 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
   const anyConfigured = settings.data?.providers.some((p) => p.provider !== "mock" && p.configured) ?? false;
   const [demo, setDemo] = React.useState(!anyConfigured);
   const [adv, setAdv] = React.useState(false);
-  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, context_recent: 10 });
+  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, context_recent: 10, max_agents: 24, persist_team: true });
   const att = useAttachments();
   React.useEffect(() => { if (open) { setGoal(initialGoal); setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask"); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => setDemo(!anyConfigured), [anyConfigured]);
@@ -96,6 +96,11 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
                 <Field label="Token budget"><Input type="number" value={budget.max_tokens} onChange={(e) => setBudget({ ...budget, max_tokens: +e.target.value || 1000 })} className="h-8" /></Field>
                 <Field label="Cost cap ($)"><Input type="number" step="0.5" value={budget.max_cost_usd} onChange={(e) => setBudget({ ...budget, max_cost_usd: +e.target.value || 0 })} className="h-8" /></Field>
                 <Field label="Timeout (s)"><Input type="number" value={budget.timeout_s} onChange={(e) => setBudget({ ...budget, timeout_s: +e.target.value || 60 })} className="h-8" /></Field>
+                <Field label="Max team size" hint="Includes agents hired during the run"><Input type="number" min={1} max={100} value={budget.max_agents} onChange={(e) => setBudget({ ...budget, max_agents: Math.max(1, +e.target.value || 1) })} className="h-8" /></Field>
+                <label className="col-span-3 flex items-center gap-2 self-end pb-1 text-xs">
+                  <Switch checked={budget.persist_team} onCheckedChange={(v) => setBudget({ ...budget, persist_team: v })} aria-label="Save team changes" />
+                  Save agents hired or edited during the run to the company (read-only and plan runs never save)
+                </label>
               </div>
             )}
           </div>

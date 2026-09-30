@@ -1,11 +1,57 @@
-"""Company templates (one-click, fully editable)."""
+"""Company templates built from departments.
+
+A template is a set of **departments**; each department has exactly one **manager** and a few members
+(typically 2-3 people in total). ``wire_org`` turns that structure into communication channels:
+
+- manager → member  ``delegate`` ("<dept> tasks")      member → manager ``report``
+- head → every other department manager ``delegate``    manager → head ``report``
+- department managers ↔ each other ``consult`` (peer coordination)
+- plus explicit cross-department ``links`` (reviews, debates, consults between specific people)
+
+The same machinery is used by built-in templates, user templates, the canvas "Add department" builder
+and the AI org generator.
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.db.base import new_id
-from app.prompts.roles import agent_from_role
+from app.prompts.roles import agent_from_role, all_roles
+from app.services.canvas import department_color
+
+DEFAULT_EDGE_CONFIG = {"max_turns": 20, "handoff_instructions": "", "condition": "", "max_rounds": 4, "max_revisions": 3}
+
+
+@dataclass(frozen=True)
+class Member:
+    key: str  # local key inside the template
+    role_key: str  # role template
+    name: str | None = None
+    role: str | None = None
+    entry: bool = False
+    x: float | None = None
+    y: float | None = None
+
+
+@dataclass(frozen=True)
+class Department:
+    name: str
+    manager: Member
+    members: tuple[Member, ...] = ()
+    color: str | None = None
+    description: str = ""
+    reports_to: str | None = None  # local key of the manager this department's head reports to (default: company head)
+
+
+@dataclass(frozen=True)
+class Link:
+    src: str
+    dst: str
+    type: str
+    bidirectional: bool = False
+    label: str = ""
+    config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -13,94 +59,240 @@ class CompanyTemplate:
     key: str
     name: str
     description: str
-    agents: list[tuple[str, str, bool, float, float]]  # (local_key, role_key, is_entry, x, y)
-    edges: list[tuple[str, str, str, bool, str, dict[str, Any]]]  # (src, dst, type, bidirectional, label, config)
+    departments: tuple[Department, ...]
+    links: tuple[Link, ...] = ()
+    head: str | None = None  # local key of the company head (usually the CEO / founder)
+    auto_wire: bool = True  # False: only explicit links (hand-tuned templates)
+
+
+def M(key: str, role_key: str, **kw: Any) -> Member:  # noqa: N802 - tiny DSL helper
+    return Member(key=key, role_key=role_key, **kw)
 
 
 TEMPLATES: dict[str, CompanyTemplate] = {
     "software_startup": CompanyTemplate(
-        key="software_startup",
-        name="Software Startup",
-        description="CEO → PM → Architect → Devs → QA → DevOps, with scope debate, design consults and code reviews.",
-        agents=[
-            ("ceo", "ceo", True, 560, 0),
-            ("pm", "pm", False, 560, 200),
-            ("architect", "architect", False, 560, 400),
-            ("designer", "designer", False, 40, 600),
-            ("frontend", "frontend", False, 320, 600),
-            ("backend", "backend", False, 800, 600),
-            ("qa", "qa", False, 560, 800),
-            ("devops", "devops", False, 560, 1000),
-        ],
-        edges=[
-            ("ceo", "pm", "delegate", False, "Product delivery", {}),
-            ("ceo", "pm", "debate", True, "Scope negotiation", {"max_rounds": 4}),
-            ("pm", "architect", "delegate", False, "Technical design", {}),
-            ("architect", "frontend", "delegate", False, "Frontend tasks", {}),
-            ("architect", "backend", "delegate", False, "Backend tasks", {}),
-            ("architect", "frontend", "review", True, "Frontend code review", {"max_revisions": 3}),
-            ("architect", "backend", "review", True, "Backend code review", {"max_revisions": 3}),
-            ("designer", "frontend", "consult", True, "Design consult", {}),
-            ("frontend", "qa", "delegate", False, "Frontend QA handoff", {"condition": "only once the code review is approved"}),
-            ("backend", "qa", "delegate", False, "Backend QA handoff", {"condition": "only once the code review is approved"}),
-            ("qa", "devops", "delegate", False, "Release handoff", {"condition": "only if all tests pass"}),
-            ("qa", "pm", "report", False, "Test results", {}),
-            ("devops", "pm", "report", False, "Deployment status", {}),
-            ("pm", "ceo", "report", False, "Final report", {}),
-        ],
+        key="software_startup", name="Software Startup",
+        description="Executive, Product & Design, Engineering and Quality & Ops: scope debate, design consults, code reviews and QA.",
+        head="ceo", auto_wire=False,
+        departments=(
+            Department("Executive", M("ceo", "ceo", entry=True, x=560, y=0)),
+            Department("Product & Design", M("pm", "pm", x=560, y=200), (M("designer", "designer", x=40, y=600),), reports_to="ceo"),
+            Department("Engineering", M("architect", "architect", x=560, y=400),
+                       (M("frontend", "frontend", x=320, y=600), M("backend", "backend", x=800, y=600)), reports_to="pm"),
+            Department("Quality & Ops", M("qa", "qa", x=560, y=800), (M("devops", "devops", x=560, y=1000),), reports_to="architect"),
+        ),
+        links=(
+            Link("ceo", "pm", "delegate", False, "Product delivery"),
+            Link("ceo", "pm", "debate", True, "Scope negotiation", {"max_rounds": 4}),
+            Link("pm", "architect", "delegate", False, "Technical design"),
+            Link("architect", "frontend", "delegate", False, "Frontend tasks"),
+            Link("architect", "backend", "delegate", False, "Backend tasks"),
+            Link("architect", "frontend", "review", True, "Frontend code review", {"max_revisions": 3}),
+            Link("architect", "backend", "review", True, "Backend code review", {"max_revisions": 3}),
+            Link("designer", "frontend", "consult", True, "Design consult"),
+            Link("frontend", "qa", "delegate", False, "Frontend QA handoff", {"condition": "only once the code review is approved"}),
+            Link("backend", "qa", "delegate", False, "Backend QA handoff", {"condition": "only once the code review is approved"}),
+            Link("qa", "devops", "delegate", False, "Release handoff", {"condition": "only if all tests pass"}),
+            Link("qa", "pm", "report", False, "Test results"),
+            Link("devops", "pm", "report", False, "Deployment status"),
+            Link("pm", "ceo", "report", False, "Final report"),
+        ),
+    ),
+    "full_company": CompanyTemplate(
+        key="full_company", name="Full Company (6 departments)",
+        description="Executive, Product, Engineering, Quality, Operations and Growth: each with a manager and 1-2 specialists.",
+        head="ceo",
+        departments=(
+            Department("Executive", M("ceo", "ceo", entry=True), (M("cos", "chief_of_staff"),)),
+            Department("Product", M("hop", "head_of_product"), (M("pm", "product_manager"), M("ux", "ux_designer"))),
+            Department("Engineering", M("em", "eng_manager"), (M("be", "fullstack_dev", name="Leo", role="Backend Engineer"),
+                                                                M("fe", "fullstack_dev", name="Ana", role="Frontend Engineer"))),
+            Department("Quality", M("qal", "qa_lead"), (M("qae", "qa_engineer"),)),
+            Department("Operations", M("ops", "devops_lead"), (M("sre", "sre"),)),
+            Department("Growth", M("mkt", "marketing_lead"), (M("cw", "content_writer"), M("ga", "growth_analyst"))),
+        ),
+        links=(
+            Link("hop", "em", "debate", True, "Scope vs. effort", {"max_rounds": 3}),
+            Link("em", "qal", "review", True, "Release review", {"max_revisions": 3}),
+            Link("ux", "fe", "consult", True, "Design consult"),
+            Link("qal", "ops", "delegate", False, "Release handoff", {"condition": "only if all tests pass"}),
+            Link("cw", "pm", "consult", True, "Product facts"),
+        ),
+    ),
+    "self_organizing": CompanyTemplate(
+        key="self_organizing", name="Self-organizing Company",
+        description="Just a Founder. Give a goal: the Founder designs departments and hires & configures agents as needed during the run.",
+        head="founder",
+        departments=(Department("Executive", M("founder", "founder", entry=True)),),
+    ),
+    "research_lab": CompanyTemplate(
+        key="research_lab", name="Research Lab",
+        description="Research (director, researcher, analyst) and Publishing (editor, writer) with an accuracy review loop.",
+        head="dir",
+        departments=(
+            Department("Research", M("dir", "research_director", entry=True), (M("res", "researcher"), M("ana", "data_analyst"))),
+            Department("Publishing", M("ed", "editor_in_chief"), (M("wr", "writer"),)),
+        ),
+        links=(Link("dir", "ed", "review", True, "Accuracy review", {"max_revisions": 2}),),
     ),
     "small_dev_team": CompanyTemplate(
-        key="small_dev_team",
-        name="Small Dev Team",
-        description="A lean PM, Developer and QA loop with code review.",
-        agents=[
-            ("pm", "pm", True, 300, 0),
-            ("dev", "developer", False, 80, 240),
-            ("qa", "qa", False, 520, 240),
-        ],
-        edges=[
-            ("pm", "dev", "delegate", False, "Implementation", {}),
-            ("qa", "dev", "review", True, "QA review", {"max_revisions": 3}),
-            ("dev", "pm", "report", False, "Progress", {}),
-            ("qa", "pm", "report", False, "Test results", {}),
-        ],
+        key="small_dev_team", name="Small Dev Team",
+        description="One team: a PM (manager), a Developer and QA with a code-review loop.", head="pm", auto_wire=False,
+        departments=(Department("Team", M("pm", "pm", entry=True, x=300, y=0), (M("dev", "developer", x=80, y=240), M("qa", "qa", x=520, y=240))),),
+        links=(
+            Link("pm", "dev", "delegate", False, "Implementation"),
+            Link("qa", "dev", "review", True, "QA review", {"max_revisions": 3}),
+            Link("dev", "pm", "report", False, "Progress"),
+            Link("qa", "pm", "report", False, "Test results"),
+        ),
     ),
     "debate_panel": CompanyTemplate(
-        key="debate_panel",
-        name="Debate Panel",
-        description="Proposer vs Critic in structured rounds, with a Moderator who issues binding decisions.",
-        agents=[
-            ("proposer", "proposer", True, 60, 220),
-            ("critic", "critic", False, 560, 220),
-            ("moderator", "moderator", False, 310, 0),
-        ],
-        edges=[
-            ("proposer", "critic", "debate", True, "Structured debate", {"max_rounds": 3}),
-            ("moderator", "proposer", "consult", True, "Moderation", {}),
-            ("moderator", "critic", "consult", True, "Moderation", {}),
-        ],
+        key="debate_panel", name="Debate Panel",
+        description="Proposer vs Critic in structured rounds; a Moderator (manager) issues binding decisions.", head="moderator", auto_wire=False,
+        departments=(Department("Panel", M("moderator", "moderator", x=310, y=0), (M("proposer", "proposer", entry=True, x=60, y=220), M("critic", "critic", x=560, y=220))),),
+        links=(
+            Link("proposer", "critic", "debate", True, "Structured debate", {"max_rounds": 3}),
+            Link("moderator", "proposer", "consult", True, "Moderation"),
+            Link("moderator", "critic", "consult", True, "Moderation"),
+        ),
     ),
-    "blank": CompanyTemplate(key="blank", name="Blank Canvas", description="Start from scratch.", agents=[], edges=[]),
+    "blank": CompanyTemplate(key="blank", name="Blank Canvas", description="Start from scratch.", departments=()),
 }
 
 
-def build_template(key: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return (agents, edges) dicts with fresh ids, ready for canvas sync."""
-    t = TEMPLATES[key]
+def _edge(src: str, dst: str, etype: str, bidi: bool, label: str, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {"id": new_id(), "source_agent_id": src, "target_agent_id": dst, "type": etype, "bidirectional": bidi, "label": label,
+            "config": {**DEFAULT_EDGE_CONFIG, **(cfg or {})}}
+
+
+def wire_org(agents: list[dict[str, Any]], head_id: str | None, links: list[dict[str, Any]] | None = None,
+             existing: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Derive channels from the org chart (department + manager + reports_to) and add explicit links.
+    Duplicate channels (same pair + type, either direction when bidirectional) are skipped."""
+    edges: list[dict[str, Any]] = list(existing or [])
+    seen: set[tuple[str, str, str]] = set()
+    for e in edges:
+        seen.add((e["source_agent_id"], e["target_agent_id"], e["type"]))
+        if e.get("bidirectional"):
+            seen.add((e["target_agent_id"], e["source_agent_id"], e["type"]))
+
+    def add(src: str, dst: str, etype: str, bidi: bool, label: str, cfg: dict[str, Any] | None = None) -> None:
+        if src == dst or (src, dst, etype) in seen or (bidi and (dst, src, etype) in seen):
+            return
+        seen.add((src, dst, etype))
+        if bidi:
+            seen.add((dst, src, etype))
+        edges.append(_edge(src, dst, etype, bidi, label, cfg))
+
+    by_id = {a["id"]: a for a in agents}
+    managers = [a for a in agents if a.get("is_manager")]
+    for a in agents:
+        mgr = by_id.get(a.get("reports_to") or "")
+        if not mgr:
+            continue
+        dept = a.get("department") or mgr.get("department") or "Team"
+        same = (a.get("department") or "") == (mgr.get("department") or "")
+        add(mgr["id"], a["id"], "delegate", False, f"{dept} tasks" if same else f"{a.get('department') or dept} direction")
+        add(a["id"], mgr["id"], "report", False, "Status" if same else f"{a.get('department') or dept} report")
+    peers = [m for m in managers if m["id"] != head_id]
+    for i, m1 in enumerate(peers):
+        for m2 in peers[i + 1:]:
+            if m1.get("department") != m2.get("department"):
+                add(m1["id"], m2["id"], "consult", True, "Department sync")
+    for ln in links or []:
+        if ln["src"] in by_id and ln["dst"] in by_id:
+            add(ln["src"], ln["dst"], ln["type"], bool(ln.get("bidirectional")), ln.get("label", ""), ln.get("config"))
+    return edges
+
+
+def layout_departments(agents: list[dict[str, Any]], head_id: str | None, origin: tuple[float, float] = (0, 0)) -> None:
+    """Column per department: head on top, manager row, members stacked below (in place)."""
+    depts: list[str] = []
+    for a in agents:
+        d = a.get("department") or "Team"
+        if a["id"] != head_id and d not in depts:
+            depts.append(d)
+    col_w, ox, oy = 320, origin[0], origin[1]
+    width = max(1, len(depts)) * col_w
+    for a in agents:
+        if a["id"] == head_id:
+            a["position_x"], a["position_y"] = ox + width / 2 - 125, oy
+    head_dept = next((a.get("department") for a in agents if a["id"] == head_id), None)
+    for ci, d in enumerate(depts):
+        x = ox + ci * col_w + 20
+        members = [a for a in agents if (a.get("department") or "Team") == d and a["id"] != head_id]
+        mgr = [a for a in members if a.get("is_manager")]
+        rest = [a for a in members if not a.get("is_manager")]
+        y = oy + (230 if head_id else 0)
+        if d == head_dept:  # head's own department: members sit beside/below the head
+            y = oy + 230
+        for a in mgr + rest:
+            a["position_x"], a["position_y"] = x, y
+            y += 190
+
+
+def build_from_template(t: CompanyTemplate) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, str]]]:
+    """Return (agents, edges, departments meta) with fresh ids, ready for canvas sync."""
     ids: dict[str, str] = {}
     agents: list[dict[str, Any]] = []
-    for local, role_key, entry, x, y in t.agents:
-        aid = new_id()
-        ids[local] = aid
-        a = agent_from_role(role_key, entry=entry, x=x, y=y)
-        a["id"] = aid
-        agents.append(a)
-    edges: list[dict[str, Any]] = []
-    for src, dst, etype, bidi, label, cfg in t.edges:
-        config = {"max_turns": 20, "handoff_instructions": "", "condition": "", "max_rounds": 4, "max_revisions": 3}
-        config.update(cfg)
-        edges.append({
-            "id": new_id(), "source_agent_id": ids[src], "target_agent_id": ids[dst],
-            "type": etype, "bidirectional": bidi, "label": label, "config": config,
-        })
+    positioned = True
+    meta: dict[str, dict[str, str]] = {}
+    for dept in t.departments:
+        meta[dept.name] = {"color": dept.color or department_color(dept.name), "description": dept.description}
+        for member, is_mgr in [(dept.manager, True)] + [(m, False) for m in dept.members]:
+            aid = new_id()
+            ids[member.key] = aid
+            a = agent_from_role(member.role_key, name=member.name, entry=member.entry, x=member.x or 0, y=member.y or 0,
+                                department=dept.name, is_manager=is_mgr, role=member.role)
+            a["id"] = aid
+            a["_local"] = member.key
+            a["_dept_mgr"] = dept.manager.key
+            a["_reports"] = dept.reports_to
+            positioned = positioned and member.x is not None
+            agents.append(a)
+    head_id = ids.get(t.head or "")
+    for a in agents:
+        if a["_local"] != a["_dept_mgr"]:
+            a["reports_to"] = ids[a["_dept_mgr"]]
+        elif a["id"] != head_id:
+            a["reports_to"] = ids.get(a["_reports"] or "") or head_id
+        for k in ("_local", "_dept_mgr", "_reports"):
+            a.pop(k)
+    links = [{"src": ids[ln.src], "dst": ids[ln.dst], "type": ln.type, "bidirectional": ln.bidirectional, "label": ln.label,
+              "config": ln.config} for ln in t.links if ln.src in ids and ln.dst in ids]
+    edges = wire_org(agents, head_id, links) if t.auto_wire else [
+        _edge(ln["src"], ln["dst"], ln["type"], ln["bidirectional"], ln["label"], ln["config"]) for ln in links]
+    if not positioned:
+        layout_departments(agents, head_id)
+    return agents, edges, meta
+
+
+def build_template(key: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    agents, edges, _ = build_from_template(TEMPLATES[key])
     return agents, edges
+
+
+def summarize_departments(agents: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for a in agents:
+        d = a.get("department") or ""
+        if not d:
+            continue
+        entry = out.setdefault(d, {"name": d, "color": ((meta or {}).get(d) or {}).get("color") or department_color(d), "manager": None, "members": []})
+        if a.get("is_manager") and not entry["manager"]:
+            entry["manager"] = a["name"]
+        else:
+            entry["members"].append(a["name"])
+    return list(out.values())
+
+
+def template_summary(t: CompanyTemplate) -> dict[str, Any]:
+    roles = all_roles()
+    depts = []
+    for d in t.departments:
+        depts.append({"name": d.name, "color": d.color or department_color(d.name),
+                      "manager": d.manager.name or roles[d.manager.role_key].default_name,
+                      "members": [m.name or roles[m.role_key].default_name for m in d.members]})
+    agents, edges, _ = build_from_template(t)
+    return {"key": t.key, "name": t.name, "description": t.description, "agent_count": len(agents), "edge_count": len(edges),
+            "source": "builtin", "departments": depts}

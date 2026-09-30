@@ -86,3 +86,17 @@ def inbound_senders(edges: list[EdgeSpec], agent_id: str) -> set[str]:
         elif e.bidirectional and e.source == agent_id:
             s.add(e.target)
     return s
+
+
+# ---------------------------------------------------------------- permission levels
+LEVEL_ORDER = {"read_only": 0, "plan": 1, "ask": 2, "danger": 3}
+LEVEL_LABEL = {"read_only": "read-only", "plan": "plan", "ask": "ask", "danger": "danger"}
+DANGEROUS = {"write_file", "run_code", "mcp_call"}
+
+
+def effective_level(run_level: str, agent_level: str | None) -> str:
+    """The run's level caps everything; an agent override can only be *more* restrictive."""
+    run_level = run_level if run_level in LEVEL_ORDER else "ask"
+    if not agent_level or agent_level == "inherit" or agent_level not in LEVEL_ORDER:
+        return run_level
+    return min(run_level, agent_level, key=LEVEL_ORDER.__getitem__)

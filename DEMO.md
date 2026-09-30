@@ -17,6 +17,7 @@
 | 11 | 7:15 | QA's `run_code` → **Tools** tab shows real `unittest` output: *Ran 10 tests … OK* | "Nothing is faked. QA runs the tests in the sandbox and reports the actual output." |
 | 12 | 8:00 | Completed → **Report** tab → **Artifacts**: `backend/todo_api.py` v1 → v2 **Diff**, version history, `frontend/index.html` **Preview** | "Real files, versioned, with author and reason. One-click revert and ZIP download." |
 | 13 | 9:00 | Drag the **timeline** back to replay the debate | "Every event is persisted, so runs can be replayed and resumed." |
+| 13b | 9:15 | Company switcher → **New company** → *Generate with AI*: "Build and launch a habit tracker app with a marketing campaign" → preview the departments → Create. Show the Org panel, department zones, deactivating an agent, and **Add department**. Then run the **Self-organizing Company** template: the Founder hires department heads, who hire their specialists live, and the Team tab shows who hired whom. | "Templates are departments with a manager each. Agents can also grow and reconfigure the org themselves, within the permission level." |
 | 14 | 9:30 | (Optional) **Runs** → new run with **Max turns = 5** → it halts ("Budget: max turns reached") | Guardrails: turns, tokens, cost, time, and the loop detector. |
 
 **Backup plan:** if anything misbehaves live, open a finished run from **Runs** and walk through it with the timeline scrubber.

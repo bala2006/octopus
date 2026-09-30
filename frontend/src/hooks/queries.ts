@@ -45,7 +45,7 @@ export function useCompanyId(): { companyId: string; setCompanyId: (c: string) =
 
 export const useCanvas = (w: string, c: string) =>
   useQuery({
-    queryKey: qk.canvas(w, c), enabled: !!w && !!c, staleTime: 30_000,
+    queryKey: qk.canvas(w, c), enabled: !!w && !!c, staleTime: 0, refetchOnMount: "always",
     queryFn: () => unwrap(api.GET("/api/v1/w/{workspace_id}/companies/{company_id}", { params: { path: { workspace_id: w, company_id: c } } })),
   });
 

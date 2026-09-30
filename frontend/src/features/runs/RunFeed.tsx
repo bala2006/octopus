@@ -1,12 +1,12 @@
 import * as React from "react";
-import { ArrowRight, Ban, Brain, ChevronDown, CircleCheck, CircleX, FileCode2, Gavel, Terminal, User } from "lucide-react";
+import { ArrowRight, Ban, Brain, ChevronDown, CircleCheck, CircleX, FileCode2, Gavel, Settings2, Sparkles, Terminal, User } from "lucide-react";
 import { MESSAGE_TYPE_LABEL, statusMeta } from "@/lib/meta";
 import { clockTime, cn } from "@/lib/utils";
 import type { AgentOut, MessageOut } from "@/types";
 import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/primitives";
-import type { RunLive } from "./runState";
+import type { OrgEvent, RunLive } from "./runState";
 
 export type FeedFilter = "all" | "user" | "internal";
 
@@ -22,26 +22,30 @@ export function isUserFacing(m: MessageOut): boolean {
   return m.sender === "user" || !m.to_agent_id || m.type === "final_report";
 }
 
-type Item = { kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any>; seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Item = ({ kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any> } | { kind: "org"; ev: OrgEvent }) & { seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export function RunFeed({ state, agents, filter, showThoughts = true }: { state: RunLive; agents: Record<string, AgentOut>; filter: FeedFilter; showThoughts?: boolean }) {
   const bottom = React.useRef<HTMLDivElement>(null);
   const scroller = React.useRef<HTMLDivElement>(null);
   const [stick, setStick] = React.useState(true);
   const items = React.useMemo(() => {
+    const raw: Item[] = [];
+    state.messages.forEach((m, i) => {
+      if (filter === "user" && !isUserFacing(m)) return;
+      if (filter === "internal" && (m.sender === "user" || !m.to_agent_id) && m.type !== "artifact_created") return;
+      raw.push(m.type === "artifact_created" ? { kind: "files", ms: [m], seq: m._seq ?? i } : { kind: "msg", m, seq: m._seq ?? i });
+    });
+    if (filter !== "user") for (const r of state.rejected) raw.push({ kind: "rejected", r, seq: r.seq ?? 0 });
+    for (const ev of state.orgEvents) raw.push({ kind: "org", ev, seq: ev.seq });
+    raw.sort((a, b) => a.seq - b.seq);
     const out: Item[] = [];
-    for (const m of state.messages) {
-      if (filter === "user" && !isUserFacing(m)) continue;
-      if (filter === "internal" && (m.sender === "user" || !m.to_agent_id) && m.type !== "artifact_created") continue;
-      if (m.type === "artifact_created") {
-        const last = out[out.length - 1];
-        if (last?.kind === "files" && last.ms[0].from_agent_id === m.from_agent_id) last.ms.push(m);
-        else out.push({ kind: "files", ms: [m] });
-      } else out.push({ kind: "msg", m });
+    for (const it of raw) { // group consecutive file writes by the same agent
+      const last = out[out.length - 1];
+      if (it.kind === "files" && last?.kind === "files" && last.ms[0].from_agent_id === it.ms[0].from_agent_id) last.ms.push(...it.ms);
+      else out.push(it.kind === "files" ? { ...it, ms: [...it.ms] } : it);
     }
-    if (filter !== "user") for (const r of state.rejected) out.push({ kind: "rejected", r, seq: r.seq });
     return out;
-  }, [state.messages, state.rejected, filter]);
+  }, [state.messages, state.rejected, state.orgEvents, filter]);
   const active = Object.entries(state.agentStatus).filter(([, st]) => statusMeta(st).live);
 
   React.useEffect(() => { if (stick) bottom.current?.scrollIntoView({ block: "end" }); }, [items.length, stick, state.streaming]);
@@ -56,6 +60,7 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
         {items.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">Waiting for the first message…</p>}
         {items.map((it) => it.kind === "msg" ? <FeedMessage key={it.m.id} m={it.m} agents={agents} />
           : it.kind === "files" ? <FileGroup key={it.ms[0].id} ms={it.ms} agents={agents} />
+          : it.kind === "org" ? <OrgItem key={`o${it.seq}`} ev={it.ev} agents={agents} />
           : <Rejected key={`r${it.seq}`} r={it.r} agents={agents} />)}
         {active.map(([aid, st]) => {
           const a = agents[aid];
@@ -136,6 +141,29 @@ function FileGroup({ ms, agents }: { ms: MessageOut[]; agents: Record<string, Ag
           {(m.meta?.planned ? "📝 " : "") + String(m.meta?.path ?? "")}<span className="text-muted-foreground/70"> v{String(m.meta?.version ?? "")}</span>
         </span>
       ))}
+    </div>
+  );
+}
+
+function OrgItem({ ev, agents }: { ev: OrgEvent; agents: Record<string, AgentOut> }) {
+  const by = agents[ev.by];
+  const who = agents[ev.agent_id];
+  if (ev.kind === "created") {
+    return (
+      <div className="ml-9 flex items-center gap-2 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/5 px-2.5 py-2 text-xs animate-in fade-in-0 slide-in-from-left-2">
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
+        {who && <AgentAvatar name={who.name} color={who.color} avatar={who.avatar} size={20} />}
+        <span><span className="font-semibold" style={by ? { color: by.color } : undefined}>{by?.name ?? "An agent"}</span> hired{" "}
+          <span className="font-semibold">{ev.name}</span> as {ev.role}{ev.department ? <> in <span className="font-medium">{ev.department}</span></> : null}
+          {ev.persisted === false && <span className="text-muted-foreground"> · run only</span>}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="ml-9 flex items-start gap-2 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground animate-fade-up">
+      <Settings2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
+      <span><span className="font-medium text-foreground">{by?.name ?? "Agent"}</span> {ev.self ? "refined its own configuration" : <>reconfigured <span className="font-medium text-foreground">{who?.name ?? ev.name}</span></>}: {ev.summary}
+        {ev.reason ? <span className="italic"> · “{ev.reason}”</span> : null}</span>
     </div>
   );
 }

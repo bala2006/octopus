@@ -42,7 +42,31 @@ flowchart TD
 
 **Live activity.** While a reply streams, `live_activity()` scans the partial JSON for the action being composed. It emits `agent_status` updates such as *"Drafting proposal to Priya…"* or *"Writing backend/todo_api.py…"* before the action executes. During execution, statuses become `writing`, `reading`, `running`, `tool` and `awaiting_approval`.
 
-## 3. Protocols (`orchestrator/protocols.py`)
+## 3. Teams, departments and templates
+
+**Org model.** Every agent has `department`, `is_manager`, `reports_to`, `active` and `created_by`. Templates
+(`services/templates.py`) are declared as departments (one manager plus members). `wire_org()` derives the channels:
+manager → member `delegate`, member → manager `report`, head ↔ department managers, peer managers `consult`,
+plus explicit cross-department links (reviews, debates, consults). User templates are stored in the global registry
+(`user_templates`) as company exports, so they're reusable in every project. `org_generator.py` designs an org from a
+prompt with the configured model (strict JSON spec), or with a deterministic keyword-based designer in Demo Mode.
+
+**Runtime team management** (`orchestrator/team.py`, mixed into `RunRuntime`):
+
+| Action | Who | Rules |
+|---|---|---|
+| `list_agents` | everyone | the roster with department, manager, live status (or *inactive*), activity, turns, hired-by, and your channels |
+| `update_agent` target `self` | everyone | role, prompt (`append_to_prompt`), description, temperature, behavior; tools can only be dropped; the turn cap can't be raised; the permission level can only go down |
+| `create_agent` | `manage_team` tool | hire into a department and report to yourself or someone you manage; tools ⊆ the hirer's tools; auto delegate/report channels plus `connect` to agents you can already reach; optional `brief` becomes the first task; capped by `budget.max_agents` |
+| `update_agent` other | `manage_team` + you manage or hired the target | same as self, plus `is_manager`, `active` (deactivate), and granting tools you have |
+
+Inactive agents never take turns, and messages to them are rejected. Permission levels: `read_only` can't hire;
+`read_only` and `plan` changes live only for the run; `ask` requests approval before a change is saved; `danger` saves
+directly. Saved changes are written to the company and bump `Company.revision`. The canvas autosaves with
+`revision`, so a stale editor gets **409** and reloads instead of overwriting hires. Events `agent_created` and
+`agent_updated` animate the live graph and appear in the feed and the run report ("Org changes").
+
+## 4. Protocols (`orchestrator/protocols.py`)
 
 ### Debate
 - A debate opens with a `proposal`. Each side replies with `objection` (reasons), a compromise `proposal`, or `agreement`.
@@ -85,7 +109,7 @@ sequenceDiagram
 ### Delegation / task board
 A `task` message is linked to a task-board entry (by `task_id`, or an open task assigned to the recipient), or a new task is created automatically. Managers use `update_task_board` to create or update tasks (assignee, acceptance criteria, status `todo → in_progress → in_review → done | blocked`).
 
-## 4. Permissions and approvals
+## 5. Permissions and approvals
 
 The effective level is `min(run level, agent override)`, ordered `read_only < plan < ask < danger`.
 
@@ -98,7 +122,7 @@ The effective level is `min(run level, agent override)`, ordered `read_only < pl
 
 An approval blocks the agent's turn on a future. The run is `awaiting_user`, and the UI shows an approval card with a diff, command or arguments. *Always allow* auto-approves that action kind for that agent for the rest of the run. Supervised mode also asks before `finish`.
 
-## 5. Events and realtime
+## 6. Events and realtime
 
 Every event except `token_stream` is appended to `run_events` with a monotonic id (`seq`). WebSocket clients connect with `?last_seq=N`. The server sends a snapshot, then **replays** every persisted event after N, then streams live events, de-duplicated by `seq`. The frontend reducer (`features/runs/runState.ts`) is pure and powers both the live view and the timeline scrubber (`replayTo(events, cursor)`).
 
@@ -118,16 +142,16 @@ sequenceDiagram
   UI->>WS: control / interject / approve / reject
 ```
 
-Event types: `snapshot`, `run_status`, `agent_status` (+activity), `turn_started`, `token_stream`, `thought`, `message_created`, `message_rejected`, `edge_activity`, `tool_call`, `tool_result`, `task_updated`, `artifact_updated`, `usage_update`, `protocol`, `approval_requested`, `approval_resolved`, `agent_finished`, `error`.
+Event types: `snapshot`, `run_status`, `agent_created`, `agent_updated`, `agent_status` (+activity), `turn_started`, `token_stream`, `thought`, `message_created`, `message_rejected`, `edge_activity`, `tool_call`, `tool_result`, `task_updated`, `artifact_updated`, `usage_update`, `protocol`, `approval_requested`, `approval_resolved`, `agent_finished`, `error`.
 
-## 6. LLM layer (`backend/app/llm`)
+## 7. LLM layer (`backend/app/llm`)
 
 - `router.prepare_request` resolves credentials from the registry (or env) and Azure options (`api_version`, `auth=key|entra`, reasoning deployments). In Demo Mode, unconfigured providers fall back to the mock.
 - `LiteLLMProvider` streams with `stream_options.include_usage`, maps `azure/<deployment>` and `azure_ai/<model>`, uses Entra ID via `DefaultAzureCredential`, and computes cost with LiteLLM pricing.
 - `stream_with_retry` retries retryable errors (429/5xx/network) with exponential backoff and jitter, but only if nothing has streamed yet.
 - `MockProvider` plus `demo_script.py` implement deterministic, role-aware scripted policies (CEO, PM, Architect, Frontend, Backend, QA, Designer, DevOps, Proposer, Critic, Moderator, plus a generic fallback). They react to the actual inbox and topology, so edited companies still terminate. QA really executes the generated tests in the sandbox.
 
-## 7. Frontend
+## 8. Frontend
 
 - The typed client (`openapi-fetch`) is generated from FastAPI's OpenAPI schema (`npm run gen:api`).
 - Canvas state lives in a Zustand store with history (undo/redo), clipboard and connection rules. Autosave is a debounced full-graph `PUT /canvas`; the server upserts and deletes by id, so client-generated UUIDs stay stable.

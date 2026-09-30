@@ -34,7 +34,10 @@ from app.models import AgentMemory, Artifact, Message, Run, Task
 from app.orchestrator import actions as A
 from app.orchestrator.bus import bus
 from app.orchestrator.context import AgentSpec, build_system_prompt, build_user_prompt
-from app.orchestrator.permissions import EdgeSpec, allowed_recipients, find_channel, rejection_reason
+from app.orchestrator.permissions import (
+    EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
+)
+from app.orchestrator.team import TeamMixin
 from app.orchestrator.protocols import (
     DebateState, LoopDetector, ReviewState, debate_decided_externally, debate_on_message, infer_verdict,
     review_on_request, review_on_result,
@@ -50,11 +53,6 @@ DEBATE_PROTOCOL_TYPES = {"proposal", "critique", "objection", "agreement", "deci
 ACTIVE_STATES = {"queued", "running", "paused", "awaiting_user"}
 
 
-LEVEL_ORDER = {"read_only": 0, "plan": 1, "ask": 2, "danger": 3}
-LEVEL_LABEL = {"read_only": "read-only", "plan": "plan", "ask": "ask", "danger": "danger"}
-DANGEROUS = {"write_file", "run_code", "mcp_call"}
-
-
 class StopRun(Exception):
     pass
 
@@ -66,14 +64,6 @@ class ProjectRef:
     workspace_id: str
     root: Path
     sf: SessionFactory
-
-
-def effective_level(run_level: str, agent_level: str | None) -> str:
-    """The run's level caps everything; an agent override can only be *more* restrictive."""
-    run_level = run_level if run_level in LEVEL_ORDER else "ask"
-    if not agent_level or agent_level == "inherit" or agent_level not in LEVEL_ORDER:
-        return run_level
-    return min(run_level, agent_level, key=LEVEL_ORDER.__getitem__)
 
 
 _ACTION_RE = re.compile(r'"action"\s*:\s*"(\w+)"')
@@ -109,9 +99,13 @@ def live_activity(text: str) -> tuple[str, str]:
     return ("thinking", "Planning next step…")
 
 
-class RunRuntime:
+class RunRuntime(TeamMixin):
     def __init__(self, run: Run, user_id: str, project: ProjectRef) -> None:
         snap = run.snapshot_json or {}
+        self.snapshot: dict[str, Any] = {"company": snap.get("company") or {}, "agents": list(snap.get("agents") or []),
+                                         "edges": list(snap.get("edges") or []), "departments": dict(snap.get("departments") or {})}
+        self.snapshot_dirty = False
+        self.company_id = run.company_id
         self.project = project
         self.sf = project.sf
         self.level = run.permission_level or "ask"
@@ -207,9 +201,12 @@ class RunRuntime:
         }
 
     async def save(self) -> None:
+        values: dict[str, Any] = {"tokens_used": self.tokens, "cost_usd": round(self.cost, 6), "turns": self.turn_no, "state_json": self.state_dict()}
+        if self.snapshot_dirty:
+            values["snapshot_json"] = self.snapshot
+            self.snapshot_dirty = False
         async with self.db() as db:
-            await db.execute(update(Run).where(Run.id == self.run_id).values(
-                tokens_used=self.tokens, cost_usd=round(self.cost, 6), turns=self.turn_no, state_json=self.state_dict()))
+            await db.execute(update(Run).where(Run.id == self.run_id).values(**values))
             await db.commit()
 
     async def restore(self, run: Run) -> None:
@@ -329,6 +326,8 @@ class RunRuntime:
     def next_runnable(self) -> str | None:
         best: tuple[int, str] | None = None
         for aid in self.agents:
+            if not self.agents[aid].active:
+                continue
             seqs = [s for s, _ in self.mailbox.get(aid, [])] + [s for s, o in self.observations.get(aid, []) if o.get("activate")]
             if seqs:
                 s = min(seqs)
@@ -468,12 +467,13 @@ class RunRuntime:
 
     # ------------------------------------------------------------------ main loop
     def entry_agents(self) -> list[str]:
-        entries = [a.id for a in self.agents.values() if a.is_entry]
+        active = [aid for aid, a in self.agents.items() if a.active]
+        entries = [aid for aid in active if self.agents[aid].is_entry]
         if entries:
             return entries
         targets = {e.target for e in self.edges} | {e.source for e in self.edges if e.bidirectional}
-        roots = [aid for aid in self.agents if aid not in targets]
-        return roots[:1] or list(self.agents)[:1]
+        roots = [aid for aid in active if aid not in targets]
+        return roots[:1] or active[:1]
 
     async def bootstrap(self) -> None:
         content = self.goal
@@ -484,8 +484,8 @@ class RunRuntime:
 
     async def main(self, fresh: bool = True) -> None:
         try:
-            if not self.agents:
-                await self.finalize("failed", "The company has no agents")
+            if not any(a.active for a in self.agents.values()):
+                await self.finalize("failed", "The company has no active agents")
                 return
             async with self.db() as db:
                 await db.execute(update(Run).where(Run.id == self.run_id, Run.started_at.is_(None)).values(started_at=utcnow()))
@@ -556,7 +556,10 @@ class RunRuntime:
         allowed = allowed_recipients(self.edges, agent.id)
         cat = lambda aid: self.agents[aid].category if aid in self.agents else "user"  # noqa: E731
         return {
-            "agent": {"id": agent.id, "name": agent.name, "role": agent.role, "category": agent.category, "is_entry": agent.is_entry},
+            "agent": {"id": agent.id, "name": agent.name, "role": agent.role, "category": agent.category, "is_entry": agent.is_entry,
+                      "department": agent.department, "is_manager": agent.is_manager, "tools": agent.tools,
+                      "manager": self.names.get(agent.reports_to or ""),
+                      "reports": [x.name for x in self.agents.values() if x.reports_to == agent.id and x.active]},
             "goal": self.goal,
             "inbox": [{"from": "user" if m["from"] is None else self.names.get(m["from"], "?"),
                        "from_category": "user" if m["from"] is None else cat(m["from"]),
@@ -565,7 +568,9 @@ class RunRuntime:
             "observations": obs,
             "allowed": [{"name": self.names[r], "role": self.agents[r].role, "category": self.agents[r].category,
                          "edge_types": [e.type for e in es]} for r, es in allowed.items()],
-            "roster": [{"name": a.name, "role": a.role, "category": a.category} for a in self.agents.values()],
+            "roster": [{"name": a.name, "role": a.role, "category": a.category, "department": a.department, "is_manager": a.is_manager,
+                        "active": a.active, "status": self.status.get(a.id, "idle"), "manager": self.names.get(a.reports_to or "")}
+                       for a in self.agents.values()],
             "tasks": [{"key": t["key"], "title": t["title"], "assignee": self.names.get(t["assignee"] or "", None), "status": t["status"]}
                       for t in self.tasks.values()],
             "state": self.mock_state.setdefault(agent.id, {}),
@@ -621,7 +626,8 @@ class RunRuntime:
         await self.set_agent_status(aid, "thinking", f"Reading {len(inbox_ids)} new message(s)…" if inbox_ids else "Reviewing results…")
         inbox_set = set(inbox_ids)
         inbox = [m for m in self.history if m["id"] in inbox_set]
-        system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges)
+        system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
+                                     status=self.status)
         user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_set, observations=obs,
                                  blackboard=self.blackboard(), names=self.names, recent_n=self.budget.context_recent)
         req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
@@ -721,6 +727,9 @@ class RunRuntime:
         await self._send_one(agent, tid, a)
 
     async def _send_one(self, agent: AgentSpec, tid: str, a: A.SendMessage) -> None:
+        if not self.agents[tid].active:
+            await self.reject(agent, tid, a, f"{self.names[tid]} is inactive (deactivated). Use list_agents to find an active teammate.")
+            return
         edge = find_channel(self.edges, agent.id, tid, a.type)
         if edge is None:
             await self.reject(agent, tid, a, rejection_reason(self.edges, agent.id, tid, a.type, self.names))

@@ -1,10 +1,12 @@
 /** Pure reducer turning run events (live or replayed) into view state. Used for live runs and timeline scrubbing. */
-import type { MessageOut, PendingApproval, RunEvent } from "@/types";
+import type { AgentOut, EdgeOut, MessageOut, PendingApproval, RunEvent } from "@/types";
 
 export interface ToolCall { call_id: string; agent_id: string; tool: string; args: Record<string, unknown>; ok?: boolean; output?: string; turn_no?: number; seq?: number }
 export interface LiveTask { key: string; title: string; status: string; assignee_agent_id?: string | null; description?: string; acceptance_criteria?: string }
 export interface LiveArtifact { id: string; path: string; version: number; author_agent_id?: string | null; change_note?: string; planned?: boolean; created?: boolean; size?: number; lines?: number; previous_lines?: number; created_at?: string }
-export interface TimelineItem { seq: number; type: string; ts?: string; agent_id?: string | null; label: string; tone: "msg" | "protocol" | "file" | "tool" | "status" | "error" | "approval" }
+export interface TimelineItem { seq: number; type: string; ts?: string; agent_id?: string | null; label: string; tone: "msg" | "protocol" | "file" | "tool" | "status" | "error" | "approval" | "org" }
+export interface OrgEvent { seq: number; kind: "created" | "updated"; by: string; agent_id: string; name: string; role?: string; department?: string; summary?: string; reason?: string; self?: boolean; persisted?: boolean; ts?: string }
+export type FeedMessage = MessageOut & { _seq?: number };
 export interface Usage { tokens: number; cost_usd: number; turns: number; max_turns?: number; max_tokens?: number; max_cost_usd?: number; per_agent?: Record<string, number>; active_seconds?: number; timeout_s?: number }
 export interface ProtocolState { kind: "debate" | "review"; result: string; edge_id: string; state: Record<string, any>; seq?: number } // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -16,7 +18,13 @@ export interface RunLive {
   activity: Record<string, string>;
   streaming: Record<string, string>;
   thoughts: Record<string, string>;
-  messages: MessageOut[];
+  messages: FeedMessage[];
+  extraAgents: AgentOut[];
+  extraEdges: EdgeOut[];
+  agentPatches: Record<string, Partial<AgentOut>>;
+  orgEvents: OrgEvent[];
+  fresh: Record<string, number>;
+  departments: Record<string, { color: string }>;
   rejected: Array<Record<string, any>>; // eslint-disable-line @typescript-eslint/no-explicit-any
   toolCalls: Record<string, ToolCall>;
   tasks: Record<string, LiveTask>;
@@ -37,6 +45,7 @@ export interface RunLive {
 
 export const initialRun = (): RunLive => ({
   status: "queued", reason: "", summary: "", agentStatus: {}, activity: {}, streaming: {}, thoughts: {}, messages: [], rejected: [],
+  extraAgents: [], extraEdges: [], agentPatches: {}, orgEvents: [], fresh: {}, departments: {},
   toolCalls: {}, tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
   pendingApproval: null, awaiting: null, errors: [], timeline: [], approvals: [], lastSeq: 0, live: false, replayDone: false,
 });
@@ -47,7 +56,7 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
   const d = e.data ?? {};
   const seq = e.seq ?? 0;
   const now = e.replay ? Date.parse(e.ts ?? "") || Date.now() : Date.now();
-  const n = (id?: string | null) => (id ? names[id] ?? "Agent" : "User");
+  const n = (id?: string | null) => (id ? names[id] ?? s.extraAgents.find((x) => x.id === id)?.name ?? "Agent" : "User");
   const push = (item: Omit<TimelineItem, "seq" | "ts">) => (seq ? [...s.timeline, { ...item, seq, ts: e.ts }] : s.timeline);
   const next: RunLive = { ...s, lastSeq: Math.max(s.lastSeq, seq) };
   switch (e.type) {
@@ -76,7 +85,7 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
       if (s.messages.some((x) => x.id === m.id)) return next;
       const lm = m.from_agent_id && m.type !== "artifact_created"
         ? { ...s.lastMessage, [m.from_agent_id]: { text: clip(m.content, 160), type: m.type, to: m.to_agent_id ? n(m.to_agent_id) : undefined } } : s.lastMessage;
-      return { ...next, messages: [...s.messages, m], lastMessage: lm,
+      return { ...next, messages: [...s.messages, { ...m, _seq: seq || undefined }], lastMessage: lm,
         awaiting: m.meta?.awaiting_input ? { agent_id: m.from_agent_id!, question: m.content } : s.awaiting,
         timeline: m.type === "artifact_created" ? s.timeline : push({ type: e.type, agent_id: m.from_agent_id, tone: "msg",
           label: `${n(m.from_agent_id)} › ${m.to_agent_id ? n(m.to_agent_id) : "you"} · ${m.type.replace("_", " ")}` }) };
@@ -114,6 +123,24 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
     case "error":
       return { ...next, errors: [...s.errors, { ...d, seq, ts: e.ts } as RunLive["errors"][number]],
         timeline: d.kind === "warning" ? s.timeline : push({ type: e.type, agent_id: d.agent_id, tone: "error", label: clip(d.message, 70) }) };
+    case "agent_created": {
+      const a = d.agent as AgentOut;
+      if (s.extraAgents.some((x) => x.id === a.id)) return next;
+      const dep = d.department as { name: string; color: string } | undefined;
+      const nm = (id?: string | null) => (id && (names[id] ?? s.extraAgents.find((x) => x.id === id)?.name)) || "Agent";
+      return { ...next, extraAgents: [...s.extraAgents, a], extraEdges: [...s.extraEdges, ...(d.edges as EdgeOut[])],
+        fresh: { ...s.fresh, [a.id]: now }, departments: dep ? { ...s.departments, [dep.name]: { color: dep.color } } : s.departments,
+        agentStatus: { ...s.agentStatus, [a.id]: "idle" },
+        orgEvents: [...s.orgEvents, { seq, kind: "created", by: d.created_by, agent_id: a.id, name: a.name, role: a.role, department: a.department, persisted: d.persisted, ts: e.ts }],
+        timeline: push({ type: e.type, agent_id: d.created_by, tone: "org", label: `${nm(d.created_by)} hired ${a.name} (${a.role})` }) };
+    }
+    case "agent_updated": {
+      const ch = (d.changes ?? {}) as Partial<AgentOut>;
+      const nm = (id?: string | null) => (id && (names[id] ?? s.extraAgents.find((x) => x.id === id)?.name)) || "Agent";
+      return { ...next, agentPatches: { ...s.agentPatches, [d.agent_id]: { ...(s.agentPatches[d.agent_id] ?? {}), ...ch } },
+        orgEvents: [...s.orgEvents, { seq, kind: "updated", by: d.by, agent_id: d.agent_id, name: ch.name ?? d.old_name, summary: d.summary, reason: d.reason, self: d.self, persisted: d.persisted, ts: e.ts }],
+        timeline: push({ type: e.type, agent_id: d.by, tone: "org", label: d.self ? `${nm(d.by)} edited own config` : `${nm(d.by)} reconfigured ${d.old_name}` }) };
+    }
     case "agent_finished":
       return next;
     default:

@@ -115,6 +115,66 @@ class Calculate(BaseModel):
     expression: str = Field(min_length=1, max_length=200)
 
 
+ToolSpec = Union[dict[str, bool], list[str]]
+
+
+class ConnectSpec(BaseModel):
+    to: str = Field(min_length=1, max_length=120)
+    type: Literal["delegate", "review", "debate", "report", "consult"] = "consult"
+    bidirectional: bool = True
+    label: str = ""
+
+
+class CreateAgent(BaseModel):
+    """Hire a new agent into the running company."""
+
+    action: Literal["create_agent"]
+    name: str = Field(min_length=1, max_length=60)
+    role: str = Field(min_length=1, max_length=80)
+    department: str = Field("", max_length=80)
+    description: str = Field("", max_length=500)
+    system_prompt: str = Field("", max_length=20000)
+    role_template: str | None = None
+    tools: ToolSpec | None = None
+    is_manager: bool = False
+    provider: str | None = None
+    model: str | None = None
+    reports_to: str | None = None  # name; default = the hiring agent
+    connect: list[ConnectSpec] = Field(default_factory=list, max_length=8)
+    brief: str | None = Field(None, max_length=8000)  # first task, delivered over the new delegate channel
+
+
+class AgentChanges(BaseModel):
+    name: str | None = Field(None, max_length=60)
+    role: str | None = Field(None, max_length=80)
+    description: str | None = Field(None, max_length=500)
+    system_prompt: str | None = Field(None, max_length=20000)
+    append_to_prompt: str | None = Field(None, max_length=4000)
+    department: str | None = Field(None, max_length=80)
+    is_manager: bool | None = None
+    active: bool | None = None
+    temperature: float | None = Field(None, ge=0, le=2)
+    model: str | None = None
+    tools: ToolSpec | None = None
+    behavior: dict[str, Any] | None = None
+    permission_level: Literal["read_only", "plan", "ask", "danger"] | None = None
+
+
+class UpdateAgent(BaseModel):
+    """Edit your own configuration (target "self") or that of an agent you manage/hired."""
+
+    action: Literal["update_agent"]
+    target: str = "self"
+    changes: AgentChanges
+    reason: str = Field("", max_length=1000)
+
+
+class ListAgents(BaseModel):
+    action: Literal["list_agents"]
+    include_inactive: bool = True
+    department: str | None = None
+
+
 class Finish(BaseModel):
     action: Literal["finish"]
     summary: str = ""
@@ -126,7 +186,7 @@ class Wait(BaseModel):
 
 Action = Annotated[
     Union[SendMessage, WriteFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
-          WebSearch, Calculate, Finish, Wait],
+          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, Finish, Wait],
     Field(discriminator="action"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Action)
@@ -134,11 +194,14 @@ _adapter: TypeAdapter[Any] = TypeAdapter(Action)
 ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "write_file", "read": "read_file",
                   "execute": "run_code", "run": "run_code", "terminal": "run_code", "tasks": "update_task_board", "done": "finish",
                   "ask_user": "request_user_input", "search": "web_search", "calculator": "calculate", "ls": "list_files",
-                  "mcp": "mcp_call", "call_tool": "mcp_call"}
+                  "mcp": "mcp_call", "call_tool": "mcp_call", "hire": "create_agent", "spawn_agent": "create_agent",
+                  "add_agent": "create_agent", "update_self": "update_agent", "edit_agent": "update_agent", "configure_agent": "update_agent",
+                  "team": "list_agents", "roster": "list_agents", "view_agents": "list_agents"}
 
 # tool toggle required for each action (absent => always available). mcp_call is gated per server.
 ACTION_TOOL = {"send_message": "send_message", "write_file": "file_write", "read_file": "file_read", "list_files": "list_files",
-               "run_code": "terminal", "request_user_input": "ask_user", "web_search": "web_search", "calculate": "calculator"}
+               "run_code": "terminal", "request_user_input": "ask_user", "web_search": "web_search", "calculate": "calculator",
+               "create_agent": "manage_team"}
 TOOL_DEFAULTS = {"send_message": True, "file_read": True, "file_write": True, "list_files": True, "calculator": True}
 
 
@@ -203,6 +266,9 @@ def parse_envelope(text: str) -> ParseResult:
         item = dict(item)
         name = str(item.get("action") or item.get("tool") or item.get("name") or "").lower()
         item["action"] = ACTION_ALIASES.get(name, name)
+        if item["action"] == "update_agent" and "changes" not in item:  # tolerate flat {"action":"update_self","role":...}
+            item = {"action": "update_agent", "target": item.pop("target", "self"), "reason": item.pop("reason", ""),
+                    "changes": {k: v for k, v in item.items() if k != "action"}}
         if item["action"] == "send_message" and "type" in item and str(item["type"]).lower() in ("approve", "request_changes") and "verdict" not in item:
             item["verdict"] = item["type"]
         try:
@@ -241,6 +307,16 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
         lines.append('{"action":"calculate","expression":"(12*7)/3"}')
     if tool_enabled(enabled_tools, "ask_user"):
         lines.append('{"action":"request_user_input","question":"..."}  (pauses the run until the user answers)')
+    lines.append('{"action":"list_agents","include_inactive":true}  (see every teammate: department, manager, active/inactive, live status)')
+    lines.append('{"action":"update_agent","target":"self","changes":{"system_prompt"|"append_to_prompt"|"role"|"description"|"temperature"|"behavior"|"tools":...},"reason":"why"}'
+                 '  (refine your OWN configuration; you cannot grant yourself new tools)')
+    if tool_enabled(enabled_tools, "manage_team"):
+        lines.append('{"action":"create_agent","name":"...","role":"...","department":"...","is_manager":false,"role_template":"optional",'
+                     '"system_prompt":"focused prompt","tools":["file_read","file_write"],"reports_to":"<name, default you>",'
+                     '"connect":[{"to":"<name>","type":"review|consult|debate|delegate|report","bidirectional":true}],"brief":"first task"}'
+                     '  (hire a teammate; you can only grant tools you have yourself)')
+        lines.append('{"action":"update_agent","target":"<name of an agent you manage or hired>","changes":{...,"active":false},"reason":"..."}'
+                     '  (reconfigure or deactivate your reports)')
     for srv in mcp_servers or []:
         tools = srv.get("tools") or []
         listing = "; ".join(f"{t['name']}: {t.get('description', '')[:120]} args={json.dumps(t.get('input_schema', {}).get('properties', {}))[:300]}"
