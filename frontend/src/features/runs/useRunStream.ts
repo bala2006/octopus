@@ -37,6 +37,7 @@ export function useRunStream(workspaceId: string, runId: string | undefined, nam
         batch.push(e);
         if (!raf) raf = requestAnimationFrame(flush);
         if (e.replay) return;
+        if (e.type === "run_continued") { toasted.current.clear(); qc.invalidateQueries({ queryKey: qk.runs(workspaceId) }); qc.invalidateQueries({ queryKey: qk.run(workspaceId, runId) }); }
         if (e.type === "run_status" && e.data.final) {
           qc.invalidateQueries({ queryKey: qk.run(workspaceId, runId) });
           qc.invalidateQueries({ queryKey: qk.runs(workspaceId) });
@@ -53,6 +54,7 @@ export function useRunStream(workspaceId: string, runId: string | undefined, nam
         if (e.type === "approval_requested") toast.warning("Approval needed", { description: e.data.summary, duration: 6000 });
         if (e.type === "error" && e.data.kind === "loop") toast.error("Loop detected", { description: e.data.message });
         if (e.type === "artifact_updated") qc.invalidateQueries({ queryKey: qk.artifacts(workspaceId, runId) });
+        if (e.type === "file_moved" || e.type === "folder_created") qc.invalidateQueries({ queryKey: qk.files(workspaceId) });
         if ((e.type === "agent_created" || e.type === "agent_updated") && e.data.persisted) {
           qc.invalidateQueries({ queryKey: ["canvas", workspaceId] });
           qc.invalidateQueries({ queryKey: qk.companies(workspaceId) });

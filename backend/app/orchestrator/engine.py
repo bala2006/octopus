@@ -115,6 +115,7 @@ class RunRuntime(TeamMixin):
         self.goal = run.goal
         self.mode = run.mode
         self.budget = RunBudget(**(run.budget_json or {}))
+        self.budget_base: dict[str, Any] | None = (run.state_json or {}).get("budget_base") or dict(run.budget_json or {})
         self.company_name = (snap.get("company") or {}).get("name", "Company")
         self.agents: dict[str, AgentSpec] = {}
         for a in snap.get("agents", []):
@@ -146,6 +147,7 @@ class RunRuntime(TeamMixin):
         self.artifacts: dict[str, dict[str, Any]] = {}
         self.decisions: list[str] = []
         self.user_notes: list[str] = []
+        self.followups: list[str] = []  # messages sent after the run finished (the run continues like a chat)
         self.mock_state: dict[str, dict[str, Any]] = {}
         self.warned: set[str] = set()
         self.rejections = 0
@@ -201,10 +203,11 @@ class RunRuntime(TeamMixin):
             "debates": {k: v.to_dict() for k, v in self.debates.items()},
             "reviews": {k: v.to_dict() for k, v in self.reviews.items()},
             "loop": self.loop.to_dict(), "task_counter": self.task_counter,
-            "decisions": self.decisions, "user_notes": self.user_notes, "mock_state": self.mock_state,
+            "decisions": self.decisions, "user_notes": self.user_notes, "followups": self.followups, "mock_state": self.mock_state,
             "active_seconds": round(self.active_seconds, 2), "awaiting": self.awaiting,
             "pending_approval": self.pending_approval, "rejections": self.rejections,
             "auto_approve": sorted(self.auto_approve), "levels": self.levels, "activity": self.activity,
+            "budget_base": self.budget_base,
         }
 
     async def save(self) -> None:
@@ -233,6 +236,7 @@ class RunRuntime(TeamMixin):
             self.loop = LoopDetector.from_dict(st["loop"])
         self.task_counter = st.get("task_counter", 0)
         self.decisions, self.user_notes = st.get("decisions", []), st.get("user_notes", [])
+        self.followups = st.get("followups", [])
         self.mock_state = st.get("mock_state", {})
         self.active_seconds = float(st.get("active_seconds", 0))
         self.awaiting = st.get("awaiting")
@@ -436,6 +440,34 @@ class RunRuntime(TeamMixin):
         if self.task and not self.task.done():
             self.task.cancel()
 
+    async def continue_with(self, content: str, to_agent_id: str | None) -> None:
+        """Re-open a finished run with a follow-up. Same run, same history, files and task board; budgets get fresh headroom."""
+        self.followups.append(content[:2000])
+        self.finalized = False
+        self.finished_summary = None
+        self.loop_escalated = False
+        self.paused = False
+        self.stop_requested = False
+        self.awaiting = None
+        self.agent_turns = Counter()  # per-agent autonomy limits apply per request
+        base = RunBudget(**(self.budget_base or self.budget.model_dump()))
+        self.budget.max_turns = min(2000, self.turn_no + base.max_turns)
+        self.budget.max_tokens = self.tokens + base.max_tokens
+        if base.max_cost_usd > 0:
+            self.budget.max_cost_usd = round(self.cost + base.max_cost_usd, 6)
+        self.budget.timeout_s = min(86400, int(self.active_seconds) + base.timeout_s)
+        async with self.db() as db:
+            await db.execute(update(Run).where(Run.id == self.run_id).values(ended_at=None, halt_reason="", budget_json=self.budget.model_dump()))
+            await db.commit()
+        await self.set_run_status("running")
+        await self.emit("run_continued", {"content": content, "to_agent_id": to_agent_id, "followup": len(self.followups)})
+        targets = [to_agent_id] if to_agent_id in self.agents else self.entry_agents()
+        for t in targets:
+            await self.post_message(sender="user", from_id=None, to_id=t, type_="task", meta={"followup": True},
+                                    content=f"Follow-up from the user: {content}\n\nThe previous work is in the project (see Workspace files). "
+                                            "Change what's needed and report back; don't start over.")
+        self.wake.set()
+
     async def interject(self, content: str, to_agent_id: str | None) -> None:
         targets = [to_agent_id] if to_agent_id else list(self.agents)
         self.user_notes.append(content[:300])
@@ -561,6 +593,9 @@ class RunRuntime(TeamMixin):
     # ------------------------------------------------------------------ a single agent turn
     def blackboard(self) -> str:
         lines = [f"Goal: {self.goal[:1500]}"]
+        if self.followups:
+            lines.append("Follow-up requests from the user (newest last; the earlier work is done, build on it, don't start over):\n"
+                         + "\n".join(f"- {f[:600]}" for f in self.followups[-5:]))
         if self.decisions:
             lines.append("Decisions:\n" + "\n".join(f"- {d}" for d in self.decisions[-10:]))
         if self.debates:
@@ -606,6 +641,11 @@ class RunRuntime(TeamMixin):
                       for t in self.tasks.values()],
             "state": self.mock_state.setdefault(agent.id, {}),
         }
+
+    def effort_for(self, agent: AgentSpec) -> str | None:
+        """Run override wins, then the agent's setting; None = let the model use its default."""
+        e = self.budget.reasoning_effort if self.budget.reasoning_effort != "default" else str(agent.behavior.get("reasoning_effort") or "default")
+        return None if e == "default" else e
 
     async def call_llm(self, agent: AgentSpec, req: LLMRequest) -> str:
         parts: list[str] = []
@@ -659,6 +699,7 @@ class RunRuntime(TeamMixin):
         user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_set, observations=obs,
                                  blackboard=self.blackboard(), names=self.names, recent_n=self.budget.context_recent)
         req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
+                         extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {},
                          messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], json_mode=True,
                          metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs)})
         if self.budget.force_mock:
@@ -834,7 +875,8 @@ class RunRuntime(TeamMixin):
     async def condition_met(self, agent: AgentSpec, edge: EdgeSpec, a: A.SendMessage) -> bool:
         """Evaluate a natural-language edge condition with a tiny LLM judge call (mock: always satisfied)."""
         cond = edge.config.get("condition", "")
-        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=0, max_tokens=5, messages=[
+        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=0, max_tokens=5,
+                         extra={"reasoning_effort": "low" if self.effort_for(agent) != "none" else "none"}, messages=[
             {"role": "system", "content": "You are a strict gatekeeper. Answer only YES or NO."},
             {"role": "user", "content": f"Channel condition: {cond}\nBlackboard:\n{self.blackboard()[:3000]}\n\n"
                                         f"Message ({a.type}): {a.content[:2000]}\n\nIs the condition satisfied?"}],
@@ -965,6 +1007,66 @@ class RunRuntime(TeamMixin):
                                 meta={"path": rel, "version": version, "artifact_id": art.id, "planned": planned}, deliver=False)
         self.notice(agent.id, f"{verb} {rel} (v{version})." + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""))
         await self._tool_result(agent, cid, "write_file", True, f"{rel} v{version}{' (planned)' if planned else ''}")
+
+    async def act_create_folder(self, agent: AgentSpec, a: A.CreateFolder) -> None:
+        cid = await self._tool_event(agent, "create_folder", {"path": a.path})
+        fs = self.fs_for(agent.id)
+        try:
+            rel, real = fs.resolve(a.path)
+        except WorkspaceError as exc:
+            await self.deny(agent, cid, "create_folder", f"create_folder failed: {exc}")
+            return
+        if real.is_dir():
+            self.notice(agent.id, f"Folder {rel}/ already exists.")
+            await self._tool_result(agent, cid, "create_folder", True, "exists")
+            return
+        ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to create the folder {rel}/", f"mkdir {rel}",
+                                      {"path": rel + "/", "old": "", "new": "", "note": a.note or "new folder"})
+        if not ok:
+            await self.deny(agent, cid, "create_folder", reason)
+            return
+        try:
+            fs.make_dir(rel)
+        except WorkspaceError as exc:
+            await self.deny(agent, cid, "create_folder", f"create_folder failed: {exc}")
+            return
+        planned = fs.shadow is not None
+        await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
+                                content=f"{'Planned' if planned else 'Created'} folder `{rel}/`" + (f": {a.note}" if a.note else ""),
+                                meta={"path": rel + "/", "folder": True, "planned": planned}, deliver=False)
+        await self.emit("folder_created", {"path": rel, "agent_id": agent.id, "planned": planned})
+        self.notice(agent.id, f"Created folder {rel}/.")
+        await self._tool_result(agent, cid, "create_folder", True, f"{rel}/")
+
+    async def act_move_file(self, agent: AgentSpec, a: A.MoveFile) -> None:
+        cid = await self._tool_event(agent, "move_file", {"source": a.source, "destination": a.destination})
+        fs = self.fs_for(agent.id)
+        try:
+            src, _ = fs.resolve(a.source)
+            dst, _ = fs.resolve(a.destination)
+        except WorkspaceError as exc:
+            await self.deny(agent, cid, "move_file", f"move_file failed: {exc}")
+            return
+        ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to move {src} → {dst}", f"mv {src} {dst}",
+                                      {"path": f"{src} → {dst}", "old": "", "new": "", "note": a.note or "move / rename"})
+        if not ok:
+            await self.deny(agent, cid, "move_file", reason)
+            return
+        await self.set_agent_status(agent.id, "writing", f"Moving {src} → {dst}…")
+        try:
+            src, dst, moved = fs.move(src, dst)
+        except WorkspaceError as exc:
+            await self.deny(agent, cid, "move_file", f"move_file failed: {exc}")
+            return
+        # keep the run's file list in step with the project
+        for old_path in [p for p in list(self.artifacts) if p == src or p.startswith(src + "/")]:
+            self.artifacts[dst + old_path[len(src):]] = self.artifacts.pop(old_path)
+        await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
+                                content=f"Moved `{src}` → `{dst}`" + (f" ({len(moved)} files)" if len(moved) > 1 else "") + (f": {a.note}" if a.note else ""),
+                                meta={"path": dst, "moved_from": src, "moved": moved[:200]}, deliver=False)
+        await self.emit("file_moved", {"source": src, "destination": dst, "files": moved[:200], "agent_id": agent.id})
+        self.notice(agent.id, f"Moved {src} → {dst} ({len(moved)} file{'s' if len(moved) != 1 else ''}).")
+        await self._tool_result(agent, cid, "move_file", True, f"{src} → {dst}")
 
     async def act_read_file(self, agent: AgentSpec, a: A.ReadFile) -> None:
         cid = await self._tool_event(agent, "read_file", {"path": a.path})
@@ -1100,9 +1202,10 @@ class RunRuntime(TeamMixin):
         await self._tool_result(agent, cid, "remember", ok, a.key)
 
     async def act_request_user_input(self, agent: AgentSpec, a: A.RequestUserInput) -> None:
+        options = [o.model_dump() for o in a.options]
         rec = await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="question", content=a.question,
-                                      meta={"awaiting_input": True}, deliver=False)
-        self.awaiting = {"agent_id": agent.id, "question": a.question, "message_id": rec["id"]}
+                                      meta={"awaiting_input": True, "options": options, "allow_other": True}, deliver=False)
+        self.awaiting = {"agent_id": agent.id, "question": a.question, "message_id": rec["id"], "options": options, "allow_other": True}
         await self.set_agent_status(agent.id, "waiting")
 
     async def act_finish(self, agent: AgentSpec, a: A.Finish) -> None:
@@ -1197,6 +1300,27 @@ class RunManager:
         await rt.load_mcp()
         rt.paused = True
         self.runtimes[run_id] = rt
+        rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
+        return rt
+
+    async def continue_run(self, run_id: str, project: ProjectRef, content: str, to_agent_id: str | None = None) -> RunRuntime | None:
+        """Send a message to a run. Live runs get an interjection; finished runs are re-opened and continue with full context."""
+        rt = await self.ensure(run_id, project)
+        if rt is not None:
+            if rt.finalized or rt.run_status in ("completed", "failed", "cancelled"):
+                return None  # finishing right now; caller retries
+            await rt.interject(content, to_agent_id)
+            return rt
+        loaded = await self._load(run_id, project)
+        if not loaded:
+            return None
+        run, user_id = loaded
+        rt = RunRuntime(run, user_id, project)
+        await rt.restore(run)
+        rt.mailbox.clear()  # stale unread messages from the finished run are context, not new work
+        await rt.load_mcp()
+        self.runtimes[run_id] = rt
+        await rt.continue_with(content, to_agent_id)
         rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
         return rt
 

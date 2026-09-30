@@ -89,3 +89,43 @@ async def test_export_import_roundtrip(client, workspace) -> None:
     body = imp.json()
     assert len(body["agents"]) == 8 and len(body["edges"]) == 14
     assert {a["id"] for a in body["agents"]}.isdisjoint({a["id"] for a in canvas["agents"]})
+
+
+async def test_finished_run_continues_like_a_chat(client, workspace) -> None:
+    """Regression: a follow-up after a run finished used to start a brand-new run with no context.
+    Now the same run re-opens with its history, task board and files, and the team builds on them."""
+    set_provider_override(None)
+    canvas = await _from_template(client, workspace, "software_startup")
+    base = f"/api/v1/w/{workspace['id']}/runs"
+    run = (await client.post(base, json={"company_id": canvas["company"]["id"], "goal": "Build a todo app with auth",
+                                         "permission_level": "danger", "budget": {"force_mock": True, "max_turns": 80}})).json()
+    first = await wait_status(client, workspace, run["id"], timeout=120)
+    assert first["status"] == "completed"
+    root = Path(workspace["path"])
+    api_before = (root / "backend/todo_api.py").read_text()
+    msgs_before = len(await run_messages(client, workspace, run["id"]))
+
+    r = await client.post(f"{base}/{run['id']}/continue", json={"content": "Add a 'clear completed' button to the todo list"})
+    assert r.status_code == 202, r.text
+    again = await wait_status(client, workspace, run["id"], timeout=120)
+    assert again["id"] == run["id"] and again["status"] == "completed", again.get("halt_reason")
+
+    # same run, full history kept and extended; earlier files untouched; the change was recorded
+    msgs = await run_messages(client, workspace, run["id"])
+    assert len(msgs) > msgs_before
+    assert any(m["sender"] == "user" and "clear completed" in m["content"] for m in msgs)
+    assert (root / "backend/todo_api.py").read_text() == api_before
+    for f in ("docs/PRD.md", "frontend/index.html", "README.md"):
+        assert (root / f).is_file(), f"{f} disappeared"
+    assert "clear completed" in (root / "docs/CHANGES.md").read_text()
+    assert again["turns"] > first["turns"] and again["tokens_used"] > first["tokens_used"]
+    assert "Follow-up done" in (again.get("summary") or "")
+    evs = await events(client, workspace, run["id"], "run_continued")
+    assert len(evs) == 1
+
+    # and it can continue again (runs are conversations)
+    r = await client.post(f"{base}/{run['id']}/interject", json={"content": "Also add a footer with the item count"})
+    assert r.status_code == 202
+    third = await wait_status(client, workspace, run["id"], timeout=120)
+    assert third["status"] == "completed"
+    assert "footer" in (root / "docs/CHANGES.md").read_text()
