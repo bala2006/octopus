@@ -8,6 +8,9 @@ interface AppState {
   /** last selected company per workspace */
   companyByWorkspace: Record<string, string>;
   chatFilter: "all" | "user" | "internal";
+  /** getting-started checklist dismissed */
+  onboarded: boolean;
+  setOnboarded: (v: boolean) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
   setCompany: (workspaceId: string, companyId: string) => void;
@@ -25,6 +28,8 @@ export const useApp = create<AppState>()(
       theme: "dark",
       companyByWorkspace: {},
       chatFilter: "all",
+      onboarded: false,
+      setOnboarded: (v) => set({ onboarded: v }),
       setTheme: (t) => { applyTheme(t); set({ theme: t }); },
       toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
       setCompany: (w, c) => set({ companyByWorkspace: { ...get().companyByWorkspace, [w]: c } }),

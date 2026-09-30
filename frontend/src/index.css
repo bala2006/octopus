@@ -13,6 +13,12 @@
     --foreground: 224 30% 12%;
     --surface: 220 20% 98%;
     --elevated: 0 0% 100%;
+    --card: 0 0% 100%;
+    --surface-2: 220 14% 94%;
+    --steel: 206 21% 50%;
+    --olive: 83 35% 38%;
+    --terracotta: 15 63% 59%;
+    --teal-panel: 177 18% 75%;
     --popover: 0 0% 100%;
     --popover-foreground: 224 30% 12%;
     --primary: 252 83% 60%;
@@ -38,6 +44,12 @@
     --foreground: 220 20% 92%;
     --surface: 228 22% 9.5%;
     --elevated: 228 20% 12%;
+    --card: 228 16% 18%;
+    --surface-2: 228 16% 12%;
+    --steel: 202 33% 56%;
+    --olive: 80 36% 62%;
+    --terracotta: 15 48% 55%;
+    --teal-panel: 180 12% 70%;
     --popover: 228 20% 12%;
     --popover-foreground: 220 20% 92%;
     --primary: 252 90% 70%;

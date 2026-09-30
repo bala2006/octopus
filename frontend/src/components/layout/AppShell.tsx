@@ -4,8 +4,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Building2, ChevronsUpDown, FileCode2, FolderOpen, History, Home, MessagesSquare, Moon, Network, Pencil, Plus, Settings, Sun, Trash2, Check, Radio,
+  BookOpen, Sparkles, CircleCheck,
 } from "lucide-react";
-import { useCompanies, useCompanyId, useRuns, useWorkspace, useWorkspaces, useWorkspaceId, qk } from "@/hooks/queries";
+import { useCompanies, useCompanyId, useRuns, useSettings, useWorkspace, useWorkspaces, useWorkspaceId, qk } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/stores/app";
@@ -20,13 +21,18 @@ import { ErrorBoundary, PermissionBadge } from "@/components/common";
 import { DirectoryPicker } from "@/features/workspaces/DirectoryPicker";
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
 
+/** The four places you work in, in the order you usually need them. Settings and the Guide live on the right. */
 const NAV = [
-  { to: "canvas", label: "Canvas", icon: Network, key: "1" },
-  { to: "chat", label: "Chat", icon: MessagesSquare, key: "2" },
-  { to: "runs", label: "Runs", icon: History, key: "3" },
-  { to: "artifacts", label: "Artifacts", icon: FileCode2, key: "4" },
-  { to: "settings", label: "Settings", icon: Settings, key: "5" },
+  { to: "canvas", label: "Canvas", hint: "Design your team of agents", icon: Network, shortcut: "1" },
+  { to: "chat", label: "Chat", hint: "Talk to one agent directly", icon: MessagesSquare, shortcut: "2" },
+  { to: "runs", label: "Runs", hint: "Watch the team work on a goal", icon: History, shortcut: "3" },
+  { to: "artifacts", label: "Artifacts", hint: "Files and code the team produced", icon: FileCode2, shortcut: "4" },
 ];
+const SIDE_NAV = [
+  { to: "guide", label: "Guide", hint: "How everything works", icon: BookOpen, shortcut: "6" },
+  { to: "settings", label: "Settings", hint: "Models, MCP, templates, project", icon: Settings, shortcut: "5" },
+];
+const ALL_NAV = [...NAV, ...SIDE_NAV];
 
 export function AppShell() {
   const w = useWorkspaceId();
@@ -38,7 +44,7 @@ export function AppShell() {
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey) return;
-      const item = NAV.find((n) => n.key === e.key);
+      const item = ALL_NAV.find((n) => n.shortcut === e.key);
       if (item) { e.preventDefault(); nav(`/w/${w}/${item.to}`); }
     };
     window.addEventListener("keydown", onKey);
@@ -65,20 +71,15 @@ export function AppShell() {
         <ProjectSwitcher />
         <span className="text-muted-foreground/50">/</span>
         <CompanySwitcher />
-        <nav className="ml-3 flex items-center gap-0.5" aria-label="Main">
-          {NAV.map(({ to, label, icon: Icon, key }) => (
-            <Tip key={to} content={<span>{label} <kbd className="kbd ml-1">Alt+{key}</kbd></span>} side="bottom">
-              <NavLink to={to} className={({ isActive }) => cn(
-                "relative flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                (isActive || loc.pathname.includes(`/${to}`)) && "bg-accent text-foreground")}>
-                <Icon className="h-4 w-4" /><span className="hidden md:inline">{label}</span>
-              </NavLink>
-            </Tip>
-          ))}
+        <nav className="ml-3 flex items-center gap-0.5 rounded-full bg-surface-2 p-0.5" aria-label="Main">
+          {NAV.map((item) => <NavItem key={item.to} {...item} active={loc.pathname.includes(`/${item.to}`)} />)}
         </nav>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1.5">
           <LiveRunsIndicator />
+          <ModelStatus />
           {ws.data && <PermissionBadge level={ws.data.default_permission as PermissionLevel} />}
+          <span className="mx-1 h-5 w-px bg-border" />
+          {SIDE_NAV.map((item) => <NavItem key={item.to} {...item} active={loc.pathname.includes(`/${item.to}`)} compact />)}
           <Tip content={theme === "dark" ? "Light theme" : "Dark theme"} side="bottom">
             <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
               {theme === "dark" ? <Sun /> : <Moon />}
@@ -90,6 +91,35 @@ export function AppShell() {
         <ErrorBoundary label="This view crashed"><Outlet /></ErrorBoundary>
       </main>
     </div>
+  );
+}
+
+function NavItem({ to, label, hint, icon: Icon, shortcut, active, compact }: { to: string; label: string; hint: string; icon: typeof Network; shortcut: string; active: boolean; compact?: boolean }) {
+  return (
+    <Tip content={<span>{hint} <kbd className="kbd ml-1">Alt+{shortcut}</kbd></span>} side="bottom">
+      <NavLink to={to} aria-label={label} className={cn(
+        "relative flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground",
+        compact && "px-2.5",
+        active ? "bg-card text-foreground shadow-sm" : "hover:bg-accent")}>
+        <Icon className="h-4 w-4" /><span className={cn("hidden", compact ? "xl:inline" : "md:inline")}>{label}</span>
+      </NavLink>
+    </Tip>
+  );
+}
+
+/** One glance: are agents using a real model, or the offline demo? Click → Settings → Providers. */
+function ModelStatus() {
+  const { data } = useSettings();
+  if (!data) return null;
+  const ready = data.providers.filter((p) => p.provider !== "mock" && p.configured);
+  return (
+    <Tip content={ready.length ? `Connected: ${ready.map((p) => p.label).join(", ")}` : "No model connected. Agents use the offline demo. Click to connect Azure OpenAI or another provider."} side="bottom">
+      <Link to="settings#providers" className={cn("hidden items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium transition hover:bg-accent sm:flex",
+        ready.length ? "border-success/40 text-success" : "border-primary/40 bg-primary/10 text-primary")}>
+        {ready.length ? <CircleCheck className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+        {ready.length ? ready[0].label : <>Demo mode<span className="hidden 2xl:inline">&nbsp;· connect a model</span></>}
+      </Link>
+    </Tip>
   );
 }
 

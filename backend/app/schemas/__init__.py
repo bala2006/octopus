@@ -439,7 +439,8 @@ ProviderName = Literal["azure", "azure_ai", "openai", "anthropic", "gemini", "ol
 
 
 class ProviderOptions(BaseModel):
-    api_version: str = ""  # Azure OpenAI
+    api_version: str = ""  # Azure OpenAI (legacy API only)
+    api_style: Literal["auto", "responses", "chat", "legacy"] = "auto"  # Azure OpenAI: v1 Responses / v1 Chat / legacy api-version
     auth: Literal["key", "entra"] = "key"  # Azure: API key or Microsoft Entra ID (az login / managed identity)
     deployments: list[str] = Field(default_factory=list)  # Azure deployment / Foundry model names shown in pickers
     reasoning_models: list[str] = Field(default_factory=list)  # deployments that need max_completion_tokens (o-series, gpt-5)
