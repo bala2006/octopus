@@ -1,10 +1,10 @@
 import * as React from "react";
 import { Handle, NodeToolbar, Position, type NodeProps } from "@xyflow/react";
-import { Flag, MessageSquare, Plug, Settings2, ShieldAlert } from "lucide-react";
+import { Crown, Flag, MessageSquare, Moon, Plug, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
 import { MESSAGE_TYPE_LABEL, PERMISSIONS, TOOLS, statusMeta } from "@/lib/meta";
 import { cn, formatTokens } from "@/lib/utils";
-import { useCanvas, type AgentNode as AgentNodeT } from "@/stores/canvas";
+import { deptColor, useCanvas, type AgentNode as AgentNodeT } from "@/stores/canvas";
 import type { PermissionLevel } from "@/types";
 import { Tip } from "@/components/ui/overlays";
 import { useEditable, useLive } from "./live";
@@ -26,8 +26,13 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
   const tools = TOOLS.filter((t) => (data.tools as Record<string, unknown>)?.[t.key]);
   const mcpCount = ((data.tools as { mcp_servers?: string[] })?.mcp_servers ?? []).length;
   const perm = data.permission_level && data.permission_level !== "inherit" ? PERMISSIONS[data.permission_level as PermissionLevel] : null;
-  const glowing = !!status && meta.live;
+  const departments = useCanvas((s) => s.departments);
+  const creatorName = useCanvas((s) => (data.created_by ? s.nodes.find((n) => n.id === data.created_by)?.data.name : undefined));
+  const inactive = data.active === false;
+  const glowing = !!status && meta.live && !inactive;
   const showQuick = editable && quickId === id;
+  const dcolor = data.department ? (live?.departments?.[data.department]?.color ?? deptColor(data.department, departments)) : null;
+  const hiredBy = data.created_by ? (live?.names?.[data.created_by] ?? creatorName ?? "an agent") : null;
 
   return (
     <>
@@ -37,6 +42,8 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
           "hover:shadow-xl",
           selected ? "border-primary/70" : "border-border",
           glowing && "scale-[1.02]",
+          inactive && "border-dashed opacity-55 grayscale-[70%]",
+          live?.fresh?.[id] && "animate-in zoom-in-75 fade-in-0 duration-500",
         )}
         style={glowing ? { boxShadow: `0 0 0 1px ${meta.color}66, 0 10px 36px -8px ${meta.color}88` } : undefined}
         onDoubleClick={() => editable && setInspector(id)}
@@ -44,11 +51,24 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
         aria-label={`${data.name}, ${data.role}${status ? `, ${meta.label}` : ""}`}
       >
         <div className="h-1 rounded-t-xl" style={{ background: `linear-gradient(90deg, ${data.color}, ${data.color}55)` }} />
+        {(dcolor || hiredBy || inactive) && (
+          <div className="flex items-center gap-1 px-3 pt-2">
+            {dcolor && (
+              <span className="inline-flex max-w-[150px] items-center gap-1 truncate rounded-full px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide"
+                style={{ background: `${dcolor}22`, color: dcolor }}>
+                {data.is_manager && <Crown className="h-2.5 w-2.5 shrink-0" />}<span className="truncate">{data.department}</span>
+              </span>
+            )}
+            {hiredBy && <Tip content={`Hired by ${hiredBy} during a run`}><span className="inline-flex items-center gap-0.5 rounded-full bg-fuchsia-500/15 px-1.5 py-px text-[9.5px] font-semibold text-fuchsia-400"><Sparkles className="h-2.5 w-2.5" />AI hire</span></Tip>}
+            {inactive && <span className="ml-auto inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-px text-[9.5px] font-semibold uppercase text-muted-foreground"><Moon className="h-2.5 w-2.5" />Inactive</span>}
+          </div>
+        )}
         <div className="flex items-start gap-2.5 p-3 pb-2">
           <AgentAvatar name={data.name} color={data.color} avatar={data.avatar} status={status} size={36} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="truncate text-sm font-semibold">{data.name}</span>
+              {data.is_manager && !dcolor && <Tip content="Manager"><Crown className="h-3 w-3 shrink-0 text-amber-400" /></Tip>}
               {data.is_entry && (
                 <Tip content="Entry agent: receives the company goal"><span className="inline-flex items-center gap-0.5 rounded bg-primary/15 px-1 py-px text-[9.5px] font-semibold uppercase tracking-wide text-primary"><Flag className="h-2.5 w-2.5" />Entry</span></Tip>
               )}

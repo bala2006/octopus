@@ -56,6 +56,7 @@ class AgentTools(BaseModel):
     calculator: bool = True
     ask_user: bool = False
     send_message: bool = True
+    manage_team: bool = False  # create_agent / update_agent for reports (hiring & org design)
     mcp_servers: list[str] = Field(default_factory=list)  # ids of the user's registered MCP servers
 
     @model_validator(mode="before")
@@ -96,6 +97,11 @@ class AgentBase(BaseModel):
     tools: AgentTools = Field(default_factory=AgentTools)
     behavior: AgentBehavior = Field(default_factory=AgentBehavior)
     permission_level: AgentPermission = "inherit"
+    department: str = Field("", max_length=80)
+    is_manager: bool = False
+    reports_to: str | None = None
+    active: bool = True
+    created_by: str | None = None
     is_entry: bool = False
     position_x: float = 0
     position_y: float = 0
@@ -119,6 +125,10 @@ class AgentPatch(BaseModel):
     tools: AgentTools | None = None
     behavior: AgentBehavior | None = None
     permission_level: AgentPermission | None = None
+    department: str | None = None
+    is_manager: bool | None = None
+    reports_to: str | None = None
+    active: bool | None = None
     is_entry: bool | None = None
     position_x: float | None = None
     position_y: float | None = None
@@ -183,10 +193,17 @@ class CompanyOut(ORM):
     agent_count: int = 0
 
 
+class DepartmentMeta(BaseModel):
+    color: str = Field("#6366f1", pattern=r"^#[0-9a-fA-F]{6}$")
+    description: str = ""
+
+
 class CanvasState(BaseModel):
     agents: list[AgentIn]
     edges: list[EdgeIn]
     viewport: dict[str, float] | None = None
+    departments: dict[str, DepartmentMeta] | None = None
+    revision: int | None = None  # optimistic concurrency: must match the server's current revision
 
 
 class CanvasOut(BaseModel):
@@ -194,6 +211,8 @@ class CanvasOut(BaseModel):
     agents: list[AgentOut]
     edges: list[EdgeOut]
     viewport: dict[str, float] | None = None
+    departments: dict[str, DepartmentMeta] = Field(default_factory=dict)
+    revision: int = 0
 
 
 class CanvasExport(BaseModel):
@@ -202,6 +221,14 @@ class CanvasExport(BaseModel):
     description: str = ""
     agents: list[AgentIn]
     edges: list[EdgeIn]
+    departments: dict[str, DepartmentMeta] = Field(default_factory=dict)
+
+
+class DepartmentSummary(BaseModel):
+    name: str
+    color: str
+    manager: str | None
+    members: list[str]
 
 
 class TemplateOut(BaseModel):
@@ -210,6 +237,30 @@ class TemplateOut(BaseModel):
     description: str
     agent_count: int
     edge_count: int
+    source: Literal["builtin", "user"] = "builtin"
+    departments: list[DepartmentSummary] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+
+class UserTemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    company_id: str | None = None  # snapshot an existing company …
+    spec: CanvasExport | None = None  # … or provide the spec directly (import)
+
+
+class GenerateCompanyIn(BaseModel):
+    prompt: str = Field(min_length=3, max_length=4000)
+    max_agents: int = Field(14, ge=2, le=40)
+    provider: str | None = None
+    model: str | None = None
+
+
+class GenerateCompanyOut(BaseModel):
+    spec: CanvasExport
+    departments: list[DepartmentSummary]
+    source: Literal["ai", "demo"]
+    warning: str = ""
 
 
 class RoleTemplateOut(BaseModel):
@@ -281,6 +332,8 @@ class RunBudget(BaseModel):
     max_loop_strikes: int = Field(3, ge=1, le=20)
     context_recent: int = Field(10, ge=2, le=100)
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
+    max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
+    persist_team: bool = True  # save agents hired / edited during the run back to the company
 
 
 class RunCreate(BaseModel):

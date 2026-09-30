@@ -1,7 +1,7 @@
 import {
   Bot, Brain, Bug, ClipboardList, Code, Container, Crown, DraftingCompass, Eye, Gavel, GitPullRequest, Layout, Lightbulb,
   Palette, PenLine, Server, ShieldAlert, Sparkles, Terminal, Wrench, MessageSquareText, Hourglass, ShieldQuestion, CircleCheck,
-  CircleAlert, Moon, FileSearch, FolderTree, FilePen, Calculator, Globe, UserRoundSearch, Send, Plug, Lock, ListChecks, Hand, Flame,
+  CircleAlert, Moon, FileSearch, FolderTree, FilePen, Calculator, Globe, UserRoundSearch, Send, Plug, Lock, ListChecks, Hand, Flame, UsersRound, Search, Crown as CrownIcon,
   type LucideIcon,
 } from "lucide-react";
 import type { AgentStatus, EdgeType, PermissionLevel } from "@/types";
@@ -10,6 +10,7 @@ export const AVATARS: Record<string, LucideIcon> = {
   crown: Crown, "clipboard-list": ClipboardList, "drafting-compass": DraftingCompass, layout: Layout, server: Server, bug: Bug,
   palette: Palette, container: Container, "git-pull-request": GitPullRequest, gavel: Gavel, lightbulb: Lightbulb,
   "shield-alert": ShieldAlert, code: Code, bot: Bot, brain: Brain, sparkles: Sparkles, wrench: Wrench,
+  "pen-line": PenLine, search: Search, calculator: Calculator, users: UsersRound,
 };
 export const AVATAR_KEYS = Object.keys(AVATARS);
 export const AGENT_COLORS = ["#8b5cf6", "#6366f1", "#06b6d4", "#10b981", "#22c55e", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#0ea5e9", "#64748b"];
@@ -47,7 +48,7 @@ export const PERMISSIONS: Record<PermissionLevel, PermMeta> = {
   danger: { label: "Danger mode", short: "Danger", description: "Everything auto-approved, network allowed for commands. Still sandboxed to the project directory.", icon: Flame, tone: "text-red-400" },
 };
 
-export interface ToolMeta { key: "file_read" | "file_write" | "list_files" | "terminal" | "web_search" | "calculator" | "ask_user" | "send_message"; label: string; icon: LucideIcon; hint: string; danger?: boolean }
+export interface ToolMeta { key: "file_read" | "file_write" | "list_files" | "terminal" | "web_search" | "calculator" | "ask_user" | "send_message" | "manage_team"; label: string; icon: LucideIcon; hint: string; danger?: boolean }
 export const TOOLS: ToolMeta[] = [
   { key: "file_read", label: "Read files", icon: FileSearch, hint: "read_file inside the project" },
   { key: "list_files", label: "List files", icon: FolderTree, hint: "Browse the project tree" },
@@ -57,7 +58,10 @@ export const TOOLS: ToolMeta[] = [
   { key: "calculator", label: "Calculator", icon: Calculator, hint: "Exact arithmetic" },
   { key: "ask_user", label: "Ask user", icon: UserRoundSearch, hint: "Pause the run to ask you a question" },
   { key: "send_message", label: "Messaging", icon: Send, hint: "Talk to connected teammates" },
+  { key: "manage_team", label: "Manage team", icon: UsersRound, hint: "Hire agents at runtime and reconfigure / deactivate the agents it manages", danger: true },
 ];
+export const MANAGER_ICON = CrownIcon;
+export const SEARCH_ICON = Search;
 
 export const RUN_STATUS: Record<string, { label: string; variant: "default" | "secondary" | "success" | "warning" | "destructive" | "outline" }> = {
   queued: { label: "Queued", variant: "secondary" },
@@ -72,5 +76,5 @@ export const RUN_STATUS: Record<string, { label: string; variant: "default" | "s
 export const MESSAGE_TYPE_LABEL: Record<string, string> = {
   task: "Task", question: "Question", answer: "Answer", proposal: "Proposal", critique: "Critique", agreement: "Agreement",
   objection: "Objection", decision: "Decision", review_request: "Review request", review_result: "Review", status_update: "Status",
-  artifact_created: "File", user_interjection: "You", final_report: "Final report", chat: "Chat",
+  artifact_created: "File", user_interjection: "You", final_report: "Final report", chat: "Chat", org: "Org change",
 };

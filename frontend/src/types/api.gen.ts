@@ -82,7 +82,11 @@ export interface paths {
         /** List Templates */
         get: operations["list_templates_api_v1_templates_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Template
+         * @description Import a template spec (JSON). To save an existing company use POST /w/{ws}/companies/{id}/save-template.
+         */
+        post: operations["create_template_api_v1_templates_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -104,6 +108,44 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{key}/spec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Template Spec
+         * @description Full template (agents, channels, departments) for previews and export.
+         */
+        get: operations["template_spec_api_v1_templates__key__spec_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Template */
+        delete: operations["delete_template_api_v1_templates__key__delete"];
+        options?: never;
+        head?: never;
+        /** Update Template */
+        patch: operations["update_template_api_v1_templates__key__patch"];
         trace?: never;
     };
     "/api/v1/settings": {
@@ -399,8 +441,52 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create From Template */
+        /**
+         * Create From Template
+         * @description Instantiate a built-in (``software_startup``) or user template (``user:<id>``).
+         */
         post: operations["create_from_template_api_v1_w__workspace_id__companies_from_template_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/w/{workspace_id}/companies/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Company
+         * @description Design a company (departments, managers, specialists, prompts, tools, channels) from a prompt. Not saved:
+         *     review the preview, then POST it to /companies/import (or save it as a template).
+         */
+        post: operations["generate_company_api_v1_w__workspace_id__companies_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/w/{workspace_id}/companies/{company_id}/save-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save As Template
+         * @description Save a company's current org (departments, agents, prompts, tools, channels) as a reusable template.
+         */
+        post: operations["save_as_template_api_v1_w__workspace_id__companies__company_id__save_template_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -474,7 +560,7 @@ export interface paths {
         put?: never;
         /**
          * Import Company
-         * @description Import an exported company. Ids are re-generated so the same file can be imported many times.
+         * @description Import an exported / generated company. Ids are re-generated so the same file can be imported many times.
          */
         post: operations["import_company_api_v1_w__workspace_id__companies_import_post"];
         delete?: never;
@@ -1046,6 +1132,25 @@ export interface components {
              */
             permission_level: "inherit" | "read_only" | "plan" | "ask" | "danger";
             /**
+             * Department
+             * @default
+             */
+            department: string;
+            /**
+             * Is Manager
+             * @default false
+             */
+            is_manager: boolean;
+            /** Reports To */
+            reports_to?: string | null;
+            /**
+             * Active
+             * @default true
+             */
+            active: boolean;
+            /** Created By */
+            created_by?: string | null;
+            /**
              * Is Entry
              * @default false
              */
@@ -1121,6 +1226,25 @@ export interface components {
              */
             permission_level: "inherit" | "read_only" | "plan" | "ask" | "danger";
             /**
+             * Department
+             * @default
+             */
+            department: string;
+            /**
+             * Is Manager
+             * @default false
+             */
+            is_manager: boolean;
+            /** Reports To */
+            reports_to?: string | null;
+            /**
+             * Active
+             * @default true
+             */
+            active: boolean;
+            /** Created By */
+            created_by?: string | null;
+            /**
              * Is Entry
              * @default false
              */
@@ -1166,6 +1290,14 @@ export interface components {
             behavior?: components["schemas"]["AgentBehavior"] | null;
             /** Permission Level */
             permission_level?: ("inherit" | "read_only" | "plan" | "ask" | "danger") | null;
+            /** Department */
+            department?: string | null;
+            /** Is Manager */
+            is_manager?: boolean | null;
+            /** Reports To */
+            reports_to?: string | null;
+            /** Active */
+            active?: boolean | null;
             /** Is Entry */
             is_entry?: boolean | null;
             /** Position X */
@@ -1215,6 +1347,11 @@ export interface components {
              * @default true
              */
             send_message: boolean;
+            /**
+             * Manage Team
+             * @default false
+             */
+            manage_team: boolean;
             /** Mcp Servers */
             mcp_servers?: string[];
         };
@@ -1342,6 +1479,10 @@ export interface components {
             agents: components["schemas"]["AgentIn"][];
             /** Edges */
             edges: components["schemas"]["EdgeIn"][];
+            /** Departments */
+            departments?: {
+                [key: string]: components["schemas"]["DepartmentMeta"];
+            };
         };
         /** CanvasExport */
         "CanvasExport-Output": {
@@ -1361,6 +1502,10 @@ export interface components {
             agents: components["schemas"]["AgentIn"][];
             /** Edges */
             edges: components["schemas"]["EdgeIn"][];
+            /** Departments */
+            departments?: {
+                [key: string]: components["schemas"]["DepartmentMeta"];
+            };
         };
         /** CanvasOut */
         CanvasOut: {
@@ -1373,6 +1518,15 @@ export interface components {
             viewport?: {
                 [key: string]: number;
             } | null;
+            /** Departments */
+            departments?: {
+                [key: string]: components["schemas"]["DepartmentMeta"];
+            };
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
         };
         /** CanvasState */
         CanvasState: {
@@ -1384,6 +1538,12 @@ export interface components {
             viewport?: {
                 [key: string]: number;
             } | null;
+            /** Departments */
+            departments?: {
+                [key: string]: components["schemas"]["DepartmentMeta"];
+            } | null;
+            /** Revision */
+            revision?: number | null;
         };
         /** CompanyIn */
         CompanyIn: {
@@ -1432,6 +1592,30 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** DepartmentMeta */
+        DepartmentMeta: {
+            /**
+             * Color
+             * @default #6366f1
+             */
+            color: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /** DepartmentSummary */
+        DepartmentSummary: {
+            /** Name */
+            name: string;
+            /** Color */
+            color: string;
+            /** Manager */
+            manager: string | null;
+            /** Members */
+            members: string[];
         };
         /** DirEntryOut */
         DirEntryOut: {
@@ -1551,6 +1735,36 @@ export interface components {
              * @default false
              */
             planned: boolean;
+        };
+        /** GenerateCompanyIn */
+        GenerateCompanyIn: {
+            /** Prompt */
+            prompt: string;
+            /**
+             * Max Agents
+             * @default 14
+             */
+            max_agents: number;
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+        };
+        /** GenerateCompanyOut */
+        GenerateCompanyOut: {
+            spec: components["schemas"]["CanvasExport-Output"];
+            /** Departments */
+            departments: components["schemas"]["DepartmentSummary"][];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "demo";
+            /**
+             * Warning
+             * @default
+             */
+            warning: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1861,6 +2075,16 @@ export interface components {
              * @default false
              */
             force_mock: boolean;
+            /**
+             * Max Agents
+             * @default 24
+             */
+            max_agents: number;
+            /**
+             * Persist Team
+             * @default true
+             */
+            persist_team: boolean;
         };
         /** RunCreate */
         RunCreate: {
@@ -2088,6 +2312,16 @@ export interface components {
             agent_count: number;
             /** Edge Count */
             edge_count: number;
+            /**
+             * Source
+             * @default builtin
+             * @enum {string}
+             */
+            source: "builtin" | "user";
+            /** Departments */
+            departments?: components["schemas"]["DepartmentSummary"][];
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** TestProviderIn */
         TestProviderIn: {
@@ -2129,6 +2363,19 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** UserTemplateIn */
+        UserTemplateIn: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Company Id */
+            company_id?: string | null;
+            spec?: components["schemas"]["CanvasExport-Input"] | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -2325,6 +2572,39 @@ export interface operations {
             };
         };
     };
+    create_template_api_v1_templates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserTemplateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_roles_api_v1_templates_roles_get: {
         parameters: {
             query?: never;
@@ -2341,6 +2621,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleTemplateOut"][];
+                };
+            };
+        };
+    };
+    template_spec_api_v1_templates__key__spec_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CanvasExport-Output"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_template_api_v1_templates__key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_template_api_v1_templates__key__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserTemplateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3037,6 +3412,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CanvasOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_company_api_v1_w__workspace_id__companies_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateCompanyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateCompanyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_as_template_api_v1_w__workspace_id__companies__company_id__save_template_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserTemplateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateOut"];
                 };
             };
             /** @description Validation Error */

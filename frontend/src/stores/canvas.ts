@@ -19,6 +19,13 @@ const DEFAULT_CONFIG: EdgeConfig = { max_turns: 20, handoff_instructions: "", co
 const HISTORY_LIMIT = 100;
 
 interface Snapshot { nodes: AgentNode[]; edges: ChannelEdge[] }
+export interface DeptMeta { color: string; description?: string }
+export interface DeptMemberSpec { role: RoleTemplateOut; name?: string; roleTitle?: string }
+export interface DeptSpec { name: string; color: string; manager: DeptMemberSpec; members: DeptMemberSpec[]; reportsTo: string | null; at: { x: number; y: number } }
+
+export const DEPT_PALETTE = ["#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ec4899", "#0ea5e9", "#ef4444", "#84cc16", "#f97316", "#6366f1"];
+export const deptColor = (name: string, meta?: Record<string, DeptMeta>) =>
+  meta?.[name]?.color ?? DEPT_PALETTE[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % DEPT_PALETTE.length];
 
 interface CanvasState {
   companyId: string | null;
@@ -32,7 +39,14 @@ interface CanvasState {
   inspectorId: string | null;
   edgeEditId: string | null;
   snapToGrid: boolean;
+  departments: Record<string, DeptMeta>;
+  revision: number;
+  savedVersion: number;
   load: (c: CanvasOut) => void;
+  markSaved: (version: number, revision: number) => void;
+  addDepartment: (spec: DeptSpec, defaults?: Partial<AgentData>) => string[];
+  setDepartmentMeta: (name: string, meta: DeptMeta) => void;
+  renameDepartment: (from: string, to: string) => void;
   reset: () => void;
   onNodesChange: (changes: NodeChange<AgentNode>[]) => void;
   onEdgesChange: (changes: EdgeChange<ChannelEdge>[]) => void;
@@ -107,12 +121,68 @@ export const useCanvas = create<CanvasState>()((set, get) => {
   };
   return {
     companyId: null, nodes: [], edges: [], past: [], future: [], clipboard: null, version: 0,
-    quickConfigId: null, inspectorId: null, edgeEditId: null, snapToGrid: true,
+    quickConfigId: null, inspectorId: null, edgeEditId: null, snapToGrid: true, departments: {}, revision: 0, savedVersion: 0,
 
     load: (c) => set({
-      companyId: c.company.id, nodes: c.agents.map(toNode), edges: c.edges.map(toEdge), past: [], future: [], version: 0,
-      quickConfigId: null, inspectorId: null, edgeEditId: null,
+      companyId: c.company.id, nodes: c.agents.map(toNode), edges: c.edges.map(toEdge), past: [], future: [], version: 0, savedVersion: 0,
+      quickConfigId: null, inspectorId: null, edgeEditId: null, departments: { ...(c.departments ?? {}) }, revision: c.revision ?? 0,
     }),
+    markSaved: (version, revision) => set({ savedVersion: version, revision }),
+    addDepartment: (spec, defaults) => {
+      const ids: string[] = [];
+      const mk = (m: DeptMemberSpec, isManager: boolean, pos: { x: number; y: number }, reportsTo: string | null): AgentNode => {
+        const id = uid();
+        ids.push(id);
+        const r = m.role;
+        return {
+          id, type: "agent", position: pos, selected: true,
+          data: {
+            id, name: m.name?.trim() || r.default_name, role: m.roleTitle?.trim() || r.role, description: r.description, avatar: r.avatar, color: r.color,
+            system_prompt: r.system_prompt, provider: "mock", model: "mock/demo", temperature: 0.4, max_tokens: 2048,
+            tools: { ...r.tools, manage_team: isManager || !!r.tools.manage_team },
+            behavior: { assertiveness: 0.5, creativity: 0.5, strictness: 0.5, debate_style: "balanced", max_autonomous_turns: isManager ? 20 : 14, template_key: r.key },
+            permission_level: "inherit", department: spec.name, is_manager: isManager, reports_to: reportsTo, active: true, created_by: null, is_entry: false,
+            ...defaults,
+          },
+        };
+      };
+      const taken = new Set(get().nodes.map((n) => n.data.name.toLowerCase()));
+      const uniq = (n: AgentNode) => {
+        let name = n.data.name, i = 2;
+        while (taken.has(name.toLowerCase())) name = `${n.data.name} ${i++}`;
+        taken.add(name.toLowerCase());
+        n.data.name = name;
+        return n;
+      };
+      const mgr = uniq(mk(spec.manager, true, spec.at, spec.reportsTo));
+      const members = spec.members.map((m, i) => uniq(mk(m, false, { x: spec.at.x + (i - (spec.members.length - 1) / 2) * 280, y: spec.at.y + 220 }, mgr.id)));
+      const cfg = DEFAULT_CONFIG;
+      const e = (s0: string, t: string, type: EdgeType, label: string, bidirectional = false) =>
+        toEdge({ id: uid(), source_agent_id: s0, target_agent_id: t, type, bidirectional, label, config: cfg });
+      const edges: ChannelEdge[] = [];
+      for (const m of members) {
+        edges.push(e(mgr.id, m.id, "delegate", `${spec.name} tasks`), e(m.id, mgr.id, "report", "Status"));
+      }
+      if (members.length > 1) edges.push(e(members[0].id, members[1].id, "consult", "Pairing", true));
+      if (spec.reportsTo && get().nodes.some((n) => n.id === spec.reportsTo)) {
+        edges.push(e(spec.reportsTo, mgr.id, "delegate", `${spec.name} direction`), e(mgr.id, spec.reportsTo, "report", `${spec.name} report`));
+      }
+      // peer managers of other departments get a sync channel
+      for (const other of get().nodes.filter((n) => n.data.is_manager && n.data.department && n.data.department !== spec.name && n.id !== spec.reportsTo && !n.data.is_entry)) {
+        edges.push(e(mgr.id, other.id, "consult", "Department sync", true));
+      }
+      commit({ nodes: [...get().nodes.map((n) => ({ ...n, selected: false })), mgr, ...members], edges: [...get().edges, ...edges] });
+      set({ departments: { ...get().departments, [spec.name]: { color: spec.color, description: "" } } });
+      return ids;
+    },
+    setDepartmentMeta: (name, meta) => { set({ departments: { ...get().departments, [name]: meta } }); commit({}, false); },
+    renameDepartment: (from, to) => {
+      const name = to.trim();
+      if (!name || name === from) return;
+      const { [from]: meta, ...rest } = get().departments;
+      set({ departments: { ...rest, [name]: meta ?? { color: deptColor(name) } } });
+      commit({ nodes: get().nodes.map((n) => (n.data.department === from ? { ...n, data: { ...n.data, department: name } } : n)) });
+    },
     reset: () => set({ companyId: null, nodes: [], edges: [], past: [], future: [], version: 0 }),
 
     onNodesChange: (changes) => {
@@ -155,9 +225,9 @@ export const useCanvas = create<CanvasState>()((set, get) => {
         data: {
           id, name, role: tpl.role, description: tpl.description ?? "", avatar: tpl.avatar ?? "bot", color: tpl.color ?? "#6366f1",
           system_prompt: tpl.system_prompt ?? "", provider: "mock", model: "mock/demo", temperature: 0.4, max_tokens: 2048,
-          tools: tpl.tools ?? { file_read: true, file_write: true, list_files: true, terminal: false, web_search: false, calculator: true, ask_user: false, send_message: true, mcp_servers: [] },
+          tools: tpl.tools ?? { file_read: true, file_write: true, list_files: true, terminal: false, web_search: false, calculator: true, ask_user: false, send_message: true, manage_team: false, mcp_servers: [] },
           behavior: { assertiveness: 0.5, creativity: 0.5, strictness: 0.5, debate_style: "balanced", max_autonomous_turns: 12, template_key: tpl.key ?? "" },
-          permission_level: "inherit", is_entry: n.length === 0,
+          permission_level: "inherit", is_entry: n.length === 0, department: "", is_manager: !!tpl.tools?.manage_team, reports_to: null, active: true, created_by: null,
           ...defaults,
         },
       };

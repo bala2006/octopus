@@ -489,10 +489,110 @@ def generic(ctx: Ctx) -> list[Action]:
     return out
 
 
+# ---------------------------------------------------------------- org building (hiring at runtime)
+HIRE_PLAN = {
+    "Engineering": [("Leo", "Backend Engineer", "fullstack_dev", ["file_read", "file_write", "list_files", "terminal"]),
+                    ("Ana", "Frontend Engineer", "fullstack_dev", ["file_read", "file_write", "list_files"])],
+    "Quality": [("Sam", "QA Engineer", "qa_engineer", ["file_read", "file_write", "list_files", "terminal"])],
+    "Product": [("Priya", "Product Manager", "product_manager", ["file_read", "file_write"])],
+    "Growth": [("Zoe", "Content Writer", "content_writer", ["file_read", "file_write"])],
+    "Research": [("Ravi", "Researcher", "researcher", ["file_read", "file_write"])],
+}
+
+
+def founder(ctx: Ctx) -> list[Action]:
+    st, out = ctx["state"], []
+    for m in ctx["inbox"]:
+        if m["from"] == "user" and not st.get("hired"):
+            st["hired"] = ["Omar", "Tess"]
+            out.append({"action": "list_agents"})
+            out.append({"action": "create_agent", "name": "Omar", "role": "Engineering Manager", "department": "Engineering",
+                        "is_manager": True, "role_template": "eng_manager",
+                        "tools": ["file_read", "file_write", "list_files", "terminal", "manage_team"],
+                        "brief": f"Lead Engineering for: {ctx['goal']}. Hire the engineers you need (keep it to 2), have them "
+                                 "build it, review their work and send me a status_update when it's done."})
+            out.append({"action": "create_agent", "name": "Tess", "role": "QA Lead", "department": "Quality", "is_manager": True,
+                        "role_template": "qa_lead", "tools": ["file_read", "file_write", "list_files", "terminal", "manage_team"],
+                        "connect": [{"to": "Omar", "type": "review", "bidirectional": True, "label": "Release review"}],
+                        "brief": f"Lead Quality for: {ctx['goal']}. Hire a QA engineer, define the test plan and report results to me."})
+            out.append({"action": "update_agent", "target": "self", "reason": "Record the org design so I keep it consistent",
+                        "changes": {"append_to_prompt": "## Org chart (designed by me)\n- Engineering: Omar (manager) builds the product\n"
+                                                        "- Quality: Tess (manager) verifies it\nKeep the company lean; hire only for real gaps."}})
+        elif m["type"] in ("status_update", "final_report"):
+            st.setdefault("reported", []).append(m["from"])
+    if st.get("hired") and set(st["hired"]) <= set(st.get("reported", [])) and not st.get("done"):
+        st["done"] = True
+        out.append({"action": "list_agents"})
+        out.append(_finish("Built a 2-department company (Engineering: Omar + hires, Quality: Tess + hires). Both departments delivered and reported."))
+    return out
+
+
+def manager(ctx: Ctx) -> list[Action]:
+    """Generic department head: hire (if the team is empty) or delegate, collect reports, refine, report upward."""
+    st, out = ctx["state"], []
+    me = ctx["agent"]
+    dept = me.get("department") or "Team"
+    for m in ctx["inbox"]:
+        t = m["type"]
+        if t in ("task", "user_interjection") and not st.get("started"):
+            st["started"] = True
+            st["boss"] = m["from"] if m["from"] != "user" else me.get("manager")
+            out.append({"action": "list_agents", "department": dept})
+            slug = dept.lower().replace(" ", "-")
+            out.append(_write(f"departments/{slug}/plan.md", f"# {dept} plan\n\nOwner: {me['name']}\n\nBrief:\n> {m['content'][:800]}\n\n"
+                              "## Approach\n1. Split the work across the team\n2. Review every deliverable\n3. Report results upward\n",
+                              f"{dept} plan"))
+            reports = me.get("reports") or []
+            if reports:
+                st["waiting"] = list(reports)
+                for r in reports:
+                    out.append(_msg(r, "task", f"{dept} task for {ctx['goal']}: deliver your part (see departments/{slug}/plan.md) "
+                                               "and send me a status_update with the file paths."))
+            elif me.get("tools", {}).get("manage_team"):
+                hires = HIRE_PLAN.get(dept) or [(f"{dept[:12]} Specialist", f"{dept} Specialist", "specialist", ["file_read", "file_write"])]
+                st["waiting"] = []
+                for name, role, tpl, tools in hires:
+                    st["waiting"].append(name)
+                    out.append({"action": "create_agent", "name": name, "role": role, "department": dept, "role_template": tpl, "tools": tools,
+                                "brief": f"You're on the {dept} team working on: {ctx['goal']}. Deliver your part as files under "
+                                         f"departments/{slug}/ and send me a status_update when done."})
+            else:
+                st["waiting"] = []
+        elif t in ("status_update", "answer", "final_report"):
+            st.setdefault("got", []).append(m["from"])
+        elif t == "question":
+            out.append(_msg(m["from"], "answer", f"Keep it simple and within {dept}'s scope; see departments/{dept.lower().replace(' ', '-')}/plan.md."))
+        elif t == "review_request":
+            out.append(_msg(m["from"], "review_result", "Reviewed: meets the bar.", verdict="approve", comments=[]))
+    waiting = st.get("waiting")
+    # resolve names of hires that were renamed on collision (e.g. "Sam 2")
+    if waiting is not None and st.get("started") and not st.get("reported"):
+        got = set(st.get("got", []))
+        if all(any(g == w or g.startswith(w + " ") for g in got) for w in waiting):
+            st["reported"] = True
+            if waiting and not st.get("refined"):
+                st["refined"] = True
+                first = next(g for g in st["got"] if g == waiting[0] or g.startswith(waiting[0] + " "))
+                out.append({"action": "update_agent", "target": first, "reason": "Codify what worked for the next iteration",
+                            "changes": {"append_to_prompt": f"## Team standard ({dept})\nAlways list the files you produced in your status_update."}})
+            slug = dept.lower().replace(" ", "-")
+            out.append(_write(f"departments/{slug}/summary.md", f"# {dept} summary\n\nDelivered by: {', '.join(st.get('got', [])) or me['name']}\n"
+                              f"Reviewed by: {me['name']}\n", f"{dept} results"))
+            boss = st.get("boss") or _upstream(ctx)
+            up = boss if boss in {x["name"] for x in ctx["allowed"]} else _upstream(ctx)
+            if up:
+                out.append(_msg(up, "status_update", f"{dept} is done: {len(st.get('got', []))} deliverable(s) reviewed. "
+                                                     f"Summary in departments/{slug}/summary.md."))
+            out.append(_finish(f"{dept} delivered."))
+    return out
+
+
 POLICIES = {
     "ceo": ceo, "pm": pm, "architect": architect, "backend": backend, "frontend": frontend, "designer": designer,
     "qa": qa, "devops": devops, "developer": developer, "techlead": architect, "proposer": proposer,
-    "critic": critic, "moderator": moderator, "generic": generic,
+    "critic": critic, "moderator": moderator, "generic": generic, "founder": founder, "manager": manager,
+    **{k: manager for k in ("eng_manager", "qa_lead", "head_of_product", "devops_lead", "marketing_lead", "research_director",
+                            "editor_in_chief", "department_head")},
 }
 
 THOUGHTS = {
@@ -507,11 +607,15 @@ THOUGHTS = {
     "proposer": "Concede valid points; converge.",
     "critic": "Stress-test, but agree when concerns are resolved.",
     "moderator": "Rule decisively with reasons.",
+    "founder": "Design the smallest org that can deliver; hire managers, let them hire specialists.",
+    "manager": "Plan, staff or delegate, review, then report upward.",
 }
 
 
 def decide(ctx: Ctx) -> dict[str, Any]:
     cat = ctx["agent"]["category"]
+    if cat == "generic" and ctx["agent"].get("is_manager") and ctx["agent"].get("department") and not ctx["agent"].get("is_entry"):
+        cat = "manager"
     policy = POLICIES.get(cat, generic)
     actions = policy(ctx)
     if not actions:

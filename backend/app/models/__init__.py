@@ -72,6 +72,19 @@ class McpServer(RegistryBase):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class UserTemplate(RegistryBase):
+    """A user-designed company template (departments + agents + channels), reusable across projects."""
+
+    __tablename__ = "user_templates"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    spec_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # CanvasExport payload
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 # ====================================================================== project
 class Company(ProjectBase):
     __tablename__ = "companies"
@@ -79,7 +92,8 @@ class Company(ProjectBase):
     user_id: Mapped[str] = mapped_column(String(36), index=True)  # registry user (cross-DB, no FK)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
-    canvas_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    canvas_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # viewport, department colors
+    revision: Mapped[int] = mapped_column(Integer, default=0)  # bumped on every team change (optimistic concurrency)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -104,6 +118,11 @@ class Agent(ProjectBase):
     tools_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     behavior_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     permission_level: Mapped[str] = mapped_column(String(20), default="inherit")  # inherit | read_only | plan | ask | danger
+    department: Mapped[str] = mapped_column(String(80), default="")
+    is_manager: Mapped[bool] = mapped_column(Boolean, default=False)
+    reports_to: Mapped[str | None] = mapped_column(String(36), nullable=True)  # manager agent id
+    active: Mapped[bool] = mapped_column(Boolean, default=True)  # inactive agents never take turns or receive messages
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)  # agent id when hired by an agent at runtime
     is_entry: Mapped[bool] = mapped_column(Boolean, default=False)
     position_x: Mapped[float] = mapped_column(Float, default=0)
     position_y: Mapped[float] = mapped_column(Float, default=0)
@@ -228,6 +247,6 @@ class AgentMemory(ProjectBase):
 
 
 __all__ = [
-    "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer",
+    "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate",
     "Company", "Agent", "Edge", "ChatSession", "Run", "Message", "RunEvent", "Task", "Artifact", "AgentMemory",
 ]

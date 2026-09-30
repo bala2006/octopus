@@ -3,7 +3,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   CheckCircle2, ChevronDown, Cloud, FolderOpen, KeyRound, Moon, Palette, Plug, Plus, RefreshCw, Server, ShieldCheck, Sparkles, Sun, Trash2, Wifi, XCircle, Zap,
+  LayoutTemplate, Download, Upload, Pencil,
 } from "lucide-react";
+import { download } from "@/lib/utils";
+import { useTemplates } from "@/hooks/queries";
+import { DepartmentChips } from "@/features/workspaces/NewCompanyDialog";
 import { api, unwrap } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { qk, useMcpServers, useSettings, useWorkspace, useWorkspaceId } from "@/hooks/queries";
@@ -14,7 +18,7 @@ import { Badge, Field, Input, Switch, Textarea } from "@/components/ui/primitive
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select, Tip } from "@/components/ui/overlays";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
 
-const SECTIONS = [["providers", "Model providers", Cloud], ["mcp", "MCP servers", Plug], ["project", "Project", FolderOpen], ["appearance", "Appearance", Palette]] as const;
+const SECTIONS = [["providers", "Model providers", Cloud], ["mcp", "MCP servers", Plug], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Appearance", Palette]] as const;
 
 export default function SettingsPage() {
   const [section, setSection] = React.useState<string>(() => (location.hash.slice(1) || "providers"));
@@ -32,6 +36,7 @@ export default function SettingsPage() {
         <div className="mx-auto max-w-3xl space-y-6 p-6 animate-fade-up" key={section}>
           {section === "providers" && <Providers />}
           {section === "mcp" && <McpServers />}
+          {section === "templates" && <TemplatesSection />}
           {section === "project" && <ProjectSettings />}
           {section === "appearance" && <Appearance />}
         </div>
@@ -335,6 +340,91 @@ function Appearance() {
           </button>
         ))}
       </div>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------- templates
+function TemplatesSection() {
+  const { data, isLoading } = useTemplates();
+  const qc = useQueryClient();
+  const mine = (data ?? []).filter((t) => t.source === "user");
+  const builtin = (data ?? []).filter((t) => t.source === "builtin");
+  const [renaming, setRenaming] = React.useState<{ key: string; name: string; description: string } | null>(null);
+  const [del, setDel] = React.useState<{ key: string; name: string } | null>(null);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["templates"] });
+  const rename = useMutation({
+    mutationFn: () => unwrap(api.PATCH("/api/v1/templates/{key}", { params: { path: { key: renaming!.key } }, body: { name: renaming!.name, description: renaming!.description } })),
+    onSuccess: () => { refresh(); setRenaming(null); toast.success("Template updated"); },
+  });
+  const remove = useMutation({
+    mutationFn: (key: string) => unwrap(api.DELETE("/api/v1/templates/{key}", { params: { path: { key } } })),
+    onSuccess: () => { refresh(); toast.success("Template deleted"); },
+  });
+  const exportTpl = async (key: string, name: string) => {
+    const spec = await unwrap(api.GET("/api/v1/templates/{key}/spec", { params: { path: { key } } }));
+    download(`${name.replace(/\W+/g, "-").toLowerCase()}.octopus-template.json`, JSON.stringify(spec, null, 2), "application/json");
+  };
+  const importTpl = async (f: File) => {
+    try {
+      const spec = JSON.parse(await f.text());
+      await unwrap(api.POST("/api/v1/templates", { body: { name: spec.name ?? f.name.replace(/\..*$/, ""), description: spec.description ?? "", spec } }));
+      refresh();
+      toast.success(`Imported ${spec.name ?? "template"}`);
+    } catch (e) { toast.error("Import failed", { description: (e as Error).message }); }
+  };
+  return (
+    <Section title="Company templates" description="Templates are sets of departments. Each department has a manager and a small team. Design one on the canvas and use Save as template, generate one with AI in New company, or import a JSON file. Templates are available in every project.">
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}><Upload />Import JSON</Button>
+        <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importTpl(f); e.target.value = ""; }} />
+      </div>
+      <div className="space-y-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">My templates</div>
+        {isLoading ? <div className="skeleton h-16" /> : !mine.length ? (
+          <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No custom templates yet. Open a company on the canvas and click <b>Save as template</b>.</div>
+        ) : mine.map((t) => (
+          <div key={t.key} className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+            <LayoutTemplate className="h-4 w-4 text-primary" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">{t.name}</div>
+              <div className="truncate text-xs text-muted-foreground">{t.description || `${t.agent_count} agents · ${t.edge_count} channels`}</div>
+              <div className="mt-1"><DepartmentChips departments={t.departments ?? []} /></div>
+            </div>
+            <Button size="icon-sm" variant="ghost" aria-label="Rename" onClick={() => setRenaming({ key: t.key, name: t.name, description: t.description })}><Pencil /></Button>
+            <Button size="icon-sm" variant="ghost" aria-label="Export" onClick={() => void exportTpl(t.key, t.name)}><Download /></Button>
+            <Button size="icon-sm" variant="ghost" className="text-destructive" aria-label="Delete" onClick={() => setDel({ key: t.key, name: t.name })}><Trash2 /></Button>
+          </div>
+        ))}
+      </div>
+      <div className="space-y-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Built-in</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {builtin.map((t) => (
+            <div key={t.key} className="rounded-xl border border-border bg-surface p-3">
+              <div className="flex items-center justify-between"><span className="text-sm font-medium">{t.name}</span>
+                <Button size="icon-sm" variant="ghost" aria-label={`Export ${t.name}`} onClick={() => void exportTpl(t.key, t.name)}><Download /></Button></div>
+              <p className="line-clamp-2 text-xs text-muted-foreground">{t.description}</p>
+              <div className="mt-1.5"><DepartmentChips departments={t.departments ?? []} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <Dialog open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Edit template</DialogTitle></DialogHeader>
+          {renaming && (
+            <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); rename.mutate(); }}>
+              <Field label="Name"><Input autoFocus value={renaming.name} onChange={(e) => setRenaming({ ...renaming, name: e.target.value })} /></Field>
+              <Field label="Description"><Textarea value={renaming.description} onChange={(e) => setRenaming({ ...renaming, description: e.target.value })} /></Field>
+              <div className="flex justify-end"><Button type="submit" loading={rename.isPending}>Save</Button></div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog open={!!del} onOpenChange={(o) => !o && setDel(null)} title={`Delete "${del?.name}"?`} destructive confirmLabel="Delete"
+        description="Companies already created from it are not affected." onConfirm={() => del && remove.mutate(del.key)} />
     </Section>
   );
 }

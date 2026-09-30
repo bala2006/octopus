@@ -134,8 +134,11 @@ class ChatConnection:
             mem = (await db.execute(select(AgentMemory).where(AgentMemory.agent_id == agent.id))).scalars().all()
         memory = {r.key: r.value for r in mem}
         tools = agent.tools_json or {}
+        mgr = next((x for x in company.agents if x.id == agent.reports_to), None)
         variables = {"company_name": company.name, "goal": "(direct conversation with the user)", "agent_name": agent.name,
-                     "role": agent.role, "team": ", ".join(f"{a.name} ({a.role})" for a in company.agents)}
+                     "role": agent.role, "team": ", ".join(f"{a.name} ({a.role})" for a in company.agents),
+                     "department": agent.department or "company", "manager": mgr.name if mgr else "the user",
+                     "reports": ", ".join(x.name for x in company.agents if x.reports_to == agent.id) or "nobody yet"}
         system = render_template(agent.system_prompt or f"You are {agent.name}, {agent.role}.", variables)
         system += ("\n\n## Direct chat mode\nYou are chatting directly with the user (not with teammates). Ignore the JSON action "
                    "schema here and reply in clear GitHub-flavoured Markdown; use fenced code blocks with language tags.")

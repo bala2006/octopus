@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertCircle, Check, ClipboardPaste, Cloud, CloudOff, Copy, Download, Flag, Grid3x3, LayoutGrid, Loader2, Maximize, MessageSquare, Network, Play,
-  Plus, Redo2, Settings2, Trash2, Undo2, Upload, Wand2, CopyPlus, MousePointerSquareDashed,
+  Plus, Redo2, Settings2, Trash2, Undo2, Upload, Wand2, CopyPlus, MousePointerSquareDashed, Building2, BookmarkPlus,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, unwrap } from "@/lib/api";
@@ -23,6 +23,9 @@ import {
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
 import { RunDialog } from "@/features/runs/RunDialog";
 import { edgeTypes, nodeTypes } from "./flowTypes";
+import { DepartmentBuilder } from "./DepartmentBuilder";
+import { DepartmentZones } from "./DepartmentZones";
+import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import { EdgeEditor } from "./EdgeEditor";
 import { Inspector } from "./Inspector";
 import { DND_MIME, Palette } from "./Palette";
@@ -57,15 +60,25 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
   const qc = useQueryClient();
   const autosave = useAutosave(workspaceId, companyId);
   const [runOpen, setRunOpen] = React.useState(false);
+  const [deptOpen, setDeptOpen] = React.useState(false);
+  const [tplOpen, setTplOpen] = React.useState(false);
   const wrapper = React.useRef<HTMLDivElement>(null);
   const menuPos = React.useRef<{ x: number; y: number } | null>(null);
   const [menuNode, setMenuNode] = React.useState<AgentNodeT | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
 
-  React.useEffect(() => {
-    if (q.data && useCanvas.getState().companyId !== companyId) {
-      useCanvas.getState().load(q.data);
-      requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 300 }));
+  // layout effect: swap the store before paint so a stale company is never shown (or edited) for a frame
+  React.useLayoutEffect(() => {
+    if (!q.data) return;
+    const st = useCanvas.getState();
+    const unsaved = st.version !== 0 && st.version !== st.savedVersion;
+    const otherCompany = st.companyId !== companyId;
+    // load when switching company, or when the server has a newer team (e.g. agents hired during a run) and we have no local edits
+    if (otherCompany || (!unsaved && (q.data.revision ?? 0) > st.revision)) {
+      const grew = !otherCompany && q.data.agents.length > st.nodes.length;
+      st.load(q.data);
+      if (otherCompany) requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 300 }));
+      else if (grew) toast.info("Your team grew", { description: "Agents hired teammates during a run; they're on the canvas now." });
     }
   }, [q.data, companyId, rf]);
 
@@ -108,8 +121,9 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
     try {
       const body = JSON.parse(await f.text());
       const res = await unwrap(api.POST("/api/v1/w/{workspace_id}/companies/import", { params: { path: { workspace_id: workspaceId } }, body }));
-      qc.invalidateQueries({ queryKey: qk.companies(workspaceId) });
       qc.setQueryData(qk.canvas(workspaceId, res.company.id), res);
+      qc.setQueryData<import("@/types").CompanyOut[]>(qk.companies(workspaceId), (old) => [res.company, ...(old ?? [])]);
+      void qc.invalidateQueries({ queryKey: qk.companies(workspaceId) });
       const { useApp } = await import("@/stores/app");
       useApp.getState().setCompany(workspaceId, res.company.id);
       toast.success(`Imported ${res.company.name}`);
@@ -119,12 +133,12 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
   };
 
   const noEntry = s.nodes.length > 0 && !s.nodes.some((n) => n.data.is_entry);
-  if (q.isLoading) return <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (q.isLoading || (q.data && s.companyId !== companyId)) return <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
   if (q.isError) return <EmptyState icon={AlertCircle} title="Could not load canvas" description={(q.error as Error).message} />;
 
   return (
     <div className="flex h-full">
-      <Palette onAdd={(k) => addRole(k)} />
+      <Palette onAdd={(k) => addRole(k)} onAddDepartment={() => setDeptOpen(true)} />
       <div className="relative min-w-0 flex-1" ref={wrapper}
         onDragOver={(e) => { if (e.dataTransfer.types.includes(DND_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
         onDrop={(e) => { const k = e.dataTransfer.getData(DND_MIME); if (k) { e.preventDefault(); addRole(k, { x: e.clientX, y: e.clientY }); } }}>
@@ -148,6 +162,10 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
                 defaultEdgeOptions={{ type: "channel" }}
               >
                 <Background variant={BackgroundVariant.Dots} gap={20} size={1.4} color="hsl(var(--grid))" />
+                <DepartmentZones departments={s.departments} onSelect={(d) => {
+                  const ids = s.nodes.filter((n) => n.data.department === d).map((n) => n.id);
+                  useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: ids.includes(n.id) })) });
+                }} />
                 <Controls showInteractive={false} position="bottom-left" />
                 <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => (n.data as { color?: string }).color ?? "#888"} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />
               </ReactFlow>
@@ -200,6 +218,9 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
             <ToolBtn tip={s.snapToGrid ? "Snap to grid: on" : "Snap to grid: off"} onClick={s.toggleSnap} active={s.snapToGrid}><Grid3x3 /></ToolBtn>
             <ToolBtn tip="Fit view" onClick={() => rf.fitView({ padding: 0.2, duration: 300 })}><Maximize /></ToolBtn>
             <Divider />
+            <ToolBtn tip="Add department" onClick={() => setDeptOpen(true)}><Building2 /></ToolBtn>
+            <ToolBtn tip="Save as template" onClick={() => setTplOpen(true)} disabled={!s.nodes.length}><BookmarkPlus /></ToolBtn>
+            <Divider />
             <ToolBtn tip="Export JSON" onClick={() => void exportJson()}><Download /></ToolBtn>
             <ToolBtn tip="Import JSON" onClick={() => fileRef.current?.click()}><Upload /></ToolBtn>
             <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importJson(f); e.target.value = ""; }} />
@@ -228,6 +249,8 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
       </div>
       <Inspector />
       <RunDialog open={runOpen} onOpenChange={setRunOpen} companyId={companyId} />
+      <DepartmentBuilder open={deptOpen} onOpenChange={setDeptOpen} />
+      <SaveTemplateDialog open={tplOpen} onOpenChange={setTplOpen} companyId={companyId} defaultName={q.data?.company.name ?? "Company"} flush={autosave.saveNow} />
     </div>
   );
 }
@@ -252,6 +275,7 @@ function SaveIndicator({ state, error, savedAt, onRetry }: { state: SaveState; e
     dirty: { icon: <Cloud className="h-3.5 w-3.5 text-muted-foreground" />, text: "Unsaved changes" },
     saving: { icon: <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />, text: "Saving…" },
     error: { icon: <CloudOff className="h-3.5 w-3.5 text-destructive" />, text: "Save failed · retry" },
+    conflict: { icon: <Loader2 className="h-3.5 w-3.5 animate-spin text-warning" />, text: "Syncing team…" },
   }[state];
   return (
     <Tip content={error ?? "Changes save automatically to .octopus/"} side="bottom">

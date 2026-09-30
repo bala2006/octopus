@@ -37,3 +37,20 @@ describe("reduceRun", () => {
     expect(replayTo(events, 3, {}).messages).toHaveLength(3);
   });
 });
+
+describe("org events", () => {
+  it("adds hired agents, patches edits and records the timeline", () => {
+    let s = initialRun();
+    s = reduceRun(s, { type: "agent_created", seq: 5, data: {
+      agent: { id: "n1", name: "Omar", role: "Engineering Manager", department: "Engineering", created_by: "f" }, edges: [{ id: "e1", source_agent_id: "f", target_agent_id: "n1", type: "delegate" }],
+      created_by: "f", persisted: true, department: { name: "Engineering", color: "#10b981" } } }, { f: "Nova" });
+    expect(s.extraAgents.map((a) => a.name)).toEqual(["Omar"]);
+    expect(s.extraEdges).toHaveLength(1);
+    expect(s.departments.Engineering.color).toBe("#10b981");
+    expect(s.timeline.at(-1)?.label).toBe("Nova hired Omar (Engineering Manager)");
+    s = reduceRun(s, { type: "agent_updated", seq: 6, data: { agent_id: "n1", by: "f", self: false, changes: { role: "VP Engineering", active: false }, summary: "role", old_name: "Omar" } }, { f: "Nova" });
+    expect(s.agentPatches.n1).toMatchObject({ role: "VP Engineering", active: false });
+    expect(s.orgEvents.map((e) => e.kind)).toEqual(["created", "updated"]);
+    expect(replayTo([{ type: "agent_created", seq: 5, data: { agent: { id: "n1", name: "Omar", role: "x" }, edges: [], created_by: "f" } }], 4, {}).extraAgents).toHaveLength(0);
+  });
+});

@@ -24,7 +24,7 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
         tasks = (await db.execute(select(Task).where(Task.run_id == run_id).order_by(Task.key))).scalars().all()
         arts = (await db.execute(select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.path, Artifact.version))).scalars().all()
         events = (await db.execute(select(RunEvent).where(RunEvent.run_id == run_id, RunEvent.type.in_(
-            ["protocol", "message_rejected", "error", "tool_result"])).order_by(RunEvent.id))).scalars().all()
+            ["protocol", "message_rejected", "error", "tool_result", "agent_created", "agent_updated"])).order_by(RunEvent.id))).scalars().all()
 
     snap = run.snapshot_json or {}
     agents = {a["id"]: a for a in snap.get("agents", [])}
@@ -41,11 +41,27 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
     if run.summary:
         out += ["## Outcome", "", run.summary, ""]
 
-    out += ["## Team", "", "| Agent | Role | Model | Turns | Tokens |", "|---|---|---|---|---|"]
+    out += ["## Team", "", "| Agent | Role | Department | Model | Turns | Tokens |", "|---|---|---|---|---|---|"]
     turns = state.get("agent_turns", {})
     for aid, a in agents.items():
-        out.append(f"| {a['name']}{' (entry)' if a.get('is_entry') else ''} | {a.get('role', '')} | {a.get('provider')}/{a.get('model')} | {turns.get(aid, 0)} | {per_agent.get(aid, 0):,} |")
+        tags = (" (entry)" if a.get("is_entry") else "") + (" · manager" if a.get("is_manager") else "") + \
+               (f" · hired by {name(a['created_by'])}" if a.get("created_by") else "") + ("" if a.get("active", True) else " · inactive")
+        out.append(f"| {a['name']}{tags} | {a.get('role', '')} | {a.get('department') or '-'} | {a.get('provider')}/{a.get('model')} | "
+                   f"{turns.get(aid, 0)} | {per_agent.get(aid, 0):,} |")
     out.append("")
+    org = [e for e in events if e.type in ("agent_created", "agent_updated")]
+    if org:
+        out += ["## Org changes", ""]
+        for e in org:
+            p = e.payload_json
+            if e.type == "agent_created":
+                a = p["agent"]
+                out.append(f"- **{name(p['created_by'])}** hired **{a['name']}** ({a['role']}, {a.get('department') or 'no department'})"
+                           + ("" if p.get("persisted") else " (run only)"))
+            else:
+                who = "its own configuration" if p.get("self") else f"{p.get('old_name')}'s configuration"
+                out.append(f"- **{name(p['by'])}** updated {who}: {p.get('summary')}" + (f" (reason: {p['reason']})" if p.get("reason") else ""))
+        out.append("")
 
     decisions = state.get("decisions", [])
     out += ["## Key decisions", ""] + ([f"- {d}" for d in decisions] or ["- None recorded"]) + [""]
