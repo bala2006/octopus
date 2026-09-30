@@ -5,6 +5,7 @@ import type { AgentOut, EdgeOut } from "@/types";
 import { EditableContext, LiveContext, type LiveOverlay } from "@/features/canvas/live";
 import { edgeTypes, nodeTypes } from "@/features/canvas/flowTypes";
 import { DepartmentZones } from "@/features/canvas/DepartmentZones";
+import { EdgeAnchorsProvider } from "@/features/canvas/edgeAnchors";
 
 /** Read-only, animated company graph for live runs and replays. Agents hired mid-run pop in without resetting the layout. */
 export function RunGraph(props: { agents: AgentOut[]; edges: EdgeOut[]; overlay: LiveOverlay; departments: Record<string, DeptMeta>; onSelect?: (agentId: string) => void }) {
@@ -31,6 +32,7 @@ function Graph({ agents, edges, overlay, departments, onSelect }: { agents: Agen
   return (
     <EditableContext.Provider value={false}>
       <LiveContext.Provider value={overlay}>
+        <EdgeAnchorsProvider>
         <ReactFlow<AgentNode, ChannelEdge>
           nodes={nodes} edges={flowEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
           onNodesChange={(ch) => setNodes((ns) => ns.map((n) => { const c = ch.find((x) => "id" in x && x.id === n.id && x.type === "position"); return c && c.type === "position" && c.position ? { ...n, position: c.position } : n; }))}
@@ -42,6 +44,7 @@ function Graph({ agents, edges, overlay, departments, onSelect }: { agents: Agen
           <DepartmentZones departments={departments} />
           <Controls showInteractive={false} position="bottom-left" />
         </ReactFlow>
+        </EdgeAnchorsProvider>
       </LiveContext.Provider>
     </EditableContext.Provider>
   );

@@ -23,6 +23,7 @@ import {
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
 import { RunDialog } from "@/features/runs/RunDialog";
 import { edgeTypes, nodeTypes } from "./flowTypes";
+import { EdgeAnchorsProvider } from "./edgeAnchors";
 import { DepartmentBuilder } from "./DepartmentBuilder";
 import { DepartmentZones } from "./DepartmentZones";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
@@ -145,6 +146,7 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
         <ContextMenu onOpenChange={(o) => !o && setMenuNode(null)}>
           <ContextMenuTrigger asChild>
             <div className="h-full w-full" onContextMenu={(e) => { menuPos.current = { x: e.clientX, y: e.clientY }; }}>
+              <EdgeAnchorsProvider>
               <ReactFlow<AgentNodeT, ChannelEdgeT>
                 nodes={s.nodes} edges={s.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
                 onNodesChange={s.onNodesChange} onEdgesChange={s.onEdgesChange}
@@ -169,6 +171,7 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
                 <Controls showInteractive={false} position="bottom-left" />
                 <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => (n.data as { color?: string }).color ?? "#888"} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />
               </ReactFlow>
+              </EdgeAnchorsProvider>
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
