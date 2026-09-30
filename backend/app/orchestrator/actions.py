@@ -1,0 +1,250 @@
+"""Structured action schema that agents must use, and a robust parser for LLM output."""
+from __future__ import annotations
+
+import json
+import re
+from typing import Annotated, Any, Literal, Union
+
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
+
+AgentMessageType = Literal[
+    "task", "question", "answer", "proposal", "critique", "agreement", "objection", "decision",
+    "review_request", "review_result", "status_update", "final_report",
+]
+
+TYPE_ALIASES = {
+    "agree": "agreement", "object": "objection", "propose": "proposal", "propose_compromise": "proposal",
+    "compromise": "proposal", "counter_proposal": "proposal", "review": "review_request", "report": "status_update",
+    "status": "status_update", "reply": "answer", "response": "answer", "ask": "question", "delegate": "task",
+    "approve": "review_result", "request_changes": "review_result", "feedback": "critique",
+}
+
+
+class SendMessage(BaseModel):
+    action: Literal["send_message"]
+    to: str = Field(min_length=1, max_length=120)
+    type: AgentMessageType = "answer"
+    content: str = Field(min_length=1, max_length=40000)
+    task_id: str | None = None
+    verdict: Literal["approve", "request_changes"] | None = None
+    comments: list[str] = Field(default_factory=list)
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _alias(cls, v: Any) -> Any:
+        return TYPE_ALIASES.get(str(v).lower(), str(v).lower()) if isinstance(v, str) else v
+
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def _verdict(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.lower().replace(" ", "_").replace("-", "_")
+            if v in ("approved", "lgtm", "accept"):
+                return "approve"
+            if v in ("changes_requested", "reject", "request_change", "changes"):
+                return "request_changes"
+        return v
+
+
+class WriteFile(BaseModel):
+    action: Literal["write_file"]
+    path: str = Field(min_length=1, max_length=300)
+    content: str = Field(max_length=1_000_000)
+    note: str = ""
+
+
+class ReadFile(BaseModel):
+    action: Literal["read_file"]
+    path: str
+
+
+class ListFiles(BaseModel):
+    action: Literal["list_files"]
+    prefix: str = ""
+
+
+class RunCode(BaseModel):
+    action: Literal["run_code"]
+    command: str = Field(min_length=1, max_length=500)
+
+
+class McpCall(BaseModel):
+    action: Literal["mcp_call"]
+    server: str = Field(min_length=1, max_length=80)
+    tool: str = Field(min_length=1, max_length=120)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskItem(BaseModel):
+    key: str | None = None
+    title: str | None = None
+    description: str | None = None
+    assignee: str | None = None
+    status: Literal["todo", "in_progress", "in_review", "done", "blocked"] | None = None
+    acceptance_criteria: str | list[str] | None = None
+
+    @field_validator("key", mode="before")
+    @classmethod
+    def _id_alias(cls, v: Any) -> Any:
+        return str(v) if v is not None else v
+
+
+class UpdateTaskBoard(BaseModel):
+    action: Literal["update_task_board"]
+    tasks: list[TaskItem] = Field(min_length=1, max_length=50)
+
+
+class Remember(BaseModel):
+    action: Literal["remember"]
+    key: str = Field(min_length=1, max_length=200)
+    value: str = Field(max_length=5000)
+
+
+class RequestUserInput(BaseModel):
+    action: Literal["request_user_input"]
+    question: str = Field(min_length=1)
+
+
+class WebSearch(BaseModel):
+    action: Literal["web_search"]
+    query: str = Field(min_length=1, max_length=300)
+
+
+class Calculate(BaseModel):
+    action: Literal["calculate"]
+    expression: str = Field(min_length=1, max_length=200)
+
+
+class Finish(BaseModel):
+    action: Literal["finish"]
+    summary: str = ""
+
+
+class Wait(BaseModel):
+    action: Literal["wait"]
+
+
+Action = Annotated[
+    Union[SendMessage, WriteFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
+          WebSearch, Calculate, Finish, Wait],
+    Field(discriminator="action"),
+]
+_adapter: TypeAdapter[Any] = TypeAdapter(Action)
+
+ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "write_file", "read": "read_file",
+                  "execute": "run_code", "run": "run_code", "terminal": "run_code", "tasks": "update_task_board", "done": "finish",
+                  "ask_user": "request_user_input", "search": "web_search", "calculator": "calculate", "ls": "list_files",
+                  "mcp": "mcp_call", "call_tool": "mcp_call"}
+
+# tool toggle required for each action (absent => always available). mcp_call is gated per server.
+ACTION_TOOL = {"send_message": "send_message", "write_file": "file_write", "read_file": "file_read", "list_files": "list_files",
+               "run_code": "terminal", "request_user_input": "ask_user", "web_search": "web_search", "calculate": "calculator"}
+TOOL_DEFAULTS = {"send_message": True, "file_read": True, "file_write": True, "list_files": True, "calculator": True}
+
+
+def tool_enabled(tools: dict[str, Any], key: str) -> bool:
+    if key == "file_read" and "file_rw" in tools and "file_read" not in tools:
+        return bool(tools["file_rw"])
+    if key == "file_write" and "file_rw" in tools and "file_write" not in tools:
+        return bool(tools["file_rw"])
+    if key == "terminal" and "code_exec" in tools and "terminal" not in tools:
+        return bool(tools["code_exec"])
+    return bool(tools.get(key, TOOL_DEFAULTS.get(key, False)))
+
+
+class ParseResult(BaseModel):
+    thought: str = ""
+    actions: list[Any] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    ok: bool = True
+
+
+def _extract_json(text: str) -> Any:
+    t = text.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)```", t, re.S)
+    candidates = [t]
+    if fence:
+        candidates.insert(0, fence.group(1).strip())
+    for c in candidates:
+        try:
+            return json.loads(c)
+        except json.JSONDecodeError:
+            pass
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(t):
+        if ch in "{[":
+            try:
+                obj, _ = dec.raw_decode(t[i:])
+                return obj
+            except json.JSONDecodeError:
+                continue
+    raise ValueError("No JSON object found in the reply")
+
+
+def parse_envelope(text: str) -> ParseResult:
+    try:
+        data = _extract_json(text)
+    except ValueError as exc:
+        return ParseResult(ok=False, errors=[str(exc)])
+    if isinstance(data, list):
+        data = {"actions": data}
+    if not isinstance(data, dict):
+        return ParseResult(ok=False, errors=["Top-level JSON must be an object with 'actions'"])
+    raw = data.get("actions")
+    if raw is None and "action" in data:
+        raw = [data]
+    if not isinstance(raw, list):
+        return ParseResult(ok=False, errors=["'actions' must be a list"])
+    res = ParseResult(thought=str(data.get("thought", ""))[:2000])
+    for i, item in enumerate(raw[:20]):
+        if not isinstance(item, dict):
+            res.errors.append(f"actions[{i}] is not an object")
+            continue
+        item = dict(item)
+        name = str(item.get("action") or item.get("tool") or item.get("name") or "").lower()
+        item["action"] = ACTION_ALIASES.get(name, name)
+        if item["action"] == "send_message" and "type" in item and str(item["type"]).lower() in ("approve", "request_changes") and "verdict" not in item:
+            item["verdict"] = item["type"]
+        try:
+            res.actions.append(_adapter.validate_python(item))
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            loc = ".".join(str(x) for x in first.get("loc", []))
+            res.errors.append(f"actions[{i}] ({item['action'] or '?'}) invalid: {loc} {first.get('msg')}")
+    if not res.actions and res.errors:
+        res.ok = False
+    return res
+
+
+def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] | None = None) -> str:
+    """Human-readable action schema injected into every agent's prompt (only enabled tools)."""
+    lines = []
+    if tool_enabled(enabled_tools, "send_message"):
+        lines.append('{"action":"send_message","to":"<teammate name | all>","type":"<message type>","content":"...",'
+                     ' "task_id":"T-1 (optional)","verdict":"approve|request_changes (review_result only)","comments":["..."]}')
+    lines += [
+        '{"action":"update_task_board","tasks":[{"key":"T-1 (omit to create)","title":"...","description":"...",'
+        '"assignee":"<name>","status":"todo|in_progress|in_review|done|blocked","acceptance_criteria":"..."}]}',
+        '{"action":"remember","key":"...","value":"..."}  (long-term memory note)',
+    ]
+    if tool_enabled(enabled_tools, "list_files"):
+        lines.append('{"action":"list_files","prefix":"optional/dir"}')
+    if tool_enabled(enabled_tools, "file_read"):
+        lines.append('{"action":"read_file","path":"relative/path.ext"}')
+    if tool_enabled(enabled_tools, "file_write"):
+        lines.append('{"action":"write_file","path":"relative/path.ext","content":"<FULL file content>","note":"why"}')
+    if tool_enabled(enabled_tools, "terminal"):
+        lines.append('{"action":"run_code","command":"python -m unittest discover -s tests -v"}  (sandboxed terminal; allowlisted: python, node, npm test, pytest)')
+    if tool_enabled(enabled_tools, "web_search"):
+        lines.append('{"action":"web_search","query":"..."}')
+    if tool_enabled(enabled_tools, "calculator"):
+        lines.append('{"action":"calculate","expression":"(12*7)/3"}')
+    if tool_enabled(enabled_tools, "ask_user"):
+        lines.append('{"action":"request_user_input","question":"..."}  (pauses the run until the user answers)')
+    for srv in mcp_servers or []:
+        tools = srv.get("tools") or []
+        listing = "; ".join(f"{t['name']}: {t.get('description', '')[:120]} args={json.dumps(t.get('input_schema', {}).get('properties', {}))[:300]}"
+                            for t in tools[:25]) or "(tool list unavailable)"
+        lines.append(f'{{"action":"mcp_call","server":"{srv["name"]}","tool":"<tool name>","arguments":{{...}}}}  MCP server "{srv["name"]}" tools: {listing}')
+    lines += ['{"action":"finish","summary":"what you delivered"}', '{"action":"wait"}  (nothing to do until new messages arrive)']
+    return "\n".join("- " + ln for ln in lines)
