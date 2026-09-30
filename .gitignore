@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# Octopus local data (per-project data lives in <project>/.octopus/)
+.octopus/
+data/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
