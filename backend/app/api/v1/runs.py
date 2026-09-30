@@ -1,0 +1,291 @@
+from __future__ import annotations
+
+import mimetypes
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
+from app.models import Artifact, ChatSession, Message, Run, RunEvent, Task, User
+from app.orchestrator.engine import ACTIVE_STATES, ProjectRef, RunRuntime, manager
+from app.schemas import (
+    ApprovalIn, ArtifactContentOut, ArtifactOut, InterjectIn, MessageOut, RevertIn, RunCreate, RunDetail, RunEventOut, RunOut,
+    TaskOut,
+)
+from app.services.canvas import snapshot
+from app.tools.workspace import ProjectFS, WorkspaceError
+
+router = APIRouter(prefix="/runs", tags=["runs"])
+
+
+def ref(ctx: ProjectCtx) -> ProjectRef:
+    return ProjectRef(workspace_id=ctx.workspace.id, root=ctx.root, sf=ctx.sf)
+
+
+async def owned_run(run_id: str, db: AsyncSession, user: User) -> Run:
+    run = await db.get(Run, run_id)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    await owned_company(run.company_id, db, user)
+    return run
+
+
+@router.post("", response_model=RunDetail, status_code=201)
+async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                     ctx: ProjectCtx = Depends(project_ctx)) -> Run:
+    company = await owned_company(body.company_id, db, user)
+    if not company.agents:
+        raise HTTPException(422, "Add at least one agent to the company before running it")
+    live = (await db.execute(select(func.count()).select_from(Run).where(Run.company_id == company.id, Run.status.in_(["running", "queued"])))).scalar()
+    if live and live >= 3:
+        raise HTTPException(429, "Too many concurrent runs for this company")
+    session_id = body.session_id
+    if session_id:
+        s = await db.get(ChatSession, session_id)
+        if s is None or s.company_id != company.id:
+            raise HTTPException(422, "Invalid session")
+    else:
+        s = ChatSession(company_id=company.id, title=body.goal[:60], mode="company")
+        db.add(s)
+        await db.flush()
+        session_id = s.id
+    run = Run(company_id=company.id, session_id=session_id, goal=body.goal, mode=body.mode, status="queued",
+              permission_level=body.permission_level or ctx.workspace.default_permission,
+              budget_json=body.budget.model_dump(), snapshot_json=snapshot(company),
+              state_json={"attachments": [{"filename": a.get("filename", "file")[:200], "text": a.get("text", "")[:30000]} for a in body.attachments[:5]]})
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    await manager.start(run.id, ref(ctx))
+    return run
+
+
+@router.get("", response_model=list[RunOut])
+async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[Run]:
+    q = select(Run).order_by(Run.created_at.desc()).limit(200)
+    if company_id:
+        await owned_company(company_id, db, user)
+        q = q.where(Run.company_id == company_id)
+    return list((await db.execute(q)).scalars().all())
+
+
+@router.get("/{run_id}", response_model=RunDetail)
+async def get_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> Run:
+    run = await owned_run(run_id, db, user)
+    rt = manager.get(run_id)
+    if rt is not None:  # live protocol state is fresher than the persisted snapshot
+        run.state_json = rt.state_dict()
+        run.status = rt.run_status
+    return run
+
+
+@router.delete("/{run_id}", status_code=204, response_class=Response, response_model=None)
+async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> None:
+    run = await owned_run(run_id, db, user)
+    if run.status in ACTIVE_STATES and manager.get(run_id):
+        raise HTTPException(409, "Stop the run before deleting it")
+    await db.delete(run)
+    await db.commit()
+
+
+async def _runtime(run_id: str, db: AsyncSession, user: User, ctx: ProjectCtx) -> RunRuntime:
+    await owned_run(run_id, db, user)
+    rt = await manager.ensure(run_id, ref(ctx))
+    if rt is None:
+        raise HTTPException(409, "Run is not active")
+    return rt
+
+
+@router.post("/{run_id}/control/{action}", response_model=RunOut)
+async def control(run_id: str, action: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                  ctx: ProjectCtx = Depends(project_ctx)) -> Run:
+    if action not in ("pause", "resume", "step", "stop"):
+        raise HTTPException(422, "action must be pause|resume|step|stop")
+    rt = await _runtime(run_id, db, user, ctx)
+    getattr(rt, action)()
+    run = await owned_run(run_id, db, user)
+    await db.refresh(run)
+    return run
+
+
+@router.post("/{run_id}/interject", status_code=202)
+async def interject(run_id: str, body: InterjectIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                    ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, bool]:
+    rt = await _runtime(run_id, db, user, ctx)
+    if body.to_agent_id and body.to_agent_id not in rt.agents:
+        raise HTTPException(422, "Unknown agent")
+    await rt.interject(body.content, body.to_agent_id)
+    return {"ok": True}
+
+
+@router.post("/{run_id}/approve", status_code=202)
+async def approve(run_id: str, body: ApprovalIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                  ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, bool]:
+    rt = await _runtime(run_id, db, user, ctx)
+    if not rt.resolve_approval(body.approval_id, body.approved, body.reason, body.scope):
+        raise HTTPException(404, "No such pending approval")
+    return {"ok": True}
+
+
+@router.get("/{run_id}/events", response_model=list[RunEventOut])
+async def events(run_id: str, after: int = 0, limit: int = Query(5000, le=20000), db: AsyncSession = Depends(get_pdb),
+                 user: User = Depends(current_user)) -> list[RunEvent]:
+    await owned_run(run_id, db, user)
+    return list((await db.execute(select(RunEvent).where(RunEvent.run_id == run_id, RunEvent.id > after).order_by(RunEvent.id).limit(limit))).scalars().all())
+
+
+@router.get("/{run_id}/messages", response_model=list[MessageOut])
+async def messages(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[Message]:
+    await owned_run(run_id, db, user)
+    return list((await db.execute(select(Message).where(Message.run_id == run_id).order_by(Message.created_at))).scalars().all())
+
+
+@router.get("/{run_id}/tasks", response_model=list[TaskOut])
+async def tasks(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[Task]:
+    await owned_run(run_id, db, user)
+    return list((await db.execute(select(Task).where(Task.run_id == run_id).order_by(Task.key))).scalars().all())
+
+
+@router.get("/{run_id}/report")
+async def report(run_id: str, download: bool = False, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                 ctx: ProjectCtx = Depends(project_ctx)) -> Response:
+    run = await owned_run(run_id, db, user)
+    if not run.report_md:
+        from app.services.report import build_report
+
+        run.report_md = await build_report(run_id, ctx.sf)
+    headers = {"Content-Disposition": f'attachment; filename="run-report-{run_id[:8]}.md"'} if download else {}
+    return Response(run.report_md, media_type="text/markdown; charset=utf-8", headers=headers)
+
+
+# ---------------- artifacts (versioned changes made by agents in a run)
+def _art_out(a: Artifact) -> ArtifactOut:
+    return ArtifactOut(id=a.id, run_id=a.run_id, path=a.path, version=a.version, planned=a.planned, author_agent_id=a.author_agent_id,
+                       change_note=a.change_note, created_at=a.created_at, size=len(a.content))
+
+
+@router.get("/{run_id}/artifacts", response_model=list[ArtifactOut])
+async def list_artifacts(run_id: str, all_versions: bool = False, db: AsyncSession = Depends(get_pdb),
+                         user: User = Depends(current_user)) -> list[ArtifactOut]:
+    await owned_run(run_id, db, user)
+    rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.path, Artifact.version))).scalars().all()
+    if not all_versions:
+        latest: dict[str, Artifact] = {}
+        for a in rows:
+            latest[a.path] = a
+        rows = list(latest.values())
+    return [_art_out(a) for a in rows]
+
+
+@router.get("/{run_id}/artifacts/file", response_model=ArtifactContentOut)
+async def get_artifact(run_id: str, path: str, version: int | None = None, db: AsyncSession = Depends(get_pdb),
+                       user: User = Depends(current_user)) -> ArtifactContentOut:
+    """Version content. ``version=0`` returns the file as it was before the run touched it."""
+    await owned_run(run_id, db, user)
+    if version == 0:
+        first = (await db.execute(select(Artifact).where(Artifact.run_id == run_id, Artifact.path == path).order_by(Artifact.version).limit(1))).scalar_one_or_none()
+        if first is None:
+            raise HTTPException(404, "Artifact not found")
+        o = _art_out(first)
+        return ArtifactContentOut(**{**o.model_dump(), "version": 0, "change_note": "original"}, content=first.previous_content or "")
+    q = select(Artifact).where(Artifact.run_id == run_id, Artifact.path == path)
+    q = q.where(Artifact.version == version) if version else q.order_by(Artifact.version.desc())
+    a = (await db.execute(q.limit(1))).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "Artifact not found")
+    return ArtifactContentOut(**_art_out(a).model_dump(), content=a.content)
+
+
+@router.post("/{run_id}/artifacts/revert", status_code=200)
+async def revert_artifact(run_id: str, body: RevertIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                          ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, str]:
+    """Restore a file in the project to an earlier version (0 = before the run). Deletes files the run created."""
+    await owned_run(run_id, db, user)
+    rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id, Artifact.path == body.path).order_by(Artifact.version))).scalars().all()
+    if not rows:
+        raise HTTPException(404, "Artifact not found")
+    if rows[-1].planned:
+        raise HTTPException(409, "Planned files never touched the project; nothing to revert")
+    fs = ProjectFS(ctx.root)
+    try:
+        rel, full = fs.resolve(body.path)
+    except WorkspaceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if body.to_version == 0:
+        if rows[0].previous_content is None:
+            full.unlink(missing_ok=True)
+            return {"status": "deleted", "path": rel}
+        fs.write(rel, rows[0].previous_content)
+        return {"status": "restored", "path": rel}
+    target = next((r for r in rows if r.version == body.to_version), None)
+    if target is None:
+        raise HTTPException(404, "No such version")
+    fs.write(rel, target.content)
+    return {"status": "restored", "path": rel}
+
+
+@router.post("/{run_id}/plans/apply", status_code=200)
+async def apply_plan(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                     ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, list[str]]:
+    """Apply every file planned in a plan-mode run to the real project."""
+    run = await owned_run(run_id, db, user)
+    if run.status in ACTIVE_STATES and manager.get(run_id):
+        raise HTTPException(409, "Wait for the run to finish before applying its plan")
+    rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id, Artifact.planned.is_(True)).order_by(Artifact.path, Artifact.version))).scalars().all()
+    latest: dict[str, Artifact] = {}
+    for a in rows:
+        latest[a.path] = a
+    fs = ProjectFS(ctx.root)
+    applied = []
+    for p, a in latest.items():
+        fs.write(p, a.content)
+        applied.append(p)
+    return {"applied": applied}
+
+
+@router.get("/{run_id}/artifacts.zip")
+async def download_zip(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                       ctx: ProjectCtx = Depends(project_ctx)) -> Response:
+    """ZIP of every file the run produced (latest version) plus the run report."""
+    run = await owned_run(run_id, db, user)
+    rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.path, Artifact.version))).scalars().all()
+    latest: dict[str, str] = {}
+    for a in rows:
+        latest[a.path] = a.content
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p, content in sorted(latest.items()):
+            zf.writestr(p, content)
+        if run.report_md:
+            zf.writestr("RUN_REPORT.md", run.report_md)
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="octopus-run-{run_id[:8]}.zip"'})
+
+
+@router.get("/{run_id}/preview/{path:path}")
+async def preview(run_id: str, path: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                  ctx: ProjectCtx = Depends(project_ctx)) -> Response:
+    """Serve project files (plan shadow first) for the sandboxed live-preview iframe (strict CSP)."""
+    from app.core.config import PROJECT_DIRNAME
+
+    run = await owned_run(run_id, db, user)
+    shadow = ctx.root / PROJECT_DIRNAME / "plans" / run_id if run.permission_level == "plan" else None
+    fs = ProjectFS(ctx.root, shadow=shadow if shadow and shadow.is_dir() else None)
+    try:
+        rel, _ = fs.resolve(path or "index.html")
+        content = fs.current(rel)
+    except WorkspaceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if content is None:
+        raise HTTPException(404, "File not found")
+    mime = mimetypes.guess_type(rel)[0] or "text/plain"
+    if mime not in ("text/html", "text/css", "application/javascript", "text/javascript", "image/svg+xml", "application/json"):
+        mime = "text/plain"
+    return Response(content, media_type=mime, headers={
+        "Content-Security-Policy": "sandbox allow-scripts allow-forms; default-src 'self' 'unsafe-inline' data:; connect-src 'none'",
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})

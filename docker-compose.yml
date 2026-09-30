@@ -1,0 +1,23 @@
+# Optional containerised setup (still fully local). The folder in OCTOPUS_PROJECTS is exposed to the
+# directory picker as /workspaces; each project keeps its data in <project>/.octopus/.
+services:
+  backend:
+    build: ./backend
+    env_file: [{ path: .env, required: false }]
+    environment:
+      OCTOPUS_HOME: /data
+      WORKSPACE_ALLOWED_ROOTS: '["/workspaces"]'
+    volumes:
+      - octopus-data:/data
+      - ${OCTOPUS_PROJECTS:-./projects}:/workspaces
+    ports: ["127.0.0.1:8000:8000"]
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    ports: ["127.0.0.1:8080:8080"]
+    restart: unless-stopped
+
+volumes:
+  octopus-data:

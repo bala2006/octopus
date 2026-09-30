@@ -29,3 +29,6 @@ data/
 .DS_Store
 .idea/
 .vscode/
+frontend/test-results/
+frontend/playwright-report/
+frontend/openapi.json

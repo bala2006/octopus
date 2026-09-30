@@ -1,0 +1,108 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@xyflow/react/dist/style.css";
+@import "highlight.js/styles/github-dark.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 30% 12%;
+    --surface: 220 20% 98%;
+    --elevated: 0 0% 100%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 30% 12%;
+    --primary: 252 83% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 224 30% 16%;
+    --muted: 220 14% 95%;
+    --muted-foreground: 220 9% 40%;
+    --accent: 220 14% 92%;
+    --accent-foreground: 224 30% 12%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 60% 38%;
+    --warning: 36 92% 45%;
+    --border: 220 13% 88%;
+    --input: 220 13% 84%;
+    --ring: 252 83% 60%;
+    --radius: 0.6rem;
+    --grid: 220 13% 86%;
+  }
+  .dark {
+    --background: 228 24% 7%;
+    --foreground: 220 20% 92%;
+    --surface: 228 22% 9.5%;
+    --elevated: 228 20% 12%;
+    --popover: 228 20% 12%;
+    --popover-foreground: 220 20% 92%;
+    --primary: 252 90% 70%;
+    --primary-foreground: 228 24% 8%;
+    --secondary: 228 16% 16%;
+    --secondary-foreground: 220 20% 92%;
+    --muted: 228 16% 14%;
+    --muted-foreground: 220 10% 62%;
+    --accent: 228 16% 18%;
+    --accent-foreground: 220 20% 95%;
+    --destructive: 0 72% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 55% 50%;
+    --warning: 38 92% 58%;
+    --border: 228 14% 18%;
+    --input: 228 14% 22%;
+    --ring: 252 90% 70%;
+    --grid: 228 14% 16%;
+  }
+  * { @apply border-border; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  :focus-visible { @apply outline-none ring-2 ring-ring ring-offset-1 ring-offset-background; }
+  ::selection { background: hsl(var(--primary) / 0.3); }
+  * { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+}
+
+@layer components {
+  .skeleton {
+    background: linear-gradient(90deg, hsl(var(--muted)) 0%, hsl(var(--accent)) 50%, hsl(var(--muted)) 100%);
+    background-size: 200% 100%;
+    @apply animate-shimmer rounded-md;
+  }
+  .kbd { @apply rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground; }
+  .shimmer-text {
+    background: linear-gradient(90deg, hsl(var(--muted-foreground)) 0%, hsl(var(--foreground)) 50%, hsl(var(--muted-foreground)) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    @apply animate-shimmer;
+  }
+  .caret::after { content: "▍"; @apply ml-0.5 animate-blink text-primary; }
+}
+
+/* ---------- React Flow theming ---------- */
+.react-flow { --xy-background-color: transparent; }
+.react-flow__attribution { display: none; }
+.react-flow__controls { @apply overflow-hidden rounded-lg border border-border shadow-lg; }
+.react-flow__controls-button { @apply border-b border-border bg-elevated text-foreground hover:bg-accent; }
+.react-flow__controls-button svg { fill: currentColor; }
+.react-flow__minimap { @apply overflow-hidden rounded-lg border border-border !bg-elevated; }
+.react-flow__handle { @apply !h-2.5 !w-2.5 !border-2 !border-background !bg-muted-foreground transition-transform; }
+.react-flow__handle:hover, .react-flow__handle.connectingfrom { @apply !scale-150 !bg-primary; }
+.react-flow__node.selected > div { @apply ring-2 ring-primary; }
+.react-flow__edge-path { transition: stroke 0.2s, stroke-width 0.2s; }
+.react-flow__selection { @apply !border-primary !bg-primary/10; }
+.react-flow__connectionline path { stroke: hsl(var(--primary)); stroke-width: 2; stroke-dasharray: 6 4; }
+
+/* ---------- Markdown ---------- */
+.prose pre { @apply my-2 rounded-lg border border-border bg-[#0d1117] p-0; }
+.prose pre code { @apply block overflow-x-auto p-3 text-[12.5px] leading-relaxed; }
+.prose :not(pre) > code { @apply rounded bg-muted px-1 py-0.5 text-[0.85em] before:content-none after:content-none; }
+.prose table { @apply text-sm; }
