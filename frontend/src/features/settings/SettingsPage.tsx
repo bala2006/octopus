@@ -294,7 +294,7 @@ function McpServers() {
           {data.map((s) => (
             <div key={s.id} className="rounded-xl border border-border bg-surface p-3">
               <div className="flex items-center gap-3">
-                <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg", s.last_error ? "bg-destructive/15 text-destructive" : "bg-pink-500/15 text-pink-400")}><Server className="h-4 w-4" /></div>
+                <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg", s.last_error ? "bg-destructive/15 text-destructive" : "bg-olive/15 text-olive")}><Server className="h-4 w-4" /></div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-sm font-medium">{s.name}<Badge variant="outline">{s.transport}</Badge>{!s.enabled && <Badge variant="secondary">disabled</Badge>}</div>
                   <div className="truncate font-mono text-[11px] text-muted-foreground">{s.transport === "http" ? s.url : `${s.command} ${s.args.join(" ")}`}</div>
@@ -406,7 +406,7 @@ function Appearance() {
       <div className="grid grid-cols-2 gap-3">
         {(["dark", "light"] as const).map((t) => (
           <button key={t} onClick={() => setTheme(t)} className={cn("rounded-xl border p-4 text-left transition hover:border-primary/50", theme === t ? "border-primary bg-primary/5" : "border-border")}>
-            <div className={cn("mb-3 h-16 rounded-lg border", t === "dark" ? "border-slate-700 bg-[#0e1220]" : "border-slate-200 bg-white")} />
+            <div className={cn("mb-3 h-16 rounded-lg border", t === "dark" ? "border-[#444442] bg-[#1F1E1D]" : "border-[#DEDCD4] bg-[#FAF9F5]")} />
             <span className="flex items-center gap-1.5 text-sm font-medium">{t === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}{t === "dark" ? "Dark" : "Light"}</span>
           </button>
         ))}

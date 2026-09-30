@@ -50,7 +50,7 @@ export function App() {
           </React.Suspense>
         </ErrorBoundary>
       </BrowserRouter>
-      <Toaster theme={theme} position="top-center" offset={56} richColors closeButton toastOptions={{ className: "!rounded-lg !border-border" }} />
+      <Toaster theme={theme} position="top-center" offset={56} closeButton toastOptions={{ className: "!rounded-lg !border-border" }} />
     </TooltipProvider>
   );
 }

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { tone } from "@/lib/palette";
 import {
   Background, BackgroundVariant, ConnectionMode, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow,
 } from "@xyflow/react";
@@ -171,7 +172,7 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
                   useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: ids.includes(n.id) })) });
                 }} />
                 <Controls showInteractive={false} position="bottom-left" />
-                <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => (n.data as { color?: string }).color ?? "#888"} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />
+                <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => tone((n.data as { color?: string }).color)} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />
               </ReactFlow>
               </EdgeAnchorsProvider>
             </div>
@@ -195,7 +196,7 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
                   <ContextMenuSubContent>
                     {roles.data?.map((r) => (
                       <ContextMenuItem key={r.key} onSelect={() => addRole(r.key, menuPos.current ?? undefined)}>
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: r.color }} />{r.role}
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: tone(r.color) }} />{r.role}
                       </ContextMenuItem>
                     ))}
                   </ContextMenuSubContent>

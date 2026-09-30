@@ -70,7 +70,7 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
           <Tip content="Managers lead a department: they delegate, review, and (with Manage team) hire">
             <button role="switch" aria-checked={!!data.is_manager} aria-label="Department manager"
               onClick={() => update(id, { is_manager: !data.is_manager, tools: { ...tools, manage_team: !data.is_manager ? true : tools.manage_team } as AgentTools }, { history: true })}
-              className={cn("flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition active:scale-95", data.is_manager ? "border-amber-400/50 bg-amber-400/10 text-amber-400" : "border-border text-muted-foreground hover:bg-accent/50")}>
+              className={cn("flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition active:scale-95", data.is_manager ? "border-terracotta/50 bg-terracotta/10 text-terracotta" : "border-border text-muted-foreground hover:bg-accent/50")}>
               <Crown className="h-3.5 w-3.5" />Manager
             </button>
           </Tip>
@@ -110,7 +110,7 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
                   <button role="switch" aria-checked={on} onClick={() => setTool(t.key, !on)}
                     className={cn("flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-left text-xs transition-all active:scale-[0.97]",
                       on ? "border-primary/50 bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-accent/50")}>
-                    <t.icon className={cn("h-3.5 w-3.5", on && (t.danger ? "text-amber-500" : "text-primary"))} />
+                    <t.icon className={cn("h-3.5 w-3.5", on && (t.danger ? "text-warning" : "text-primary"))} />
                     <span className="flex-1 truncate">{t.label}</span>
                     <span className={cn("h-1.5 w-1.5 rounded-full transition-colors", on ? "bg-primary" : "bg-muted-foreground/30")} />
                   </button>
@@ -132,7 +132,7 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
               {mcp.map((s) => {
                 const on = mcpIds.includes(s.id);
                 return (
-                  <label key={s.id} className={cn("flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-xs transition", on ? "border-pink-400/40 bg-pink-400/5" : "border-border hover:bg-accent/40", !s.enabled && "opacity-50")}>
+                  <label key={s.id} className={cn("flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-xs transition", on ? "border-olive/40 bg-olive/5" : "border-border hover:bg-accent/40", !s.enabled && "opacity-50")}>
                     <Switch checked={on} disabled={!s.enabled} onCheckedChange={(v) => setTool("mcp_servers", v ? [...mcpIds, s.id] : mcpIds.filter((x) => x !== s.id))} aria-label={`Grant ${s.name}`} />
                     <span className="flex-1 truncate font-medium">{s.name}</span>
                     <span className={cn("text-[10px]", s.last_error ? "text-destructive" : "text-muted-foreground")}>{s.last_error ? "error" : `${(s.tools ?? []).length} tools`}</span>

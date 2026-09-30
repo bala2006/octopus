@@ -3,6 +3,7 @@ import { applyEdgeChanges, applyNodeChanges, type Connection, type Edge, type Ed
 import dagre from "@dagrejs/dagre";
 import type { AgentIn, AgentOut, CanvasOut, EdgeConfig, EdgeIn, EdgeOut, EdgeType, RoleTemplateOut } from "@/types";
 import { uid } from "@/lib/utils";
+import { SOFT_COLORS, tone } from "@/lib/palette";
 
 export type AgentData = Omit<AgentIn, "position_x" | "position_y"> & { id: string } & Record<string, unknown>;
 export type AgentNode = Node<AgentData, "agent">;
@@ -23,9 +24,9 @@ export interface DeptMeta { color: string; description?: string }
 export interface DeptMemberSpec { role: RoleTemplateOut; name?: string; roleTitle?: string }
 export interface DeptSpec { name: string; color: string; manager: DeptMemberSpec; members: DeptMemberSpec[]; reportsTo: string | null; at: { x: number; y: number } }
 
-export const DEPT_PALETTE = ["#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ec4899", "#0ea5e9", "#ef4444", "#84cc16", "#f97316", "#6366f1"];
+export const DEPT_PALETTE = SOFT_COLORS;
 export const deptColor = (name: string, meta?: Record<string, DeptMeta>) =>
-  meta?.[name]?.color ?? DEPT_PALETTE[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % DEPT_PALETTE.length];
+  tone(meta?.[name]?.color ?? DEPT_PALETTE[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % DEPT_PALETTE.length]);
 
 interface CanvasState {
   companyId: string | null;
@@ -223,7 +224,7 @@ export const useCanvas = create<CanvasState>()((set, get) => {
       const node: AgentNode = {
         id, type: "agent", position: pos, selected: true,
         data: {
-          id, name, role: tpl.role, description: tpl.description ?? "", avatar: tpl.avatar ?? "bot", color: tpl.color ?? "#6366f1",
+          id, name, role: tpl.role, description: tpl.description ?? "", avatar: tpl.avatar ?? "bot", color: tpl.color ?? "#D97756",
           system_prompt: tpl.system_prompt ?? "", provider: "mock", model: "mock/demo", temperature: 0.4, max_tokens: 2048,
           tools: tpl.tools ?? { file_read: true, file_write: true, list_files: true, terminal: false, web_search: false, calculator: true, ask_user: false, send_message: true, manage_team: false, mcp_servers: [] },
           behavior: { assertiveness: 0.5, creativity: 0.5, strictness: 0.5, debate_style: "balanced", max_autonomous_turns: 12, template_key: tpl.key ?? "" },

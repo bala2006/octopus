@@ -62,7 +62,7 @@ export function AppShell() {
   }
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface/80 px-3 backdrop-blur">
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3">
         <Link to="/" className="flex items-center gap-2 rounded-md px-1 py-1 transition hover:bg-accent" aria-label="All projects">
           <img src="/octopus.svg" alt="" className="h-6 w-6" />
           <span className="hidden text-sm font-semibold tracking-tight lg:inline">Octopus</span>
@@ -229,7 +229,7 @@ function LiveRunsIndicator() {
   const first = live.find((r) => r.status === "awaiting_user") ?? live[0];
   return (
     <Tip content={needsYou ? "A run is waiting for you" : `${live.length} live run(s)`} side="bottom">
-      <Link to={`/w/${w}/runs/${first.id}`} className={cn("flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition hover:bg-accent",
+      <Link to={`/w/${w}/runs/${first.id}`} className={cn("flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium transition hover:bg-accent",
         needsYou ? "border-warning/50 bg-warning/10 text-warning" : "border-primary/40 bg-primary/10 text-primary")}>
         <Radio className={cn("h-3 w-3", !needsYou && "animate-pulse")} />
         {needsYou ? "Needs you" : `${live.length} live`}

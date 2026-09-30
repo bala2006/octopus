@@ -19,7 +19,7 @@ function CodeBlock({ children, ...props }: React.HTMLAttributes<HTMLPreElement>)
       <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
         {lang && !lang.includes(" ") && <span className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-white/70">{lang}</span>}
         <button onClick={copy} className="rounded-md bg-black/40 p-1 text-white/80 transition hover:bg-black/60" aria-label="Copy code">
-          {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? <Check className="h-3.5 w-3.5 text-olive" /> : <Copy className="h-3.5 w-3.5" />}
         </button>
       </div>
       <pre ref={ref} {...props}>{children}</pre>

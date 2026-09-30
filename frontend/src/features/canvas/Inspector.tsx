@@ -97,7 +97,7 @@ export function Inspector() {
               <div className="space-y-1.5">
                 {TOOLS.map((t) => (
                   <label key={t.key} className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-2.5 transition hover:bg-accent/30">
-                    <t.icon className={cn("h-4 w-4", t.danger ? "text-amber-500" : "text-muted-foreground")} />
+                    <t.icon className={cn("h-4 w-4", t.danger ? "text-warning" : "text-muted-foreground")} />
                     <span className="flex-1"><span className="block text-sm">{t.label}</span><span className="block text-[11px] text-muted-foreground">{t.hint}</span></span>
                     <Switch checked={!!(tools as Record<string, unknown>)[t.key]} onCheckedChange={(v) => set({ tools: { ...tools, [t.key]: v } })} />
                   </label>
@@ -148,7 +148,7 @@ function McpGrants({ tools, onChange }: { tools: AgentTools; onChange: (ids: str
       {!data?.length && <p className="text-xs text-muted-foreground">No MCP servers registered. Add them in Settings.</p>}
       {data?.map((s) => (
         <label key={s.id} className="flex items-center gap-3 rounded-lg border border-border p-2.5">
-          <Plug className="h-4 w-4 text-pink-400" />
+          <Plug className="h-4 w-4 text-olive" />
           <span className="flex-1"><span className="block text-sm">{s.name}</span><span className="block truncate text-[11px] text-muted-foreground">{(s.tools ?? []).map((t) => t.name).join(", ") || s.last_error || "no tools"}</span></span>
           <Switch checked={ids.includes(s.id)} disabled={!s.enabled} onCheckedChange={(v) => onChange(v ? [...ids, s.id] : ids.filter((x) => x !== s.id))} />
         </label>

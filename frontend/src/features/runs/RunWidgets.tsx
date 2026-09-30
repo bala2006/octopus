@@ -1,4 +1,5 @@
 import * as React from "react";
+import { tone } from "@/lib/palette";
 import { Coins, Cpu, Gauge, Radio, Timer } from "lucide-react";
 import { cn, formatCost, formatTokens } from "@/lib/utils";
 import type { AgentOut } from "@/types";
@@ -66,7 +67,7 @@ export function TaskBoard({ tasks, agents }: { tasks: LiveTask[]; agents: Record
 }
 
 const TONE: Record<TimelineItem["tone"], string> = {
-  msg: "bg-sky-400", protocol: "bg-rose-400", file: "bg-emerald-400", tool: "bg-amber-400", status: "bg-muted-foreground", error: "bg-destructive", approval: "bg-warning", org: "bg-fuchsia-400",
+  msg: "bg-steel", protocol: "bg-destructive", file: "bg-olive", tool: "bg-terracotta", status: "bg-muted-foreground", error: "bg-destructive", approval: "bg-warning", org: "bg-steel",
 };
 
 /** Timeline scrubber over persisted events. `cursor === null` means live. */
@@ -123,7 +124,7 @@ export function Timeline({ items, maxSeq, cursor, onCursor, agents, live }: {
         )}
       </div>
       <div className="w-64 shrink-0 truncate text-[11px] text-muted-foreground" aria-live="polite">
-        {current ? <>{current.agent_id && agents[current.agent_id] && <span style={{ color: agents[current.agent_id].color }} className="font-medium">● </span>}{current.label}</> : "No events yet"}
+        {current ? <>{current.agent_id && agents[current.agent_id] && <span style={{ color: tone(agents[current.agent_id].color) }} className="font-medium">● </span>}{current.label}</> : "No events yet"}
       </div>
     </div>
   );

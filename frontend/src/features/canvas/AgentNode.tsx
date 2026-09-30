@@ -1,4 +1,5 @@
 import * as React from "react";
+import { tone } from "@/lib/palette";
 import { Handle, NodeToolbar, Position, type NodeProps } from "@xyflow/react";
 import { Crown, Flag, MessageSquare, Moon, Plug, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
@@ -31,7 +32,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
   const inactive = data.active === false;
   const glowing = !!status && meta.live && !inactive;
   const showQuick = editable && quickId === id;
-  const dcolor = data.department ? (live?.departments?.[data.department]?.color ?? deptColor(data.department, departments)) : null;
+  const dcolor = data.department ? tone(live?.departments?.[data.department]?.color ?? deptColor(data.department, departments)) : null;
   const hiredBy = data.created_by ? (live?.names?.[data.created_by] ?? creatorName ?? "an agent") : null;
 
   return (
@@ -50,7 +51,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
         data-testid={`agent-node-${data.name}`}
         aria-label={`${data.name}, ${data.role}${status ? `, ${meta.label}` : ""}`}
       >
-        <div className="h-1 rounded-t-xl" style={{ background: `linear-gradient(90deg, ${data.color}, ${data.color}55)` }} />
+        <div className="h-1 rounded-t-xl" style={{ background: `linear-gradient(90deg, ${tone(data.color)}, ${tone(data.color)}55)` }} />
         {(dcolor || hiredBy || inactive) && (
           <div className="flex items-center gap-1 px-3 pt-2">
             {dcolor && (
@@ -59,7 +60,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
                 {data.is_manager && <Crown className="h-2.5 w-2.5 shrink-0" />}<span className="truncate">{data.department}</span>
               </span>
             )}
-            {hiredBy && <Tip content={`Hired by ${hiredBy} during a run`}><span className="inline-flex items-center gap-0.5 rounded-full bg-fuchsia-500/15 px-1.5 py-px text-[9.5px] font-semibold text-fuchsia-400"><Sparkles className="h-2.5 w-2.5" />AI hire</span></Tip>}
+            {hiredBy && <Tip content={`Hired by ${hiredBy} during a run`}><span className="inline-flex items-center gap-0.5 rounded-full bg-steel/15 px-1.5 py-px text-[9.5px] font-semibold text-steel"><Sparkles className="h-2.5 w-2.5" />AI hire</span></Tip>}
             {inactive && <span className="ml-auto inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-px text-[9.5px] font-semibold uppercase text-muted-foreground"><Moon className="h-2.5 w-2.5" />Inactive</span>}
           </div>
         )}
@@ -68,7 +69,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="truncate text-sm font-semibold">{data.name}</span>
-              {data.is_manager && !dcolor && <Tip content="Manager"><Crown className="h-3 w-3 shrink-0 text-amber-400" /></Tip>}
+              {data.is_manager && !dcolor && <Tip content="Manager"><Crown className="h-3 w-3 shrink-0 text-terracotta" /></Tip>}
               {data.is_entry && (
                 <Tip content="Entry agent: receives the company goal"><span className="inline-flex items-center gap-0.5 rounded bg-primary/15 px-1 py-px text-[9.5px] font-semibold uppercase tracking-wide text-primary"><Flag className="h-2.5 w-2.5" />Entry</span></Tip>
               )}
@@ -90,9 +91,9 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
             {perm && <Tip content={`Permission: ${perm.label}`}><span className={cn("rounded bg-muted p-0.5", perm.tone)}><perm.icon className="h-3 w-3" /></span></Tip>}
             <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
               {tools.slice(0, 6).map((t) => (
-                <Tip key={t.key} content={t.label}><span className={cn("rounded p-0.5", t.danger && "text-amber-500/90")}><t.icon className="h-3 w-3" /></span></Tip>
+                <Tip key={t.key} content={t.label}><span className={cn("rounded p-0.5", t.danger && "text-warning/90")}><t.icon className="h-3 w-3" /></span></Tip>
               ))}
-              {mcpCount > 0 && <Tip content={`${mcpCount} MCP server(s)`}><span className="flex items-center rounded p-0.5 text-pink-400"><Plug className="h-3 w-3" /><span className="text-[9px]">{mcpCount}</span></span></Tip>}
+              {mcpCount > 0 && <Tip content={`${mcpCount} MCP server(s)`}><span className="flex items-center rounded p-0.5 text-olive"><Plug className="h-3 w-3" /><span className="text-[9px]">{mcpCount}</span></span></Tip>}
             </div>
           </div>
 

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { tone } from "@/lib/palette";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -107,7 +108,7 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-surface" aria-label="Chats">
       <div className="p-2">
         <button onClick={onCompany} className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium transition hover:bg-accent", active?.mode === "company" && "bg-accent")}>
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-cyan-500 text-white"><Hash className="h-4 w-4" /></span>
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
           Company Channel
         </button>
       </div>
@@ -213,7 +214,7 @@ function ChatMessage({ m, agent, isLast, onRegenerate, busy }: { m: MessageOut; 
       <AgentAvatar name={agent.name} color={agent.color} avatar={agent.avatar} size={30} />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="font-semibold" style={{ color: agent.color }}>{agent.name}</span>
+          <span className="font-semibold" style={{ color: tone(agent.color) }}>{agent.name}</span>
           <span className="text-muted-foreground">{agent.role}</span>
           <span className="font-mono text-[10px] text-muted-foreground">{meta.provider}/{meta.model}</span>
           {meta.warning && <Tip content={meta.warning}><Badge variant="warning">demo</Badge></Tip>}
@@ -258,7 +259,7 @@ function StreamingMessage({ s, agent }: { s: StreamingMsg; agent: AgentOut }) {
       <AgentAvatar name={agent.name} color={agent.color} avatar={agent.avatar} status={s.phase === "writing" ? "speaking" : s.phase === "tool" ? "tool" : "thinking"} size={30} />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2 text-xs">
-          <span className="font-semibold" style={{ color: agent.color }}>{agent.name}</span>
+          <span className="font-semibold" style={{ color: tone(agent.color) }}>{agent.name}</span>
           <span className="shimmer-text font-medium">{s.detail}</span>
           <span className="tabular-nums text-[10px] text-muted-foreground">{(elapsed / 1000).toFixed(1)}s</span>
         </div>
@@ -327,7 +328,7 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-cyan-500 text-white"><Hash className="h-4 w-4" /></span>
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">Company Channel</div>
           <div className="truncate text-xs text-muted-foreground">{shownRun ? `${live ? "Live" : "Last"} run: ${shownRun.goal}` : "Send a goal to the entry agent(s); watch the team work"}</div>
