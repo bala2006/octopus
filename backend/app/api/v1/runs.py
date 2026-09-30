@@ -74,9 +74,10 @@ async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(ge
 async def get_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> Run:
     run = await owned_run(run_id, db, user)
     rt = manager.get(run_id)
-    if rt is not None:  # live protocol state is fresher than the persisted snapshot
+    if rt is not None:  # live state is fresher than the persisted row; take all of it from the runtime so it's consistent
         run.state_json = rt.state_dict()
         run.status = rt.run_status
+        run.turns, run.tokens_used, run.cost_usd = rt.turn_no, rt.tokens, round(rt.cost, 6)
     return run
 
 

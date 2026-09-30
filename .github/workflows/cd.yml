@@ -1,0 +1,75 @@
+name: CD
+
+# Delivery: after CI passes on main (or when a version tag is pushed), publish Docker images to GitHub Container Registry.
+#   ghcr.io/<owner>/octopus-backend:{main,sha-<short>,<version>,latest}
+#   ghcr.io/<owner>/octopus-frontend:{main,sha-<short>,<version>,latest}
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  tests:
+    # Tag pushes don't trigger CI (it ignores tags), so run the full suite here before publishing a release.
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish ${{ matrix.image }} image
+    needs: [tests]
+    # main: only after a successful CI run; tags: after the test suite above; manual runs always
+    if: >-
+      always() &&
+      (needs.tests.result == 'success' || needs.tests.result == 'skipped') &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        image: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - id: rev
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/octopus-${{ matrix.image }}
+          tags: |
+            type=raw,value=main,enable=${{ github.event_name == 'workflow_run' }}
+            type=raw,value=sha-${{ steps.rev.outputs.short }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=octopus-${{ matrix.image }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

@@ -1,5 +1,8 @@
 # 🐙 Octopus: a virtual software company of AI agents
 
+[![CI](https://github.com/bala2006/octopus/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/bala2006/octopus/actions/workflows/ci.yml)
+[![CD](https://github.com/bala2006/octopus/actions/workflows/cd.yml/badge.svg)](https://github.com/bala2006/octopus/actions/workflows/cd.yml)
+
 Octopus lets you assemble a **company of AI agents** (CEO, PM, Architect, Developers, QA, Designer, DevOps…), wire them together on an **n8n-style canvas**, and give the company a goal such as *"Build a todo app with auth"*. The agents debate, delegate, review each other's work and **write real files into your project folder**. You can watch everything live, step through it, interject, approve or reject dangerous actions, and replay the run afterwards.
 
 - **Runs 100% locally.** Your project directory is the agents' sandbox. All project data lives in `<project>/.octopus/`.
@@ -118,6 +121,27 @@ make test-backend     # pytest: edge-permission routing, loop detection, debate 
 make test-frontend    # tsc strict + vitest (reducer, canvas store, components)
 make e2e              # Playwright: folder → template → edit agent → chat → run → artifacts; ask-mode approval
 ```
+
+### CI / CD (GitHub Actions)
+
+Every push to any branch and every pull request runs **CI** (`.github/workflows/ci.yml`). Jobs run in parallel where they can:
+
+| Job | What it checks |
+|---|---|
+| Backend | `ruff` (syntax errors / undefined names) + the full `pytest` suite |
+| Frontend | `tsc` typecheck, `vitest` unit tests, production build |
+| API types | `frontend/src/types/api.gen.ts` matches the FastAPI schema (run `make gen-api` if it fails) |
+| E2E | Playwright happy paths against the real backend in Demo Mode (traces uploaded on failure) |
+| Docker | backend and frontend images build |
+| CI passed | one summary check: mark it as *required* in branch protection so red PRs can't be merged |
+
+**CD** (`.github/workflows/cd.yml`) publishes Docker images to GitHub Container Registry:
+- **After CI passes on `main`:** images tagged `main` and `sha-<commit>`.
+- **For a `vX.Y.Z` tag:** the full suite runs again first, then images are tagged `X.Y.Z`, `X.Y` and `latest`.
+
+Images: `ghcr.io/bala2006/octopus-backend`, `ghcr.io/bala2006/octopus-frontend`.
+
+Dependabot opens weekly update PRs for actions, pip and npm, and CI tests each one.
 
 ## Screenshots
 
