@@ -146,10 +146,55 @@ Event types: `snapshot`, `run_status`, `agent_created`, `agent_updated`, `agent_
 
 ## 7. LLM layer (`backend/app/llm`)
 
-- `router.prepare_request` resolves credentials from the registry (or env) and Azure options (`api_version`, `auth=key|entra`, reasoning deployments). In Demo Mode, unconfigured providers fall back to the mock.
-- `LiteLLMProvider` streams with `stream_options.include_usage`, maps `azure/<deployment>` and `azure_ai/<model>`, uses Entra ID via `DefaultAzureCredential`, and computes cost with LiteLLM pricing.
-- `stream_with_retry` retries retryable errors (429/5xx/network) with exponential backoff and jitter, but only if nothing has streamed yet.
-- `MockProvider` plus `demo_script.py` implement deterministic, role-aware scripted policies (CEO, PM, Architect, Frontend, Backend, QA, Designer, DevOps, Proposer, Critic, Moderator, plus a generic fallback). They react to the actual inbox and topology, so edited companies still terminate. QA really executes the generated tests in the sandbox.
+- **One real provider.** `router.PROVIDER_CATALOG` holds Azure OpenAI (`gpt-6-luna` by default) plus the offline `mock`. `prepare_request` routes every non-mock agent to Azure and maps unknown models to the configured deployment. It moves credentials saved on the legacy *Foundry* card to Azure, and in Demo Mode falls back to the mock when Azure isn't configured.
+- **`azure_v1.AzureV1Provider`** streams from `/openai/v1/responses` (default) or `/openai/v1/chat/completions`. `azure_v1_target()` accepts any endpoint shape and needs no `api-version`.
+  - The deployment is sent as `model`, with `reasoning.effort` (Responses) or `reasoning_effort` (Chat).
+  - `max_output_tokens` gets reasoning headroom.
+  - `phase: "commentary"` text is skipped.
+  - A parameter the deployment rejects (for example `temperature`) is dropped, retried and remembered per deployment.
+  - Legacy `/openai/deployments/...` URLs go through `LiteLLMProvider`.
+- **Usage and pricing (`pricing.py`).** `Usage` carries the exact provider counts: input (incl. cached and cache-write) and output (incl. reasoning). `pricing.apply()` prices each part at per-deployment rates:
+  - Defaults for gpt-6-luna Standard, per 1M tokens: $0.10 input, $0.01 cached, $0.125 cache write, $0.50 output.
+  - Prompts over 272K tokens: 2× input and 1.5× output.
+  - Data Zone and regional deployments: +10%.
+  - User overrides come from Settings.
+
+  The runtime aggregates totals, per-agent tokens and cost, and a cost breakdown, and emits them in `usage_update`. Costs are stored in USD. `services/fx.py` supplies USD→display-currency rates (ECB via Frankfurter, with ExchangeRate-API as a fallback), cached for 6h, with the last known rate used offline.
+- **Retries.** `stream_with_retry` retries 429/5xx/network errors with exponential backoff and jitter, but only if nothing has streamed yet.
+- **Demo Mode.** `MockProvider` plus `demo_script.py` implement deterministic, role-aware scripted policies that react to the actual inbox and topology, so edited companies still terminate. QA really runs the generated tests in the sandbox. `followup()` handles continued runs: the entry agent hands the change to a teammate, who records it in `docs/CHANGES.md` and reports back. Usage is estimated and priced at gpt-6-luna rates.
+
+## 7b. Runs continue like chats
+
+`RunManager.continue_run()` is used by `POST /runs/{id}/continue`, by `/interject`, and by the run WebSocket's `interject` message.
+- **Live run:** the message is injected into the running team.
+- **Finished run (`completed`/`failed`/`cancelled`):** the **same run** is re-opened in these steps:
+  1. The `RunRuntime` is rebuilt with `restore()`: the full message history, task board, artifacts, observations, protocol state and mock state.
+  2. The stale mailbox is cleared.
+  3. `continue_with()` runs:
+     - it records the follow-up;
+     - it resets the per-agent autonomy counters;
+     - it gives the budgets fresh headroom on top of what was already used;
+     - it sets `status=running` and emits `run_continued`;
+     - it delivers `"Follow-up from the user: …"` to the entry agent(s), or to the agent you chose.
+  4. The blackboard lists the follow-ups and tells agents to build on the existing work.
+
+The files are never touched, artifact versions keep counting on the same run, and the chat stays one continuous feed. **New run** is a separate, explicit action.
+
+## 7c. Agent tools added on top of the core schema
+
+- **Folders.** `create_folder` and `move_file` (move or rename files or whole folders, with `ProjectFS.make_dir` / `ProjectFS.move`) are gated like `write_file`. They respect the sandbox (no traversal, no `.git`/`.octopus`, no secrets outside danger mode, no moving a folder into itself). In plan mode, folders go to the plan shadow and moves are refused. The run's artifact paths follow moves.
+- **Questions.** `request_user_input` takes `question` plus `options: [{label, description, recommended}]` (2-5; exactly one ends up recommended). The UI (`QuestionCard`) shows them as choices with a **Recommended** tag plus *Something else* for a typed answer. The answer is delivered to the asking agent.
+- **Browser (`services/browser.py`).** Octopus supervises one `@playwright/mcp` process on `127.0.0.1` (random port, `--allowed-hosts`, `--isolated`, `--shared-browser-context`). It installs the browser on first use and stops it on shutdown.
+  - Each (run, agent) pair gets a **long-lived MCP session**, i.e. a persistent tab, in a dedicated task. The regular MCP client opens a session per call, which would lose the page.
+  - Agents with the `browser` tool (on by default) see it as MCP server `browser` and are told the preview URL.
+  - Sessions close when the run finalizes.
+- **Reasoning effort.** `behavior.reasoning_effort` per agent, overridable run-wide with `budget.reasoning_effort` (`default|none|low|medium|high|xhigh|max`). The channel-condition gatekeeper always uses `low`.
+
+## 7d. Projects, folders and preview
+
+- **Native folder dialog (`services/native_dialog.py`).** It uses `osascript` on macOS, PowerShell `FolderBrowserDialog` on Windows, and zenity/kdialog/yad on Linux, with a Tk fallback. It runs only for requests from the same machine. `POST /workspaces/native` opens the dialog and registers the folder server-side; the allowed-roots check doesn't apply because the user picked the folder on their own desktop. Without a desktop (Docker/SSH) the UI falls back to the in-app browser.
+- **Self-managed `.octopus/`.** `ensure_layout()` creates or repairs `plans/`, `exports/`, `browser/`, `README.md` and `.gitignore` (`*`) every time a project is opened.
+- **Preview (`services/preview.py`).** It serves project files (plan shadow first for run previews) with real MIME types under a CSP sandbox. That CSP explicitly allows the preview base URL, because `'self'` matches nothing in an opaque-origin sandbox. It also allows `https:` CDNs and forbids forms and framing by other origins. `/api/v1/w/{id}/preview/…` serves the live folder, and `/runs/{id}/preview/…` serves a run's view.
 
 ## 8. Frontend
 
