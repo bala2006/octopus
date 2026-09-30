@@ -160,12 +160,12 @@ export default function ArtifactsPage() {
                 {content.isLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
                 {content.isError && <EmptyState icon={FileCode2} title="Cannot open file" description={(content.error as Error).message} />}
                 {mode === "view" && content.data !== undefined && (
-                  <Editor height="100%" language={languageFor(selected)} value={content.data} theme={theme === "dark" ? "octopus-dark" : "vs"}
+                  <Editor height="100%" language={languageFor(selected)} value={content.data} theme={theme === "dark" ? "octopus-dark" : "octopus-light"}
                     options={{ readOnly: true, minimap: { enabled: false }, fontSize: 12.5, fontFamily: "JetBrains Mono Variable, monospace", scrollBeyondLastLine: false, wordWrap: "on", renderLineHighlight: "none" }}
                     loading={<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />} />
                 )}
                 {mode === "diff" && content.data !== undefined && (
-                  <DiffEditor height="100%" language={languageFor(selected)} original={base.data ?? ""} modified={content.data} theme={theme === "dark" ? "octopus-dark" : "vs"}
+                  <DiffEditor height="100%" language={languageFor(selected)} original={base.data ?? ""} modified={content.data} theme={theme === "dark" ? "octopus-dark" : "octopus-light"}
                     options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, fontSize: 12.5, scrollBeyondLastLine: false }}
                     loading={<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />} />
                 )}
@@ -238,7 +238,7 @@ function TreeItem({ node, depth, selected, onSelect }: { node: TreeNode; depth: 
     return (
       <button role="treeitem" aria-selected={selected === node.path} aria-label={`${node.name}${f.versions && f.versions > 1 ? `, ${f.versions} versions` : ""}${f.badge === "planned" ? ", planned" : ""}`} onClick={() => onSelect(node.path)} style={pad}
         className={cn("flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left transition", selected === node.path ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground")}>
-        <Icon className={cn("h-3.5 w-3.5 shrink-0", f.badge === "planned" ? "text-violet-400" : f.badge === "modified" ? "text-amber-400" : "text-emerald-400/80")} />
+        <Icon className={cn("h-3.5 w-3.5 shrink-0", f.badge === "planned" ? "text-steel" : f.badge === "modified" ? "text-terracotta" : "text-olive/80")} />
         <span className="truncate">{node.name}</span>
         {f.versions && f.versions > 1 && <Tip content={`${f.versions} versions`}><span className="ml-auto rounded bg-muted px-1 text-[10px] tabular-nums">{f.versions}</span></Tip>}
       </button>

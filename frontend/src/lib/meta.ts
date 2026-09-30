@@ -13,39 +13,39 @@ export const AVATARS: Record<string, LucideIcon> = {
   "pen-line": PenLine, search: Search, calculator: Calculator, users: UsersRound,
 };
 export const AVATAR_KEYS = Object.keys(AVATARS);
-export const AGENT_COLORS = ["#8b5cf6", "#6366f1", "#06b6d4", "#10b981", "#22c55e", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#0ea5e9", "#64748b"];
+export const AGENT_COLORS = ["#D97756", "#66839A", "#6B8440", "#C9A04A", "#8E7AA8", "#5E9C94", "#C0655A", "#8A7F6E", "#B58D5E", "#7B8FB8", "#A36F8C", "#7E9B6A"];
 
 export interface StatusMeta { label: string; color: string; icon: LucideIcon; live: boolean }
 export const STATUS: Record<AgentStatus, StatusMeta> = {
-  idle: { label: "Idle", color: "#64748b", icon: Moon, live: false },
-  thinking: { label: "Thinking", color: "#a78bfa", icon: Brain, live: true },
-  speaking: { label: "Writing message", color: "#38bdf8", icon: MessageSquareText, live: true },
-  writing: { label: "Writing file", color: "#34d399", icon: PenLine, live: true },
-  reading: { label: "Reading", color: "#60a5fa", icon: Eye, live: true },
-  running: { label: "Running command", color: "#fbbf24", icon: Terminal, live: true },
-  tool: { label: "Using tool", color: "#f472b6", icon: Plug, live: true },
-  waiting: { label: "Waiting", color: "#94a3b8", icon: Hourglass, live: false },
-  awaiting_approval: { label: "Needs approval", color: "#f59e0b", icon: ShieldQuestion, live: true },
-  error: { label: "Error", color: "#f87171", icon: CircleAlert, live: false },
-  done: { label: "Done", color: "#22c55e", icon: CircleCheck, live: false },
+  idle: { label: "Idle", color: "#8A8780", icon: Moon, live: false },
+  thinking: { label: "Thinking", color: "#8E7AA8", icon: Brain, live: true },
+  speaking: { label: "Writing message", color: "#6B98B2", icon: MessageSquareText, live: true },
+  writing: { label: "Writing file", color: "#7E9B6A", icon: PenLine, live: true },
+  reading: { label: "Reading", color: "#7B8FB8", icon: Eye, live: true },
+  running: { label: "Running command", color: "#C9A04A", icon: Terminal, live: true },
+  tool: { label: "Using tool", color: "#A36F8C", icon: Plug, live: true },
+  waiting: { label: "Waiting", color: "#9D9A91", icon: Hourglass, live: false },
+  awaiting_approval: { label: "Needs approval", color: "#D97756", icon: ShieldQuestion, live: true },
+  error: { label: "Error", color: "#C0655A", icon: CircleAlert, live: false },
+  done: { label: "Done", color: "#7E9B6A", icon: CircleCheck, live: false },
 };
 export const statusMeta = (s?: string): StatusMeta => STATUS[(s as AgentStatus) ?? "idle"] ?? STATUS.idle;
 
 export interface EdgeMeta { label: string; color: string; dash?: string; description: string }
 export const EDGE_TYPES: Record<EdgeType, EdgeMeta> = {
-  delegate: { label: "Delegate", color: "#8b5cf6", description: "Task handoff: the source assigns work to the target." },
-  review: { label: "Review", color: "#10b981", dash: "6 4", description: "Feedback loop: review_request → approve / request_changes." },
-  debate: { label: "Debate", color: "#f43f5e", dash: "2 5", description: "Adversarial discussion ending in explicit agreement or a decision." },
-  report: { label: "Report", color: "#0ea5e9", dash: "10 4", description: "Status reported upward." },
-  consult: { label: "Consult", color: "#eab308", dash: "1 4", description: "Ask-only: questions and answers." },
+  delegate: { label: "Delegate", color: "#D97756", description: "Task handoff: the source assigns work to the target." },
+  review: { label: "Review", color: "#7E9B6A", dash: "6 4", description: "Feedback loop: review_request → approve / request_changes." },
+  debate: { label: "Debate", color: "#B8645A", dash: "2 5", description: "Adversarial discussion ending in explicit agreement or a decision." },
+  report: { label: "Report", color: "#6B98B2", dash: "10 4", description: "Status reported upward." },
+  consult: { label: "Consult", color: "#C9A04A", dash: "1 4", description: "Ask-only: questions and answers." },
 };
 
 export interface PermMeta { label: string; short: string; description: string; icon: LucideIcon; tone: string }
 export const PERMISSIONS: Record<PermissionLevel, PermMeta> = {
-  read_only: { label: "Read only", short: "Read", description: "Agents can read and discuss. No writes, commands or MCP calls.", icon: Lock, tone: "text-sky-400" },
-  plan: { label: "Plan", short: "Plan", description: "Agents write proposed changes to a plan (.octopus/plans). Your project stays untouched until you apply it.", icon: ListChecks, tone: "text-violet-400" },
-  ask: { label: "Ask for dangerous actions", short: "Ask", description: "Reading is free. Writing files, running commands and MCP calls need your approval.", icon: Hand, tone: "text-amber-400" },
-  danger: { label: "Danger mode", short: "Danger", description: "Everything auto-approved, network allowed for commands. Still sandboxed to the project directory.", icon: Flame, tone: "text-red-400" },
+  read_only: { label: "Read only", short: "Read", description: "Agents can read and discuss. No writes, commands or MCP calls.", icon: Lock, tone: "text-steel" },
+  plan: { label: "Plan", short: "Plan", description: "Agents write proposed changes to a plan (.octopus/plans). Your project stays untouched until you apply it.", icon: ListChecks, tone: "text-olive" },
+  ask: { label: "Ask for dangerous actions", short: "Ask", description: "Reading is free. Writing files, running commands and MCP calls need your approval.", icon: Hand, tone: "text-warning" },
+  danger: { label: "Danger mode", short: "Danger", description: "Everything auto-approved, network allowed for commands. Still sandboxed to the project directory.", icon: Flame, tone: "text-destructive" },
 };
 
 export interface ToolMeta { key: "file_read" | "file_write" | "list_files" | "terminal" | "web_search" | "calculator" | "ask_user" | "send_message" | "manage_team"; label: string; icon: LucideIcon; hint: string; danger?: boolean }

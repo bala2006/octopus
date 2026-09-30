@@ -1,4 +1,5 @@
 import * as React from "react";
+import { tone } from "@/lib/palette";
 import { ArrowRight, Ban, Brain, ChevronDown, CircleCheck, CircleX, FileCode2, Gavel, Settings2, Sparkles, Terminal, User } from "lucide-react";
 import { MESSAGE_TYPE_LABEL, statusMeta } from "@/lib/meta";
 import { clockTime, cn } from "@/lib/utils";
@@ -11,10 +12,10 @@ import type { OrgEvent, RunLive } from "./runState";
 export type FeedFilter = "all" | "user" | "internal";
 
 const TYPE_TONE: Record<string, string> = {
-  proposal: "text-rose-400 border-rose-400/40", objection: "text-orange-400 border-orange-400/40", agreement: "text-emerald-400 border-emerald-400/40",
-  decision: "text-amber-400 border-amber-400/40", critique: "text-orange-400 border-orange-400/40", review_request: "text-emerald-400 border-emerald-400/40",
-  review_result: "text-emerald-400 border-emerald-400/40", task: "text-violet-400 border-violet-400/40", status_update: "text-sky-400 border-sky-400/40",
-  final_report: "text-primary border-primary/50", question: "text-yellow-400 border-yellow-400/40", answer: "text-yellow-400 border-yellow-400/40",
+  proposal: "text-destructive border-destructive/40", objection: "text-terracotta border-terracotta/40", agreement: "text-olive border-olive/40",
+  decision: "text-terracotta border-terracotta/40", critique: "text-terracotta border-terracotta/40", review_request: "text-olive border-olive/40",
+  review_result: "text-olive border-olive/40", task: "text-steel border-steel/40", status_update: "text-steel border-steel/40",
+  final_report: "text-primary border-primary/50", question: "text-warning border-warning/40", answer: "text-warning border-warning/40",
   user_interjection: "text-primary border-primary/40",
 };
 
@@ -134,8 +135,8 @@ function FileGroup({ ms, agents }: { ms: MessageOut[]; agents: Record<string, Ag
   const a = ms[0].from_agent_id ? agents[ms[0].from_agent_id] : null;
   return (
     <div className="ml-9 flex flex-wrap items-center gap-1.5 rounded-md py-1 text-[11px] text-muted-foreground animate-fade-up">
-      <FileCode2 className="h-3.5 w-3.5 text-emerald-400" />
-      <span style={a ? { color: a.color } : undefined} className="font-medium">{a?.name}</span>
+      <FileCode2 className="h-3.5 w-3.5 text-olive" />
+      <span style={a ? { color: tone(a.color) } : undefined} className="font-medium">{a?.name}</span>
       {ms.map((m) => (
         <span key={m.id} className="rounded border border-border bg-muted/40 px-1.5 py-px font-mono">
           {(m.meta?.planned ? "📝 " : "") + String(m.meta?.path ?? "")}<span className="text-muted-foreground/70"> v{String(m.meta?.version ?? "")}</span>
@@ -150,10 +151,10 @@ function OrgItem({ ev, agents }: { ev: OrgEvent; agents: Record<string, AgentOut
   const who = agents[ev.agent_id];
   if (ev.kind === "created") {
     return (
-      <div className="ml-9 flex items-center gap-2 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/5 px-2.5 py-2 text-xs animate-in fade-in-0 slide-in-from-left-2">
-        <Sparkles className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
+      <div className="ml-9 flex items-center gap-2 rounded-lg border border-steel/30 bg-steel/5 px-2.5 py-2 text-xs animate-in fade-in-0 slide-in-from-left-2">
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-steel" />
         {who && <AgentAvatar name={who.name} color={who.color} avatar={who.avatar} size={20} />}
-        <span><span className="font-semibold" style={by ? { color: by.color } : undefined}>{by?.name ?? "An agent"}</span> hired{" "}
+        <span><span className="font-semibold" style={by ? { color: tone(by.color) } : undefined}>{by?.name ?? "An agent"}</span> hired{" "}
           <span className="font-semibold">{ev.name}</span> as {ev.role}{ev.department ? <> in <span className="font-medium">{ev.department}</span></> : null}
           {ev.persisted === false && <span className="text-muted-foreground"> · run only</span>}</span>
       </div>
@@ -161,7 +162,7 @@ function OrgItem({ ev, agents }: { ev: OrgEvent; agents: Record<string, AgentOut
   }
   return (
     <div className="ml-9 flex items-start gap-2 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground animate-fade-up">
-      <Settings2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
+      <Settings2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
       <span><span className="font-medium text-foreground">{by?.name ?? "Agent"}</span> {ev.self ? "refined its own configuration" : <>reconfigured <span className="font-medium text-foreground">{who?.name ?? ev.name}</span></>}: {ev.summary}
         {ev.reason ? <span className="italic"> · “{ev.reason}”</span> : null}</span>
     </div>

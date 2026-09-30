@@ -13,6 +13,7 @@ const RunsPage = React.lazy(() => import("@/features/runs/RunsPage"));
 const LiveRunPage = React.lazy(() => import("@/features/runs/LiveRunPage"));
 const ArtifactsPage = React.lazy(() => import("@/features/artifacts/ArtifactsPage"));
 const SettingsPage = React.lazy(() => import("@/features/settings/SettingsPage"));
+const GuidePage = React.lazy(() => import("@/features/guide/GuidePage"));
 
 function PageFallback() {
   return (
@@ -41,13 +42,15 @@ export function App() {
                 <Route path="artifacts" element={<ArtifactsPage />} />
                 <Route path="artifacts/:runId" element={<ArtifactsPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="guide" element={<GuidePage />} />
               </Route>
+              <Route path="/guide" element={<GuidePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </React.Suspense>
         </ErrorBoundary>
       </BrowserRouter>
-      <Toaster theme={theme} position="top-center" offset={56} richColors closeButton toastOptions={{ className: "!rounded-lg !border-border" }} />
+      <Toaster theme={theme} position="top-center" offset={56} closeButton toastOptions={{ className: "!rounded-lg !border-border" }} />
     </TooltipProvider>
   );
 }

@@ -41,11 +41,13 @@ make start                  # http://localhost:8000
 2. **Create company** → *Software Startup*.
 3. Press **Run**, enter a goal, keep **Demo Mode** on, and watch.
 
+New to Octopus? Open **Guide** in the top bar (or `/guide`) for an illustrated tour of every feature.
+
 ### Azure OpenAI / Azure AI Foundry
 
 Go to **Settings → Model providers**:
 
-- **Azure OpenAI**: endpoint `https://<resource>.openai.azure.com`, API version, and either an API key or **Entra ID** (`az login`; the identity needs the *Cognitive Services OpenAI User* role). List your **deployment names**; they appear in every agent's model picker. Mark o-series/GPT-5 deployments as *reasoning* so Octopus sends `max_completion_tokens` and no temperature.
+- **Azure OpenAI**: paste the endpoint exactly as the portal shows it (for example `https://<resource>.services.ai.azure.com/openai/v1/responses`, `…/openai/v1/chat/completions` or just `https://<resource>.openai.azure.com`), an API key or **Entra ID** (`az login`; the identity needs the *Cognitive Services OpenAI User* role), and your **deployment names** (e.g. `gpt-6-luna`). Octopus calls the Azure **v1 API** directly (Responses API by default, Chat Completions if the URL ends in `/chat/completions`), with no `api-version`. Parameters a deployment rejects, like `temperature` on reasoning models, are dropped automatically. Legacy `…/openai/deployments/<name>/…` URLs still use the dated `api-version` path.
 - **Azure AI Foundry models**: endpoint `https://<resource>.services.ai.azure.com/models`, plus model names such as `DeepSeek-R1` or `Phi-4`.
 
 Use **Test connection** to check each one. Env vars (`AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_AI_API_BASE`, …) work too. Keys are Fernet-encrypted at rest and never returned to the browser.

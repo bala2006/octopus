@@ -69,9 +69,9 @@ function Providers() {
           <div className="flex-1 text-sm"><span className="font-medium">Demo Mode {data?.demo_mode ? "is on" : "is off"}.</span>{" "}
             <span className="text-muted-foreground">Agents whose provider isn't configured fall back to the offline scripted mock. Toggle per run in the Run dialog.</span></div>
         </div>
-        <AzureCard provider="azure" title="Azure OpenAI" subtitle="Deployments on an Azure OpenAI / Foundry resource: azure/<deployment>" info={info.azure} saved={keys.azure}
-          endpointHint="https://<resource>.openai.azure.com" showVersion />
-        <AzureCard provider="azure_ai" title="Azure AI Foundry models" subtitle="Foundry model inference endpoint (DeepSeek, Llama, Phi, Mistral, Claude…): azure_ai/<model>" info={info.azure_ai} saved={keys.azure_ai}
+        <AzureCard provider="azure" title="Azure OpenAI" subtitle="GPT deployments on an Azure OpenAI or Foundry resource" info={info.azure} saved={keys.azure}
+          endpointHint="https://<resource>.services.ai.azure.com/openai/v1/responses" />
+        <AzureCard provider="azure_ai" title="Azure AI Foundry models" subtitle="Other Foundry models (DeepSeek, Llama, Phi, Mistral…)" info={info.azure_ai} saved={keys.azure_ai}
           endpointHint="https://<resource>.services.ai.azure.com/models" />
       </Section>
       <div>
@@ -91,9 +91,9 @@ function Providers() {
 function useProviderSave(provider: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { api_key: string; base_url: string; options: { api_version?: string; auth?: "key" | "entra"; deployments?: string[]; reasoning_models?: string[] } }) =>
+    mutationFn: (body: { api_key: string; base_url: string; options: { api_version?: string; api_style?: "auto" | "responses" | "chat" | "legacy"; auth?: "key" | "entra"; deployments?: string[]; reasoning_models?: string[] } }) =>
       unwrap(api.PUT("/api/v1/settings/providers", { body: { provider: provider as "azure", api_key: body.api_key, base_url: body.base_url,
-        options: { api_version: body.options.api_version ?? "", auth: body.options.auth ?? "key", deployments: body.options.deployments ?? [], reasoning_models: body.options.reasoning_models ?? [] } } })),
+        options: { api_version: body.options.api_version ?? "", api_style: body.options.api_style ?? "auto", auth: body.options.auth ?? "key", deployments: body.options.deployments ?? [], reasoning_models: body.options.reasoning_models ?? [] } } })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.settings }); toast.success("Saved"); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -118,62 +118,133 @@ function TestButton({ provider, model, disabled }: { provider: string; model: st
   );
 }
 
-function AzureCard({ provider, title, subtitle, info, saved, endpointHint, showVersion }: {
-  provider: "azure" | "azure_ai"; title: string; subtitle: string; info?: ProviderInfo; saved?: ProviderKeyOut; endpointHint: string; showVersion?: boolean;
+type AzureStyle = "auto" | "responses" | "chat" | "legacy";
+
+/** Mirrors backend app/llm/azure_v1.py:azure_v1_target so users see exactly which URL Octopus will call. */
+export function describeAzureEndpoint(url: string, style: AzureStyle): { ok: boolean; text: string } {
+  const u0 = url.trim().split(/[?#]/)[0].replace(/\/+$/, "");
+  if (!u0) return { ok: false, text: "" };
+  if (!/^https?:\/\//.test(u0)) return { ok: false, text: "The endpoint must start with https://" };
+  if (style === "legacy" || u0.includes("/openai/deployments/")) {
+    return { ok: true, text: `Legacy API: ${u0.split("/openai")[0]}/openai/deployments/<deployment>/chat/completions?api-version=…` };
+  }
+  let u = u0, kind: "responses" | "chat" = "responses";
+  if (u.endsWith("/responses")) u = u.slice(0, -"/responses".length);
+  else if (u.endsWith("/chat/completions")) { u = u.slice(0, -"/chat/completions".length); kind = "chat"; }
+  if (u.endsWith("/openai/v1")) { /* already v1 */ } else if (u.endsWith("/openai")) u += "/v1";
+  else if (u.endsWith("/models")) u = `${u.slice(0, -"/models".length)}/openai/v1`;
+  else u += "/openai/v1";
+  if (style === "responses" || style === "chat") kind = style;
+  return { ok: true, text: `${kind === "responses" ? "Responses API" : "Chat Completions API"} (v1): ${u}/${kind === "responses" ? "responses" : "chat/completions"}` };
+}
+
+function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
+  provider: "azure" | "azure_ai"; title: string; subtitle: string; info?: ProviderInfo; saved?: ProviderKeyOut; endpointHint: string;
 }) {
+  const isOpenAI = provider === "azure";
   const [endpoint, setEndpoint] = React.useState(saved?.base_url ?? "");
   const [key, setKey] = React.useState("");
   const [auth, setAuth] = React.useState<"key" | "entra">((saved?.options.auth as "key" | "entra") ?? "key");
+  const [style, setStyle] = React.useState<AzureStyle>((saved?.options.api_style as AzureStyle) ?? "auto");
   const [version, setVersion] = React.useState(saved?.options.api_version || "2024-10-21");
   const [deps, setDeps] = React.useState((saved?.options.deployments ?? []).join("\n"));
   const [reasoning, setReasoning] = React.useState((saved?.options.reasoning_models ?? []).join(", "));
+  const [advanced, setAdvanced] = React.useState(false);
   React.useEffect(() => {
     if (!saved) return;
     setEndpoint(saved.base_url); setAuth((saved.options.auth as "key" | "entra") ?? "key"); setVersion(saved.options.api_version || "2024-10-21");
+    setStyle((saved.options.api_style as AzureStyle) ?? "auto");
     setDeps((saved.options.deployments ?? []).join("\n")); setReasoning((saved.options.reasoning_models ?? []).join(", "));
   }, [saved]);
   const save = useProviderSave(provider);
   const depList = deps.split(/[\n,]/).map((d) => d.trim()).filter(Boolean);
   const [testModel, setTestModel] = React.useState(depList[0] ?? "");
-  React.useEffect(() => { if (!testModel && depList[0]) setTestModel(depList[0]); }, [depList, testModel]);
+  React.useEffect(() => { if (!depList.includes(testModel)) setTestModel(depList[0] ?? ""); }, [depList, testModel]);
   const qc = useQueryClient();
   const remove = useMutation({
     mutationFn: () => unwrap(api.DELETE("/api/v1/settings/providers/{provider}", { params: { path: { provider } } })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.settings }); setKey(""); setEndpoint(""); toast.success("Removed"); },
   });
+  const detected = isOpenAI ? describeAzureEndpoint(endpoint, style) : null;
+  const legacy = isOpenAI && (style === "legacy" || endpoint.includes("/openai/deployments/"));
+  const needsKey = auth === "key" && !saved?.masked_key && !key;
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface">
+    <div className="overflow-hidden rounded-2xl border border-border bg-card">
       <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-blue-700 text-white"><Cloud className="h-4 w-4" /></div>
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-steel/15 text-steel"><Cloud className="h-4 w-4" /></div>
         <div className="min-w-0 flex-1"><div className="text-sm font-semibold">{title}</div><div className="truncate text-xs text-muted-foreground">{subtitle}</div></div>
-        {info?.configured ? <Badge variant="success"><CheckCircle2 className="h-3 w-3" />Configured</Badge> : <Badge variant="outline">Not configured</Badge>}
+        {info?.configured ? <Badge variant="success"><CheckCircle2 className="h-3 w-3" />Connected</Badge> : <Badge variant="outline">Not connected</Badge>}
       </div>
-      <div className="grid gap-3 p-4 sm:grid-cols-2">
-        <Field label="Endpoint" hint={endpointHint}><Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder={endpointHint} className="font-mono text-xs" /></Field>
-        {showVersion ? <Field label="API version"><Input value={version} onChange={(e) => setVersion(e.target.value)} className="font-mono text-xs" /></Field> : <div />}
-        <Field label="Authentication">
-          <Select value={auth} onValueChange={(v) => setAuth(v as "key" | "entra")} options={[
-            { value: "key", label: "API key", hint: "Keys and Endpoint page of the resource" },
-            { value: "entra", label: "Microsoft Entra ID", hint: "Uses az login / managed identity / env credentials" }]} />
-        </Field>
+      <div className="space-y-4 p-4">
+        <Step n={1} title="Endpoint" hint={isOpenAI ? "Paste it exactly as the Azure or Foundry portal shows it. Any of these work: resource URL, …/openai/v1, …/openai/v1/responses." : endpointHint}>
+          <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder={endpointHint} className="font-mono text-xs" aria-label={`${title} endpoint`} />
+          {detected?.text && (
+            <p className={cn("mt-1.5 flex items-start gap-1 break-all text-[11px]", detected.ok ? "text-success" : "text-destructive")}>
+              {detected.ok ? <CheckCircle2 className="mt-px h-3 w-3 shrink-0" /> : <XCircle className="mt-px h-3 w-3 shrink-0" />}{detected.text}
+            </p>
+          )}
+        </Step>
         {auth === "key" ? (
-          <Field label="API key" hint={saved?.masked_key ? `Stored: ${saved.masked_key} (leave empty to keep)` : "Stored encrypted"}>
+          <Step n={2} title="API key" hint={saved?.masked_key ? `Saved: ${saved.masked_key}. Leave empty to keep it.` : "Keys and Endpoint page of the resource. Stored encrypted on this machine."}>
             <div className="relative"><KeyRound className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={saved?.masked_key || "••••••••"} className="pl-8 font-mono text-xs" autoComplete="off" /></div>
-          </Field>
-        ) : <p className="self-end rounded-md bg-muted/50 p-2 text-[11px] text-muted-foreground">Run <code>az login</code> on this machine. The identity needs the <b>Cognitive Services OpenAI User</b> role.</p>}
-        <Field label={provider === "azure" ? "Deployment names" : "Model names"} hint="One per line. These appear in every agent's model picker.">
-          <Textarea value={deps} onChange={(e) => setDeps(e.target.value)} placeholder={provider === "azure" ? "gpt-4.1\ngpt-4.1-mini\no4-mini" : "DeepSeek-R1\nPhi-4"} className="min-h-[76px] font-mono text-xs" />
-        </Field>
-        <Field label="Reasoning deployments" hint="Comma-separated. Sent with max_completion_tokens and no temperature (o-series, gpt-5).">
-          <Input value={reasoning} onChange={(e) => setReasoning(e.target.value)} placeholder="o4-mini, gpt-5" className="font-mono text-xs" />
-        </Field>
+              <Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={saved?.masked_key || "Paste your key"} className="pl-8 font-mono text-xs" autoComplete="off" aria-label={`${title} API key`} /></div>
+          </Step>
+        ) : (
+          <Step n={2} title="Microsoft Entra ID" hint="No key needed.">
+            <p className="rounded-md bg-muted/60 p-2 text-[11px] text-muted-foreground">Run <code>az login</code> on this machine. The identity needs the <b>Cognitive Services OpenAI User</b> role.</p>
+          </Step>
+        )}
+        <Step n={3} title={isOpenAI ? "Deployment names" : "Model names"} hint={isOpenAI ? "The name you gave the deployment in Azure, not the model family. One per line. They appear in every agent's model picker." : "One per line. They appear in every agent's model picker."}>
+          <Textarea value={deps} onChange={(e) => setDeps(e.target.value)} placeholder={isOpenAI ? "gpt-6-luna\ngpt-4.1-mini" : "DeepSeek-R1\nPhi-4"} className="min-h-[64px] font-mono text-xs" aria-label={isOpenAI ? "Deployment names" : "Model names"} />
+        </Step>
+
+        <div>
+          <button onClick={() => setAdvanced(!advanced)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" aria-expanded={advanced}>
+            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advanced && "rotate-180")} />Advanced
+          </button>
+          {advanced && (
+            <div className="mt-3 grid gap-3 rounded-xl border border-border bg-background/50 p-3 sm:grid-cols-2 animate-fade-up">
+              <Field label="Authentication">
+                <Select value={auth} onValueChange={(v) => setAuth(v as "key" | "entra")} options={[
+                  { value: "key", label: "API key", hint: "Keys and Endpoint page of the resource" },
+                  { value: "entra", label: "Microsoft Entra ID", hint: "Uses az login / managed identity / env credentials" }]} />
+              </Field>
+              {isOpenAI && (
+                <Field label="API">
+                  <Select value={style} onValueChange={(v) => setStyle(v as AzureStyle)} options={[
+                    { value: "auto", label: "Automatic (recommended)", hint: "Detected from the endpoint; Responses API by default" },
+                    { value: "responses", label: "v1 Responses API", hint: "/openai/v1/responses" },
+                    { value: "chat", label: "v1 Chat Completions", hint: "/openai/v1/chat/completions" },
+                    { value: "legacy", label: "Legacy (api-version)", hint: "/openai/deployments/<name>/…?api-version=" }]} />
+                </Field>
+              )}
+              {legacy && <Field label="API version" hint="Legacy API only"><Input value={version} onChange={(e) => setVersion(e.target.value)} className="font-mono text-xs" /></Field>}
+              <Field label="Reasoning deployments" hint="Optional. Octopus drops parameters a deployment rejects (like temperature) automatically. List them here to skip that first retry.">
+                <Input value={reasoning} onChange={(e) => setReasoning(e.target.value)} placeholder="gpt-6-luna, o4-mini" className="font-mono text-xs" />
+              </Field>
+            </div>
+          )}
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-border bg-background/40 px-4 py-2.5">
-        <Button size="sm" loading={save.isPending} disabled={!endpoint} onClick={() => save.mutate({ api_key: key, base_url: endpoint, options: { api_version: version, auth, deployments: depList, reasoning_models: reasoning.split(",").map((s) => s.trim()).filter(Boolean) } })}>Save</Button>
-        {depList.length > 1 && <Select value={testModel} onValueChange={setTestModel} options={depList.map((d) => ({ value: d, label: d }))} className="h-8 w-40 text-xs" ariaLabel="Model to test" />}
+        <Button size="sm" loading={save.isPending} disabled={!endpoint || (detected ? !detected.ok : false)} title={needsKey ? "Add an API key" : undefined}
+          onClick={() => save.mutate({ api_key: key, base_url: endpoint, options: { api_version: legacy ? version : "", api_style: style, auth, deployments: depList, reasoning_models: reasoning.split(",").map((x) => x.trim()).filter(Boolean) } })}>Save</Button>
+        {depList.length > 1 && <Select value={testModel} onValueChange={setTestModel} options={depList.map((d) => ({ value: d, label: d }))} className="h-8 w-40 text-xs" ariaLabel="Deployment to test" />}
         <TestButton provider={provider} model={testModel || depList[0] || ""} disabled={!info?.configured} />
         {saved && <Button size="sm" variant="ghost" className="ml-auto text-destructive hover:text-destructive" onClick={() => remove.mutate()}><Trash2 />Remove</Button>}
+      </div>
+    </div>
+  );
+}
+
+function Step({ n, title, hint, children }: { n: number; title: string; hint?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3">
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">{n}</span>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="text-sm font-medium">{title}</div>
+        {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+        {children}
       </div>
     </div>
   );
@@ -223,7 +294,7 @@ function McpServers() {
           {data.map((s) => (
             <div key={s.id} className="rounded-xl border border-border bg-surface p-3">
               <div className="flex items-center gap-3">
-                <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg", s.last_error ? "bg-destructive/15 text-destructive" : "bg-pink-500/15 text-pink-400")}><Server className="h-4 w-4" /></div>
+                <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg", s.last_error ? "bg-destructive/15 text-destructive" : "bg-olive/15 text-olive")}><Server className="h-4 w-4" /></div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-sm font-medium">{s.name}<Badge variant="outline">{s.transport}</Badge>{!s.enabled && <Badge variant="secondary">disabled</Badge>}</div>
                   <div className="truncate font-mono text-[11px] text-muted-foreground">{s.transport === "http" ? s.url : `${s.command} ${s.args.join(" ")}`}</div>
@@ -335,7 +406,7 @@ function Appearance() {
       <div className="grid grid-cols-2 gap-3">
         {(["dark", "light"] as const).map((t) => (
           <button key={t} onClick={() => setTheme(t)} className={cn("rounded-xl border p-4 text-left transition hover:border-primary/50", theme === t ? "border-primary bg-primary/5" : "border-border")}>
-            <div className={cn("mb-3 h-16 rounded-lg border", t === "dark" ? "border-slate-700 bg-[#0e1220]" : "border-slate-200 bg-white")} />
+            <div className={cn("mb-3 h-16 rounded-lg border", t === "dark" ? "border-[#444442] bg-[#1F1E1D]" : "border-[#DEDCD4] bg-[#FAF9F5]")} />
             <span className="flex items-center gap-1.5 text-sm font-medium">{t === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}{t === "dark" ? "Dark" : "Light"}</span>
           </button>
         ))}

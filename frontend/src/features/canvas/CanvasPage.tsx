@@ -1,4 +1,5 @@
 import * as React from "react";
+import { tone } from "@/lib/palette";
 import {
   Background, BackgroundVariant, ConnectionMode, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow,
 } from "@xyflow/react";
@@ -6,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertCircle, Check, ClipboardPaste, Cloud, CloudOff, Copy, Download, Flag, Grid3x3, LayoutGrid, Loader2, Maximize, MessageSquare, Network, Play,
-  Plus, Redo2, Settings2, Trash2, Undo2, Upload, Wand2, CopyPlus, MousePointerSquareDashed, Building2, BookmarkPlus,
+  Plus, Redo2, Settings2, Trash2, Undo2, Upload, Wand2, CopyPlus, MousePointerSquareDashed, Building2, BookmarkPlus, MoreHorizontal,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, unwrap } from "@/lib/api";
@@ -18,11 +19,13 @@ import { EmptyState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger,
-  ContextMenuTrigger, Tip,
+  ContextMenuTrigger, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Tip,
 } from "@/components/ui/overlays";
+import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
 import { RunDialog } from "@/features/runs/RunDialog";
 import { edgeTypes, nodeTypes } from "./flowTypes";
+import { EdgeAnchorsProvider } from "./edgeAnchors";
 import { DepartmentBuilder } from "./DepartmentBuilder";
 import { DepartmentZones } from "./DepartmentZones";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
@@ -40,9 +43,10 @@ export default function CanvasPage() {
   if (!companyId) {
     return (
       <>
-        <EmptyState icon={Network} title="No company in this project yet"
-          description="A company is a team of AI agents wired together on a canvas. Start from the Software Startup template or a blank canvas."
+        <EmptyState icon={Network} title="Create your first team"
+          description="A company is a team of AI agents that talk to each other. Pick a ready-made template (you can change everything later) or describe your goal and let AI design one."
           action={<Button onClick={() => setCreating(true)} data-testid="new-company"><Plus />Create company</Button>} />
+        <div className="pointer-events-none fixed bottom-4 left-4 z-10"><GettingStarted /></div>
         <NewCompanyDialog open={creating} onOpenChange={setCreating} />
       </>
     );
@@ -145,6 +149,7 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
         <ContextMenu onOpenChange={(o) => !o && setMenuNode(null)}>
           <ContextMenuTrigger asChild>
             <div className="h-full w-full" onContextMenu={(e) => { menuPos.current = { x: e.clientX, y: e.clientY }; }}>
+              <EdgeAnchorsProvider>
               <ReactFlow<AgentNodeT, ChannelEdgeT>
                 nodes={s.nodes} edges={s.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
                 onNodesChange={s.onNodesChange} onEdgesChange={s.onEdgesChange}
@@ -167,8 +172,9 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
                   useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: ids.includes(n.id) })) });
                 }} />
                 <Controls showInteractive={false} position="bottom-left" />
-                <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => (n.data as { color?: string }).color ?? "#888"} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />
+                <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => tone((n.data as { color?: string }).color)} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />
               </ReactFlow>
+              </EdgeAnchorsProvider>
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
@@ -190,7 +196,7 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
                   <ContextMenuSubContent>
                     {roles.data?.map((r) => (
                       <ContextMenuItem key={r.key} onSelect={() => addRole(r.key, menuPos.current ?? undefined)}>
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: r.color }} />{r.role}
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: tone(r.color) }} />{r.role}
                       </ContextMenuItem>
                     ))}
                   </ContextMenuSubContent>
@@ -213,16 +219,29 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
             <ToolBtn tip="Undo (Ctrl+Z)" onClick={s.undo} disabled={!s.past.length}><Undo2 /></ToolBtn>
             <ToolBtn tip="Redo (Ctrl+Y)" onClick={s.redo} disabled={!s.future.length}><Redo2 /></ToolBtn>
             <Divider />
-            <ToolBtn tip="Copy (Ctrl+C)" onClick={() => s.copy()} disabled={!s.nodes.some((n) => n.selected)}><Copy /></ToolBtn>
-            <ToolBtn tip="Auto-layout" onClick={() => { s.autoLayout(); setTimeout(() => rf.fitView({ padding: 0.2, duration: 400 }), 30); }}><LayoutGrid /></ToolBtn>
-            <ToolBtn tip={s.snapToGrid ? "Snap to grid: on" : "Snap to grid: off"} onClick={s.toggleSnap} active={s.snapToGrid}><Grid3x3 /></ToolBtn>
-            <ToolBtn tip="Fit view" onClick={() => rf.fitView({ padding: 0.2, duration: 300 })}><Maximize /></ToolBtn>
+            <ToolBtn tip="Tidy up: auto-layout" onClick={() => { s.autoLayout(); setTimeout(() => rf.fitView({ padding: 0.2, duration: 400 }), 30); }}><LayoutGrid /></ToolBtn>
+            <ToolBtn tip="Fit to screen" onClick={() => rf.fitView({ padding: 0.2, duration: 300 })}><Maximize /></ToolBtn>
             <Divider />
-            <ToolBtn tip="Add department" onClick={() => setDeptOpen(true)}><Building2 /></ToolBtn>
+            <Tip content="Add a department: a manager plus a small team" side="bottom">
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setDeptOpen(true)} aria-label="Add department"><Building2 />Department</Button>
+            </Tip>
             <ToolBtn tip="Save as template" onClick={() => setTplOpen(true)} disabled={!s.nodes.length}><BookmarkPlus /></ToolBtn>
-            <Divider />
-            <ToolBtn tip="Export JSON" onClick={() => void exportJson()}><Download /></ToolBtn>
-            <ToolBtn tip="Import JSON" onClick={() => fileRef.current?.click()}><Upload /></ToolBtn>
+            <DropdownMenu>
+              <Tip content="More actions" side="bottom">
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="More actions"><MoreHorizontal /></Button>
+                </DropdownMenuTrigger>
+              </Tip>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuItem disabled={!s.nodes.some((n) => n.selected)} onSelect={() => s.copy()}><Copy />Copy selection<span className="ml-auto kbd">Ctrl C</span></DropdownMenuItem>
+                <DropdownMenuItem disabled={!s.clipboard} onSelect={() => s.paste()}><ClipboardPaste />Paste<span className="ml-auto kbd">Ctrl V</span></DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => s.selectAll()}><MousePointerSquareDashed />Select all<span className="ml-auto kbd">Ctrl A</span></DropdownMenuItem>
+                <DropdownMenuItem onSelect={(e) => { e.preventDefault(); s.toggleSnap(); }}><Grid3x3 />Snap to grid{s.snapToGrid && <Check className="ml-auto !text-primary" />}</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void exportJson()}><Download />Export company (JSON)</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => fileRef.current?.click()}><Upload />Import company (JSON)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importJson(f); e.target.value = ""; }} />
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
@@ -240,11 +259,14 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="rounded-xl border border-dashed border-border bg-surface/80 p-6 text-center backdrop-blur animate-fade-up">
               <Network className="mx-auto mb-2 h-6 w-6 text-primary" />
-              <p className="text-sm font-medium">Drag an agent from the palette</p>
-              <p className="text-xs text-muted-foreground">or right-click the canvas → Add agent here</p>
+              <p className="text-sm font-medium">Your canvas is empty</p>
+              <p className="text-xs text-muted-foreground">Add a <b>Department</b> from the toolbar, or drag a role from <b>Roles</b> on the left.</p>
             </div>
           </div>
         )}
+        <div className="pointer-events-none absolute bottom-3 left-14 z-10">
+          <GettingStarted onRun={s.nodes.length ? () => { void autosave.saveNow(); setRunOpen(true); } : undefined} />
+        </div>
         <EdgeEditor />
       </div>
       <Inspector />

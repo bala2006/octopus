@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import Any
 
 from app.llm.base import LLMChunk, LLMError, LLMRequest, Usage, estimate_tokens
+from app.llm.azure_v1 import legacy_api_base
 
 PREFIX = {
     "azure": "azure/", "azure_ai": "azure_ai/", "openai": "openai/", "anthropic": "anthropic/", "gemini": "gemini/",
@@ -39,7 +40,7 @@ def build_kwargs(req: LLMRequest) -> dict[str, Any]:
         "max_tokens": req.max_tokens, "stream": True, "stream_options": {"include_usage": True},
     }
     if req.base_url:
-        kwargs["api_base"] = req.base_url
+        kwargs["api_base"] = legacy_api_base(req.base_url) if req.provider == "azure" else req.base_url
     auth = req.extra.get("auth", "key")
     if req.provider in ("azure", "azure_ai"):
         if req.provider == "azure":

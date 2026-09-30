@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { BookmarkPlus, Building2, Check, Crown, LayoutTemplate, RefreshCw, Sparkles, Swords, Users, Wand2, FlaskConical, Rocket, Network, User } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { tone } from "@/lib/palette";
 import { qk, useTemplates, useWorkspaceId } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
 import type { CanvasOut, CompanyOut, TemplateOut } from "@/types";
@@ -28,12 +29,12 @@ export function DepartmentChips({ departments, max = 8 }: { departments: DeptSum
   if (!departments.length) return <span className="text-[11px] text-muted-foreground">No departments</span>;
   return (
     <div className="flex flex-wrap gap-1">
-      {departments.slice(0, max).map((d) => (
+      {departments.slice(0, max).map((d0) => { const d = { ...d0, color: tone(d0.color) }; return (
         <span key={d.name} className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: `${d.color}1f`, color: d.color }}
           title={`${d.name}: ${[d.manager, ...d.members].filter(Boolean).join(", ")}`}>
           {d.name}<span className="opacity-70">{1 + d.members.length - (d.manager ? 0 : 1)}</span>
         </span>
-      ))}
+      ); })}
       {departments.length > max && <span className="text-[10px] text-muted-foreground">+{departments.length - max}</span>}
     </div>
   );
@@ -42,12 +43,12 @@ export function DepartmentChips({ departments, max = 8 }: { departments: DeptSum
 export function OrgPreview({ departments }: { departments: DeptSummary[] }) {
   return (
     <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-      {departments.map((d) => (
+      {departments.map((d0) => ({ ...d0, color: tone(d0.color) })).map((d) => (
         <div key={d.name} className="rounded-lg border p-2.5 animate-fade-up" style={{ borderColor: `${d.color}55`, background: `${d.color}0b` }}>
           <div className="mb-1.5 flex items-center justify-between text-xs font-semibold" style={{ color: d.color }}>
             <span>{d.name}</span><span className="text-[10px] font-normal text-muted-foreground">{(d.manager ? 1 : 0) + d.members.length} people</span>
           </div>
-          {d.manager && <div className="flex items-center gap-1 text-xs"><Crown className="h-3 w-3 text-amber-400" />{d.manager}</div>}
+          {d.manager && <div className="flex items-center gap-1 text-xs"><Crown className="h-3 w-3 text-terracotta" />{d.manager}</div>}
           {d.members.map((m) => <div key={m} className="flex items-center gap-1 pl-0.5 text-xs text-muted-foreground"><User className="h-3 w-3" />{m}</div>)}
         </div>
       ))}

@@ -41,13 +41,13 @@ export function TeamView({ agents, state, departments }: { agents: AgentOut[]; s
                 const off = a.active === false;
                 const fresh = state.fresh[a.id] && Date.now() - state.fresh[a.id] < 4000;
                 return (
-                  <li key={a.id} className={cn("flex items-center gap-2.5 px-3 py-2 transition-colors", off && "opacity-55", fresh && "animate-in fade-in-0 slide-in-from-left-2 bg-fuchsia-500/5")}>
+                  <li key={a.id} className={cn("flex items-center gap-2.5 px-3 py-2 transition-colors", off && "opacity-55", fresh && "animate-in fade-in-0 slide-in-from-left-2 bg-steel/5")}>
                     <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} status={off ? undefined : state.agentStatus[a.id] ?? "idle"} size={28} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 text-[13px] font-medium">
                         {a.name}
-                        {a.is_manager && <Crown className="h-3 w-3 text-amber-400" aria-label="Manager" />}
-                        {a.created_by && <span className="inline-flex items-center gap-0.5 rounded-full bg-fuchsia-500/15 px-1.5 text-[10px] text-fuchsia-400"><Sparkles className="h-2.5 w-2.5" />hired by {byId[a.created_by]?.name ?? "agent"}</span>}
+                        {a.is_manager && <Crown className="h-3 w-3 text-terracotta" aria-label="Manager" />}
+                        {a.created_by && <span className="inline-flex items-center gap-0.5 rounded-full bg-steel/15 px-1.5 text-[10px] text-steel"><Sparkles className="h-2.5 w-2.5" />hired by {byId[a.created_by]?.name ?? "agent"}</span>}
                         {off && <span className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground"><Moon className="h-2.5 w-2.5" />inactive</span>}
                       </div>
                       <div className="truncate text-[11px] text-muted-foreground">{a.role}{a.reports_to && byId[a.reports_to] ? ` · reports to ${byId[a.reports_to].name}` : ""}</div>

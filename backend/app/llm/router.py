@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import decrypt_secret
 from app.llm.base import LLMChunk, LLMError, LLMProvider, LLMRequest
+from app.llm.azure_v1 import AzureV1Provider, azure_v1_target
 from app.llm.litellm_provider import LiteLLMProvider
 from app.llm.mock_provider import MockProvider
 from app.models import ProviderKey
@@ -21,7 +22,7 @@ log = get_logger("llm")
 PROVIDER_CATALOG: dict[str, dict] = {
     "mock": {"label": "Demo (mock, offline)", "needs_key": False, "models": ["mock/demo"]},
     "azure": {"label": "Azure OpenAI", "needs_key": True, "needs_base": True,
-              "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o4-mini", "gpt-5", "gpt-5-mini"]},
+              "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "o4-mini", "gpt-5", "gpt-5-mini"]},
     "azure_ai": {"label": "Azure AI Foundry", "needs_key": True, "needs_base": True,
                  "models": ["DeepSeek-R1", "Llama-3.3-70B-Instruct", "Phi-4", "Mistral-Large-2411", "claude-sonnet-4-5"]},
     "openai": {"label": "OpenAI", "needs_key": True, "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"]},
@@ -42,10 +43,14 @@ def set_provider_override(provider: LLMProvider | None) -> None:
     _override = provider
 
 
-def get_provider(name: str) -> LLMProvider:
+def get_provider(name: str, req: LLMRequest | None = None) -> LLMProvider:
     if _override is not None:
         return _override
-    return MockProvider() if name == "mock" else LiteLLMProvider()
+    if name == "mock":
+        return MockProvider()
+    if name == "azure" and req is not None and azure_v1_target(req.base_url, req.extra) is not None:
+        return AzureV1Provider()  # Azure OpenAI v1 API (Responses / Chat Completions), no api-version needed
+    return LiteLLMProvider()
 
 
 async def resolve_credentials(db: AsyncSession, user_id: str, provider: str) -> tuple[str | None, str | None, dict]:
@@ -101,7 +106,7 @@ async def stream_with_retry(
     req: LLMRequest, *, retries: int = 3, base_delay: float = 0.8, on_retry: Callable[[int, str], None] | None = None,
 ) -> AsyncIterator[LLMChunk]:
     """Stream with exponential backoff. Retries only if the failure happened before any token was yielded."""
-    provider = get_provider(req.provider)
+    provider = get_provider(req.provider, req)
     attempt = 0
     while True:
         yielded = False

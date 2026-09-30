@@ -21,7 +21,11 @@ loader.config({ monaco });
 
 monaco.editor.defineTheme("octopus-dark", {
   base: "vs-dark", inherit: true, rules: [],
-  colors: { "editor.background": "#0f1320", "editor.lineHighlightBackground": "#171c2c", "editorGutter.background": "#0f1320" },
+  colors: { "editor.background": "#1F1E1D", "editor.lineHighlightBackground": "#2C2C2C", "editorGutter.background": "#1F1E1D" },
+});
+monaco.editor.defineTheme("octopus-light", {
+  base: "vs", inherit: true, rules: [],
+  colors: { "editor.background": "#FCFCFC", "editor.lineHighlightBackground": "#F0EEE6", "editorGutter.background": "#FAF9F5" },
 });
 
 export { monaco };

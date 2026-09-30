@@ -85,8 +85,8 @@ function DeptGroup({ name, nodes, color, onFocus }: { name: string; nodes: Agent
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1 truncate text-[12px] font-medium">
                       {n.data.name}
-                      {n.data.is_manager && <Crown className="h-2.5 w-2.5 shrink-0 text-amber-400" aria-label="Manager" />}
-                      {n.data.created_by && <Sparkles className="h-2.5 w-2.5 shrink-0 text-fuchsia-400" aria-label="Hired by an agent" />}
+                      {n.data.is_manager && <Crown className="h-2.5 w-2.5 shrink-0 text-terracotta" aria-label="Manager" />}
+                      {n.data.created_by && <Sparkles className="h-2.5 w-2.5 shrink-0 text-steel" aria-label="Hired by an agent" />}
                     </span>
                     <span className="block truncate text-[10.5px] text-muted-foreground">{n.data.role}</span>
                   </span>

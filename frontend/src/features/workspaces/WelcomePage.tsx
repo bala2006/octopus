@@ -2,7 +2,7 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, FolderOpen, FolderX, Network, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowRight, BookOpen, FolderOpen, FolderX, Network, Play, Sparkles, Trash2 } from "lucide-react";
 import { useWorkspaces, qk } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
@@ -24,35 +24,39 @@ export function WelcomePage() {
   });
 
   return (
-    <div className="relative flex min-h-full items-center justify-center overflow-hidden p-6">
-      <div className="pointer-events-none absolute inset-0 opacity-60 [background:radial-gradient(600px_circle_at_20%_10%,hsl(var(--primary)/0.15),transparent_60%),radial-gradient(500px_circle_at_90%_80%,rgba(6,182,212,0.12),transparent_60%)]" />
-      <div className="relative w-full max-w-3xl space-y-8 animate-fade-up">
-        <div className="flex items-center gap-4">
-          <img src="/octopus.svg" alt="" className="h-14 w-14 drop-shadow-[0_8px_24px_rgba(139,92,246,0.35)]" />
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Octopus</h1>
-            <p className="text-sm text-muted-foreground">Assemble a virtual company of AI agents that debate, delegate, review and ship real code in your project folder.</p>
+    <div className="flex h-full justify-center overflow-y-auto p-6">
+      <div className="relative my-auto w-full max-w-3xl space-y-8 py-6 animate-fade-up">
+        <div className="space-y-3 text-center">
+          <img src="/octopus.svg" alt="" className="mx-auto h-14 w-14" />
+          <h1 className="text-3xl font-semibold tracking-tight">Your AI company, in one folder</h1>
+          <p className="mx-auto max-w-xl text-[15px] text-muted-foreground">
+            Octopus builds a small team of AI agents (a CEO, engineers, a reviewer…) that plan, talk to each other and write real files in a project folder you choose.
+          </p>
+          <div className="flex justify-center gap-2 pt-1">
+            <Button size="lg" onClick={() => setOpen(true)} data-testid="open-folder"><FolderOpen />Open project folder</Button>
+            <Button size="lg" variant="outline" asChild><Link to="/guide"><BookOpen />How it works</Link></Button>
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <ol className="grid gap-3 sm:grid-cols-3">
           {[
-            { icon: FolderOpen, t: "Pick a project folder", d: "Agents are sandboxed to it. Data is saved in .octopus/" },
-            { icon: Network, t: "Wire your team", d: "Drag agents onto the canvas and connect who talks to whom" },
-            { icon: ShieldCheck, t: "Stay in control", d: "Read-only, plan, ask or danger mode, plus live approvals" },
-          ].map(({ icon: I, t, d }) => (
-            <div key={t} className="rounded-xl border border-border bg-surface/70 p-3.5 backdrop-blur">
-              <I className="mb-2 h-4 w-4 text-primary" />
-              <div className="text-sm font-medium">{t}</div>
-              <div className="text-xs text-muted-foreground">{d}</div>
-            </div>
+            { icon: FolderOpen, t: "Pick a folder", d: "An empty folder for a new app, or an existing repo. Agents can't leave it." },
+            { icon: Network, t: "Choose a team", d: "Start from a template. Every agent and connection can be changed later." },
+            { icon: Play, t: "Give it a goal", d: "Watch the team work live. You approve risky steps and review every file." },
+          ].map(({ icon: I, t, d }, i) => (
+            <li key={t} className="relative rounded-2xl border border-border bg-card p-4">
+              <span className="absolute right-3 top-3 font-mono text-xs text-muted-foreground">0{i + 1}</span>
+              <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary"><I className="h-4 w-4" /></span>
+              <div className="text-sm font-semibold">{t}</div>
+              <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{d}</div>
+            </li>
           ))}
-        </div>
+        </ol>
 
-        <div className="rounded-xl border border-border bg-surface/80 backdrop-blur">
+        <div className="rounded-2xl border border-border bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold">Projects</h2>
-            <Button onClick={() => setOpen(true)} data-testid="open-folder"><FolderOpen />Open project folder</Button>
+            <h2 className="text-sm font-semibold">Your projects</h2>
+            {!!data?.length && <Button size="sm" variant="outline" onClick={() => setOpen(true)}><FolderOpen />Open another folder</Button>}
           </div>
           {isLoading ? (
             <div className="space-y-2 p-4">{[0, 1].map((i) => <div key={i} className="skeleton h-12" />)}</div>
@@ -60,8 +64,7 @@ export function WelcomePage() {
             <div className="flex flex-col items-center gap-2 p-10 text-center">
               <Sparkles className="h-6 w-6 text-primary" />
               <p className="text-sm font-medium">Create your first workspace</p>
-              <p className="max-w-sm text-xs text-muted-foreground">Choose an empty folder for a new app, or an existing repository you want your agent company to work on.</p>
-              <Button className="mt-2" onClick={() => setOpen(true)}><FolderOpen />Choose directory</Button>
+              <p className="max-w-sm text-xs text-muted-foreground">No projects yet. Use <b>Open project folder</b> above to get started.</p>
             </div>
           ) : (
             <ul className="divide-y divide-border">
@@ -88,7 +91,7 @@ export function WelcomePage() {
             </ul>
           )}
         </div>
-        <p className="text-center text-[11px] text-muted-foreground">Runs 100% locally · Azure OpenAI and Azure AI Foundry supported · Demo Mode works offline</p>
+        <p className="text-center text-[11px] text-muted-foreground">Runs locally · Works offline in Demo Mode · Connect Azure OpenAI or another model any time in Settings</p>
       </div>
       <DirectoryPicker open={open} onOpenChange={setOpen} />
       <ConfirmDialog open={!!forget} onOpenChange={(o) => !o && setForget(null)} title={`Remove "${forget?.name}" from Octopus?`}

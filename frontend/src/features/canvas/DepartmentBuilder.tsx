@@ -29,9 +29,9 @@ function RowEditor({ row, onChange, isManager, onRemove, byKey, roleOptions }: {
 }) {
   const r = byKey[row.roleKey];
   return (
-    <div className={cn("flex items-center gap-2 rounded-lg border p-2 animate-fade-up", isManager ? "border-amber-400/40 bg-amber-400/5" : "border-border")}>
+    <div className={cn("flex items-center gap-2 rounded-lg border p-2 animate-fade-up", isManager ? "border-terracotta/40 bg-terracotta/5" : "border-border")}>
       {r ? <AgentAvatar name={row.name || r.default_name} color={r.color} avatar={r.avatar} size={26} /> : null}
-      {isManager && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-label="Manager" />}
+      {isManager && <Crown className="h-3.5 w-3.5 shrink-0 text-terracotta" aria-label="Manager" />}
       <Select value={row.roleKey} onValueChange={(v) => onChange({ ...row, roleKey: v })} options={roleOptions} className="h-8 w-44 text-xs" ariaLabel="Role template" />
       <Input value={row.title} onChange={(e) => onChange({ ...row, title: e.target.value })} placeholder={r?.role ?? "Title"} className="h-8 flex-1 text-xs" aria-label="Title" />
       <Input value={row.name} onChange={(e) => onChange({ ...row, name: e.target.value })} placeholder={r?.default_name ?? "Name"} className="h-8 w-28 text-xs" aria-label="Name" />

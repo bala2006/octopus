@@ -1,7 +1,7 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@xyflow/react/dist/style.css";
-@import "highlight.js/styles/github-dark.css";
+@import "highlight.js/styles/github-dark-dimmed.css";
 
 @tailwind base;
 @tailwind components;
@@ -9,53 +9,66 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 224 30% 12%;
-    --surface: 220 20% 98%;
-    --elevated: 0 0% 100%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 224 30% 12%;
-    --primary: 252 83% 60%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 94%;
-    --secondary-foreground: 224 30% 16%;
-    --muted: 220 14% 95%;
-    --muted-foreground: 220 9% 40%;
-    --accent: 220 14% 92%;
-    --accent-foreground: 224 30% 12%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 152 60% 38%;
-    --warning: 36 92% 45%;
-    --border: 220 13% 88%;
-    --input: 220 13% 84%;
-    --ring: 252 83% 60%;
-    --radius: 0.6rem;
-    --grid: 220 13% 86%;
+    --background: 48 33.3% 97.1%; /* #FAF9F5 */
+    --foreground: 60 2.6% 7.6%; /* #141413 */
+    --surface: 48 25% 92.2%; /* #F0EEE6 */
+    --elevated: 0 0% 98.8%; /* #FCFCFC */
+    --card: 0 0% 98.8%; /* #FCFCFC */
+    --surface-2: 48 25% 92.2%; /* #F0EEE6 */
+    --popover: 0 0% 98.8%; /* #FCFCFC */
+    --popover-foreground: 60 2.6% 7.6%; /* #141413 */
+    --primary: 15 63.3% 59.4%; /* #D97756 */
+    --primary-foreground: 0 0% 98.8%; /* #FCFCFC */
+    --secondary: 49 20.8% 89.6%; /* #EAE8DF */
+    --secondary-foreground: 60 2.6% 7.6%; /* #141413 */
+    --muted: 48 25% 92.2%; /* #F0EEE6 */
+    --muted-foreground: 48 2.7% 35.9%; /* #5E5D59 */
+    --accent: 50 20.7% 88.6%; /* #E8E6DC */
+    --accent-foreground: 60 2.6% 7.6%; /* #141413 */
+    --destructive: 9 48.4% 47.8%; /* #B5503F */
+    --destructive-foreground: 0 0% 98.8%; /* #FCFCFC */
+    --success: 82 34.7% 38.4%; /* #6B8440 */
+    --warning: 37 59.8% 44.9%; /* #B7832E */
+    --border: 48 13.2% 85.1%; /* #DEDCD4 */
+    --input: 50 12% 80.4%; /* #D3D1C7 */
+    --ring: 15 63.3% 59.4%; /* #D97756 */
+    --grid: 48 13.2% 85.1%; /* #DEDCD4 */
+    --steel: 207 20.5% 50.2%; /* #66839A */
+    --olive: 82 34.7% 38.4%; /* #6B8440 */
+    --terracotta: 15 63.3% 59.4%; /* #D97756 */
+    --teal-panel: 178 18.7% 74.9%; /* #B3CBCA */
+    --radius: 0.7rem;
   }
   .dark {
-    --background: 228 24% 7%;
-    --foreground: 220 20% 92%;
-    --surface: 228 22% 9.5%;
-    --elevated: 228 20% 12%;
-    --popover: 228 20% 12%;
-    --popover-foreground: 220 20% 92%;
-    --primary: 252 90% 70%;
-    --primary-foreground: 228 24% 8%;
-    --secondary: 228 16% 16%;
-    --secondary-foreground: 220 20% 92%;
-    --muted: 228 16% 14%;
-    --muted-foreground: 220 10% 62%;
-    --accent: 228 16% 18%;
-    --accent-foreground: 220 20% 95%;
-    --destructive: 0 72% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 152 55% 50%;
-    --warning: 38 92% 58%;
-    --border: 228 14% 18%;
-    --input: 228 14% 22%;
-    --ring: 252 90% 70%;
-    --grid: 228 14% 16%;
+    --background: 30 3.3% 11.8%; /* #1F1E1D */
+    --foreground: 51 25.9% 94.7%; /* #F5F4EE */
+    --surface: 30 2.7% 14.5%; /* #262524 */
+    --elevated: 0 0% 17.3%; /* #2C2C2C */
+    --card: 0 0% 17.3%; /* #2C2C2C */
+    --surface-2: 0 0% 17.3%; /* #2C2C2C */
+    --popover: 0 0% 17.3%; /* #2C2C2C */
+    --popover-foreground: 51 25.9% 94.7%; /* #F5F4EE */
+    --primary: 15 48.7% 54.9%; /* #C47054 */
+    --primary-foreground: 0 0% 98.8%; /* #FCFCFC */
+    --secondary: 40 2.9% 20.2%; /* #353432 */
+    --secondary-foreground: 51 25.9% 94.7%; /* #F5F4EE */
+    --muted: 0 0% 17.3%; /* #2C2C2C */
+    --muted-foreground: 49 7.7% 72%; /* #BDBBB2 */
+    --accent: 40 2.8% 21.4%; /* #383735 */
+    --accent-foreground: 51 25.9% 94.7%; /* #F5F4EE */
+    --destructive: 9 54.8% 59.2%; /* #D06F5E */
+    --destructive-foreground: 0 0% 98.8%; /* #FCFCFC */
+    --success: 80 33.7% 62.2%; /* #A9BF7E */
+    --warning: 35 62.4% 60.4%; /* #D9A55B */
+    --border: 60 1.5% 26.3%; /* #444442 */
+    --input: 45 2.7% 29.4%; /* #4D4C49 */
+    --ring: 15 48.7% 54.9%; /* #C47054 */
+    --grid: 40 2.7% 21.8%; /* #393836 */
+    --steel: 202 31.6% 55.9%; /* #6B98B2 */
+    --olive: 80 33.7% 62.2%; /* #A9BF7E */
+    --terracotta: 15 48.7% 54.9%; /* #C47054 */
+    --teal-panel: 180 13% 69.8%; /* #A8BCBC */
+    color-scheme: dark;
   }
   * { @apply border-border; }
   html, body, #root { height: 100%; }
@@ -87,6 +100,8 @@
   .caret::after { content: "▍"; @apply ml-0.5 animate-blink text-primary; }
 }
 
+/* Light / dark palette: "soft on the eyes" warm neutrals, terracotta accent, olive + steel-blue status accents. */
+
 /* ---------- React Flow theming ---------- */
 .react-flow { --xy-background-color: transparent; }
 .react-flow__attribution { display: none; }
@@ -102,7 +117,7 @@
 .react-flow__connectionline path { stroke: hsl(var(--primary)); stroke-width: 2; stroke-dasharray: 6 4; }
 
 /* ---------- Markdown ---------- */
-.prose pre { @apply my-2 rounded-lg border border-border bg-[#0d1117] p-0; }
+.prose pre { @apply my-2 rounded-lg border border-border bg-[#262523] p-0; }
 .prose pre code { @apply block overflow-x-auto p-3 text-[12.5px] leading-relaxed; }
 .prose :not(pre) > code { @apply rounded bg-muted px-1 py-0.5 text-[0.85em] before:content-none after:content-none; }
 .prose table { @apply text-sm; }

@@ -5,6 +5,7 @@ import { EDGE_TYPES } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useCanvas, type ChannelEdge as ChannelEdgeT } from "@/stores/canvas";
 import { useEditable, useLive } from "./live";
+import { useAnchor } from "./edgeAnchors";
 
 const ICON: Record<string, LucideIcon> = { delegate: Send, review: GitPullRequest, debate: Gavel, report: TrendingUp, consult: MessageCircleQuestion };
 const ACTIVE_MS = 2600;
@@ -13,7 +14,12 @@ function ChannelEdgeImpl({ id, sourceX, sourceY, targetX, targetY, sourcePositio
   const live = useLive();
   const editable = useEditable();
   const setEdgeEdit = useCanvas((s) => s.setEdgeEdit);
-  const [path, lx, ly] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.3 });
+  // floating anchors: bottom→top between levels, right→left between peers (see edgeAnchors.tsx)
+  const a = useAnchor(id);
+  const [path, lx, ly] = getBezierPath(a
+    ? { sourceX: a.sx, sourceY: a.sy, targetX: a.tx, targetY: a.ty, sourcePosition: a.sPos, targetPosition: a.tPos, curvature: 0.25 }
+    : { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.25 });
+  const [hover, setHover] = React.useState(false);
   const type = data?.type ?? "delegate";
   const meta = EDGE_TYPES[type];
   const Icon = ICON[type] ?? Send;
@@ -51,7 +57,8 @@ function ChannelEdgeImpl({ id, sourceX, sourceY, targetX, targetY, sourcePositio
       <EdgeLabelRenderer>
         <button
           className={cn(
-            "nodrag nopan pointer-events-auto absolute flex items-center gap-1 rounded-full border bg-elevated px-2 py-0.5 text-[10px] font-medium shadow-sm transition-all",
+            "nodrag nopan pointer-events-auto absolute flex items-center gap-1 rounded-full border bg-elevated px-1.5 py-0.5 text-[10px] font-medium shadow-sm transition-all",
+            (hover || selected || active) && "z-10 px-2",
             "hover:scale-105 hover:shadow-md",
             selected && "ring-2 ring-primary",
             active && "scale-110 shadow-lg",
@@ -59,12 +66,13 @@ function ChannelEdgeImpl({ id, sourceX, sourceY, targetX, targetY, sourcePositio
           )}
           style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, borderColor: `${meta.color}66`, color: meta.color }}
           onClick={(e) => { e.stopPropagation(); if (editable) setEdgeEdit(id); }}
+          onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
           aria-label={`${meta.label} channel${data?.label ? `: ${data.label}` : ""}`}
           title={meta.description}
         >
           <Icon className="h-3 w-3" />
-          <span className="max-w-[120px] truncate">{data?.label || meta.label}</span>
-          {data?.bidirectional && <ArrowLeftRight className="h-2.5 w-2.5 opacity-70" />}
+          {(hover || selected || active) && <span className="max-w-[120px] truncate">{data?.label || meta.label}</span>}
+          {data?.bidirectional && (hover || selected) && <ArrowLeftRight className="h-2.5 w-2.5 opacity-70" />}
           {active && <span className="ml-0.5 rounded bg-current/10 px-1 text-[9px] uppercase tracking-wide">{act!.type.replace("_", " ")}</span>}
         </button>
       </EdgeLabelRenderer>

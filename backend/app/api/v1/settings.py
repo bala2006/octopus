@@ -78,7 +78,8 @@ async def delete_key(provider: str, db: AsyncSession = Depends(get_registry_db),
 
 @router.post("/settings/providers/test", response_model=TestProviderOut)
 async def test_provider(body: TestProviderIn, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> TestProviderOut:
-    req = LLMRequest(provider=body.provider, model=body.model, max_tokens=16, temperature=0,
+    # generous budget: reasoning deployments (gpt-5+, o-series) spend output tokens on thinking before "pong"
+    req = LLMRequest(provider=body.provider, model=body.model, max_tokens=1024, temperature=0,
                      messages=[{"role": "user", "content": "Reply with the single word: pong"}], metadata={"kind": "chat", "mock_script": "pong"})
     import time
 

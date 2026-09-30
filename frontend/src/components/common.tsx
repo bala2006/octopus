@@ -1,4 +1,5 @@
 import * as React from "react";
+import { tone } from "@/lib/palette";
 import { AlertTriangle, RotateCcw, type LucideIcon } from "lucide-react";
 import { AVATARS, PERMISSIONS, statusMeta } from "@/lib/meta";
 import { cn, initials } from "@/lib/utils";
@@ -11,6 +12,7 @@ export function AgentAvatar({ name, color, avatar, status, size = 32, className 
 }) {
   const Icon = avatar ? AVATARS[avatar] : undefined;
   const meta = status ? statusMeta(status) : null;
+  color = tone(color);
   return (
     <div className={cn("relative shrink-0", className)} style={{ width: size, height: size }}>
       <div

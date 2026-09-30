@@ -1995,6 +1995,12 @@ export interface components {
              */
             api_version: string;
             /**
+             * Api Style
+             * @default auto
+             * @enum {string}
+             */
+            api_style: "auto" | "responses" | "chat" | "legacy";
+            /**
              * Auth
              * @default key
              * @enum {string}
