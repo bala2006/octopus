@@ -1,0 +1,191 @@
+name: CI
+
+# Every push and pull request runs the full test suite, so regressions are caught before they reach main.
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+  pull_request:
+  workflow_dispatch:
+  workflow_call: # reused by CD to test release tags before publishing
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "22"
+  FORCE_COLOR: "1"
+
+jobs:
+  backend:
+    name: Backend · lint + pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt ruff
+      - name: Lint (syntax errors, undefined names)
+        working-directory: backend
+        run: .venv/bin/ruff check app tests --select E9,F63,F7,F82 --output-format github
+      - name: Tests
+        working-directory: backend
+        run: .venv/bin/python -m pytest -q --junitxml=pytest-report.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-pytest-report
+          path: backend/pytest-report.xml
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend · typecheck + unit tests + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npx vite build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 3
+
+  api-types:
+    name: API types in sync with the backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/bin/pip install -r backend/requirements.txt
+          npm ci --no-audit --no-fund --prefix frontend
+      - name: Regenerate src/types/api.gen.ts from the FastAPI schema
+        working-directory: frontend
+        run: npm run gen:api
+      - name: Fail if the committed types are stale
+        run: |
+          if ! git diff --exit-code -- frontend/src/types/api.gen.ts; then
+            echo "::error file=frontend/src/types/api.gen.ts::API types are out of date. Run 'make gen-api' and commit the result."
+            exit 1
+          fi
+
+  e2e:
+    name: E2E · Playwright (Demo Mode)
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/bin/pip install -r backend/requirements.txt
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright
+        working-directory: frontend
+        run: npx playwright test
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-results
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          retention-days: 7
+
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [backend, frontend, api-types, e2e, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All required jobs succeeded
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "::error::One or more CI jobs did not succeed"
+          exit 1
+      - run: echo "All CI jobs passed"
