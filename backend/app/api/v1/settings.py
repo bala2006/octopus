@@ -13,7 +13,7 @@ from app.core.security import decrypt_secret, encrypt_secret, mask_secret
 from app.db.base import utcnow
 from app.db.session import get_registry_db
 from app.llm.base import LLMError, LLMRequest
-from app.llm.router import PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
+from app.llm.router import LEGACY_AZURE_ROWS, PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
 from app.models import McpServer, ProviderKey, User
 from app.schemas import (
     McpServerIn, McpServerOut, McpToolOut, ParsedFileOut, ProviderInfo, ProviderKeyIn, ProviderKeyOut, ProviderOptions, SettingsOut,
@@ -29,7 +29,8 @@ router = APIRouter(tags=["settings"])
 @router.get("/settings", response_model=SettingsOut)
 async def get_settings_view(db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> SettingsOut:
     s = get_settings()
-    rows = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user.id))).scalars().all()
+    await migrate_legacy_azure(db, user.id)
+    rows = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user.id, ProviderKey.provider.in_(list(PROVIDER_CATALOG))))).scalars().all()
     keys = [key_out(r) for r in rows]
     providers = []
     for name, info in PROVIDER_CATALOG.items():
@@ -39,6 +40,18 @@ async def get_settings_view(db: AsyncSession = Depends(get_registry_db), user: U
                                       needs_key=info["needs_key"], needs_base=info.get("needs_base", False)))
     return SettingsOut(demo_mode=s.demo_mode, single_user_mode=s.single_user_mode, default_provider=s.default_provider,
                        default_model=s.default_model, sandbox_mode=s.sandbox_mode, providers=providers, keys=keys)
+
+
+async def migrate_legacy_azure(db: AsyncSession, user_id: str) -> None:
+    """Earlier versions had an "Azure AI Foundry" card; credentials pasted there become the Azure OpenAI provider."""
+    rows = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user_id))).scalars().all()
+    if any(r.provider == "azure" for r in rows):
+        return
+    legacy = next((r for r in rows if r.provider in LEGACY_AZURE_ROWS and (r.encrypted_key or r.base_url)), None)
+    if legacy is not None:
+        legacy.provider = "azure"
+        legacy.updated_at = utcnow()
+        await db.commit()
 
 
 def key_out(r: ProviderKey) -> ProviderKeyOut:

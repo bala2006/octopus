@@ -435,7 +435,7 @@ class MemoryOut(ORM):
 
 
 # ---------- settings ----------
-ProviderName = Literal["azure", "azure_ai", "openai", "anthropic", "gemini", "ollama", "openrouter", "groq", "mistral"]
+ProviderName = Literal["azure"]
 
 
 class ProviderOptions(BaseModel):

@@ -3,7 +3,7 @@
 Octopus lets you assemble a **company of AI agents** (CEO, PM, Architect, Developers, QA, Designer, DevOps…), wire them together on an **n8n-style canvas**, and give the company a goal such as *"Build a todo app with auth"*. The agents debate, delegate, review each other's work and **write real files into your project folder**. You can watch everything live, step through it, interject, approve or reject dangerous actions, and replay the run afterwards.
 
 - **Runs 100% locally.** Your project directory is the agents' sandbox. All project data lives in `<project>/.octopus/`.
-- **Models:** Azure OpenAI and Azure AI Foundry are first-class (API key or Microsoft Entra ID). OpenAI, Anthropic, Gemini and Ollama also work through LiteLLM.
+- **Model:** Azure OpenAI, deployment `gpt-6-luna`, through the Azure v1 Responses API (API key or Microsoft Entra ID). Without it configured, Demo Mode runs everything offline.
 - **Demo Mode** runs a deterministic, scripted, offline company, so it needs no keys and costs nothing.
 
 ![Live run](docs/screenshots/06-run-completed.png)
@@ -43,14 +43,14 @@ make start                  # http://localhost:8000
 
 New to Octopus? Open **Guide** in the top bar (or `/guide`) for an illustrated tour of every feature.
 
-### Azure OpenAI / Azure AI Foundry
+### Azure OpenAI (gpt-6-luna)
 
-Go to **Settings → Model providers**:
+Go to **Settings → Model**:
 
-- **Azure OpenAI**: paste the endpoint exactly as the portal shows it (for example `https://<resource>.services.ai.azure.com/openai/v1/responses`, `…/openai/v1/chat/completions` or just `https://<resource>.openai.azure.com`), an API key or **Entra ID** (`az login`; the identity needs the *Cognitive Services OpenAI User* role), and your **deployment names** (e.g. `gpt-6-luna`). Octopus calls the Azure **v1 API** directly (Responses API by default, Chat Completions if the URL ends in `/chat/completions`), with no `api-version`. Parameters a deployment rejects, like `temperature` on reasoning models, are dropped automatically. Legacy `…/openai/deployments/<name>/…` URLs still use the dated `api-version` path.
-- **Azure AI Foundry models**: endpoint `https://<resource>.services.ai.azure.com/models`, plus model names such as `DeepSeek-R1` or `Phi-4`.
+- **Azure OpenAI**: paste the endpoint exactly as the portal shows it (for example `https://<resource>.services.ai.azure.com/openai/v1/responses`, `…/openai/v1/chat/completions` or just `https://<resource>.openai.azure.com`), an API key or **Entra ID** (`az login`; the identity needs the *Cognitive Services OpenAI User* role), and the **deployment name** (`gpt-6-luna`, prefilled). Octopus calls the Azure **v1 API** directly (Responses API by default, Chat Completions if the URL ends in `/chat/completions`), with no `api-version`. Parameters a deployment rejects, like `temperature` on reasoning models, are dropped automatically. Legacy `…/openai/deployments/<name>/…` URLs still use the dated `api-version` path.
+- Azure OpenAI is the only real provider. Agents saved with another provider or model (older templates used `gpt-4.1-mini`) run on the configured deployment. Credentials entered on the old *Azure AI Foundry* card are moved to Azure OpenAI automatically.
 
-Use **Test connection** to check each one. Env vars (`AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_AI_API_BASE`, …) work too. Keys are Fernet-encrypted at rest and never returned to the browser.
+Use **Test connection** to check it. Env vars (`AZURE_API_BASE`, `AZURE_API_KEY`, `DEFAULT_MODEL`) work too. Keys are Fernet-encrypted at rest and never returned to the browser.
 
 ### MCP servers
 
@@ -77,7 +77,7 @@ flowchart LR
     WS["WebSockets<br/>/ws/w/:ws/runs/:id · /chat/:id"]
     ORC["Orchestrator<br/>RunRuntime per run"]
     BUS["Event bus<br/>persist + fan-out"]
-    LLM["LLM router<br/>LiteLLM · Azure · Foundry · Mock"]
+    LLM["LLM router<br/>Azure OpenAI v1 · Mock"]
     TOOLS["Tools<br/>ProjectFS · sandbox · MCP · web · calc"]
   end
   REG[("~/.octopus/registry.db<br/>users · keys · MCP · workspaces")]

@@ -23,6 +23,9 @@ from app.llm.base import LLMChunk, LLMError, LLMRequest, Usage, estimate_tokens
 
 ApiStyle = str  # "responses" | "chat"
 _PROTECTED = {"model", "input", "messages", "stream"}
+# Reasoning deployments (gpt-6-luna reasons at "medium" effort by default) spend output tokens on thinking before they
+# answer; max_output_tokens covers both, so the agent's answer budget gets this much extra room.
+REASONING_HEADROOM = 4096
 # (base, deployment) → parameters the deployment rejected once; never sent again in this process
 _dropped: dict[tuple[str, str], set[str]] = {}
 
@@ -64,14 +67,14 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
     reasoning = bool(req.extra.get("reasoning_model"))
     if style == "responses":
         body: dict[str, Any] = {
-            "model": req.model, "stream": True, "max_output_tokens": req.max_tokens, "store": False,
+            "model": req.model, "stream": True, "max_output_tokens": req.max_tokens + REASONING_HEADROOM, "store": False,
             "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages],
         }
         if req.json_mode:
             body["text"] = {"format": {"type": "json_object"}}
     else:
         body = {
-            "model": req.model, "stream": True, "messages": req.messages, "max_completion_tokens": req.max_tokens,
+            "model": req.model, "stream": True, "messages": req.messages, "max_completion_tokens": req.max_tokens + REASONING_HEADROOM,
             "stream_options": {"include_usage": True},
         }
         if req.json_mode:
@@ -135,7 +138,7 @@ async def _auth_headers(req: LLMRequest) -> dict[str, str]:
         token = await asyncio.to_thread(entra_token_provider())
         return {"Authorization": f"Bearer {token}"}
     if not req.api_key:
-        raise LLMError("Azure OpenAI API key is missing (Settings → Providers)", retryable=False)
+        raise LLMError("Azure OpenAI API key is missing (Settings → Model)", retryable=False)
     return {"api-key": req.api_key}
 
 
@@ -188,6 +191,7 @@ class AzureV1Provider:
         yield LLMChunk(usage=usage)
 
     async def _events(self, resp: httpx.Response, style: ApiStyle, text_parts: list[str]) -> AsyncIterator[LLMChunk]:
+        skip_items: set[str] = set()  # output items that aren't the final answer (phase = "commentary")
         async for line in resp.aiter_lines():
             if not line.startswith("data:"):
                 continue
@@ -209,7 +213,13 @@ class AzureV1Provider:
                     yield LLMChunk(usage=Usage(prompt_tokens=u.get("prompt_tokens") or 0, completion_tokens=u.get("completion_tokens") or 0))
                 continue
             kind = ev.get("type", "")
-            if kind == "response.output_text.delta":
+            if kind == "response.output_item.added":
+                item = ev.get("item") or {}
+                if item.get("phase") == "commentary" and item.get("id"):
+                    skip_items.add(item["id"])
+            elif kind == "response.output_text.delta":
+                if ev.get("item_id") in skip_items:
+                    continue
                 delta = ev.get("delta") or ""
                 if delta:
                     text_parts.append(delta)

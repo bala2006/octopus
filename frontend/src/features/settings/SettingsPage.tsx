@@ -18,7 +18,7 @@ import { Badge, Field, Input, Switch, Textarea } from "@/components/ui/primitive
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select, Tip } from "@/components/ui/overlays";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
 
-const SECTIONS = [["providers", "Model providers", Cloud], ["mcp", "MCP servers", Plug], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Appearance", Palette]] as const;
+const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", Plug], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Appearance", Palette]] as const;
 
 export default function SettingsPage() {
   const [section, setSection] = React.useState<string>(() => (location.hash.slice(1) || "providers"));
@@ -59,32 +59,19 @@ function Providers() {
   const { data, isLoading } = useSettings();
   const keys = Object.fromEntries((data?.keys ?? []).map((k) => [k.provider, k]));
   const info = Object.fromEntries((data?.providers ?? []).map((p) => [p.provider, p]));
-  const [showOthers, setShowOthers] = React.useState(false);
-  if (isLoading) return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="skeleton h-40" />)}</div>;
+  if (isLoading) return <div className="skeleton h-72" />;
   return (
-    <>
-      <Section title="Model providers" description="Keys are encrypted at rest in your local Octopus registry and never sent back to the browser.">
-        <div className={cn("flex items-center gap-3 rounded-xl border p-3", data?.demo_mode ? "border-primary/30 bg-primary/5" : "border-border")}>
+    <Section title="Model" description="Agents run on your Azure OpenAI deployment. The key is encrypted on this machine and never sent back to the browser.">
+      {!info.azure?.configured && (
+        <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
           <Sparkles className="h-4 w-4 text-primary" />
-          <div className="flex-1 text-sm"><span className="font-medium">Demo Mode {data?.demo_mode ? "is on" : "is off"}.</span>{" "}
-            <span className="text-muted-foreground">Agents whose provider isn't configured fall back to the offline scripted mock. Toggle per run in the Run dialog.</span></div>
+          <div className="flex-1 text-sm"><span className="font-medium">Demo Mode until Azure is connected.</span>{" "}
+            <span className="text-muted-foreground">Agents use an offline scripted model, so you can try everything for free.</span></div>
         </div>
-        <AzureCard provider="azure" title="Azure OpenAI" subtitle="GPT deployments on an Azure OpenAI or Foundry resource" info={info.azure} saved={keys.azure}
-          endpointHint="https://<resource>.services.ai.azure.com/openai/v1/responses" />
-        <AzureCard provider="azure_ai" title="Azure AI Foundry models" subtitle="Other Foundry models (DeepSeek, Llama, Phi, Mistral…)" info={info.azure_ai} saved={keys.azure_ai}
-          endpointHint="https://<resource>.services.ai.azure.com/models" />
-      </Section>
-      <div>
-        <button onClick={() => setShowOthers(!showOthers)} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ChevronDown className={cn("h-4 w-4 transition-transform", showOthers && "rotate-180")} />Other providers (OpenAI, Anthropic, Gemini, Ollama…)
-        </button>
-        {showOthers && (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 animate-fade-up">
-            {(data?.providers ?? []).filter((p) => !["mock", "azure", "azure_ai"].includes(p.provider)).map((p) => <SimpleProvider key={p.provider} info={p} saved={keys[p.provider]} />)}
-          </div>
-        )}
-      </div>
-    </>
+      )}
+      <AzureCard provider="azure" title="Azure OpenAI" subtitle="gpt-6-luna on your Azure OpenAI / Foundry resource (v1 Responses API)" info={info.azure} saved={keys.azure}
+        endpointHint="https://<resource>.services.ai.azure.com/openai/v1/responses" />
+    </Section>
   );
 }
 
@@ -119,6 +106,7 @@ function TestButton({ provider, model, disabled }: { provider: string; model: st
 }
 
 type AzureStyle = "auto" | "responses" | "chat" | "legacy";
+const DEFAULT_DEPLOYMENT = "gpt-6-luna";
 
 /** Mirrors backend app/llm/azure_v1.py:azure_v1_target so users see exactly which URL Octopus will call. */
 export function describeAzureEndpoint(url: string, style: AzureStyle): { ok: boolean; text: string } {
@@ -139,7 +127,7 @@ export function describeAzureEndpoint(url: string, style: AzureStyle): { ok: boo
 }
 
 function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
-  provider: "azure" | "azure_ai"; title: string; subtitle: string; info?: ProviderInfo; saved?: ProviderKeyOut; endpointHint: string;
+  provider: "azure"; title: string; subtitle: string; info?: ProviderInfo; saved?: ProviderKeyOut; endpointHint: string;
 }) {
   const isOpenAI = provider === "azure";
   const [endpoint, setEndpoint] = React.useState(saved?.base_url ?? "");
@@ -147,14 +135,14 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
   const [auth, setAuth] = React.useState<"key" | "entra">((saved?.options.auth as "key" | "entra") ?? "key");
   const [style, setStyle] = React.useState<AzureStyle>((saved?.options.api_style as AzureStyle) ?? "auto");
   const [version, setVersion] = React.useState(saved?.options.api_version || "2024-10-21");
-  const [deps, setDeps] = React.useState((saved?.options.deployments ?? []).join("\n"));
+  const [deps, setDeps] = React.useState((saved?.options.deployments ?? []).join("\n") || DEFAULT_DEPLOYMENT);
   const [reasoning, setReasoning] = React.useState((saved?.options.reasoning_models ?? []).join(", "));
   const [advanced, setAdvanced] = React.useState(false);
   React.useEffect(() => {
     if (!saved) return;
     setEndpoint(saved.base_url); setAuth((saved.options.auth as "key" | "entra") ?? "key"); setVersion(saved.options.api_version || "2024-10-21");
     setStyle((saved.options.api_style as AzureStyle) ?? "auto");
-    setDeps((saved.options.deployments ?? []).join("\n")); setReasoning((saved.options.reasoning_models ?? []).join(", "));
+    setDeps((saved.options.deployments ?? []).join("\n") || DEFAULT_DEPLOYMENT); setReasoning((saved.options.reasoning_models ?? []).join(", "));
   }, [saved]);
   const save = useProviderSave(provider);
   const depList = deps.split(/[\n,]/).map((d) => d.trim()).filter(Boolean);
@@ -227,7 +215,7 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-border bg-background/40 px-4 py-2.5">
-        <Button size="sm" loading={save.isPending} disabled={!endpoint || (detected ? !detected.ok : false)} title={needsKey ? "Add an API key" : undefined}
+        <Button size="sm" loading={save.isPending} disabled={!endpoint || needsKey || (detected ? !detected.ok : false)} title={needsKey ? "Add an API key" : undefined}
           onClick={() => save.mutate({ api_key: key, base_url: endpoint, options: { api_version: legacy ? version : "", api_style: style, auth, deployments: depList, reasoning_models: reasoning.split(",").map((x) => x.trim()).filter(Boolean) } })}>Save</Button>
         {depList.length > 1 && <Select value={testModel} onValueChange={setTestModel} options={depList.map((d) => ({ value: d, label: d }))} className="h-8 w-40 text-xs" ariaLabel="Deployment to test" />}
         <TestButton provider={provider} model={testModel || depList[0] || ""} disabled={!info?.configured} />
@@ -245,24 +233,6 @@ function Step({ n, title, hint, children }: { n: number; title: string; hint?: R
         <div className="text-sm font-medium">{title}</div>
         {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
         {children}
-      </div>
-    </div>
-  );
-}
-
-function SimpleProvider({ info, saved }: { info: ProviderInfo; saved?: ProviderKeyOut }) {
-  const [key, setKey] = React.useState("");
-  const [base, setBase] = React.useState(saved?.base_url ?? "");
-  const save = useProviderSave(info.provider);
-  return (
-    <div className="space-y-2.5 rounded-xl border border-border bg-surface p-3">
-      <div className="flex items-center justify-between"><span className="text-sm font-medium">{info.label}</span>
-        {info.configured ? <Badge variant="success">Ready</Badge> : <Badge variant="outline">Off</Badge>}</div>
-      {info.needs_key && <Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={saved?.masked_key || "API key"} className="h-8 font-mono text-xs" autoComplete="off" />}
-      {info.provider === "ollama" && <Input value={base} onChange={(e) => setBase(e.target.value)} placeholder="http://localhost:11434" className="h-8 font-mono text-xs" />}
-      <div className="flex items-center gap-2">
-        <Button size="xs" onClick={() => save.mutate({ api_key: key, base_url: base, options: {} })} loading={save.isPending}>Save</Button>
-        <TestButton provider={info.provider} model={info.models[0] ?? ""} disabled={!info.configured} />
       </div>
     </div>
   );

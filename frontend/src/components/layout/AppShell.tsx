@@ -107,7 +107,7 @@ function NavItem({ to, label, hint, icon: Icon, shortcut, active, compact }: { t
   );
 }
 
-/** One glance: are agents using a real model, or the offline demo? Click → Settings → Providers. */
+/** One glance: are agents using a real model, or the offline demo? Click → Settings → Model. */
 function ModelStatus() {
   const { data } = useSettings();
   if (!data) return null;

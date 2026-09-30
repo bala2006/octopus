@@ -81,7 +81,7 @@ test("create project → company from template → edit agent → run in Demo Mo
   // 7. Settings: Azure providers
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByText("Azure OpenAI", { exact: true })).toBeVisible();
-  await expect(page.getByText("Azure AI Foundry models")).toBeVisible();
+  await expect(page.getByLabel("Deployment names")).toHaveValue("gpt-6-luna");
   await shoot(page, "08-settings");
 });
 
