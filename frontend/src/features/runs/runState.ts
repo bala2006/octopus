@@ -7,7 +7,14 @@ export interface LiveArtifact { id: string; path: string; version: number; autho
 export interface TimelineItem { seq: number; type: string; ts?: string; agent_id?: string | null; label: string; tone: "msg" | "protocol" | "file" | "tool" | "status" | "error" | "approval" | "org" }
 export interface OrgEvent { seq: number; kind: "created" | "updated"; by: string; agent_id: string; name: string; role?: string; department?: string; summary?: string; reason?: string; self?: boolean; persisted?: boolean; ts?: string }
 export type FeedMessage = MessageOut & { _seq?: number };
-export interface Usage { tokens: number; cost_usd: number; turns: number; max_turns?: number; max_tokens?: number; max_cost_usd?: number; per_agent?: Record<string, number>; active_seconds?: number; timeout_s?: number }
+export interface Usage {
+  tokens: number; cost_usd: number; turns: number; max_turns?: number; max_tokens?: number; max_cost_usd?: number; per_agent?: Record<string, number>;
+  active_seconds?: number; timeout_s?: number;
+  /** exact provider usage: input includes cached + cache-write tokens, output includes reasoning tokens */
+  input_tokens?: number; cached_tokens?: number; cache_write_tokens?: number; output_tokens?: number; reasoning_tokens?: number; llm_calls?: number; estimated_calls?: number;
+  cost_breakdown?: { input?: number; cached_input?: number; cache_write?: number; output?: number };
+  per_agent_cost?: Record<string, number>;
+}
 export interface ProtocolState { kind: "debate" | "review"; result: string; edge_id: string; state: Record<string, any>; seq?: number } // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export interface RunLive {

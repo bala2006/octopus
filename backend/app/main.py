@@ -30,7 +30,10 @@ async def lifespan(_: FastAPI):  # type: ignore[no-untyped-def]
     await asyncio.to_thread(upgrade_registry, s.registry_database_url)
     log.info("octopus_started", home=str(s.octopus_home), demo_mode=s.demo_mode, roots=s.workspace_allowed_roots)
     yield
+    from app.services.browser import browser
+
     await manager.shutdown()
+    await browser.shutdown()
     await dispose_all()
 
 
@@ -39,6 +42,14 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Octopus API", version="1.0.0", lifespan=lifespan,
                   description="Multi-agent orchestration platform: a virtual software company of AI agents.")
     app.add_middleware(RateLimitMiddleware, per_minute=s.rate_limit_per_minute)
+
+    @app.middleware("http")
+    async def remember_origin(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # the agents' browser opens project previews on the same host:port the user's browser uses
+        host = request.headers.get("host", "")
+        if request.url.path.startswith("/api/") and host.split(":")[0] in ("127.0.0.1", "localhost"):
+            s.public_url = f"{request.url.scheme}://{host}"
+        return await call_next(request)
     app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
     api = APIRouter(prefix="/api/v1")

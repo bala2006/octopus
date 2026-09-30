@@ -276,15 +276,20 @@ const SECTIONS: Section[] = [
   {
     id: "projects", title: "Projects are folders", icon: FolderOpen,
     body: <>
-      <p>A project is simply a folder on your computer. Agents can read and write <b>only inside it</b>. Octopus keeps its own data in a hidden
-        <code className="mx-1 rounded bg-muted px-1 text-foreground">.octopus/</code>folder there, so deleting a project from the list never deletes your files.</p>
+      <p>A project is simply a folder on your computer. <b>Open project folder</b> shows your system's own folder window (Finder, Explorer or your
+        Linux file chooser), where you can pick a folder or create a new one. Agents can read and write <b>only inside it</b>.</p>
+      <p>Octopus creates and manages a hidden <code className="mx-1 rounded bg-muted px-1 text-foreground">.octopus/</code>folder there, like
+        <code className="mx-1 rounded bg-muted px-1 text-foreground">.git</code>. It holds your teams, chats, run history and file versions, and git ignores
+        it automatically. Re-open the folder later and everything is back. Removing a project from the list never deletes your files.</p>
       <Shot name="welcome" alt="Welcome screen with the list of projects" caption="Open a folder from the welcome screen. Switch projects any time from the top-left." />
     </>,
   },
   {
     id: "companies", title: "Create a team (company)", icon: Building2,
     body: <>
-      <p>A <b>company</b> is a team of agents. Start with a <b>template</b> such as <i>Software Startup</i>, or describe your goal and let AI design the team.
+      <p>A <b>company</b> is a team of agents. Start with one of 14 <b>templates</b>: <i>Software Startup</i>, <i>Web App Studio</i>, <i>Indie Game Studio</i>,
+        <i>Mobile App Team</i>, <i>SaaS Launch</i>, <i>Data Science Team</i>, <i>Security Audit</i>, <i>Content &amp; Marketing Studio</i>,
+        <i>Customer Support Desk</i> and more. Or describe your goal and let AI design the team.
         You can keep several companies in one project and switch between them in the top bar.</p>
       <Shot name="new-company" alt="New company dialog with templates" caption="Templates are just starting points. Everything can be edited afterwards." />
     </>,
@@ -336,7 +341,9 @@ const SECTIONS: Section[] = [
     body: <>
       <p>Press <b>Run</b>, type a goal (for example <i>"Build a todo app with login"</i>) and choose how much freedom the team gets:</p>
       <PermissionLadder />
-      <p>While it runs you see who is thinking, messages flying along channels, and files being written. If an agent needs your approval, the run pauses and
+      <p>While it runs you see who is thinking, messages flying along channels, and files being written. You can drag agents around to get a better view.
+        Click the <b>tokens / cost</b> meter for the exact usage Azure reported: uncached input, cached input, cache writes and output (reasoning
+        included), each with its cost at gpt-6-luna prices. If an agent needs your approval, the run pauses and
         a <b>Needs you</b> badge appears in the top bar. You can pause, send a message to the team, or stop at any time.</p>
       <Shot name="run" alt="Live run view with the team graph and message feed" />
     </>,
@@ -344,7 +351,8 @@ const SECTIONS: Section[] = [
   {
     id: "artifacts", title: "Review the results", icon: FileCode2,
     body: <>
-      <p><b>Artifacts</b> lists every file the team created or changed, with a diff for each version and the final report. In <b>Plan</b> mode nothing touches your
+      <p><b>Artifacts</b> lists every file the team created or changed, with a diff for each version and the final report. <b>Project files</b> shows the
+        whole folder and updates live during a run. <b>Preview</b> runs HTML apps with their CSS, JS and images, and renders Markdown, images and PDFs. In <b>Plan</b> mode nothing touches your
         project until you apply the plan here. You can also download everything as a zip.</p>
       <Shot name="artifacts" alt="Artifacts page with files and diffs" />
     </>,
@@ -383,7 +391,10 @@ const SECTIONS: Section[] = [
     body: <>
       <p><b>Save as template</b> (bookmark icon on the canvas toolbar) turns your current team into a reusable template, available in every project. Import or export
         templates as JSON in <b>Settings › Templates</b>.</p>
-      <p className="flex gap-2"><Plug className="mt-1 h-4 w-4 shrink-0 text-terracotta" /><span><b>MCP servers</b> give agents extra tools (GitHub, databases, browsers…).
+      <p className="flex gap-2"><Plug className="mt-1 h-4 w-4 shrink-0 text-terracotta" /><span><b>Built-in browser</b>: Octopus runs Playwright on your machine, so
+        agents with the <b>Browser</b> tool (on by default) get their own tab. They open the project preview, click through it and read console errors,
+        which lets testers check what the team built. Test it in <b>Settings › MCP servers</b>.</span></p>
+      <p className="flex gap-2"><Plug className="mt-1 h-4 w-4 shrink-0 text-terracotta" /><span><b>MCP servers</b> give agents extra tools (GitHub, databases…).
         Add one in <b>Settings › MCP servers</b>, then switch it on for specific agents in their settings.</span></p>
       <p className="flex gap-2"><Crown className="mt-1 h-4 w-4 shrink-0 text-terracotta" /><span>The left panel on the canvas has two tabs: <b>Org</b> lists departments and lets you pause agents, and <b>Roles</b> lists agent types you can drag in.</span></p>
     </>,

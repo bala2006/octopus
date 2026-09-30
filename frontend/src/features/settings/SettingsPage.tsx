@@ -1,9 +1,9 @@
 import * as React from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   CheckCircle2, ChevronDown, Cloud, FolderOpen, KeyRound, Moon, Palette, Plug, Plus, RefreshCw, Server, ShieldCheck, Sparkles, Sun, Trash2, Wifi, XCircle, Zap,
-  LayoutTemplate, Download, Upload, Pencil,
+  LayoutTemplate, Download, Upload, Pencil, Globe,
 } from "lucide-react";
 import { download } from "@/lib/utils";
 import { useTemplates } from "@/hooks/queries";
@@ -78,9 +78,10 @@ function Providers() {
 function useProviderSave(provider: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { api_key: string; base_url: string; options: { api_version?: string; api_style?: "auto" | "responses" | "chat" | "legacy"; auth?: "key" | "entra"; deployments?: string[]; reasoning_models?: string[] } }) =>
+    mutationFn: (body: { api_key: string; base_url: string; options: { api_version?: string; api_style?: "auto" | "responses" | "chat" | "legacy"; auth?: "key" | "entra"; deployments?: string[]; reasoning_models?: string[]; deployment_type?: DeploymentType; pricing?: Record<string, number> } }) =>
       unwrap(api.PUT("/api/v1/settings/providers", { body: { provider: provider as "azure", api_key: body.api_key, base_url: body.base_url,
-        options: { api_version: body.options.api_version ?? "", api_style: body.options.api_style ?? "auto", auth: body.options.auth ?? "key", deployments: body.options.deployments ?? [], reasoning_models: body.options.reasoning_models ?? [] } } })),
+        options: { api_version: body.options.api_version ?? "", api_style: body.options.api_style ?? "auto", auth: body.options.auth ?? "key", deployments: body.options.deployments ?? [], reasoning_models: body.options.reasoning_models ?? [],
+          deployment_type: body.options.deployment_type ?? "global", pricing: body.options.pricing ?? {} } } })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.settings }); toast.success("Saved"); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -106,6 +107,10 @@ function TestButton({ provider, model, disabled }: { provider: string; model: st
 }
 
 type AzureStyle = "auto" | "responses" | "chat" | "legacy";
+type DeploymentType = "global" | "data_zone" | "regional";
+/** gpt-6-luna Standard rates, USD per 1M tokens (backend: app/llm/pricing.py). */
+const DEFAULT_RATES = { input: 0.1, cached_input: 0.01, cache_write: 0.125, output: 0.5 };
+const RATE_FIELDS = [["input", "Input"], ["cached_input", "Cached input"], ["cache_write", "Cache writes"], ["output", "Output"]] as const;
 const DEFAULT_DEPLOYMENT = "gpt-6-luna";
 
 /** Mirrors backend app/llm/azure_v1.py:azure_v1_target so users see exactly which URL Octopus will call. */
@@ -138,10 +143,14 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
   const [deps, setDeps] = React.useState((saved?.options.deployments ?? []).join("\n") || DEFAULT_DEPLOYMENT);
   const [reasoning, setReasoning] = React.useState((saved?.options.reasoning_models ?? []).join(", "));
   const [advanced, setAdvanced] = React.useState(false);
+  const [depType, setDepType] = React.useState<DeploymentType>((saved?.options.deployment_type as DeploymentType) ?? "global");
+  const [rates, setRates] = React.useState<Record<string, string>>(Object.fromEntries(Object.entries(saved?.options.pricing ?? {}).map(([k, v]) => [k, String(v)])));
   React.useEffect(() => {
     if (!saved) return;
     setEndpoint(saved.base_url); setAuth((saved.options.auth as "key" | "entra") ?? "key"); setVersion(saved.options.api_version || "2024-10-21");
     setStyle((saved.options.api_style as AzureStyle) ?? "auto");
+    setDepType((saved.options.deployment_type as DeploymentType) ?? "global");
+    setRates(Object.fromEntries(Object.entries(saved.options.pricing ?? {}).map(([k, v]) => [k, String(v)])));
     setDeps((saved.options.deployments ?? []).join("\n") || DEFAULT_DEPLOYMENT); setReasoning((saved.options.reasoning_models ?? []).join(", "));
   }, [saved]);
   const save = useProviderSave(provider);
@@ -210,13 +219,30 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
               <Field label="Reasoning deployments" hint="Optional. Octopus drops parameters a deployment rejects (like temperature) automatically. List them here to skip that first retry.">
                 <Input value={reasoning} onChange={(e) => setReasoning(e.target.value)} placeholder="gpt-6-luna, o4-mini" className="font-mono text-xs" />
               </Field>
+              <Field label="Deployment type" hint="Data Zone and regional deployments cost 10% more.">
+                <Select value={depType} onValueChange={(v) => setDepType(v as DeploymentType)} ariaLabel="Deployment type" options={[
+                  { value: "global", label: "Global Standard" }, { value: "data_zone", label: "Data Zone Standard (+10%)" }, { value: "regional", label: "Regional (+10%)" }]} />
+              </Field>
+              <div className="sm:col-span-2">
+                <div className="mb-1 text-xs font-medium">Pricing <span className="font-normal text-muted-foreground">(USD per 1M tokens, empty = gpt-6-luna list price)</span></div>
+                <div className="grid grid-cols-4 gap-2">
+                  {RATE_FIELDS.map(([k, label]) => (
+                    <label key={k} className="space-y-1 text-[11px] text-muted-foreground">{label}
+                      <Input type="number" step="0.001" min="0" value={rates[k] ?? ""} placeholder={String(DEFAULT_RATES[k])} aria-label={`${label} price`}
+                        onChange={(e) => setRates({ ...rates, [k]: e.target.value })} className="h-8 font-mono text-xs" />
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10.5px] text-muted-foreground">Costs use the exact token counts Azure returns: uncached input, cached input, cache writes and output (reasoning included). Prompts over 272K tokens bill 2× input and 1.5× output.</p>
+              </div>
             </div>
           )}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-border bg-background/40 px-4 py-2.5">
         <Button size="sm" loading={save.isPending} disabled={!endpoint || needsKey || (detected ? !detected.ok : false)} title={needsKey ? "Add an API key" : undefined}
-          onClick={() => save.mutate({ api_key: key, base_url: endpoint, options: { api_version: legacy ? version : "", api_style: style, auth, deployments: depList, reasoning_models: reasoning.split(",").map((x) => x.trim()).filter(Boolean) } })}>Save</Button>
+          onClick={() => save.mutate({ api_key: key, base_url: endpoint, options: { api_version: legacy ? version : "", api_style: style, auth, deployments: depList, reasoning_models: reasoning.split(",").map((x) => x.trim()).filter(Boolean),
+            deployment_type: depType, pricing: Object.fromEntries(Object.entries(rates).filter(([, v]) => v !== "" && !Number.isNaN(Number(v))).map(([k, v]) => [k, Number(v)])) } })}>Save</Button>
         {depList.length > 1 && <Select value={testModel} onValueChange={setTestModel} options={depList.map((d) => ({ value: d, label: d }))} className="h-8 w-40 text-xs" ariaLabel="Deployment to test" />}
         <TestButton provider={provider} model={testModel || depList[0] || ""} disabled={!info?.configured} />
         {saved && <Button size="sm" variant="ghost" className="ml-auto text-destructive hover:text-destructive" onClick={() => remove.mutate()}><Trash2 />Remove</Button>}
@@ -254,6 +280,7 @@ function McpServers() {
   });
   return (
     <Section title="MCP servers" description="Register Model Context Protocol servers, then grant them to individual agents from the canvas. Calls respect the run's permission level.">
+      <BrowserCard />
       <div className="flex justify-end"><Button size="sm" onClick={() => setEditing("new")}><Plus />Add MCP server</Button></div>
       {isLoading ? <div className="skeleton h-24" /> : !data?.length ? (
         <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -285,6 +312,38 @@ function McpServers() {
       <ConfirmDialog open={!!del} onOpenChange={(o) => !o && setDel(null)} title={`Remove ${del?.name}?`} destructive confirmLabel="Remove"
         description="Agents granted this server lose access on their next run." onConfirm={() => del && remove.mutate(del.id)} />
     </Section>
+  );
+}
+
+/** Octopus starts Playwright MCP itself on 127.0.0.1; every agent with the Browser tool gets its own tab. */
+function BrowserCard() {
+  const status = useQuery({ queryKey: ["browser-status"], queryFn: () => unwrap(api.GET("/api/v1/settings/browser")), refetchInterval: 5000 });
+  const [res, setRes] = React.useState<{ ok: boolean; detail: string; latency_ms: number } | null>(null);
+  const test = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/settings/browser/test")), onMutate: () => setRes(null),
+    onSuccess: (r) => { setRes(r); status.refetch(); },
+  });
+  const st = status.data;
+  const label: Record<string, string> = { ready: "Running", starting: "Starting…", installing: "Installing browser…", stopped: "Starts on first use", error: "Error" };
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-olive/15 text-olive"><Globe className="h-4 w-4" /></div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm font-semibold">Built-in browser<Badge variant="outline">Playwright MCP</Badge></div>
+          <div className="text-xs text-muted-foreground">Managed by Octopus on this machine. Agents with the <b>Browser</b> tool (on by default) get their own tab to open the project preview, click through it and read console errors.</div>
+        </div>
+        {st && <Badge variant={st.status === "ready" ? "success" : st.status === "error" ? "destructive" : "outline"}>{st.enabled ? label[st.status] ?? st.status : "Disabled"}</Badge>}
+      </div>
+      {st?.error && <p className="mt-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">{st.error}</p>}
+      {st && !st.node && <p className="mt-2 rounded-md bg-warning/10 p-2 text-xs text-warning">Node.js 18+ (npx) is needed for the browser. Install it from nodejs.org.</p>}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => test.mutate()} loading={test.isPending} disabled={!st?.enabled}><Wifi />Test browser</Button>
+        {test.isPending && <span className="text-xs text-muted-foreground">The first run downloads the browser, which can take a minute.</span>}
+        {res && <span className={cn("flex items-center gap-1 text-xs", res.ok ? "text-success" : "text-destructive")}>{res.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}{res.detail}{res.latency_ms ? <span className="text-muted-foreground">· {res.latency_ms}ms</span> : null}</span>}
+        {st && <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{st.package} · {st.browser} · {st.tools?.length ?? 0} tools</span>}
+      </div>
+    </div>
   );
 }
 

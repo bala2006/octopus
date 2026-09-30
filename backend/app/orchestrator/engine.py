@@ -131,6 +131,11 @@ class RunRuntime(TeamMixin):
         self.done_agents: set[str] = set()
         self.agent_turns: Counter[str] = Counter()
         self.agent_tokens: Counter[str] = Counter()
+        self.agent_cost: Counter[str] = Counter()
+        # exact provider usage: input (incl. cached/cache-write), cached, cache_write, output (incl. reasoning), reasoning
+        self.usage_totals: Counter[str] = Counter()
+        self.cost_totals: Counter[str] = Counter()  # USD by component: input / cached_input / cache_write / output
+        self.llm_calls = 0
         self.edge_counts: Counter[str] = Counter()
         self.debates: dict[str, DebateState] = {}
         self.reviews: dict[str, ReviewState] = {}
@@ -191,6 +196,8 @@ class RunRuntime(TeamMixin):
             "observations": {k: [o for _, o in v] for k, v in self.observations.items()},
             "status": self.status, "done_agents": sorted(self.done_agents),
             "agent_turns": dict(self.agent_turns), "agent_tokens": dict(self.agent_tokens), "edge_counts": dict(self.edge_counts),
+            "agent_cost": dict(self.agent_cost), "usage_totals": dict(self.usage_totals), "cost_totals": dict(self.cost_totals),
+            "llm_calls": self.llm_calls,
             "debates": {k: v.to_dict() for k, v in self.debates.items()},
             "reviews": {k: v.to_dict() for k, v in self.reviews.items()},
             "loop": self.loop.to_dict(), "task_counter": self.task_counter,
@@ -201,7 +208,7 @@ class RunRuntime(TeamMixin):
         }
 
     async def save(self) -> None:
-        values: dict[str, Any] = {"tokens_used": self.tokens, "cost_usd": round(self.cost, 6), "turns": self.turn_no, "state_json": self.state_dict()}
+        values: dict[str, Any] = {"tokens_used": self.tokens, "cost_usd": round(self.cost, 8), "turns": self.turn_no, "state_json": self.state_dict()}
         if self.snapshot_dirty:
             values["snapshot_json"] = self.snapshot
             self.snapshot_dirty = False
@@ -215,6 +222,10 @@ class RunRuntime(TeamMixin):
         self.done_agents = set(st.get("done_agents", []))
         self.agent_turns = Counter(st.get("agent_turns", {}))
         self.agent_tokens = Counter(st.get("agent_tokens", {}))
+        self.agent_cost = Counter(st.get("agent_cost", {}))
+        self.usage_totals = Counter(st.get("usage_totals", {}))
+        self.cost_totals = Counter(st.get("cost_totals", {}))
+        self.llm_calls = st.get("llm_calls", 0)
         self.edge_counts = Counter(st.get("edge_counts", {}))
         self.debates = {k: DebateState.from_dict(v) for k, v in st.get("debates", {}).items()}
         self.reviews = {k: ReviewState.from_dict(v) for k, v in st.get("reviews", {}).items()}
@@ -283,10 +294,30 @@ class RunRuntime(TeamMixin):
 
     async def usage_event(self) -> None:
         await self.emit("usage_update", {
-            "tokens": self.tokens, "cost_usd": round(self.cost, 6), "turns": self.turn_no,
+            "tokens": self.tokens, "cost_usd": round(self.cost, 8), "turns": self.turn_no,
             "max_turns": self.budget.max_turns, "max_tokens": self.budget.max_tokens, "max_cost_usd": self.budget.max_cost_usd,
             "per_agent": dict(self.agent_tokens), "active_seconds": round(self.active_seconds, 1), "timeout_s": self.budget.timeout_s,
+            "per_agent_cost": {k: round(v, 6) for k, v in self.agent_cost.items()},
+            "input_tokens": self.usage_totals["input"], "cached_tokens": self.usage_totals["cached"],
+            "cache_write_tokens": self.usage_totals["cache_write"], "output_tokens": self.usage_totals["output"],
+            "reasoning_tokens": self.usage_totals["reasoning"], "llm_calls": self.llm_calls,
+            "estimated_calls": self.usage_totals["estimated_calls"],
+            "cost_breakdown": {k: round(v, 6) for k, v in self.cost_totals.items()},
         })
+
+    def add_usage(self, agent_id: str | None, u: Any) -> None:
+        """Accumulate one LLM call's exact usage (as reported by Azure) and its priced cost."""
+        self.tokens += u.total_tokens
+        self.cost += u.cost_usd
+        self.llm_calls += 1
+        if getattr(u, "estimated", False):
+            self.usage_totals["estimated_calls"] += 1
+        self.usage_totals.update({"input": u.prompt_tokens, "cached": u.cached_tokens, "cache_write": u.cache_write_tokens,
+                                  "output": u.completion_tokens, "reasoning": u.reasoning_tokens})
+        self.cost_totals.update({k: v for k, v in (u.cost_breakdown or {}).items() if v})
+        if agent_id:
+            self.agent_tokens[agent_id] += u.total_tokens
+            self.agent_cost[agent_id] += u.cost_usd
 
     # ------------------------------------------------------------------ messaging primitives
     def deliver(self, aid: str, mid: str) -> None:
@@ -595,10 +626,7 @@ class RunRuntime(TeamMixin):
                         await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
                         buf, last = "", time.monotonic()
                 if chunk.usage:
-                    u = chunk.usage
-                    self.tokens += u.total_tokens
-                    self.cost += u.cost_usd
-                    self.agent_tokens[agent.id] += u.total_tokens
+                    self.add_usage(agent.id, chunk.usage)
             if buf:
                 await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
 
@@ -627,7 +655,7 @@ class RunRuntime(TeamMixin):
         inbox_set = set(inbox_ids)
         inbox = [m for m in self.history if m["id"] in inbox_set]
         system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
-                                     status=self.status)
+                                     status=self.status, preview_url=self.preview_url())
         user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_set, observations=obs,
                                  blackboard=self.blackboard(), names=self.names, recent_n=self.budget.context_recent)
         req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
@@ -820,8 +848,7 @@ class RunRuntime(TeamMixin):
             async for ch in stream_with_retry(req, retries=1):
                 out += ch.delta
                 if ch.usage:
-                    self.tokens += ch.usage.total_tokens
-                    self.cost += ch.usage.cost_usd
+                    self.add_usage(agent.id, ch.usage)
             return not out.strip().upper().startswith("NO")
         except LLMError:
             return True  # fail open: do not block the run on a judge failure
@@ -961,28 +988,46 @@ class RunRuntime(TeamMixin):
         self.observe(agent.id, {"tool": "list_files", "ok": ok, "content": out})
         await self._tool_result(agent, cid, "list_files", ok, out[:2000])
 
+    def preview_url(self) -> str:
+        """Where the agents' browser can open this project (served by Octopus, sandboxed)."""
+        return f"{get_settings().public_url.rstrip('/')}/api/v1/w/{self.project.workspace_id}/preview/"
+
     async def load_mcp(self) -> None:
         """Resolve MCP servers granted to each agent (only the run owner's registered, enabled servers)."""
         from app.models import McpServer
         from app.tools.mcp_client import McpConfig
 
+        from app.services.browser import SERVER_ID, SERVER_NAME, browser
+
         wanted = {sid for a in self.agents.values() for sid in (a.tools.get("mcp_servers") or [])}
-        if not wanted:
-            return
-        async with registry_factory()() as rdb:
-            rows = (await rdb.execute(select(McpServer).where(McpServer.id.in_(wanted), McpServer.user_id == self.user_id,
-                                                              McpServer.enabled.is_(True)))).scalars().all()
-        self.mcp_configs = {r.id: McpConfig.from_row(r) for r in rows}
+        if wanted:
+            async with registry_factory()() as rdb:
+                rows = (await rdb.execute(select(McpServer).where(McpServer.id.in_(wanted), McpServer.user_id == self.user_id,
+                                                                  McpServer.enabled.is_(True)))).scalars().all()
+            self.mcp_configs = {r.id: McpConfig.from_row(r) for r in rows}
         for a in self.agents.values():
             a.mcp = [{"id": c.id, "name": c.name, "tools": c.tools} for sid in (a.tools.get("mcp_servers") or [])
-                     if (c := self.mcp_configs.get(sid))]
+                     if (c := self.mcp_configs.get(sid)) and c.name.lower() != SERVER_NAME]
+            if A.tool_enabled(a.tools, "browser") and get_settings().browser_enabled:
+                a.mcp.append({"id": SERVER_ID, "name": SERVER_NAME, "tools": browser.tool_list(), "builtin": True})
 
     async def act_mcp_call(self, agent: AgentSpec, a: A.McpCall) -> None:
         from app.tools.mcp_client import call_tool
 
         cid = await self._tool_event(agent, f"mcp:{a.server}/{a.tool}", {"server": a.server, "tool": a.tool, "arguments": a.arguments})
+        from app.services.browser import SERVER_ID, browser
+
         granted = {m["name"].lower(): m["id"] for m in agent.mcp}
         sid = granted.get(a.server.lower())
+        if sid == SERVER_ID:  # built-in browser: one persistent tab per agent, no approval needed (isolated, in-memory profile)
+            if self.levels.get(agent.id, self.level) == "read_only" and a.tool in ("browser_fill_form", "browser_type", "browser_file_upload"):
+                await self.deny(agent, cid, "mcp_call", "Read-only mode: you may look at pages but not fill in forms.")
+                return
+            await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
+            ok, out = await browser.call(self.run_id, agent.id, a.tool, a.arguments)
+            self.observe(agent.id, {"tool": f"browser/{a.tool}", "ok": ok, "content": out})
+            await self._tool_result(agent, cid, "mcp_call", ok, out)
+            return
         cfg = self.mcp_configs.get(sid) if sid else None
         if cfg is None:
             await self.deny(agent, cid, "mcp_call", f"MCP server '{a.server}' is not granted to you. Granted: {', '.join(m['name'] for m in agent.mcp) or 'none'}")
@@ -1091,7 +1136,10 @@ class RunRuntime(TeamMixin):
                 status=status, halt_reason=reason[:200], summary=summary, ended_at=utcnow(),
                 tokens_used=self.tokens, cost_usd=round(self.cost, 6), turns=self.turn_no, state_json=self.state_dict()))
             await db.commit()
+        from app.services.browser import browser
         from app.services.report import build_report  # local import avoids a cycle
+
+        await browser.close_run(self.run_id)
 
         try:
             report = await build_report(self.run_id, self.sf)

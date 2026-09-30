@@ -32,3 +32,6 @@ data/
 frontend/test-results/
 frontend/playwright-report/
 frontend/openapi.json
+
+# Playwright MCP output
+.playwright-mcp/

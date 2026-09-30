@@ -156,6 +156,109 @@ TEMPLATES: dict[str, CompanyTemplate] = {
             Link("moderator", "critic", "consult", True, "Moderation"),
         ),
     ),
+    "web_app_studio": CompanyTemplate(
+        key="web_app_studio", name="Web App Studio",
+        description="Product, Engineering and QA for a browser app. An E2E tester clicks through every feature in the real browser.",
+        head="hop",
+        departments=(
+            Department("Product", M("hop", "head_of_product", entry=True), (M("ux", "ux_designer"),)),
+            Department("Engineering", M("em", "eng_manager"), (M("fe", "fullstack_dev", name="Ana", role="Frontend Engineer"),
+                                                                M("be", "fullstack_dev", name="Leo", role="Backend Engineer"))),
+            Department("Quality", M("qal", "qa_lead"), (M("e2e", "e2e_tester"),)),
+        ),
+        links=(
+            Link("ux", "fe", "consult", True, "Design consult"),
+            Link("em", "fe", "review", True, "Code review", {"max_revisions": 3}),
+            Link("em", "be", "review", True, "Code review", {"max_revisions": 3}),
+            Link("e2e", "fe", "consult", True, "Bug reports"),
+        ),
+    ),
+    "game_studio": CompanyTemplate(
+        key="game_studio", name="Indie Game Studio",
+        description="A director, a designer, two gameplay programmers and a playtester who plays each build in the browser.",
+        head="dir",
+        departments=(
+            Department("Direction", M("dir", "game_director", entry=True), (M("gd", "game_designer"),)),
+            Department("Engineering", M("em", "eng_manager", name="Omar", role="Lead Programmer"),
+                       (M("gp1", "gameplay_programmer"), M("gp2", "gameplay_programmer", name="Sara", role="Graphics & UI Programmer"))),
+            Department("Playtest", M("qal", "qa_lead", name="Tess", role="QA Lead"), (M("pt", "playtester"),)),
+        ),
+        links=(
+            Link("gd", "gp1", "consult", True, "Mechanics & tuning"),
+            Link("dir", "em", "debate", True, "Scope vs. time", {"max_rounds": 3}),
+            Link("pt", "gd", "report", False, "Playtest notes"),
+            Link("em", "gp1", "review", True, "Code review", {"max_revisions": 2}),
+        ),
+    ),
+    "mobile_app_team": CompanyTemplate(
+        key="mobile_app_team", name="Mobile App Team",
+        description="Mobile-first web app (installable PWA): research-led product, two mobile devs and QA testing at phone sizes.",
+        head="hop",
+        departments=(
+            Department("Product", M("hop", "head_of_product", entry=True), (M("uxr", "ux_researcher"), M("ux", "ux_designer"))),
+            Department("Mobile", M("em", "eng_manager"), (M("m1", "mobile_dev"), M("m2", "mobile_dev", name="Chloe", role="Mobile Web Developer (offline & sync)"))),
+            Department("Quality", M("qal", "qa_lead"), (M("e2e", "e2e_tester"),)),
+        ),
+        links=(Link("ux", "m1", "consult", True, "Design consult"), Link("uxr", "e2e", "consult", True, "Usability checks")),
+    ),
+    "saas_launch": CompanyTemplate(
+        key="saas_launch", name="SaaS Launch",
+        description="Build and launch: Product, Engineering, Quality, Marketing and Sales, from PRD to pricing page and launch copy.",
+        head="ceo",
+        departments=(
+            Department("Executive", M("ceo", "ceo", entry=True)),
+            Department("Product", M("hop", "head_of_product"), (M("pm", "product_manager"),)),
+            Department("Engineering", M("em", "eng_manager"), (M("dev", "fullstack_dev"), M("e2e", "e2e_tester"))),
+            Department("Marketing", M("mkt", "marketing_lead"), (M("cw", "content_writer"), M("seo", "seo_specialist"))),
+            Department("Sales", M("sales", "sales_lead")),
+        ),
+        links=(
+            Link("hop", "em", "debate", True, "Scope vs. effort", {"max_rounds": 3}),
+            Link("cw", "pm", "consult", True, "Product facts"),
+            Link("sales", "hop", "consult", True, "Pricing & packaging"),
+        ),
+    ),
+    "data_science_team": CompanyTemplate(
+        key="data_science_team", name="Data Science Team",
+        description="A lead, a data engineer and an ML engineer, plus an analyst and a writer who turn results into a clear report.",
+        head="lead",
+        departments=(
+            Department("Data Science", M("lead", "data_science_lead", entry=True), (M("de", "data_engineer"), M("ml", "ml_engineer"))),
+            Department("Insights", M("ed", "editor_in_chief", name="Hugo", role="Insights Lead"), (M("da", "data_analyst"), M("wr", "writer"))),
+        ),
+        links=(Link("lead", "ed", "review", True, "Accuracy review", {"max_revisions": 2}), Link("ml", "da", "consult", True, "Metrics")),
+    ),
+    "security_audit": CompanyTemplate(
+        key="security_audit", name="Security Audit",
+        description="Audit this project's own code: threat model, findings with fixes, regression tests, and an engineering fix loop.",
+        head="sec",
+        departments=(
+            Department("Security", M("sec", "security_lead", entry=True), (M("appsec", "security_engineer"),)),
+            Department("Engineering", M("em", "eng_manager"), (M("dev", "fullstack_dev"),)),
+        ),
+        links=(Link("appsec", "dev", "review", True, "Fix verification", {"max_revisions": 3}),),
+    ),
+    "content_studio": CompanyTemplate(
+        key="content_studio", name="Content & Marketing Studio",
+        description="Creative brief, SEO research, writing and editing: blog posts, landing copy and a launch campaign.",
+        head="cd",
+        departments=(
+            Department("Creative", M("cd", "creative_director", entry=True), (M("seo", "seo_specialist"),)),
+            Department("Editorial", M("ed", "editor_in_chief"), (M("cw", "content_writer"), M("wr", "writer"))),
+            Department("Analytics", M("mkt", "marketing_lead", name="Lucia", role="Growth Lead"), (M("ga", "growth_analyst"),)),
+        ),
+        links=(Link("cd", "ed", "review", True, "Brand review", {"max_revisions": 2}), Link("seo", "cw", "consult", True, "Keywords")),
+    ),
+    "support_desk": CompanyTemplate(
+        key="support_desk", name="Customer Support Desk",
+        description="Support playbooks, help-centre articles and bug escalation, with a technical writer and a product liaison.",
+        head="sup",
+        departments=(
+            Department("Support", M("sup", "support_lead", entry=True), (M("agent", "support_agent"), M("tw", "technical_writer"))),
+            Department("Product", M("hop", "head_of_product"), (M("pm", "product_manager"),)),
+        ),
+        links=(Link("sup", "hop", "consult", True, "Bug escalation"), Link("tw", "pm", "consult", True, "Product facts")),
+    ),
     "blank": CompanyTemplate(key="blank", name="Blank Canvas", description="Start from scratch.", departments=()),
 }
 

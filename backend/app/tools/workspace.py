@@ -101,6 +101,15 @@ class ProjectFS:
                 return sh.read_text(encoding="utf-8", errors="replace")
         return real.read_text(encoding="utf-8", errors="replace") if real.is_file() else None
 
+    def current_file(self, path: str) -> tuple[str, Path] | None:
+        """Real file on disk for ``path`` (shadow first in plan mode), for serving binary assets such as images."""
+        rel, real = self.resolve(path)
+        if self.shadow:
+            sh = self._inside(self.shadow, rel)
+            if sh.is_file():
+                return rel, sh
+        return (rel, real) if real.is_file() else None
+
     def original(self, path: str) -> str | None:
         rel, real = self.resolve(path)
         return real.read_text(encoding="utf-8", errors="replace") if real.is_file() else None

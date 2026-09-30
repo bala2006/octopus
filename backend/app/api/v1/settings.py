@@ -16,6 +16,7 @@ from app.llm.base import LLMError, LLMRequest
 from app.llm.router import LEGACY_AZURE_ROWS, PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
 from app.models import McpServer, ProviderKey, User
 from app.schemas import (
+    BrowserStatusOut, BrowserTestOut,
     McpServerIn, McpServerOut, McpToolOut, ParsedFileOut, ProviderInfo, ProviderKeyIn, ProviderKeyOut, ProviderOptions, SettingsOut,
     TestProviderIn,
     TestProviderOut,
@@ -109,6 +110,40 @@ async def test_provider(body: TestProviderIn, db: AsyncSession = Depends(get_reg
         return TestProviderOut(ok=True, detail=f"Model replied: {out.strip()[:80]!r}", latency_ms=int((time.monotonic() - t0) * 1000))
     except LLMError as exc:
         return TestProviderOut(ok=False, detail=str(exc)[:500], latency_ms=int((time.monotonic() - t0) * 1000))
+
+
+# ---------------- built-in browser (Playwright MCP managed by Octopus)
+def _browser_status() -> BrowserStatusOut:
+    import shutil
+
+    from app.services.browser import browser
+
+    s = get_settings()
+    return BrowserStatusOut(enabled=s.browser_enabled, status=browser.status, error=browser.error, browser=browser._browser_arg(),
+                            package=s.playwright_mcp_package, tools=[t["name"] for t in browser.tool_list()], node=bool(shutil.which("npx")))
+
+
+@router.get("/settings/browser", response_model=BrowserStatusOut)
+async def browser_status(user: User = Depends(current_user)) -> BrowserStatusOut:
+    return _browser_status()
+
+
+@router.post("/settings/browser/test", response_model=BrowserTestOut)
+async def browser_test(user: User = Depends(current_user)) -> BrowserTestOut:
+    """Start the browser if needed, open a test page in a throwaway tab and read it back."""
+    import time
+
+    from app.services.browser import browser
+
+    t0 = time.monotonic()
+    page = "data:text/html,<title>Octopus</title><h1>Browser ready</h1>"
+    ok, out = await browser.call("settings-test", user.id, "browser_navigate", {"url": page})
+    if ok:
+        ok, out = await browser.call("settings-test", user.id, "browser_snapshot", {})
+        ok = ok and "Browser ready" in out
+    await browser.close_run("settings-test")
+    ms = int((time.monotonic() - t0) * 1000)
+    return BrowserTestOut(ok=ok, detail="Opened a page and read it back" if ok else out[:400], latency_ms=ms)
 
 
 # ---------------- MCP servers

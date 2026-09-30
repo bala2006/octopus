@@ -140,8 +140,17 @@ def org_variables(agent: AgentSpec, agents: dict[str, AgentSpec]) -> dict[str, s
             "reports": ", ".join(reports) or "nobody yet"}
 
 
+def browser_note(agent: AgentSpec, preview_url: str) -> str:
+    if not any(m.get("builtin") for m in agent.mcp):
+        return ""
+    where = f" The project is served at {preview_url}<path> (e.g. {preview_url}index.html)." if preview_url else ""
+    return ("\n## Browser\nYou have a real browser (MCP server \"browser\", your own tab)." + where +
+            " Open pages with browser_navigate, then read them with browser_snapshot and interact via the element refs it returns"
+            ' (browser_click / browser_type with "target": "<ref>").' " Check browser_console_messages for errors. Use it to test what the team builds.")
+
+
 def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
-                        status: dict[str, str] | None = None) -> str:
+                        status: dict[str, str] | None = None, preview_url: str = "") -> str:
     names = {a.id: a.name for a in agents.values()}
     variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role,
                  **org_variables(agent, agents)}
@@ -176,7 +185,7 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 {channels}
 
 ## Long-term memory notes
-{memory}
+{memory}{browser_note(agent, preview_url)}
 
 ## Rules
 1. Be concise. Do not repeat what others already said; reference it.

@@ -57,6 +57,7 @@ class AgentTools(BaseModel):
     ask_user: bool = False
     send_message: bool = True
     manage_team: bool = False  # create_agent / update_agent for reports (hiring & org design)
+    browser: bool = True  # built-in Playwright browser (Octopus-managed MCP server "browser")
     mcp_servers: list[str] = Field(default_factory=list)  # ids of the user's registered MCP servers
 
     @model_validator(mode="before")
@@ -444,6 +445,8 @@ class ProviderOptions(BaseModel):
     auth: Literal["key", "entra"] = "key"  # Azure: API key or Microsoft Entra ID (az login / managed identity)
     deployments: list[str] = Field(default_factory=list)  # Azure deployment / Foundry model names shown in pickers
     reasoning_models: list[str] = Field(default_factory=list)  # deployments that need max_completion_tokens (o-series, gpt-5)
+    deployment_type: Literal["global", "data_zone", "regional"] = "global"  # Data Zone / regional deployments cost +10%
+    pricing: dict[str, float] = Field(default_factory=dict)  # USD per 1M tokens override: input / cached_input / cache_write / output
 
 
 class ProviderKeyIn(BaseModel):
@@ -480,6 +483,22 @@ class SettingsOut(BaseModel):
     keys: list[ProviderKeyOut]
 
 
+class BrowserStatusOut(BaseModel):
+    enabled: bool
+    status: str  # stopped | starting | installing | ready | error
+    error: str = ""
+    browser: str = ""
+    package: str = ""
+    tools: list[str] = Field(default_factory=list)
+    node: bool = True  # npx found
+
+
+class BrowserTestOut(BaseModel):
+    ok: bool
+    detail: str
+    latency_ms: int = 0
+
+
 class TestProviderIn(BaseModel):
     provider: str
     model: str
@@ -498,6 +517,16 @@ class WorkspaceIn(BaseModel):
     default_permission: PermissionLevel = "ask"
 
 
+class NativeOpenIn(BaseModel):
+    default_permission: PermissionLevel = "ask"
+
+
+class NativeDialogOut(BaseModel):
+    available: bool
+    method: str = ""
+    reason: str = ""
+
+
 class WorkspacePatch(BaseModel):
     name: str | None = Field(None, max_length=200)
     default_permission: PermissionLevel | None = None
@@ -512,6 +541,11 @@ class WorkspaceOut(ORM):
     last_opened_at: datetime
     exists: bool = True
     existing_project: bool = False
+
+
+class NativeOpenOut(BaseModel):
+    cancelled: bool
+    workspace: WorkspaceOut | None = None
 
 
 class DirEntryOut(BaseModel):
@@ -538,6 +572,13 @@ class FileNode(BaseModel):
     size: int
     modified: bool = False  # changed by agents in the selected run
     planned: bool = False
+
+
+class ProjectTreeOut(BaseModel):
+    root: str  # absolute path of the project folder
+    name: str
+    files: list[FileNode]
+    truncated: bool = False
 
 
 class FileContentOut(BaseModel):

@@ -18,7 +18,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger, Tip,
 } from "@/components/ui/overlays";
 import { ErrorBoundary, PermissionBadge } from "@/components/common";
-import { DirectoryPicker } from "@/features/workspaces/DirectoryPicker";
+import { useOpenFolder } from "@/features/workspaces/useOpenFolder";
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
 
 /** The four places you work in, in the order you usually need them. Settings and the Guide live on the right. */
@@ -128,7 +128,7 @@ function ProjectSwitcher() {
   const { data: list } = useWorkspaces();
   const { data: ws } = useWorkspace(w);
   const nav = useNavigate();
-  const [open, setOpen] = React.useState(false);
+  const folder = useOpenFolder();
   return (
     <>
       <DropdownMenu>
@@ -149,11 +149,11 @@ function ProjectSwitcher() {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setOpen(true)}><Plus />Open another folder…</DropdownMenuItem>
+          <DropdownMenuItem onSelect={folder.open}><Plus />Open another folder…</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => nav("/")}><Home />All projects</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DirectoryPicker open={open} onOpenChange={setOpen} />
+      {folder.element}
     </>
   );
 }
