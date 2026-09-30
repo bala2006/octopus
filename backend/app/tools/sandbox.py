@@ -16,6 +16,7 @@ import asyncio
 import os
 import shlex
 import shutil
+import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,10 +75,11 @@ def _limits(memory_mb: int, cpu_s: int):  # type: ignore[no-untyped-def]
         import resource
 
         mem = memory_mb * 1024 * 1024
-        for lim, val in ((resource.RLIMIT_AS, mem), (resource.RLIMIT_CPU, cpu_s), (resource.RLIMIT_FSIZE, 50 * 1024 * 1024),
-                         (resource.RLIMIT_NPROC, 512)):
+        # CPU: SIGXCPU at the soft limit, SIGKILL one second later at the hard limit
+        for lim, soft, hard in ((resource.RLIMIT_AS, mem, mem), (resource.RLIMIT_CPU, cpu_s, cpu_s + 1),
+                                (resource.RLIMIT_FSIZE, 50 * 1024 * 1024, 50 * 1024 * 1024), (resource.RLIMIT_NPROC, 512, 512)):
             try:
-                resource.setrlimit(lim, (val, val))
+                resource.setrlimit(lim, (soft, hard))
             except (ValueError, OSError):
                 pass
         os.setsid()
@@ -136,6 +138,9 @@ async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: i
     text = out.decode("utf-8", errors="replace")
     if len(text) > MAX_OUTPUT:
         text = text[:2000] + "\n... [truncated] ...\n" + text[-(MAX_OUTPUT - 2000):]
+    if os.name == "posix" and proc.returncode in (-signal.SIGXCPU, -signal.SIGKILL):
+        # killed by the CPU-time limit (a busy process can burn `timeout` CPU seconds before the wall clock runs out)
+        return ExecResult(False, -9, f"{text}\nTimed out: CPU time limit of {timeout}s exceeded".lstrip(), timed_out=True, backend=backend)
     return ExecResult(proc.returncode == 0, proc.returncode or 0, text, backend=backend)
 
 
