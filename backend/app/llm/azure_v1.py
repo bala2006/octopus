@@ -79,6 +79,12 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
         }
         if req.json_mode:
             body["response_format"] = {"type": "json_object"}
+    effort = req.extra.get("reasoning_effort")
+    if effort:  # none | low | medium | high | xhigh | max
+        if style == "responses":
+            body["reasoning"] = {"effort": effort}
+        else:
+            body["reasoning_effort"] = effort
     if not reasoning:
         body["temperature"] = req.temperature
     for k in drop:
@@ -103,7 +109,7 @@ def _rejected_param(status: int, text: str, body: dict[str, Any]) -> str | None:
         for k in body:
             if k not in _PROTECTED and any(f"{q}{k}{q}" in msg for q in ("'", '"', "`")):
                 return k
-        for k in ("temperature", "max_output_tokens", "max_completion_tokens", "store", "stream_options"):
+        for k in ("temperature", "reasoning", "reasoning_effort", "max_output_tokens", "max_completion_tokens", "store", "stream_options"):
             if k in body and k in low:
                 return k
     return None

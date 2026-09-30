@@ -66,6 +66,16 @@ test("create project → company from template → edit agent → run in Demo Mo
   await expect(page.getByText("Final report").first()).toBeVisible();
   await shoot(page, "06-run-completed");
 
+  // 5b. Runs continue like chats: a follow-up on the finished run re-opens the SAME run with its context and files
+  const runUrl = page.url();
+  const apiBefore = fs.readFileSync(path.join(PROJECT, "backend", "todo_api.py"), "utf8");
+  await page.getByLabel("Interjection").fill("Add a 'clear completed' button");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(/Follow-up done/).first()).toBeVisible({ timeout: 60_000 });
+  expect(page.url()).toBe(runUrl);
+  expect(fs.readFileSync(path.join(PROJECT, "backend", "todo_api.py"), "utf8")).toBe(apiBefore);
+  expect(fs.readFileSync(path.join(PROJECT, "docs", "CHANGES.md"), "utf8")).toContain("clear completed");
+
   // 6. Report + artifacts, real files in the project directory
   await page.getByRole("tab", { name: /Report/ }).click();
   await expect(page.getByRole("heading", { name: "Key decisions" })).toBeVisible();

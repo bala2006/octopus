@@ -158,7 +158,9 @@ class ChatConnection:
         stopped = False
         try:
             for _round in range(MAX_TOOL_ROUNDS + 1):
+                effort = str((agent.behavior_json or {}).get("reasoning_effort") or "default")
                 req = LLMRequest(provider=agent.provider, model=agent.model, messages=messages, temperature=agent.temperature,
+                                 extra={} if effort == "default" else {"reasoning_effort": effort},
                                  max_tokens=agent.max_tokens,
                                  metadata={"kind": "chat", "agent_name": agent.name, "agent_role": agent.role,
                                            "category": role_category(agent.role, (agent.behavior_json or {}).get("template_key", "")),

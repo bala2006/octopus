@@ -153,6 +153,38 @@ class ProjectFS:
                         return sorted(out)
         return sorted(out)
 
+    def make_dir(self, path: str) -> str:
+        """Create a folder (and its parents) inside the project; in plan mode it goes to the plan shadow."""
+        rel, target = self.target_for_write(path)
+        if target.exists() and not target.is_dir():
+            raise WorkspaceError(f"'{rel}' already exists and is a file")
+        target.mkdir(parents=True, exist_ok=True)
+        return rel
+
+    def move(self, src: str, dst: str) -> tuple[str, str, list[str]]:
+        """Move/rename a file or folder inside the project. Returns (src, dst, moved file paths relative to the project)."""
+        if self.shadow:
+            raise WorkspaceError("Plan mode: files can't be moved; write the new file with write_file instead")
+        s_rel, s_real = self.resolve(src)
+        d_rel, d_real = self.resolve(dst)
+        if not s_real.exists():
+            raise WorkspaceError(f"Not found: {s_rel}")
+        if s_real.is_symlink():
+            raise WorkspaceError("Symlinks can't be moved")
+        if d_real.exists() and d_real.is_dir() and not s_real.is_dir():  # move a file into a folder
+            d_rel, d_real = self.resolve(f"{d_rel}/{s_real.name}")
+        if d_real.exists():
+            raise WorkspaceError(f"'{d_rel}' already exists")
+        if s_real.is_dir() and (d_real == s_real or s_real in d_real.parents):
+            raise WorkspaceError("Can't move a folder into itself")
+        moved = [f"{d_rel}/{os.path.relpath(os.path.join(dp, f), s_real)}".replace("\\", "/") for dp, _, fs in os.walk(s_real) for f in fs] \
+            if s_real.is_dir() else [d_rel]
+        if not self.allow_secrets and any(is_secret(m) for m in moved):
+            raise WorkspaceError("That move would touch a secrets file; it requires danger mode")
+        d_real.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(s_real, d_real)
+        return s_rel, d_rel, moved
+
     def zip_bytes(self, paths: list[str] | None = None, extra: dict[str, str] | None = None) -> bytes:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:

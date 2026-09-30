@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, MessageSquareReply, Pause, Play, Send, Wrench, History,
+  ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, Pause, Play, Send, Wrench, History,
   MessagesSquare, UsersRound,
 } from "lucide-react";
 import { fetchRaw } from "@/lib/api";
@@ -20,6 +20,7 @@ import { ConfirmDialog, Select, Tabs, TabsContent, TabsList, TabsTrigger, Tip } 
 import { ApprovalCard } from "./ApprovalCard";
 import { RunFeed, ToolLog, type FeedFilter } from "./RunFeed";
 import { RunGraph } from "./RunGraph";
+import { QuestionCard, type AwaitingQuestion } from "./QuestionCard";
 import { TaskBoard, Timeline, UsageMeter } from "./RunWidgets";
 import { TeamView } from "./TeamView";
 import { replayTo, TERMINAL } from "./runState";
@@ -160,10 +161,11 @@ export default function LiveRunPage() {
               <div className="px-3 pb-2"><ApprovalCard key={liveState.pendingApproval.id} approval={liveState.pendingApproval} agent={agents[liveState.pendingApproval.agent_id]}
                 onDecide={(ok, scope, reason) => send({ type: ok ? "approve" : "reject", approval_id: liveState.pendingApproval!.id, scope, reason })} /></div>
             )}
-            {isLive && cursor === null && <InterjectBox agents={agentsList} awaiting={liveState.awaiting} onSend={(content, to) => send({ type: "interject", content, to_agent_id: to })} />}
             {terminal && state.summary && cursor === null && (
               <div className="border-t border-border bg-success/5 px-4 py-3 text-sm"><span className="font-semibold">Outcome: </span>{state.summary}</div>
             )}
+            {cursor === null && <InterjectBox agents={agentsList} awaiting={liveState.awaiting} finished={terminal}
+              onSend={(content, to) => send({ type: "interject", content, to_agent_id: to })} />}
           </TabsContent>
           <TabsContent value="team" className="min-h-0 flex-1 overflow-y-auto"><TeamView agents={agentsList} state={state} departments={departments} /></TabsContent>
           <TabsContent value="tasks" className="min-h-0 flex-1 overflow-y-auto"><TaskBoard tasks={Object.values(state.tasks)} agents={agents} /></TabsContent>
@@ -193,29 +195,32 @@ function AgentStrip({ agents, state }: { agents: AgentOut[]; state: ReturnType<t
   );
 }
 
-function InterjectBox({ agents, awaiting, onSend }: { agents: AgentOut[]; awaiting: { agent_id: string; question: string } | null; onSend: (c: string, to?: string) => void }) {
+/** Talk to the team. While live this steers the run; after it finished it continues the same run like a chat. */
+/** Talk to the team. While live this steers the run; after it finished it continues the same run like a chat. */
+function InterjectBox({ agents, awaiting, onSend, finished }: { agents: AgentOut[]; awaiting: AwaitingQuestion | null; onSend: (c: string, to?: string) => void; finished?: boolean }) {
   const [text, setText] = React.useState("");
   const [to, setTo] = React.useState<string>("all");
-  React.useEffect(() => { if (awaiting) setTo(awaiting.agent_id); }, [awaiting]);
   const asker = awaiting ? agents.find((a) => a.id === awaiting.agent_id) : undefined;
   const submit = () => {
     if (!text.trim()) return;
     onSend(text.trim(), to === "all" ? undefined : to);
     setText("");
-    toast.success(to === "all" ? "Sent to everyone" : `Sent to ${agents.find((a) => a.id === to)?.name}`, { duration: 1500 });
+    toast.success(finished ? "Continuing the run" : to === "all" ? "Sent to everyone" : `Sent to ${agents.find((a) => a.id === to)?.name}`,
+      { duration: 1500, description: finished ? "Same team, same files and history." : undefined });
   };
   return (
-    <div className="border-t border-border bg-surface p-3">
-      {asker && (
-        <div className="mb-2 flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-2 text-xs animate-in fade-in-0">
-          <MessageSquareReply className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-          <div><span className="font-semibold">{asker.name} is waiting for your answer:</span><Markdown className="text-xs">{awaiting!.question}</Markdown></div>
+    <div className="max-h-[60dvh] overflow-y-auto px-3 pb-3 pt-1">
+      {awaiting && (
+        <div className="mb-2">
+          <QuestionCard key={awaiting.question} awaiting={awaiting} agent={asker}
+            onAnswer={(answer) => { onSend(answer, awaiting.agent_id); toast.success(`Answered ${asker?.name ?? "the agent"}`, { duration: 1500 }); }} />
         </div>
       )}
       <div className="flex items-end gap-2">
         <Select ariaLabel="Send to" value={to} onValueChange={setTo} className="h-9 w-[140px] text-xs"
-          options={[{ value: "all", label: "Everyone" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]} />
-        <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={1} placeholder={asker ? "Answer the question…" : "Interject: steer the team…"}
+          options={[{ value: "all", label: finished ? "Entry agent" : "Everyone" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]} />
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={1}
+          placeholder={awaiting ? "Or message the team…" : finished ? "Ask for a change or a next step: the team continues from where it stopped…" : "Interject: steer the team…"}
           className="max-h-32 min-h-[36px] flex-1 resize-none py-2 text-sm"
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} aria-label="Interjection" />
         <Button onClick={submit} disabled={!text.trim()} size="icon" className="h-9 w-9" aria-label="Send"><Send /></Button>

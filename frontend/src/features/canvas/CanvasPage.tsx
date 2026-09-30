@@ -172,7 +172,7 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
                   useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: ids.includes(n.id) })) });
                 }} />
                 <Controls showInteractive={false} position="bottom-left" />
-                <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => tone((n.data as { color?: string }).color)} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />
+                {!s.quickConfigId && <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => tone((n.data as { color?: string }).color)} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />}
               </ReactFlow>
               </EdgeAnchorsProvider>
             </div>

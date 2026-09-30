@@ -126,16 +126,22 @@ async def handle_client(msg: dict[str, Any], run_id: str, project: ProjectRef) -
     kind = msg.get("type")
     if kind in (None, "pong"):
         return
+    if kind in ("interject", "user_message", "continue"):
+        # live run → interjection; finished run → continue it like a chat (same run, full context)
+        content = str(msg.get("content", "")).strip()[:20000]
+        to = msg.get("to_agent_id") or None
+        if content:
+            for _ in range(40):
+                if await manager.continue_run(run_id, project, content, to):
+                    return
+                await asyncio.sleep(0.1)
+            await bus.publish(run_id, "error", {"message": "Run could not be continued", "kind": "client"}, project.sf)
+        return
     rt = await manager.ensure(run_id, project)
     if rt is None:
         await bus.publish(run_id, "error", {"message": "Run is not active", "kind": "client"}, project.sf)
         return
-    if kind in ("interject", "user_message"):
-        content = str(msg.get("content", "")).strip()[:20000]
-        to = msg.get("to_agent_id")
-        if content and (to is None or to in rt.agents):
-            await rt.interject(content, to)
-    elif kind == "control":
+    if kind == "control":
         action = msg.get("action")
         if action in ("pause", "resume", "step", "stop"):
             getattr(rt, action)()

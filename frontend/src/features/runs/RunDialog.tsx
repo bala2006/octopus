@@ -10,6 +10,7 @@ import type { PermissionLevel, RunDetail } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/overlays";
+import { EffortPicker, type Effort } from "@/features/canvas/EffortPicker";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
 import { useAttachments, AttachmentChips } from "@/features/chat/attachments";
 
@@ -33,7 +34,7 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
   const anyConfigured = settings.data?.providers.some((p) => p.provider !== "mock" && p.configured) ?? false;
   const [demo, setDemo] = React.useState(!anyConfigured);
   const [adv, setAdv] = React.useState(false);
-  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, context_recent: 10, max_agents: 24, persist_team: true });
+  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, context_recent: 10, max_agents: 24, persist_team: true, reasoning_effort: "default" as Effort });
   const att = useAttachments();
   React.useEffect(() => { if (open) { setGoal(initialGoal); setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask"); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => setDemo(!anyConfigured), [anyConfigured]);
@@ -81,6 +82,9 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
             ))}
           </div>
           <Field label="Permission level"><PermissionPicker value={perm} onChange={setPerm} compact /></Field>
+          <Field label="Reasoning effort" hint="Applies to every agent in this run. “Per agent” uses each agent's own setting.">
+            <EffortPicker value={budget.reasoning_effort} defaultLabel="Per agent" onChange={(v) => setBudget({ ...budget, reasoning_effort: v })} />
+          </Field>
           <label className={cn("flex items-center gap-3 rounded-lg border p-3 transition", demo ? "border-primary/40 bg-primary/5" : "border-border")}>
             <Sparkles className="h-4 w-4 text-primary" />
             <span className="flex-1"><span className="block text-sm font-medium">Demo Mode</span><span className="block text-xs text-muted-foreground">Scripted, deterministic, offline agents (no API cost). Great for presentations.</span></span>

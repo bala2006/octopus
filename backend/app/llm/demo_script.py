@@ -612,7 +612,67 @@ THOUGHTS = {
 }
 
 
+FOLLOWUP = "Follow-up from the user:"
+FU_TASK = "Follow-up change request:"
+
+
+def _followup_text(content: str) -> str:
+    return content.split(FOLLOWUP, 1)[-1].split("\n\n", 1)[0].strip()
+
+
+def followup(ctx: Ctx) -> list[Action] | None:
+    """Continued runs (Demo Mode): apply a follow-up on top of the existing work instead of starting over.
+
+    The entry agent logs the request, hands it to one teammate, and finishes again once that teammate reports back.
+    The teammate records the change in the project (docs/CHANGES.md) and reports.
+    """
+    st, me = ctx["state"], ctx["agent"]
+    fu = st.setdefault("followups", {})
+    out: list[Action] = []
+    handled = False
+    for m in ctx["inbox"]:
+        c = m.get("content") or ""
+        if m["from"] == "user" and FOLLOWUP in c:
+            handled = True
+            req = _followup_text(c)
+            n = len(fu.get("log", [])) + 1
+            fu.setdefault("log", []).append(req)
+            target = next((a["name"] for a in ctx["allowed"] if "delegate" in a["edge_types"]), None) or \
+                next((a["name"] for a in ctx["allowed"]), None)
+            if target:
+                fu["waiting"] = target
+                out.append(_msg(target, "task", f"{FU_TASK} {req}\nKeep everything that already works; change only what's needed "
+                                                f"and report back. (request #{n})"))
+            else:
+                out.append(_write("docs/CHANGES.md", _changes(fu["log"], me["name"]), f"Follow-up #{n}: {req[:60]}"))
+                out.append(_finish(f"Applied follow-up #{n}: {req}"))
+        elif FU_TASK in c:
+            handled = True
+            req = c.split(FU_TASK, 1)[1].split("\n", 1)[0].strip()
+            log = st.setdefault("fu_log", [])
+            log.append(req)
+            out.append(_write("docs/CHANGES.md", _changes(log, me["name"]), f"Follow-up: {req[:60]}"))
+            back = m["from"] if m["from"] in {a["name"] for a in ctx["allowed"]} else _upstream(ctx)
+            if back:
+                out.append(_msg(back, "status_update", f"Done: {req}. Existing work kept; change recorded in docs/CHANGES.md."))
+            if not me.get("is_entry"):
+                out.append(_finish(f"Follow-up applied: {req}"))
+        elif fu.get("waiting") and m["from"] == fu.get("waiting") and m["type"] in ("status_update", "final_report", "answer"):
+            handled = True
+            fu["waiting"] = None
+            last = fu["log"][-1] if fu.get("log") else "the requested change"
+            out.append(_finish(f"Follow-up done: {last}. Built on the previous work (see docs/CHANGES.md)."))
+    return out if handled else None
+
+
+def _changes(items: list[str], by: str) -> str:
+    return "# Changes after the first delivery\n\n" + "\n".join(f"{i}. {x} ({by})" for i, x in enumerate(items, 1)) + "\n"
+
+
 def decide(ctx: Ctx) -> dict[str, Any]:
+    fu = followup(ctx)
+    if fu is not None:
+        return {"thought": "A follow-up on delivered work: change only what's needed and report back.", "actions": fu or [{"action": "wait"}]}
     cat = ctx["agent"]["category"]
     if cat == "generic" and ctx["agent"].get("is_manager") and ctx["agent"].get("department") and not ctx["agent"].get("is_entry"):
         cat = "manager"

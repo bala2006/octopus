@@ -24,7 +24,7 @@ export const DialogContent = React.forwardRef<React.ElementRef<typeof DialogPrim
   ({ className, children, hideClose, ...props }, ref) => (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className={overlayCls} />
-      <DialogPrimitive.Content ref={ref} className={cn("fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-hidden rounded-xl border bg-elevated p-5 shadow-2xl duration-200", contentAnim, className)} {...props}>
+      <DialogPrimitive.Content ref={ref} className={cn("fixed left-1/2 top-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain rounded-xl border bg-elevated p-5 shadow-2xl duration-200", contentAnim, className)} {...props}>
         {children}
         {!hideClose && (
           <DialogPrimitive.Close className="absolute right-3 top-3 rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground" aria-label="Close">
@@ -55,7 +55,7 @@ export function ConfirmDialog({ open, onOpenChange, title, description, confirmL
     <AlertPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <AlertPrimitive.Portal>
         <AlertPrimitive.Overlay className={overlayCls} />
-        <AlertPrimitive.Content className={cn("fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border bg-elevated p-5 shadow-2xl", contentAnim)}>
+        <AlertPrimitive.Content className={cn("fixed left-1/2 top-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain rounded-xl border bg-elevated p-5 shadow-2xl", contentAnim)}>
           <AlertPrimitive.Title className="text-base font-semibold">{title}</AlertPrimitive.Title>
           {description && <AlertPrimitive.Description className="text-sm text-muted-foreground">{description}</AlertPrimitive.Description>}
           <div className="flex justify-end gap-2">
@@ -75,7 +75,7 @@ export const PopoverAnchor = PopoverPrimitive.Anchor;
 export const PopoverContent = React.forwardRef<React.ElementRef<typeof PopoverPrimitive.Content>, React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>>(
   ({ className, align = "center", sideOffset = 6, ...props }, ref) => (
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Content ref={ref} align={align} sideOffset={sideOffset} className={cn("z-50 rounded-lg border bg-popover p-3 text-popover-foreground shadow-xl outline-none", contentAnim, "data-[side=right]:slide-in-from-left-2 data-[side=left]:slide-in-from-right-2", className)} {...props} />
+      <PopoverPrimitive.Content ref={ref} align={align} sideOffset={sideOffset} className={cn("z-50 max-h-[var(--radix-popover-content-available-height)] overflow-y-auto overscroll-contain rounded-lg border bg-popover p-3 text-popover-foreground shadow-xl outline-none", contentAnim, "data-[side=right]:slide-in-from-left-2 data-[side=left]:slide-in-from-right-2", className)} {...props} />
     </PopoverPrimitive.Portal>
   ),
 );
@@ -89,7 +89,7 @@ export function Tip({ content, children, side = "top", delay = 300 }: { content:
     <TooltipPrimitive.Root delayDuration={delay}>
       <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
-        <TooltipPrimitive.Content side={side} sideOffset={6} className={cn("z-[60] max-w-xs rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-lg", contentAnim)}>
+        <TooltipPrimitive.Content side={side} sideOffset={6} className={cn("z-[60] max-h-[var(--radix-tooltip-content-available-height)] max-w-xs overflow-y-auto rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-lg", contentAnim)}>
           {content}
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
@@ -103,7 +103,7 @@ export const DropdownMenuTrigger = DropdownPrimitive.Trigger;
 export const DropdownMenuContent = React.forwardRef<React.ElementRef<typeof DropdownPrimitive.Content>, React.ComponentPropsWithoutRef<typeof DropdownPrimitive.Content>>(
   ({ className, sideOffset = 6, ...props }, ref) => (
     <DropdownPrimitive.Portal>
-      <DropdownPrimitive.Content ref={ref} sideOffset={sideOffset} className={cn("z-50 min-w-[10rem] overflow-hidden rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl", contentAnim, className)} {...props} />
+      <DropdownPrimitive.Content ref={ref} sideOffset={sideOffset} className={cn("z-50 max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[10rem] overflow-y-auto overscroll-contain rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl", contentAnim, className)} {...props} />
     </DropdownPrimitive.Portal>
   ),
 );
@@ -121,7 +121,7 @@ export const ContextMenu = ContextPrimitive.Root;
 export const ContextMenuTrigger = ContextPrimitive.Trigger;
 export const ContextMenuContent = React.forwardRef<React.ElementRef<typeof ContextPrimitive.Content>, React.ComponentPropsWithoutRef<typeof ContextPrimitive.Content>>(({ className, ...props }, ref) => (
   <ContextPrimitive.Portal>
-    <ContextPrimitive.Content ref={ref} className={cn("z-50 min-w-[12rem] overflow-hidden rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl", contentAnim, className)} {...props} />
+    <ContextPrimitive.Content ref={ref} className={cn("z-50 max-h-[var(--radix-context-menu-content-available-height)] min-w-[12rem] overflow-y-auto overscroll-contain rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl", contentAnim, className)} {...props} />
   </ContextPrimitive.Portal>
 ));
 ContextMenuContent.displayName = "ContextMenuContent";
@@ -134,7 +134,7 @@ export const ContextMenuLabel = ({ children }: { children: React.ReactNode }) =>
 export const ContextMenuSub = ContextPrimitive.Sub;
 export const ContextMenuSubTrigger = ({ children }: { children: React.ReactNode }) => <ContextPrimitive.SubTrigger className={itemCls}>{children}</ContextPrimitive.SubTrigger>;
 export const ContextMenuSubContent = ({ children }: { children: React.ReactNode }) => (
-  <ContextPrimitive.Portal><ContextPrimitive.SubContent className="z-50 max-h-80 min-w-[12rem] overflow-auto rounded-lg border bg-popover p-1 shadow-xl">{children}</ContextPrimitive.SubContent></ContextPrimitive.Portal>
+  <ContextPrimitive.Portal><ContextPrimitive.SubContent className="z-50 max-h-[min(20rem,var(--radix-context-menu-content-available-height))] min-w-[12rem] overflow-auto rounded-lg border bg-popover p-1 shadow-xl">{children}</ContextPrimitive.SubContent></ContextPrimitive.Portal>
 );
 
 // ---------------- Select
@@ -148,8 +148,8 @@ export function Select({ value, onValueChange, options, placeholder, className, 
         <SelectPrimitive.Icon><ChevronDown className="h-4 w-4 opacity-50" /></SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
-        <SelectPrimitive.Content position="popper" sideOffset={4} className={cn("z-[70] max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border bg-popover shadow-xl", contentAnim)}>
-          <SelectPrimitive.Viewport className="p-1">
+        <SelectPrimitive.Content position="popper" sideOffset={4} className={cn("z-[70] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border bg-popover shadow-xl", contentAnim)}>
+          <SelectPrimitive.Viewport className="max-h-[inherit] overflow-y-auto p-1">
             {options.map((o) => (
               <SelectPrimitive.Item key={o.value} value={o.value} className="relative flex cursor-default select-none flex-col rounded-md py-1.5 pl-7 pr-2 text-sm outline-none focus:bg-accent data-[disabled]:opacity-50">
                 <SelectPrimitive.ItemIndicator className="absolute left-2 top-2"><Check className="h-3.5 w-3.5 text-primary" /></SelectPrimitive.ItemIndicator>

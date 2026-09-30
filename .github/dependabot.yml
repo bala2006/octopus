@@ -10,6 +10,9 @@ updates:
     directory: /backend
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    groups:
+      # FastAPI and Pydantic change the OpenAPI schema together; bump them as one PR (then run `make gen-api`)
+      api-stack: { patterns: ["fastapi", "pydantic", "pydantic-settings", "starlette"] }
   - package-ecosystem: npm
     directory: /frontend
     schedule: { interval: weekly }
@@ -17,3 +20,16 @@ updates:
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Majors that need a real migration; they can't pass CI as a lone version bump:
+      # - typescript 7: openapi-typescript (API type generator) peers on typescript ^5
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # - vite 8 and @vitejs/plugin-react 6 require each other (and vitest must follow)
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
+      # - tailwindcss 4: new CSS-first config, needs a migration of tailwind.config.ts / index.css
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Slider, Switch, Textarea } from "@/components/ui/primitives";
 import { ScrollArea, Select, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/overlays";
 import { ModelPicker } from "./ModelPicker";
+import { EffortPicker, type Effort } from "./EffortPicker";
 
 export function Inspector() {
   const id = useCanvas((s) => s.inspectorId);
@@ -86,6 +87,9 @@ export function Inspector() {
             <TabsContent value="model" className="space-y-4">
               <Heading>Model</Heading>
               <ModelPicker provider={d.provider ?? "mock"} model={d.model ?? ""} onChange={(p, m) => set({ provider: p, model: m })} />
+              <Field label="Reasoning effort" hint="How long the model thinks before answering. Higher = better on hard work, more tokens and time.">
+                <EffortPicker value={(behavior.reasoning_effort ?? "default") as Effort} onChange={(v) => set({ behavior: { ...behavior, reasoning_effort: v } })} />
+              </Field>
               <Field label={`Temperature: ${(d.temperature ?? 0.4).toFixed(2)}`}>
                 <Slider min={0} max={2} step={0.05} value={[d.temperature ?? 0.4]} onValueChange={([v]) => set({ temperature: v })} aria-label="Temperature" />
               </Field>

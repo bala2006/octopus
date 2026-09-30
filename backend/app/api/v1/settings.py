@@ -16,7 +16,7 @@ from app.llm.base import LLMError, LLMRequest
 from app.llm.router import LEGACY_AZURE_ROWS, PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
 from app.models import McpServer, ProviderKey, User
 from app.schemas import (
-    BrowserStatusOut, BrowserTestOut,
+    BrowserStatusOut, BrowserTestOut, FxRateOut,
     McpServerIn, McpServerOut, McpToolOut, ParsedFileOut, ProviderInfo, ProviderKeyIn, ProviderKeyOut, ProviderOptions, SettingsOut,
     TestProviderIn,
     TestProviderOut,
@@ -110,6 +110,22 @@ async def test_provider(body: TestProviderIn, db: AsyncSession = Depends(get_reg
         return TestProviderOut(ok=True, detail=f"Model replied: {out.strip()[:80]!r}", latency_ms=int((time.monotonic() - t0) * 1000))
     except LLMError as exc:
         return TestProviderOut(ok=False, detail=str(exc)[:500], latency_ms=int((time.monotonic() - t0) * 1000))
+
+
+# ---------------- currency display (costs are stored in USD; the UI converts with real rates)
+@router.get("/settings/fx", response_model=FxRateOut)
+async def fx_rate(currency: str = "USD", user: User = Depends(current_user)) -> FxRateOut:
+    import httpx
+
+    from app.services.fx import usd_to
+
+    try:
+        r = await usd_to(currency)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, f"Exchange rates are unavailable right now ({type(exc).__name__}); costs are shown in USD") from exc
+    return FxRateOut(currency=r.currency, rate=r.rate, date=r.date, source=r.source, stale=r.stale)
 
 
 # ---------------- built-in browser (Playwright MCP managed by Octopus)

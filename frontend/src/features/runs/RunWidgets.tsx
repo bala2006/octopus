@@ -1,7 +1,8 @@
 import * as React from "react";
 import { tone } from "@/lib/palette";
 import { Coins, Cpu, Gauge, Radio, Timer } from "lucide-react";
-import { cn, formatCost, formatTokens } from "@/lib/utils";
+import { cn, formatTokens } from "@/lib/utils";
+import { useMoney } from "@/lib/money";
 import type { AgentOut } from "@/types";
 import { AgentAvatar } from "@/components/common";
 import { Popover, PopoverContent, PopoverTrigger, Tip } from "@/components/ui/overlays";
@@ -22,13 +23,14 @@ function Meter({ icon: Icon, label, value, max, fmt }: { icon: typeof Cpu; label
 }
 
 export function UsageMeter({ usage }: { usage: RunLive["usage"] }) {
+  const money = useMoney();
   return (
     <div className="flex items-center gap-4">
       <Meter icon={Gauge} label="Turns" value={usage.turns} max={usage.max_turns} fmt={String} />
       <UsageBreakdown usage={usage}>
         <button className="flex items-center gap-4 rounded-md px-1 py-0.5 transition hover:bg-accent" aria-label="Token and cost details">
           <Meter icon={Cpu} label="Tokens" value={usage.tokens} max={usage.max_tokens} fmt={formatTokens} />
-          <Meter icon={Coins} label="Cost" value={usage.cost_usd} max={usage.max_cost_usd || undefined} fmt={formatCost} />
+          <Meter icon={Coins} label="Cost" value={usage.cost_usd} max={usage.max_cost_usd || undefined} fmt={money} />
         </button>
       </UsageBreakdown>
       {usage.timeout_s ? <Meter icon={Timer} label="Active time" value={Math.round(usage.active_seconds ?? 0)} max={usage.timeout_s} fmt={(n) => `${n}s`} /> : null}
@@ -38,6 +40,7 @@ export function UsageMeter({ usage }: { usage: RunLive["usage"] }) {
 
 /** Exact usage as reported by Azure (input incl. cached + cache writes, output incl. reasoning) and what it cost. */
 export function UsageBreakdown({ usage, children }: { usage: RunLive["usage"]; children: React.ReactNode }) {
+  const money = useMoney();
   const cb = usage.cost_breakdown ?? {};
   const input = usage.input_tokens ?? 0, cached = usage.cached_tokens ?? 0, written = usage.cache_write_tokens ?? 0;
   const rows: [string, number | undefined, number | undefined, string?][] = [
@@ -61,10 +64,10 @@ export function UsageBreakdown({ usage, children }: { usage: RunLive["usage"]; c
               <tr key={label} className="border-t border-border/60">
                 <td className="px-3 py-1.5">{label}{hint && <div className="text-[10px] text-muted-foreground">{hint}</div>}</td>
                 <td className="px-2 text-right">{(n ?? 0).toLocaleString()}</td>
-                <td className="px-3 text-right">{formatCost(c ?? 0)}</td>
+                <td className="px-3 text-right">{money(c ?? 0)}</td>
               </tr>
             ))}
-            <tr className="border-t border-border font-semibold"><td className="px-3 py-1.5">Total</td><td className="px-2 text-right">{usage.tokens.toLocaleString()}</td><td className="px-3 text-right">{formatCost(usage.cost_usd)}</td></tr>
+            <tr className="border-t border-border font-semibold"><td className="px-3 py-1.5">Total</td><td className="px-2 text-right">{usage.tokens.toLocaleString()}</td><td className="px-3 text-right">{money(usage.cost_usd)}</td></tr>
           </tbody>
         </table>
         <p className="border-t border-border px-3 py-2 text-[10.5px] leading-snug text-muted-foreground">

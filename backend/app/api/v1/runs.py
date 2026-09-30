@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -113,11 +115,27 @@ async def control(run_id: str, action: str, db: AsyncSession = Depends(get_pdb),
 @router.post("/{run_id}/interject", status_code=202)
 async def interject(run_id: str, body: InterjectIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                     ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, bool]:
-    rt = await _runtime(run_id, db, user, ctx)
-    if body.to_agent_id and body.to_agent_id not in rt.agents:
+    """Message the team. On a finished run this continues it (same run, full history, files untouched)."""
+    return await _send(run_id, body, db, user, ctx)
+
+
+@router.post("/{run_id}/continue", status_code=202)
+async def continue_run(run_id: str, body: InterjectIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                       ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, bool]:
+    """Follow up on a run like a chat: the same team picks up where it left off."""
+    return await _send(run_id, body, db, user, ctx)
+
+
+async def _send(run_id: str, body: InterjectIn, db: AsyncSession, user: User, ctx: ProjectCtx) -> dict[str, bool]:
+    run = await owned_run(run_id, db, user)
+    agent_ids = {a.get("id") for a in (run.snapshot_json or {}).get("agents", [])}
+    if body.to_agent_id and body.to_agent_id not in agent_ids and not (manager.get(run_id) and body.to_agent_id in manager.get(run_id).agents):
         raise HTTPException(422, "Unknown agent")
-    await rt.interject(body.content, body.to_agent_id)
-    return {"ok": True}
+    for _ in range(40):  # a run that is finalizing right now can be continued a moment later
+        if await manager.continue_run(run_id, ref(ctx), body.content, body.to_agent_id):
+            return {"ok": True}
+        await asyncio.sleep(0.1)
+    raise HTTPException(409, "Run could not be continued")
 
 
 @router.post("/{run_id}/approve", status_code=202)

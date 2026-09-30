@@ -5,7 +5,7 @@ import json
 import re
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import AliasChoices, model_validator, BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
 AgentMessageType = Literal[
     "task", "question", "answer", "proposal", "critique", "agreement", "objection", "decision",
@@ -50,6 +50,20 @@ class WriteFile(BaseModel):
     action: Literal["write_file"]
     path: str = Field(min_length=1, max_length=300)
     content: str = Field(max_length=1_000_000)
+    note: str = ""
+
+
+class CreateFolder(BaseModel):
+    action: Literal["create_folder"]
+    path: str = Field(min_length=1, max_length=300)
+    note: str = ""
+
+
+class MoveFile(BaseModel):
+    """Move or rename a file or a whole folder inside the project (organise files)."""
+    action: Literal["move_file"]
+    source: str = Field(min_length=1, max_length=300, validation_alias=AliasChoices("source", "from", "src", "path"))
+    destination: str = Field(min_length=1, max_length=300, validation_alias=AliasChoices("destination", "to", "dst", "target"))
     note: str = ""
 
 
@@ -100,9 +114,31 @@ class Remember(BaseModel):
     value: str = Field(max_length=5000)
 
 
+class Choice(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    description: str = Field("", max_length=500)
+    recommended: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_str(cls, data: Any) -> Any:
+        return {"label": data} if isinstance(data, str) else data
+
+
 class RequestUserInput(BaseModel):
+    """Ask the user. Always offer 2-5 concrete options (mark the best one recommended); the user can also type their own answer."""
     action: Literal["request_user_input"]
     question: str = Field(min_length=1)
+    options: list[Choice] = Field(default_factory=list, max_length=6)
+
+    @model_validator(mode="after")
+    def _one_recommended(self) -> "RequestUserInput":
+        rec = [o for o in self.options if o.recommended]
+        if self.options and not rec:
+            self.options[0].recommended = True  # there is always a suggested answer
+        for extra in rec[1:]:
+            extra.recommended = False
+        return self
 
 
 class WebSearch(BaseModel):
@@ -185,7 +221,7 @@ class Wait(BaseModel):
 
 
 Action = Annotated[
-    Union[SendMessage, WriteFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
+    Union[SendMessage, WriteFile, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
           WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, Finish, Wait],
     Field(discriminator="action"),
 ]
@@ -196,10 +232,11 @@ ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "w
                   "ask_user": "request_user_input", "search": "web_search", "calculator": "calculate", "ls": "list_files",
                   "mcp": "mcp_call", "call_tool": "mcp_call", "hire": "create_agent", "spawn_agent": "create_agent",
                   "add_agent": "create_agent", "update_self": "update_agent", "edit_agent": "update_agent", "configure_agent": "update_agent",
-                  "team": "list_agents", "roster": "list_agents", "view_agents": "list_agents"}
+                  "mkdir": "create_folder", "make_dir": "create_folder", "create_directory": "create_folder", "mkdir_p": "create_folder",
+                  "move": "move_file", "rename": "move_file", "mv": "move_file", "rename_file": "move_file", "team": "list_agents", "roster": "list_agents", "view_agents": "list_agents"}
 
 # tool toggle required for each action (absent => always available). mcp_call is gated per server.
-ACTION_TOOL = {"send_message": "send_message", "write_file": "file_write", "read_file": "file_read", "list_files": "list_files",
+ACTION_TOOL = {"send_message": "send_message", "write_file": "file_write", "create_folder": "file_write", "move_file": "file_write", "read_file": "file_read", "list_files": "list_files",
                "run_code": "terminal", "request_user_input": "ask_user", "web_search": "web_search", "calculate": "calculator",
                "create_agent": "manage_team"}
 TOOL_DEFAULTS = {"send_message": True, "file_read": True, "file_write": True, "list_files": True, "calculator": True, "browser": True}
@@ -298,7 +335,9 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
     if tool_enabled(enabled_tools, "file_read"):
         lines.append('{"action":"read_file","path":"relative/path.ext"}')
     if tool_enabled(enabled_tools, "file_write"):
-        lines.append('{"action":"write_file","path":"relative/path.ext","content":"<FULL file content>","note":"why"}')
+        lines.append('{"action":"write_file","path":"relative/path.ext","content":"<FULL file content>","note":"why"}  (parent folders are created for you)')
+        lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
+        lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):
         lines.append('{"action":"run_code","command":"python -m unittest discover -s tests -v"}  (sandboxed terminal; allowlisted: python, node, npm test, pytest)')
     if tool_enabled(enabled_tools, "web_search"):
@@ -306,7 +345,9 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
     if tool_enabled(enabled_tools, "calculator"):
         lines.append('{"action":"calculate","expression":"(12*7)/3"}')
     if tool_enabled(enabled_tools, "ask_user"):
-        lines.append('{"action":"request_user_input","question":"..."}  (pauses the run until the user answers)')
+        lines.append('{"action":"request_user_input","question":"...","options":[{"label":"best choice","description":"why","recommended":true},'
+                     '{"label":"alternative"},{"label":"another alternative"}]}  (pauses the run until the user answers; ALWAYS give 2-5 concrete '
+                     'options and mark exactly one recommended; the user may also type a different answer)')
     lines.append('{"action":"list_agents","include_inactive":true}  (see every teammate: department, manager, active/inactive, live status)')
     lines.append('{"action":"update_agent","target":"self","changes":{"system_prompt"|"append_to_prompt"|"role"|"description"|"temperature"|"behavior"|"tools":...},"reason":"why"}'
                  '  (refine your OWN configuration; you cannot grant yourself new tools)')

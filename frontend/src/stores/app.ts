@@ -10,6 +10,9 @@ interface AppState {
   chatFilter: "all" | "user" | "internal";
   /** getting-started checklist dismissed */
   onboarded: boolean;
+  /** display currency for costs (ISO code); costs are stored in USD and converted with live rates */
+  currency: string;
+  setCurrency: (c: string) => void;
   setOnboarded: (v: boolean) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
@@ -29,6 +32,8 @@ export const useApp = create<AppState>()(
       companyByWorkspace: {},
       chatFilter: "all",
       onboarded: false,
+      currency: "USD",
+      setCurrency: (c) => set({ currency: c.toUpperCase() }),
       setOnboarded: (v) => set({ onboarded: v }),
       setTheme: (t) => { applyTheme(t); set({ theme: t }); },
       toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),

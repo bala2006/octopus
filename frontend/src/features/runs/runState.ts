@@ -1,3 +1,4 @@
+import type { AwaitingQuestion } from "./QuestionCard";
 /** Pure reducer turning run events (live or replayed) into view state. Used for live runs and timeline scrubbing. */
 import type { AgentOut, EdgeOut, MessageOut, PendingApproval, RunEvent } from "@/types";
 
@@ -41,7 +42,7 @@ export interface RunLive {
   lastMessage: Record<string, { text: string; type: string; to?: string }>;
   protocols: Record<string, ProtocolState>;
   pendingApproval: PendingApproval | null;
-  awaiting: { agent_id: string; question: string } | null;
+  awaiting: AwaitingQuestion | null;
   errors: Array<{ message: string; kind?: string; agent_id?: string; seq?: number; ts?: string }>;
   timeline: TimelineItem[];
   approvals: Array<{ id: string | null; approved: boolean; reason?: string; agent_id?: string; kind?: string; summary?: string; auto?: boolean; seq?: number }>;
@@ -93,7 +94,7 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
       const lm = m.from_agent_id && m.type !== "artifact_created"
         ? { ...s.lastMessage, [m.from_agent_id]: { text: clip(m.content, 160), type: m.type, to: m.to_agent_id ? n(m.to_agent_id) : undefined } } : s.lastMessage;
       return { ...next, messages: [...s.messages, { ...m, _seq: seq || undefined }], lastMessage: lm,
-        awaiting: m.meta?.awaiting_input ? { agent_id: m.from_agent_id!, question: m.content } : s.awaiting,
+        awaiting: m.meta?.awaiting_input ? { agent_id: m.from_agent_id!, question: m.content, options: (m.meta.options as AwaitingQuestion["options"]) ?? [], allow_other: true } : s.awaiting,
         timeline: m.type === "artifact_created" ? s.timeline : push({ type: e.type, agent_id: m.from_agent_id, tone: "msg",
           label: `${n(m.from_agent_id)} › ${m.to_agent_id ? n(m.to_agent_id) : "you"} · ${m.type.replace("_", " ")}` }) };
     }
@@ -118,6 +119,8 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
       return { ...next, artifacts: { ...s.artifacts, [a.path]: a },
         timeline: push({ type: e.type, agent_id: a.author_agent_id, tone: "file", label: `${n(a.author_agent_id)} ${a.planned ? "planned" : a.version === 1 && a.created ? "created" : "updated"} ${a.path} v${a.version}` }) };
     }
+    case "run_continued":
+      return { ...next, status: "running", summary: "", timeline: push({ type: e.type, tone: "status", label: `Continued: ${clip(d.content, 60)}` }) };
     case "usage_update":
       return { ...next, usage: { ...s.usage, ...d } };
     case "protocol":
