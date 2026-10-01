@@ -177,7 +177,7 @@ def browser_note(agent: AgentSpec, preview_url: str) -> str:
 
 def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
                         status: dict[str, str] | None = None, preview_url: str = "", native: bool = False, project_memory: str = "",
-                        role_prompt: str | None = None) -> str:
+                        role_prompt: str | None = None, skills_text: str = "") -> str:
     """``role_prompt``: the agent's prompt resolved from the role library (services/roles.py); default: its own."""
     names = {a.id: a.name for a in agents.values()}
     variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role,
@@ -214,7 +214,7 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 {channels}
 
 ## Long-term memory notes
-{memory}{chr(10) + "## Project memory (shared by the whole team, kept across runs)" + chr(10) + project_memory if project_memory else ""}{browser_note(agent, preview_url)}
+{memory}{chr(10) + "## Project memory (shared by the whole team, kept across runs)" + chr(10) + project_memory if project_memory else ""}{browser_note(agent, preview_url)}{skills_text}
 
 ## Rules
 1. Be concise. Do not repeat what others already said; reference it. The Blackboard (task board, workspace files) is always

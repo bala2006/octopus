@@ -3,7 +3,7 @@ import { useStore } from "@xyflow/react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { BookOpenCheck, Crown, Flag, Maximize2, MessageSquare, PenLine, Plug, Power, Trash2, X } from "lucide-react";
-import { useMcpServers, useRoleTemplates, useSettings, useWorkspaceId } from "@/hooks/queries";
+import { useMcpServers, useRoleTemplates, useSettings, useSkills, useWorkspaceId } from "@/hooks/queries";
 import { PERMISSIONS, TOOLS } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useCanvas, type AgentData } from "@/stores/canvas";
@@ -185,6 +185,8 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
           </Field>
         </div>
 
+        <AgentSkills id={id} behavior={behavior} roleKey={roleKey} />
+
         <div className="space-y-1.5">
           <Field label="Tools">
             <Select ariaLabel="Tool preset" value={customTools ? "custom" : preset} onValueChange={pickPreset} className="h-8 text-xs"
@@ -239,5 +241,30 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
         <Button variant="ghost" size="xs" className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => deleteNodes([id])}><Trash2 />Delete</Button>
       </div>
     </div>
+  );
+}
+
+/** The agent's skills: its role's (from the skill library) plus any picked for it; add from a list, remove picked ones. */
+function AgentSkills({ id, behavior, roleKey }: { id: string; behavior: NonNullable<AgentData["behavior"]>; roleKey: string }) {
+  const { data: skills = [] } = useSkills();
+  const update = useCanvas((s) => s.updateAgent);
+  const picked = (behavior.skills ?? []) as string[];
+  const fromRole = skills.filter((s) => roleKey && (s.roles ?? []).includes(roleKey) && !picked.includes(s.name)).map((s) => s.name);
+  const setPicked = (next: string[]) => update(id, { behavior: { ...behavior, skills: next } as AgentData["behavior"] }, { history: true });
+  return (
+    <Field label="Skills">
+      <div className="flex flex-wrap items-center gap-1" data-testid="agent-skills">
+        {fromRole.map((n) => <Tip key={n} content="From the role"><span className="rounded-full border border-border bg-muted/40 px-2 py-px font-mono text-[10.5px] text-muted-foreground">{n}</span></Tip>)}
+        {picked.map((n) => (
+          <button key={n} onClick={() => setPicked(picked.filter((x) => x !== n))} title="Remove"
+            className="rounded-full border border-primary/40 bg-primary/10 px-2 py-px font-mono text-[10.5px] text-primary hover:border-destructive/50">{n} ×</button>
+        ))}
+        <div className="min-w-[120px] flex-1">
+          <Combobox value="" placeholder="Add a skill" ariaLabel="Add a skill" className="h-6 border-dashed text-[11px]"
+            options={skills.filter((s) => !picked.includes(s.name) && !fromRole.includes(s.name)).map((s) => ({ value: s.name, label: s.name, hint: s.description }))}
+            onChange={(v) => setPicked([...picked, v])} />
+        </div>
+      </div>
+    </Field>
   );
 }

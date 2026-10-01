@@ -280,9 +280,15 @@ class Wait(BaseModel):
     action: Literal["wait"]
 
 
+class UseSkill(BaseModel):
+    """Load a skill (a step-by-step playbook) by name; its full instructions come back as the result."""
+    action: Literal["use_skill"]
+    name: str = Field(min_length=1, max_length=80)
+
+
 Action = Annotated[
     Union[SendMessage, Delegate, WriteFile, EditFile, SearchProject, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
-          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, Finish, Wait],
+          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, UseSkill, Finish, Wait],
     Field(discriminator="action"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Action)
@@ -394,6 +400,7 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
     if tool_enabled(enabled_tools, "send_message"):
         lines.append('{"action":"delegate","to":"<teammate>","objective":"...","deliverable":"...","done_when":"...","context":"..."}'
                      '  (hand work to a teammate you have a delegate channel to; it goes on the task board)')
+    lines.append('{"action":"use_skill","name":"<skill name>"}  (load a step-by-step playbook from the Skills list, then follow it)')
     lines += [
         '{"action":"update_task_board","tasks":[{"key":"T-1 (omit to create)","title":"...","description":"...",'
         '"assignee":"<name>","status":"todo|in_progress|in_review|done|blocked","acceptance_criteria":"..."}]}',

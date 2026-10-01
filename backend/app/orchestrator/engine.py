@@ -49,6 +49,7 @@ from app.orchestrator.protocols import (
 from app.schemas import RunBudget
 from app.services import project_memory as PM
 from app.tools import basic
+from app.services import skills as SK
 from app.services.roles import resolve_prompt
 from app.tools.sandbox import SandboxError, parse_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError
@@ -365,6 +366,7 @@ class RunRuntime(TeamMixin):
         from app.prompts.roles import all_roles
 
         self.roles = all_roles()  # replaced by the owner's role library in load_roles()
+        self.skills: dict[str, SK.Skill] = SK.builtin_skills()  # + the owner's and the project's skills in load_roles()
         self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
         # verify-before-finish: code changed since anything was last run / opened in the browser
         self.unverified: dict[str, int] = {}  # deliverable path → turn it last changed without being exercised since
@@ -1329,7 +1331,9 @@ class RunRuntime(TeamMixin):
         system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
                                      status=self.status, preview_url=self.preview_url(), native=native,
                                      project_memory=PM.render(self.memory, exclude_run=self.run_id),
-                                     role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, self.roles))
+                                     role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, self.roles),
+                                     skills_text=SK.prompt_section(self.skills, str(agent.behavior.get("template_key") or ""),
+                                                                   list(agent.behavior.get("skills") or [])))
         user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
                                  names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
                                  team_status=team_status(self.agents, self.status))
@@ -2075,7 +2079,8 @@ class RunRuntime(TeamMixin):
         try:
             async with registry_factory()() as rdb:
                 self.roles = await effective_roles(rdb, self.user_id)
-        except Exception as exc:  # noqa: BLE001 - built-in roles still work
+                self.skills = await SK.effective_skills(rdb, self.user_id, self.root)
+        except Exception as exc:  # noqa: BLE001 - built-in roles and skills still work
             log.warning("roles_not_loaded", error=str(exc)[:200])
 
     async def load_mcp(self) -> None:
@@ -2297,6 +2302,20 @@ class RunRuntime(TeamMixin):
 
     async def act_wait(self, agent: AgentSpec, a: A.Wait) -> None:
         return None
+
+    async def act_use_skill(self, agent: AgentSpec, a: A.UseSkill) -> None:
+        cid = await self._tool_event(agent, "use_skill", {"name": a.name})
+        key = a.name.strip().lower()
+        sk = self.skills.get(key) or next((s for s in self.skills.values() if key in s.name), None)
+        if sk is None:
+            out = f"No skill named '{a.name}'. Available: {', '.join(sorted(self.skills)) or 'none'}"
+            self.observe(agent.id, {"tool": "use_skill", "ok": False, "content": out})
+            await self._tool_result(agent, cid, "use_skill", False, out)
+            return
+        await self.set_agent_status(agent.id, "reading", f"Following the {sk.name} skill…")
+        self.log(agent.id, f"uses the {sk.name} skill")
+        self.observe(agent.id, {"tool": "use_skill", "ok": True, "content": f"# Skill: {sk.name}\n{sk.description}\n\n{sk.body}"})
+        await self._tool_result(agent, cid, "use_skill", True, sk.name)
 
     # ------------------------------------------------------------------ finalisation
     async def finalize(self, status: str, reason: str) -> None:

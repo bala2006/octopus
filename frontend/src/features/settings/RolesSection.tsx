@@ -86,7 +86,7 @@ export function RolesSection() {
         <Button size="sm" variant="ghost" disabled={!modified} onClick={() => setConfirm("restore-all")}><RotateCcw />Restore all defaults</Button>
       </div>
 
-      <div className="flex min-h-[560px] overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex h-[min(680px,calc(100dvh-14rem))] min-h-[440px] overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex w-60 shrink-0 flex-col border-r border-border">
           <label className="flex items-center gap-2 border-b border-border px-2.5 py-2 text-xs">
             <Search className="h-3.5 w-3.5 text-muted-foreground" />
@@ -111,7 +111,7 @@ export function RolesSection() {
         </div>
 
         {role && draft ? (
-          <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+          <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
             <div className="flex items-center gap-2">
               <UserCog className="h-4 w-4 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{role.key}</span>

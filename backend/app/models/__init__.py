@@ -107,6 +107,23 @@ class UserRole(RegistryBase):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class UserSkill(RegistryBase):
+    """A skill edited or written by the user (Settings → Skills). ``name`` equal to a built-in skill overrides it (delete
+    the row to restore the default); any other name is a skill of the user's own."""
+
+    __tablename__ = "user_skills"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_user_skill_name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(Text, default="")
+    roles: Mapped[str] = mapped_column(Text, default="")  # comma-separated role keys
+    phases: Mapped[str] = mapped_column(Text, default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 # ====================================================================== project
 class Company(ProjectBase):
     __tablename__ = "companies"
@@ -269,6 +286,6 @@ class AgentMemory(ProjectBase):
 
 
 __all__ = [
-    "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate", "UserRole",
+    "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate", "UserRole", "UserSkill",
     "Company", "Agent", "Edge", "ChatSession", "Run", "Message", "RunEvent", "Task", "Artifact", "AgentMemory",
 ]

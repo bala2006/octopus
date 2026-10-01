@@ -47,6 +47,8 @@ DESCRIPTIONS = {
     "create_agent": "Hire a new teammate into the company (you can only grant tools you have yourself).",
     "update_agent": "Change your own configuration (target \"self\") or that of an agent you manage.",
     "list_agents": "See every teammate: department, manager, active/inactive and live status.",
+    "use_skill": "Load one of the skills listed in your instructions (a step-by-step playbook for a kind of work: spec, design, "
+                 "implementation, testing, review…). The full steps come back; follow them.",
     "finish": "Report that your part is done, with a summary. For the entry agent this completes the run.",
     "wait": "End your turn without acting; you are woken when a new message arrives.",
 }

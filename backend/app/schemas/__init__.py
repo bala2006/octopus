@@ -93,6 +93,7 @@ class AgentBehavior(BaseModel):
     # None (agents from before roles were linked): linked while the prompt is still the built-in text
     prompt_linked: bool | None = None
     extra_instructions: str = Field("", max_length=8000)  # appended to the role prompt for this agent only
+    skills: list[str] = Field(default_factory=list, max_length=20)  # skills picked for this agent (on top of its role's)
     # reasoning effort for reasoning models (gpt-6-luna supports none..max); "default" = the model's own default (medium)
     reasoning_effort: ReasoningEffort = "default"
 
@@ -288,6 +289,23 @@ class RoleTemplateOut(BaseModel):
     tools: AgentTools
     category: str = "General"
     source: Literal["builtin", "modified", "custom"] = "builtin"  # modified = a built-in role the user edited
+
+
+class SkillOut(BaseModel):
+    name: str
+    description: str
+    body: str
+    roles: list[str] = Field(default_factory=list)
+    phases: list[str] = Field(default_factory=list)
+    source: Literal["builtin", "modified", "custom", "project"] = "builtin"
+
+
+class SkillIn(BaseModel):
+    name: str = Field(min_length=2, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
+    description: str = Field(min_length=1, max_length=400)
+    body: str = Field(min_length=1, max_length=40000)
+    roles: list[str] = Field(default_factory=list, max_length=60)
+    phases: list[str] = Field(default_factory=list, max_length=12)
 
 
 class RoleIn(BaseModel):
