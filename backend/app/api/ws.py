@@ -3,7 +3,8 @@
 /ws/w/{workspace_id}/runs/{run_id}?token=&last_seq=N
     server → client: snapshot, agent_status, agent_activity, token_stream, thought, message_created, message_rejected,
                      edge_activity, tool_call, tool_result, task_updated, artifact_updated, usage_update, protocol,
-                     approval_requested, approval_resolved, turn_started, run_status, error, ping
+                     approval_requested, approval_resolved, turn_started, run_status, error, ping,
+                     thinking_stream, browser_action (screenshot: GET /api/v1/w/{w}/runs/{run}/browser/{frame})
     client → server: interject | user_message {content, to_agent_id?}, control {action}, approve {approval_id, scope?},
                      reject {approval_id, reason?}, pong
     On connect every persisted event with seq > last_seq is replayed first, so reconnects lose nothing.

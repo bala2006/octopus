@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     playwright_mcp_port: int = 0  # 0 = pick a free port
     playwright_browser: str = ""  # chrome | msedge | chromium | firefox | webkit ("" = chrome if installed, else chromium)
     playwright_headless: bool = True
+    # After each browser action, screenshot the agent's tab so the run's Browser view shows what it is doing
+    browser_live_frames: bool = True
 
     # MCP: allow stdio servers (spawns user-configured commands on the backend host)
     mcp_allow_stdio: bool = True
