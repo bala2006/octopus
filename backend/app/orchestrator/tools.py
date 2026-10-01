@@ -49,11 +49,15 @@ DESCRIPTIONS = {
     "list_agents": "See every teammate: department, manager, active/inactive and live status.",
     "use_skill": "Load one of the skills listed in your instructions (a step-by-step playbook for a kind of work: spec, design, "
                  "implementation, testing, review…). The full steps come back; follow them.",
-    "finish": "Report that your part is done, with a summary. For the entry agent this completes the run.",
+    "set_track": "Company head, at intake only: pick the track for this goal (quick = one coherent deliverable; standard = a "
+                 "feature or app; large = several independent parts) and whether a research phase is needed. Octopus then "
+                 "briefs each phase owner in order and comes back to you to accept. Ends your turn.",
+    "finish": "Report that your part is done, with a summary. For the entry agent this completes the run. In a workflow Test or "
+              "Review phase set outcome \"pass\" or \"fail\" (fail sends your findings back to the builder).",
     "wait": "End your turn without acting; you are woken when a new message arrives.",
 }
 # turn-ending actions: the model is not called again in this turn after one of these
-TERMINAL_ACTIONS = {"finish", "wait", "request_user_input"}
+TERMINAL_ACTIONS = {"finish", "wait", "request_user_input", "set_track"}
 
 
 def _inline(schema: dict[str, Any]) -> dict[str, Any]:

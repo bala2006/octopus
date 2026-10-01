@@ -7,6 +7,19 @@ const msg = (id: string, from: string | null, to: string | null, type = "task", 
 });
 
 describe("reduceRun", () => {
+  it("tracks the workflow and puts each phase handoff on the timeline", () => {
+    const wf = (active: string, loops = 0) => ({ track: "quick", index: 1, ended: false, phases: ["intake", "build", "test", "accept"].map((k) => ({
+      key: k, title: k[0].toUpperCase() + k.slice(1), owner: k === "build" ? "b" : k === "test" ? "q" : "h",
+      status: k === active ? "active" : k === "intake" ? "done" : "pending", loops: k === "build" ? loops : 0 })) });
+    let s = reduceRun(initialRun(), { type: "workflow_updated", seq: 1, data: { workflow: wf("build") } }, { b: "Sam" });
+    expect(s.workflow?.track).toBe("quick");
+    expect(s.timeline.at(-1)).toMatchObject({ tone: "protocol", label: "Build → Sam" });
+    s = reduceRun(s, { type: "workflow_updated", seq: 2, data: { workflow: wf("build") } }, { b: "Sam" });
+    expect(s.timeline).toHaveLength(1); // same phase: no new entry
+    s = reduceRun(s, { type: "workflow_updated", seq: 3, data: { workflow: wf("test") } }, { q: "Quinn" });
+    s = reduceRun(s, { type: "workflow_updated", seq: 4, data: { workflow: wf("build", 1) } }, { b: "Sam" });
+    expect(s.timeline.at(-1)?.label).toBe("Build → Sam (fix round 1)");
+  });
   it("makes skipped turns and stalls visible", () => {
     let s = reduceRun(initialRun(), { type: "turn_skipped", seq: 1, data: { agent_id: "a", limit: 12, inbox: [] } }, { a: "Alice" });
     expect(s.timeline.at(-1)).toMatchObject({ tone: "error", label: "Alice skipped: over 12 autonomous turns" });

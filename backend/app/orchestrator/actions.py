@@ -274,10 +274,21 @@ class ListAgents(BaseModel):
 class Finish(BaseModel):
     action: Literal["finish"]
     summary: str = ""
+    # workflow test / review phases: "pass" moves on, "fail" sends the findings back to the builder
+    outcome: Literal["done", "pass", "fail"] = "done"
 
 
 class Wait(BaseModel):
     action: Literal["wait"]
+
+
+class SetTrack(BaseModel):
+    """Company head, during intake: choose how the goal is worked (Octopus then runs the phases with the right owners)."""
+    action: Literal["set_track"]
+    track: Literal["quick", "standard", "large"]
+    research: bool = False  # add a Research phase (real unknowns: an unfamiliar API, a library choice, a domain question)
+    reason: str = Field("", max_length=2000)  # why this track; assumptions you made
+    owners: dict[str, str] = Field(default_factory=dict)  # optional phase -> teammate name overrides, e.g. {"build": "Sam"}
 
 
 class UseSkill(BaseModel):
@@ -288,7 +299,7 @@ class UseSkill(BaseModel):
 
 Action = Annotated[
     Union[SendMessage, Delegate, WriteFile, EditFile, SearchProject, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
-          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, UseSkill, Finish, Wait],
+          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, UseSkill, SetTrack, Finish, Wait],
     Field(discriminator="action"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Action)

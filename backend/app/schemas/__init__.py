@@ -384,6 +384,9 @@ class RunBudget(BaseModel):
     max_tool_rounds: int = Field(40, ge=1, le=200)  # model calls per agent turn with native tools (each returns tool results)
     # an agent that can run code or browse is sent back once to verify when it finishes with unexercised code changes
     verify_before_finish: bool = True
+    # how the team works: "on" = the defined workflow (intake → spec → design → build → test → review → accept with owners
+    # and gates), "off" = free-form, "auto" = the workflow when the team can staff a build and an independent check
+    workflow: Literal["auto", "on", "off"] = "auto"
     context_recent: int = Field(30, ge=2, le=200)  # own messages kept verbatim; older ones are summarised
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run

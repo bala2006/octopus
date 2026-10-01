@@ -42,6 +42,7 @@ from app.orchestrator.permissions import (
     EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
 )
 from app.orchestrator.team import TeamMixin
+from app.orchestrator.workflow import WorkflowMixin
 from app.orchestrator.protocols import (
     DebateState, LoopDetector, ReviewState, debate_decided_externally, debate_on_message, infer_verdict,
     review_on_request, review_on_result,
@@ -282,7 +283,7 @@ def live_activity(text: str) -> tuple[str, str]:
     return ("thinking", "Planning next step…")
 
 
-class RunRuntime(TeamMixin):
+class RunRuntime(TeamMixin, WorkflowMixin):
     def __init__(self, run: Run, user_id: str, project: ProjectRef) -> None:
         snap = run.snapshot_json or {}
         self.snapshot: dict[str, Any] = {"company": snap.get("company") or {}, "agents": list(snap.get("agents") or []),
@@ -368,6 +369,7 @@ class RunRuntime(TeamMixin):
         self.roles = all_roles()  # replaced by the owner's role library in load_roles()
         self.skills: dict[str, SK.Skill] = SK.builtin_skills()  # + the owner's and the project's skills in load_roles()
         self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
+        self.wf: dict[str, Any] | None = None  # the workflow's state (orchestrator/workflow.py); None = free-form run
         # verify-before-finish: code changed since anything was last run / opened in the browser
         self.unverified: dict[str, int] = {}  # deliverable path → turn it last changed without being exercised since
         self.finish_bounces: set[str] = set()  # "agent|files" already sent back once (never twice for the same state)
@@ -426,7 +428,7 @@ class RunRuntime(TeamMixin):
             "budget_base": self.budget_base,
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
-            "broken_files": self.broken_files,
+            "broken_files": self.broken_files, "workflow": self.wf,
             "journal": self.journal[-JOURNAL_MAX:], "journal_n": self.journal_n, "seen": self.seen, "seen_turn": self.seen_turn,
             "metrics": self.efficiency(),
         }
@@ -445,6 +447,7 @@ class RunRuntime(TeamMixin):
         self.status.update(st.get("status", {}))
         self.done_agents = set(st.get("done_agents", []))
         self.broken_files = dict(st.get("broken_files", {}))
+        self.wf = st.get("workflow") or None
         self.agent_turns = Counter(st.get("agent_turns", {}))
         self.agent_tokens = Counter(st.get("agent_tokens", {}))
         self.agent_cost = Counter(st.get("agent_cost", {}))
@@ -980,8 +983,13 @@ class RunRuntime(TeamMixin):
         if images:
             content += "\n\n--- Attached image(s), shown to every agent as images: " + ", ".join(str(a.get("filename")) for a in images) + " ---"
         meta: dict[str, Any] = {"goal": True}
+        if self.wf_enabled_for_run():
+            self.wf_init()
+            content += self.wf_intake_note()
+            await self.wf_emit()
         if images:
             meta["images"] = [{"filename": a.get("filename"), "name": a.get("name"), "mime": a.get("mime")} for a in images]
+        self.goal_content = content.split("\n\n--- How this company works ---")[0]
         for aid in self.entry_agents():
             await self.post_message(sender="user", from_id=None, to_id=aid, type_="task", content=content, meta=meta)
 
@@ -1006,6 +1014,8 @@ class RunRuntime(TeamMixin):
                 aid = self.next_runnable()
                 if aid is None:
                     if self.awaiting:
+                        continue
+                    if self.wf_active() and await self.nudge_workflow():
                         continue
                     if await self.nudge_open_tasks():
                         continue
@@ -1068,6 +1078,8 @@ class RunRuntime(TeamMixin):
         if self.artifacts:
             lines.append("Workspace files:\n" + "\n".join(
                 f"- {p} v{a['version']} by {self.names.get(a['author'] or '', '?')}" for p, a in sorted(self.artifacts.items())))
+        if self.wf:
+            lines.append(self.wf_blackboard())
         if self.broken_files:
             lines.append("Files FAILING automatic checks (fix before anything else):\n" + "\n".join(
                 f"- {p}: {msg.splitlines()[0][:300]}" for p, msg in sorted(self.broken_files.items())))
@@ -1264,7 +1276,7 @@ class RunRuntime(TeamMixin):
         try:
             req, native = await self.build_request(agent, inbox_set, obs)
             if native:
-                await self.native_turn(agent, req)
+                await self.native_turn(agent, req, exclude=self.wf_tool_exclusions(agent))
                 await self.end_turn(aid)
                 return
             text = await self.call_llm_escalating(agent, req)
@@ -1538,7 +1550,7 @@ class RunRuntime(TeamMixin):
         token = DELEGATION.set(frame)
         last = ""
         try:
-            last = await self.native_turn(worker, req, exclude={"request_user_input"})
+            last = await self.native_turn(worker, req, exclude={"request_user_input"} | self.wf_tool_exclusions(worker))
         except (LLMError, asyncio.TimeoutError) as exc:
             last = f"(stopped by a model error: {exc})"
             await self.emit("error", {"message": f"{worker.name}: LLM call failed: {exc}", "agent_id": wid, "kind": "llm"})
@@ -2250,7 +2262,8 @@ class RunRuntime(TeamMixin):
         can run code or open a browser, finishing the run or a delegated task while code changed unexercised or a file
         fails its automatic check, is sent back once with what to check. Asking again finishes (it may be unverifiable)."""
         frame = DELEGATION.get()
-        if self.budget.force_mock or not self.budget.verify_before_finish or not (agent.is_entry or (frame is not None and frame["worker"] == agent.id)):
+        if self.budget.force_mock or not self.budget.verify_before_finish or not (
+                agent.is_entry or (frame is not None and frame["worker"] == agent.id) or self.wf_owner_of_active(agent.id)):
             return None
         can_run = A.tool_enabled(agent.tools, "terminal")
         can_browse = any(m.get("builtin") for m in agent.mcp)
@@ -2275,9 +2288,38 @@ class RunRuntime(TeamMixin):
         return ("Not finished yet: verify first. " + "; ".join(parts) + ". Fix what you find, then call `finish` again with "
                 "what you checked and what you saw. (If it really can't be verified here, call `finish` again and say so.)")
 
+    async def wf_finish_refusal(self, agent: AgentSpec, a: A.Finish) -> str | None:
+        """Workflow rules for `finish`: the head accepts at the end; a phase owner closes its phase (gate checked)."""
+        frame = DELEGATION.get()
+        if not self.wf_active() or (frame is not None and frame["worker"] == agent.id):
+            return None
+        ph = self.wf_phase()
+        if ph is None:
+            return None
+        if agent.is_entry and ph["key"] == "intake":  # answered without a build (e.g. a question): no workflow needed
+            self.wf.update({"ended": True, "reason": "finished at intake"})
+            await self.wf_emit()
+            return None
+        if agent.is_entry and ph["key"] == "accept":  # the head signs off: the run completes
+            ph.update({"status": "done", "summary": (a.summary or "")[:2000]})
+            self.wf["ended"] = True
+            await self.wf_emit()
+            return None
+        if agent.is_entry:
+            if self.wf.get("head_bounced") == ph["key"]:
+                self.wf.update({"ended": True, "reason": f"head finished during {ph['key']}"})
+                return None
+            self.wf["head_bounced"] = ph["key"]
+            return (f"The workflow is in the {ph['key']} phase ({self.names.get(ph['owner'], '?')} is on it). Wait for it to come "
+                    "back to you for acceptance (call `wait`). Finishing now would end the run unfinished; call finish again only "
+                    "if that is really what you want.")
+        if self.wf_owner_of_active(agent.id):
+            return await self.wf_on_finish(agent, a)
+        return None
+
     async def act_finish(self, agent: AgentSpec, a: A.Finish) -> None:
         self._bounced_finish = None
-        if (why := self.finish_refusal(agent)):
+        if (why := self.finish_refusal(agent)) or (why := await self.wf_finish_refusal(agent, a)):
             self._bounced_finish = agent.id
             self.notice(agent.id, why, activate=True)
             return

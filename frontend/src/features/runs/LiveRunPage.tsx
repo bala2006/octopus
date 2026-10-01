@@ -19,6 +19,7 @@ import { Badge, Textarea } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 import { ApprovalCard } from "./ApprovalCard";
 import { BrowserView } from "./BrowserView";
+import { WorkflowBar } from "./WorkflowBar";
 import { isBrowsing } from "./browserSteps";
 import { RunFeed, ToolLog, type FeedFilter } from "./RunFeed";
 import { RunGraph } from "./RunGraph";
@@ -127,6 +128,7 @@ export default function LiveRunPage() {
           )}
         </div>
       </div>
+      {state.workflow && <WorkflowBar wf={state.workflow} agents={agents} />}
 
       {/* body */}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(380px,40%)]">

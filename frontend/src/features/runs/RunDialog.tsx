@@ -9,7 +9,7 @@ import { qk, useSettings, useWorkspace, useWorkspaceId } from "@/hooks/queries";
 import type { ParsedFileOut, PermissionLevel, RunDetail } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/overlays";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select } from "@/components/ui/overlays";
 import { EffortPicker, type Effort } from "@/features/canvas/EffortPicker";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
 import { useAttachments, AttachmentChips, attachmentPayload } from "@/features/chat/attachments";
@@ -36,7 +36,7 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
   const anyConfigured = settings.data?.providers.some((p) => p.provider !== "mock" && p.configured) ?? false;
   const [demo, setDemo] = React.useState(!anyConfigured);
   const [adv, setAdv] = React.useState(false);
-  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, stall_turns: 30, max_tool_rounds: 40, context_recent: 30, max_agents: 24, persist_team: true, verify_before_finish: true, reasoning_effort: "default" as Effort });
+  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, stall_turns: 30, max_tool_rounds: 40, context_recent: 30, max_agents: 24, persist_team: true, verify_before_finish: true, workflow: "auto" as "auto" | "on" | "off", reasoning_effort: "default" as Effort });
   const att = useAttachments({ images: true });
   React.useEffect(() => {
     if (!open) return;
@@ -91,7 +91,15 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
               </button>
             ))}
           </div>
-          <Field label="Permission level"><PermissionPicker value={perm} onChange={setPerm} compact /></Field>
+          <div className="grid grid-cols-[1fr_210px] items-end gap-3">
+            <Field label="Permission level"><PermissionPicker value={perm} onChange={setPerm} compact /></Field>
+            <Field label="How the team works">
+              <Select ariaLabel="How the team works" value={budget.workflow} onValueChange={(v) => setBudget({ ...budget, workflow: v as typeof budget.workflow })}
+                options={[{ value: "auto", label: "Auto (recommended)", hint: "Defined workflow when the team has a builder and a tester or reviewer" },
+                  { value: "on", label: "Defined workflow", hint: "Intake → spec → design → build → test → review → accept, each phase with its owner" },
+                  { value: "off", label: "Free-form", hint: "The head decides how to split the work" }]} />
+            </Field>
+          </div>
           <Field label="Reasoning effort" hint="Applies to every agent in this run. “Per agent” uses each agent's own setting.">
             <EffortPicker value={budget.reasoning_effort} defaultLabel="Per agent" onChange={(v) => setBudget({ ...budget, reasoning_effort: v })} />
           </Field>

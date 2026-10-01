@@ -140,7 +140,6 @@ class ChatConnection:
                      "role": agent.role, "team": ", ".join(f"{a.name} ({a.role})" for a in company.agents),
                      "department": agent.department or "company", "manager": mgr.name if mgr else "the user",
                      "reports": ", ".join(x.name for x in company.agents if x.reports_to == agent.id) or "nobody yet"}
-        from app.db.session import registry_factory
         from app.services.roles import effective_roles, resolve_prompt
 
         async with registry_factory()() as rdb:
