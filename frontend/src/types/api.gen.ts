@@ -2450,6 +2450,7 @@ export interface components {
             started_at: string | null;
             /** Ended At */
             ended_at: string | null;
+            outcome?: components["schemas"]["RunOutcome"] | null;
             /** Snapshot */
             snapshot?: {
                 [key: string]: unknown;
@@ -2518,6 +2519,48 @@ export interface components {
             started_at: string | null;
             /** Ended At */
             ended_at: string | null;
+            outcome?: components["schemas"]["RunOutcome"] | null;
+        };
+        /**
+         * RunOutcome
+         * @description What a run actually produced, so a list can tell a delivered run from a no-op (filled by the runs list).
+         */
+        RunOutcome: {
+            /**
+             * Tasks Total
+             * @default 0
+             */
+            tasks_total: number;
+            /**
+             * Tasks Done
+             * @default 0
+             */
+            tasks_done: number;
+            /**
+             * Tasks Open
+             * @default 0
+             */
+            tasks_open: number;
+            /**
+             * Tasks Blocked
+             * @default 0
+             */
+            tasks_blocked: number;
+            /**
+             * Files
+             * @default 0
+             */
+            files: number;
+            /**
+             * Errors
+             * @default 0
+             */
+            errors: number;
+            /**
+             * Final Report
+             * @default false
+             */
+            final_report: boolean;
         };
         /** SessionIn */
         SessionIn: {

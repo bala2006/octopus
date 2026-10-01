@@ -10,10 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.models import Artifact, ChatSession, Message, Run, RunEvent, Task, User
-from app.orchestrator.engine import ACTIVE_STATES, ProjectRef, RunRuntime, manager
+from app.orchestrator.engine import ACTIVE_STATES, OPEN_TASK_STATES, ProjectRef, RunRuntime, manager
 from app.schemas import (
     ApprovalIn, ArtifactContentOut, ArtifactOut, InterjectIn, MessageOut, RevertIn, RunCreate, RunDetail, RunEventOut, RunOut,
-    TaskOut,
+    RunOutcome, TaskOut,
 )
 from app.services.canvas import snapshot
 from app.tools.workspace import ProjectFS, WorkspaceError
@@ -63,13 +63,53 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
     return run
 
 
+ERROR_KINDS = ("llm", "parse", "limit", "loop", "stall", "permission")
+
+
+async def run_outcomes(db: AsyncSession, run_ids: list[str]) -> dict[str, RunOutcome]:
+    """Task board, files, errors and final report per run: a handful of grouped queries for the whole list."""
+    out = {rid: RunOutcome() for rid in run_ids}
+    if not run_ids:
+        return out
+    for rid, status, n in (await db.execute(select(Task.run_id, Task.status, func.count()).where(Task.run_id.in_(run_ids))
+                                            .group_by(Task.run_id, Task.status))).all():
+        o = out[rid]
+        o.tasks_total += n
+        if status == "done":
+            o.tasks_done += n
+        elif status in OPEN_TASK_STATES:
+            o.tasks_open += n
+            if status == "blocked":
+                o.tasks_blocked += n
+    for rid, n in (await db.execute(select(Artifact.run_id, func.count(func.distinct(Artifact.path))).where(Artifact.run_id.in_(run_ids))
+                                    .group_by(Artifact.run_id))).all():
+        out[rid].files = n
+    kind = func.json_extract(RunEvent.payload_json, "$.kind")
+    for rid, n in (await db.execute(select(RunEvent.run_id, func.count()).where(RunEvent.run_id.in_(run_ids), RunEvent.type == "error",
+                                                                              kind.in_(ERROR_KINDS)).group_by(RunEvent.run_id))).all():
+        out[rid].errors = n
+    for (rid,) in (await db.execute(select(Message.run_id).where(Message.run_id.in_(run_ids), Message.type == "final_report").distinct())).all():
+        out[rid].final_report = True
+    return out
+
+
 @router.get("", response_model=list[RunOut])
-async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[Run]:
+async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[RunOut]:
     q = select(Run).order_by(Run.created_at.desc()).limit(200)
     if company_id:
         await owned_company(company_id, db, user)
         q = q.where(Run.company_id == company_id)
-    return list((await db.execute(q)).scalars().all())
+    runs = list((await db.execute(q)).scalars().all())
+    outcomes = await run_outcomes(db, [r.id for r in runs])
+    result = []
+    for r in runs:
+        o = RunOut.model_validate(r)
+        rt = manager.get(r.id)
+        if rt is not None:  # live counters are fresher than the row
+            o.status, o.turns, o.tokens_used, o.cost_usd = rt.run_status, rt.turn_no, rt.tokens, round(rt.cost, 6)
+        o.outcome = outcomes[r.id]
+        result.append(o)
+    return result
 
 
 @router.get("/{run_id}", response_model=RunDetail)

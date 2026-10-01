@@ -359,6 +359,17 @@ class RunCreate(BaseModel):
     attachments: list[dict[str, str]] = Field(default_factory=list)
 
 
+class RunOutcome(BaseModel):
+    """What a run actually produced, so a list can tell a delivered run from a no-op (filled by the runs list)."""
+    tasks_total: int = 0
+    tasks_done: int = 0
+    tasks_open: int = 0  # todo / in_progress / in_review / blocked
+    tasks_blocked: int = 0
+    files: int = 0  # distinct paths written
+    errors: int = 0  # llm / parse / limit / loop / stall / permission errors
+    final_report: bool = False  # the entry agent called finish
+
+
 class RunOut(ORM):
     id: str
     company_id: str
@@ -376,6 +387,7 @@ class RunOut(ORM):
     created_at: datetime
     started_at: datetime | None
     ended_at: datetime | None
+    outcome: RunOutcome | None = None  # filled by the runs list
 
 
 class RunDetail(RunOut):

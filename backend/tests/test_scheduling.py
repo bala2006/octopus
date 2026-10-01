@@ -110,3 +110,22 @@ async def test_productive_self_turns_are_not_capped(client, workspace) -> None:
     from pathlib import Path
 
     assert (Path(workspace["path"]) / "big.js").read_text().count("// part") == n
+
+
+async def test_runs_list_reports_what_each_run_produced(client, workspace) -> None:
+    """The Runs page must be able to tell a delivered run from a no-op (issue #32)."""
+    cid = await make_company(client, workspace, TEAM, EDGES)
+    set_provider_override(ScriptedProvider({"Cleo": [env(msg("Dev", "task", "Build index.html"))]}))
+    stuck = await start_run(client, workspace, cid)
+    await wait_status(client, workspace, stuck["id"])
+    set_provider_override(ScriptedProvider({"Cleo": [env({"action": "write_file", "path": "a.html", "content": "<p>a</p>"},
+                                                         {"action": "write_file", "path": "b.css", "content": "p{}"},
+                                                         board({"title": "Ship", "assignee": "Dev", "status": "done"}),
+                                                         {"action": "finish", "summary": "shipped"})]}))
+    shipped = await start_run(client, workspace, cid, permission_level="danger")
+    await wait_status(client, workspace, shipped["id"])
+    runs = {r["id"]: r for r in (await client.get(f"/api/v1/w/{workspace['id']}/runs", params={"company_id": cid})).json()}
+    assert runs[stuck["id"]]["outcome"] == {"tasks_total": 1, "tasks_done": 0, "tasks_open": 1, "tasks_blocked": 0, "files": 0,
+                                            "errors": 0, "final_report": False}
+    assert runs[shipped["id"]]["outcome"] == {"tasks_total": 1, "tasks_done": 1, "tasks_open": 0, "tasks_blocked": 0, "files": 2,
+                                              "errors": 0, "final_report": True}
