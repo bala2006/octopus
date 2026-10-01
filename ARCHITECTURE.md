@@ -43,6 +43,26 @@ flowchart TD
 
 **Editing files.** `edit_file` replaces exact existing text (`edits: [{old_string, new_string, replace_all?}]`). Each `old_string` must match exactly once unless `replace_all`; edits apply in order and all succeed or none do. The result shows the changed lines with line numbers. It goes through the same permission gate, version history and events as `write_file`.
 
+**Delegation** (`delegate` action). A lead hands work to a teammate it has a delegate channel to, with an objective,
+deliverable, done-when and context. Inside a native tool loop the teammate's sub-turn runs immediately (it is counted as
+that agent's turn, with its own tool loop) and its result comes back as the delegator's tool result: the teammate's
+`finish` summary, the files it changed and the task's status. No message round-trips, no question/answer turns. Several
+`delegate` calls in one reply run concurrently (asyncio); writes to the same file and approval cards are serialised.
+Delegation chains are limited to 3 levels and never cycle; outside a native tool loop (JSON envelope) a delegation
+becomes a structured task message.
+
+**Shared knowledge.** The engine keeps a team log (files written, task-board changes, decisions, delegations and their
+results, finishes, project notes). Every prompt carries "Team activity since your last turn": the log entries plus one
+line per message between other agents since that agent last acted. `search_project` greps the project and the working
+docs (`.octopus/work/`). **Project memory** (`.octopus/memory.json`, `services/project_memory.py`) outlives runs: notes saved
+with `remember(scope="project")` and an automatic retrospective of each finished run (goal, outcome, files, open tasks,
+decisions, efficiency) are shown to every agent in later runs.
+
+**Efficiency metrics.** Each agent turn is counted, and marked as work when it changes a deliverable (not a working doc)
+or runs a command or browser/MCP tool. Runs report work turns vs. all turns, the turn of the first deliverable file and
+delegations (Runs page, report, `state.metrics`). `scripts/bench.py` runs `bench/tasks.json` (coding tasks with objective
+checks) per template against a backend and prints a comparison table.
+
 **Routing** (`orchestrator/permissions.py`). `find_channel(edges, src, dst, type)` picks the edge a message travels on, preferring the edge type that matches the message type (`proposal`→debate, `review_*`→review, `task`→delegate, `status_update`→report…). It respects direction; debate edges only carry debate-protocol types. If no channel exists, the message is **rejected server-side**: it is never delivered, and the sender gets an activating notice explaining why (`no channel`, `one-way`, `wrong type`).
 
 **Limits.** Global max turns, per-edge `max_turns`, token budget, cost budget, active wall-clock timeout (paused time is excluded), per-agent `max_autonomous_turns`, and a loop detector. The detector rejects near-duplicate messages on the same pair; after N strikes the run auto-pauses for human review. The kill switch cancels the task immediately; a report is still produced.

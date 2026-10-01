@@ -369,6 +369,11 @@ class RunOutcome(BaseModel):
     files: int = 0  # distinct paths written
     errors: int = 0  # llm / parse / limit / loop / stall / permission errors
     final_report: bool = False  # the entry agent called finish
+    # efficiency: agent turns, turns that changed a deliverable or ran something, when the first deliverable appeared
+    agent_turns: int = 0
+    work_turns: int = 0
+    first_deliverable_turn: int | None = None
+    delegations: int = 0
 
 
 class RunOut(ORM):

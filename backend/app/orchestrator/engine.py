@@ -15,6 +15,7 @@ watchdog (both auto-pause for a human), human pause and kill switch.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import re
 import time
 from collections import Counter
@@ -45,6 +46,7 @@ from app.orchestrator.protocols import (
     review_on_request, review_on_result,
 )
 from app.schemas import RunBudget
+from app.services import project_memory as PM
 from app.tools import basic
 from app.tools.sandbox import SandboxError, parse_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError
@@ -60,6 +62,13 @@ OPEN_TASK_STATES = {"todo", "in_progress", "in_review", "blocked"}
 MAX_SELF_TURNS = 3
 # A run and all of its follow-ups may spend at most this multiple of the run's original budget (turns, tokens, cost, time).
 FOLLOWUP_BUDGET_CEILING = 3
+# Delegation as a tool call: the delegated teammate's sub-turn runs inside the delegator's tool call. These context vars
+# follow each asyncio task, so parallel delegations each see their own frame.
+DELEGATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("octopus_delegation", default=None)
+IN_TOOL_LOOP: contextvars.ContextVar[bool] = contextvars.ContextVar("octopus_in_tool_loop", default=False)
+MAX_DELEGATION_DEPTH = 3  # delegator → worker → worker's report → … (cycles are refused)
+JOURNAL_MAX = 400
+DIGEST_LINES = 40
 READ_PAGE_CHARS = TOOL_RESULT_CHARS - 500  # one read_file page fits in a tool result with room for its header
 JUDGE_MAX_TOKENS = 16  # "YES"/"NO" plus slack; 5 often produced no answer at all (reasoning headroom is added on top)
 
@@ -213,6 +222,19 @@ class RunRuntime(TeamMixin):
         self.self_turns: Counter[str] = Counter()
         self.progress_turn = run.turns or 0
         self.nudged: dict[str, int] = {}
+        # shared team knowledge: an engine-kept log of what happened (files, tasks, decisions, delegations, finishes) and,
+        # per agent, the point up to which it has seen it, so every prompt can carry "what the team did since your last turn"
+        self.journal: list[dict[str, Any]] = []
+        self.journal_n = 0
+        self.seen: dict[str, int] = {}
+        self.seen_turn: dict[str, int] = {}
+        # efficiency: turns that changed a deliverable or ran something vs. turns spent coordinating
+        self.metrics: Counter[str] = Counter()
+        self.first_deliverable_turn: int | None = None
+        self.turn_work: dict[str, bool] = {}
+        self._file_locks: dict[str, asyncio.Lock] = {}
+        self._approval_lock = asyncio.Lock()
+        self.memory = PM.load(project.root)  # project memory shared across runs
 
         self.seq = 0
         self.turn_no = run.turns or 0
@@ -272,6 +294,8 @@ class RunRuntime(TeamMixin):
             "budget_base": self.budget_base,
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
+            "journal": self.journal[-JOURNAL_MAX:], "journal_n": self.journal_n, "seen": self.seen, "seen_turn": self.seen_turn,
+            "metrics": self.efficiency(),
         }
 
     async def save(self) -> None:
@@ -310,6 +334,13 @@ class RunRuntime(TeamMixin):
         self.progress_turn = int(st.get("progress_turn", self.turn_no))
         self.nudged = dict(st.get("nudged", {}))
         self.stall_ack = int(st.get("stall_ack", self.turn_no))
+        self.journal = list(st.get("journal", []))
+        self.journal_n = int(st.get("journal_n", len(self.journal)))
+        self.seen = dict(st.get("seen", {}))
+        self.seen_turn = dict(st.get("seen_turn", {}))
+        m = st.get("metrics") or {}
+        self.metrics = Counter({k: int(m.get(k, 0)) for k in ("turns", "work_turns", "delegations", "parallel_delegations")})
+        self.first_deliverable_turn = m.get("first_deliverable_turn")
         async with self.db() as db:
             msgs = (await db.execute(select(Message).where(Message.run_id == self.run_id).order_by(Message.created_at))).scalars().all()
             for m in msgs:
@@ -444,6 +475,53 @@ class RunRuntime(TeamMixin):
         return best[1] if best else None
 
     # ------------------------------------------------------------------ task board awareness
+    def log(self, aid: str | None, text: str) -> None:
+        """Record something the whole team should know about (shown to each agent once, in its next prompt)."""
+        self.journal_n += 1
+        self.journal.append({"n": self.journal_n, "turn": self.turn_no, "agent": aid, "text": text[:500]})
+        del self.journal[:-JOURNAL_MAX]
+
+    def decide(self, text: str, aid: str | None = None) -> None:
+        self.decisions.append(text)
+        self.log(aid, text)
+
+    def digest(self, aid: str) -> str:
+        """What teammates did since this agent's last turn: the engine's log plus one line per message between others."""
+        since, since_turn = self.seen.get(aid, 0), self.seen_turn.get(aid, -1)
+        rows: list[tuple[int, str]] = [(e["turn"], f"- t{e['turn']} {self.names.get(e['agent'] or '', 'Octopus')}: {e['text']}")
+                                       for e in self.journal if e["n"] > since and e["agent"] != aid]
+        for m in self.history:
+            if m["turn"] <= since_turn or aid in (m["from"], m["to"]) or m["type"] == "artifact_created" or m["from"] is None:
+                continue
+            first = (m["content"].strip().splitlines() or [""])[0][:200]
+            to = self.names.get(m["to"] or "", "everyone")
+            rows.append((m["turn"], f"- t{m['turn']} {self.names.get(m['from'], '?')} → {to} ({m['type']}): {first}"))
+        rows.sort(key=lambda r: r[0])
+        lines = [r[1] for r in rows]
+        if len(lines) > DIGEST_LINES:
+            lines = [f"- … {len(lines) - DIGEST_LINES} earlier entries (see the Blackboard and files)"] + lines[-DIGEST_LINES:]
+        return "\n".join(lines)
+
+    def mark_work(self, aid: str) -> None:
+        """This turn changed a deliverable or ran something (as opposed to only coordinating)."""
+        if not self.turn_work.get(aid):
+            self.turn_work[aid] = True
+            self.metrics["work_turns"] += 1
+
+    def start_turn_metrics(self, aid: str) -> None:
+        self.metrics["turns"] += 1
+        self.turn_work[aid] = False
+
+    def efficiency(self) -> dict[str, Any]:
+        turns = self.metrics["turns"]
+        return {"turns": turns, "work_turns": self.metrics["work_turns"],
+                "overhead_share": round(1 - self.metrics["work_turns"] / turns, 3) if turns else 0.0,
+                "first_deliverable_turn": self.first_deliverable_turn, "delegations": self.metrics["delegations"],
+                "parallel_delegations": self.metrics["parallel_delegations"]}
+
+    def file_lock(self, rel: str) -> asyncio.Lock:
+        return self._file_locks.setdefault(rel, asyncio.Lock())
+
     def mark_progress(self) -> None:
         """Something moved the run forward (a file changed, a task changed status, a verdict, a finish, user input)."""
         self.progress_turn = self.turn_no
@@ -658,6 +736,13 @@ class RunRuntime(TeamMixin):
         if f"{agent.id}:{kind}" in self.auto_approve:
             await self.emit("approval_resolved", {"id": None, "approved": True, "reason": "auto-approved (always allow)",
                                                   "agent_id": agent.id, "kind": kind, "summary": summary, "auto": True})
+            return True, "auto"
+        async with self._approval_lock:  # one approval card at a time, even when delegated teammates work in parallel
+            return await self._request_approval(agent, kind, summary, preview, details)
+
+    async def _request_approval(self, agent: AgentSpec, kind: str, summary: str, preview: str,
+                                details: dict[str, Any] | None = None) -> tuple[bool, str]:
+        if f"{agent.id}:{kind}" in self.auto_approve:  # an earlier card in the queue may have said "always"
             return True, "auto"
         aid = new_id()
         fut: asyncio.Future[tuple[bool, str]] = asyncio.get_running_loop().create_future()
@@ -936,27 +1021,13 @@ class RunRuntime(TeamMixin):
             return
         self.turn_no += 1
         self.agent_turns[aid] += 1
+        self.start_turn_metrics(aid)
         await self.emit("turn_started", {"agent_id": aid, "turn_no": self.turn_no, "inbox": inbox_ids})
         await self.set_agent_status(aid, "thinking", f"Reading {len(inbox_ids)} new message(s)…" if inbox_ids else "Reviewing results…")
         inbox_set = set(inbox_ids)
         inbox = [m for m in self.history if m["id"] in inbox_set]
-        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
-                         extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {}, messages=[], json_mode=True,
-                         metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs)})
-        if self.budget.force_mock:
-            req.provider, req.model = "mock", "mock/demo"
         try:
-            async with registry_factory()() as rdb:
-                req, warn = await prepare_request(rdb, self.user_id, req)
-            if warn and aid not in self.warned:
-                self.warned.add(aid)
-                await self.emit("error", {"message": f"{agent.name}: {warn}", "agent_id": aid, "kind": "warning"})
-            native = self.native_tools_for(req)
-            system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
-                                         status=self.status, preview_url=self.preview_url(), native=native)
-            user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_set, observations=obs,
-                                     blackboard=self.blackboard(), names=self.names, recent_n=self.budget.context_recent, native=native)
-            req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+            req, native = await self.build_request(agent, inbox_set, obs)
             if native:
                 await self.native_turn(agent, req)
                 await self.end_turn(aid)
@@ -1001,6 +1072,33 @@ class RunRuntime(TeamMixin):
                 break
         await self.end_turn(aid)
 
+    async def build_request(self, agent: AgentSpec, inbox_ids: set[str], obs: list[dict[str, Any]], *, extra: str = ""
+                            ) -> tuple[LLMRequest, bool]:
+        """Resolve the model, then build the prompts (native tools or JSON envelope) for one agent turn."""
+        aid = agent.id
+        inbox = [m for m in self.history if m["id"] in inbox_ids]
+        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
+                         extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {}, messages=[], json_mode=True,
+                         metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs)})
+        if self.budget.force_mock:
+            req.provider, req.model = "mock", "mock/demo"
+        async with registry_factory()() as rdb:
+            req, warn = await prepare_request(rdb, self.user_id, req)
+        if warn and aid not in self.warned:
+            self.warned.add(aid)
+            await self.emit("error", {"message": f"{agent.name}: {warn}", "agent_id": aid, "kind": "warning"})
+        native = self.native_tools_for(req)
+        system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
+                                     status=self.status, preview_url=self.preview_url(), native=native,
+                                     project_memory=PM.render(self.memory, exclude_run=self.run_id))
+        user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
+                                 names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid))
+        if extra:
+            user += "\n\n" + extra
+        req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        self.seen[aid], self.seen_turn[aid] = self.journal_n, self.turn_no
+        return req, native
+
     # ------------------------------------------------------------------ native function calling
     def native_tools_for(self, req: LLMRequest) -> bool:
         """Use the model's own function calling when the provider supports it (Azure Responses API); otherwise the JSON envelope."""
@@ -1009,13 +1107,23 @@ class RunRuntime(TeamMixin):
         check = getattr(get_provider(req.provider, req), "supports_native_tools", None)
         return bool(check and check(req))
 
-    async def native_turn(self, agent: AgentSpec, req: LLMRequest) -> None:
+    async def native_turn(self, agent: AgentSpec, req: LLMRequest, *, exclude: set[str] | frozenset[str] = frozenset()) -> str:
         """One turn as a tool loop: the model calls tools, gets each result back, and keeps going until it stops calling tools
         (or ends the turn with wait / finish / a question for the user). Errors are returned to the model as tool results."""
         aid = agent.id
-        req.tools, mcp_map = T.tool_specs(agent.tools, agent.mcp)
+        specs, mcp_map = T.tool_specs(agent.tools, agent.mcp)
+        req.tools = [t for t in specs if t["name"] not in exclude]
         req.json_mode = False
         req.continuation = []
+        token = IN_TOOL_LOOP.set(True)
+        try:
+            return await self._tool_loop(agent, req, mcp_map)
+        finally:
+            IN_TOOL_LOOP.reset(token)
+
+    async def _tool_loop(self, agent: AgentSpec, req: LLMRequest, mcp_map: dict[str, tuple[str, str]]) -> str:
+        aid = agent.id
+        last_text = ""
         for rnd in range(self.budget.max_tool_rounds):
             if self.stop_requested:
                 raise StopRun()
@@ -1023,7 +1131,8 @@ class RunRuntime(TeamMixin):
                 break  # pause / budget are honoured between rounds too; the turn ends cleanly
             res = await self.call_llm_escalating_result(agent, req)
             if res.text.strip():
-                await self.emit("thought", {"agent_id": aid, "text": res.text.strip()[:4000], "turn_no": self.turn_no})
+                last_text = res.text.strip()
+                await self.emit("thought", {"agent_id": aid, "text": last_text[:4000], "turn_no": self.turn_no})
             if not res.tool_calls:
                 legacy = A.parse_envelope(res.text) if res.text.lstrip().startswith(("{", "```")) else None
                 if legacy and legacy.ok and legacy.actions:  # the model answered with an old-style envelope: honour it
@@ -1034,8 +1143,17 @@ class RunRuntime(TeamMixin):
                 break
             outputs: list[dict[str, Any]] = []
             ended = False
+            # several delegations in one reply are independent work: run those teammates at the same time
+            delegations = [c for c in res.tool_calls if c.name == "delegate"]
+            ran: dict[str, tuple[str, bool]] = {}
+            if len(delegations) > 1:
+                self.metrics["parallel_delegations"] += len(delegations)
+                done = await asyncio.gather(*(self.run_tool_call(agent, c, mcp_map) for c in delegations))
+                ran = {c.id: r for c, r in zip(delegations, done)}
             for call in res.tool_calls:
-                if ended:
+                if call.id in ran:
+                    out, _ = ran[call.id]
+                elif ended:
                     out = "Not run: an earlier call in this reply ended your turn."
                 else:
                     out, ended = await self.run_tool_call(agent, call, mcp_map)
@@ -1048,6 +1166,7 @@ class RunRuntime(TeamMixin):
         else:
             await self.emit("error", {"kind": "warning", "agent_id": aid,
                                       "message": f"{agent.name} used all {self.budget.max_tool_rounds} tool rounds of this turn"})
+        return last_text
 
     async def run_tool_call(self, agent: AgentSpec, call: ToolCall, mcp_map: dict[str, tuple[str, str]]) -> tuple[str, bool]:
         """Run one function call through the normal action executor. Returns (result text for the model, turn ended?).
@@ -1059,6 +1178,10 @@ class RunRuntime(TeamMixin):
         if action is None:
             await self.emit("error", {"message": f"{agent.name}: {call.name}: {err}", "agent_id": aid, "kind": "parse"})
             return f"Error: {err}. Nothing was done; call the tool again with corrected arguments.", False
+        if action.action == "delegate":  # returns the teammate's result directly (and may run in parallel with others)
+            if not A.tool_enabled(agent.tools, "send_message"):
+                return "Error: delegating needs the Messaging tool, which you don't have.", False
+            return clip(await self.delegate(agent, action), TOOL_RESULT_CHARS), False
         before = len(self.observations.get(aid, []))
         await self.execute(agent, action)
         produced = self.observations.get(aid, [])[before:]
@@ -1081,6 +1204,120 @@ class RunRuntime(TeamMixin):
         ended = (name in T.TERMINAL_ACTIONS or self.finished_summary is not None or aid in self.done_agents
                  or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
         return clip("\n".join(lines), TOOL_RESULT_CHARS), ended
+
+    # ------------------------------------------------------------------ delegation (orchestrator → worker)
+    def brief_text(self, delegator: AgentSpec, a: A.Delegate) -> str:
+        parts = [f"Objective: {a.objective.strip()}"]
+        if a.deliverable.strip():
+            parts.append(f"Deliverable: {a.deliverable.strip()}")
+        if a.done_when.strip():
+            parts.append(f"Done when: {a.done_when.strip()}")
+        if a.context.strip():
+            parts.append(f"Context: {a.context.strip()}")
+        return "\n".join(parts)
+
+    async def act_delegate(self, agent: AgentSpec, a: A.Delegate) -> None:  # JSON-envelope path
+        self.notice(agent.id, await self.delegate(agent, a))
+
+    async def delegate(self, agent: AgentSpec, a: A.Delegate) -> str:
+        """Hand work to a teammate over a delegate channel. Inside a native tool loop the teammate's sub-turn runs right away
+        and its result is returned; otherwise (JSON envelope, or depth/cycle limits) it becomes a task message."""
+        tid = self.resolve_agent(a.to)
+        if tid is None:
+            can = [self.names[r] for r, es in allowed_recipients(self.edges, agent.id).items() if any(e.type == "delegate" for e in es)]
+            return f"Not delegated: unknown teammate '{a.to}'. You can delegate to: {', '.join(can) or 'nobody'}."
+        if tid == agent.id:
+            return "Not delegated: that's you. Just do the work."
+        worker = self.agents[tid]
+        if not worker.active:
+            return f"Not delegated: {worker.name} is inactive."
+        edge = find_channel(self.edges, agent.id, tid, "task")
+        if edge is None:
+            return "Not delegated: " + rejection_reason(self.edges, agent.id, tid, "task", self.names)
+        brief = self.brief_text(agent, a)
+        frame = DELEGATION.get()
+        chain: tuple[str, ...] = (*(frame["chain"] if frame else ()), agent.id)
+        self.metrics["delegations"] += 1
+        if not IN_TOOL_LOOP.get() or len(chain) > MAX_DELEGATION_DEPTH or tid in chain:
+            await self._send_one(agent, tid, A.SendMessage(action="send_message", to=worker.name, type="task", content=brief, task_id=a.task_id))
+            return f"Delegated to {worker.name} as a task message; the result arrives as a message when they report back."
+        req, native = await self.build_request(worker, set(), [o for _, o in self.observations.pop(tid, [])], extra="")
+        if not native:  # e.g. the teammate runs on another provider: fall back to a message
+            await self._send_one(agent, tid, A.SendMessage(action="send_message", to=worker.name, type="task", content=brief, task_id=a.task_id))
+            return f"Delegated to {worker.name} as a task message; the result arrives as a message when they report back."
+        key = await self.link_task(agent.id, tid, a.task_id, a.objective)
+        task = self.tasks[key]
+        if task["status"] in ("todo", "blocked"):
+            task["status"] = "in_progress"
+            await self.save_task(task)
+        self.edge_counts[edge.id] += 1
+        await self.post_message(sender="agent", from_id=agent.id, to_id=tid, type_="task", content=brief, edge_id=edge.id,
+                                meta={"task_id": key, "delegation": True}, deliver=False)
+        await self.emit("edge_activity", {"edge_id": edge.id, "from_agent_id": agent.id, "to_agent_id": tid, "type": "task",
+                                          "count": self.edge_counts[edge.id], "max_turns": int((edge.config or {}).get("max_turns", 20))})
+        self.log(agent.id, f"delegated {key} to {worker.name}: {a.objective[:200]}")
+        return await self.run_delegated(agent, worker, key, brief, req, chain)
+
+    async def run_delegated(self, delegator: AgentSpec, worker: AgentSpec, key: str, brief: str, req: LLMRequest,
+                            chain: tuple[str, ...]) -> str:
+        wid = worker.id
+        max_auto = int(worker.behavior.get("max_autonomous_turns", 12))
+        if self.agent_turns[wid] >= max_auto:
+            return f"{worker.name} has no turns left in this request (max {max_auto}); do it yourself or delegate to someone else."
+        if (why := self.limit_reason()):
+            return f"Not started: {why}"
+        self.turn_no += 1
+        self.agent_turns[wid] += 1
+        self.start_turn_metrics(wid)
+        await self.emit("turn_started", {"agent_id": wid, "turn_no": self.turn_no, "inbox": [], "delegated_by": delegator.id, "task": key})
+        await self.set_agent_status(wid, "thinking", f"Working on {key} for {delegator.name}…")
+        before = {p: v["version"] for p, v in self.artifacts.items()}
+        req.messages[-1]["content"] += (f"\n\n# Delegated to you by {delegator.name} (task {key})\n{brief}\n\nYour result goes straight back "
+                                        f"to {delegator.name}: when you're done, or can't go on, call `finish` with what you did, where "
+                                        "the results are, and anything still open.")
+        frame = {"worker": wid, "summary": None, "chain": chain}
+        token = DELEGATION.set(frame)
+        last = ""
+        try:
+            last = await self.native_turn(worker, req, exclude={"request_user_input"})
+        except (LLMError, asyncio.TimeoutError) as exc:
+            last = f"(stopped by a model error: {exc})"
+            await self.emit("error", {"message": f"{worker.name}: LLM call failed: {exc}", "agent_id": wid, "kind": "llm"})
+        finally:
+            DELEGATION.reset(token)
+        summary = frame["summary"] or last or "(no summary)"
+        task = self.tasks[key]
+        if frame["summary"] is not None and task["status"] not in ("done", "blocked"):
+            task["status"] = "done"
+            await self.save_task(task)
+            self.mark_progress()
+        changed = [f"{p} (v{v['version']})" for p, v in self.artifacts.items() if before.get(p) != v["version"]]
+        await self.end_turn(wid)
+        self.log(wid, f"{'finished' if frame['summary'] is not None else 'stopped'} {key} for {delegator.name}: {summary[:200]}")
+        await self.post_message(sender="agent", from_id=wid, to_id=delegator.id, type_="status_update", content=summary,
+                                meta={"task_id": key, "delegation_result": True}, deliver=False)
+        return (f"Result from {worker.name} ({key} is {task['status']}):\n{summary}\n"
+                + (f"Files changed: {', '.join(changed)}" if changed else "No files changed."))
+
+    async def act_search_project(self, agent: AgentSpec, a: A.SearchProject) -> None:
+        cid = await self._tool_event(agent, "search_project", {"query": a.query, "path_prefix": a.path_prefix})
+        await self.set_agent_status(agent.id, "reading", f"Searching for {a.query[:40]}…")
+        try:
+            hits, total, n = self.fs_for(agent.id).search(a.query, regex=a.regex, prefix=a.path_prefix, max_results=a.max_results)
+            out = (f"{total} match{'es' if total != 1 else ''} in {n} files" + (f" (showing {len(hits)})" if total > len(hits) else "")
+                   + (":\n" + "\n".join(hits) if hits else "."))
+            ok = True
+        except WorkspaceError as exc:
+            out, ok = str(exc), False
+        self.observe(agent.id, {"tool": "search_project", "ok": ok, "content": out})
+        await self._tool_result(agent, cid, "search_project", ok, out[:2000])
+
+    def retrospective(self, status: str, reason: str) -> dict[str, Any]:
+        open_ = self.open_tasks()
+        return {"run_id": self.run_id, "at": utcnow().isoformat(timespec="seconds"), "goal": self.goal[:500], "status": status,
+                "halt_reason": reason[:300], "summary": (self.finished_summary or "")[:800],
+                "files": sorted(self.artifacts)[:40], "open_tasks": [f"{t['key']} {t['status']} {t['title'][:80]}" for t in open_[:10]],
+                "decisions": self.decisions[-5:], "followups": [f[:200] for f in self.followups[-3:]], "efficiency": self.efficiency()}
 
     async def end_turn(self, aid: str) -> None:
         if self.progress_turn == self.turn_no:  # productive turn: the agent may keep working on its own results
@@ -1180,7 +1417,7 @@ class RunRuntime(TeamMixin):
             activating = bool(v.event and v.event.get("result") == "max_rounds")
             meta["debate"] = {"round": st.rounds, "max_rounds": st.max_rounds, "status": st.status, "number": st.number}
             if st.status == "consensus" and protocol_event:
-                self.decisions.append(f"Consensus ({self.names[edge.source]} ↔ {self.names[edge.target]}): {st.outcome[:240]}")
+                self.decide(f"Consensus ({self.names[edge.source]} ↔ {self.names[edge.target]}): {st.outcome[:240]}", agent.id)
         elif a.type in ("review_request", "review_result"):
             if edge.type == "review":
                 author, reviewer = (agent.id, tid) if a.type == "review_request" else (tid, agent.id)
@@ -1218,7 +1455,7 @@ class RunRuntime(TeamMixin):
             for d in self.debates.values():
                 if tid in d.participants and debate_decided_externally(d, content):
                     await self.emit("protocol", {"kind": "debate", "result": "decided", "edge_id": d.edge_id, "state": d.to_dict()})
-            self.decisions.append(f"Decision by {agent.name}: {content.splitlines()[0][:240]}")
+            self.decide(f"Decision by {agent.name}: {content.splitlines()[0][:240]}", agent.id)
         if a.type == "decision" or (protocol_event and protocol_event.get("result") not in (None, "requested", "round")):
             self.mark_progress()  # verdicts, consensus and decisions move the run forward; another debate round does not
         if protocol_event:
@@ -1279,6 +1516,7 @@ class RunRuntime(TeamMixin):
              "acceptance_criteria": fields.get("acceptance_criteria") or "", "created_by": creator}
         self.tasks[t["key"]] = t
         await self.save_task(t, new=True)
+        self.log(creator, f"created {t['key']} \"{t['title'][:120]}\"" + (f" for {self.names.get(t['assignee'], '?')}" if t["assignee"] else ""))
         return t
 
     async def save_task(self, t: dict[str, Any], new: bool = False) -> None:
@@ -1324,6 +1562,9 @@ class RunRuntime(TeamMixin):
                 changed.append(f"created {t['key']}")
             else:
                 self.notice(agent.id, f"Unknown task key '{item.key}'. Existing: {', '.join(self.tasks) or 'none'}")
+        moved = [c for c in changed if not c.startswith("created")]
+        if moved:
+            self.log(agent.id, "task board: " + ", ".join(moved))
         await self._tool_result(agent, cid, "update_task_board", True, ", ".join(changed))
 
     async def act_write_file(self, agent: AgentSpec, a: A.WriteFile) -> None:
@@ -1361,8 +1602,20 @@ class RunRuntime(TeamMixin):
 
     async def commit_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
                           appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
-        """Permission gate, write, version history, events and the agent's confirmation, shared by write_file / edit_file."""
+        """Permission gate, write, version history, events and the agent's confirmation, shared by write_file / edit_file.
+        One writer per path at a time (parallel delegations may touch the same file)."""
+        async with self.file_lock(rel):
+            await self._commit_file(agent, cid, tool, rel, old, content, note, appending=appending, partial=partial,
+                                    context_line=context_line)
+
+    async def _commit_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
+                           appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
         fs = self.fs_for(agent.id)
+        if tool == "edit_file" or appending:  # the file may have changed while waiting for the lock: re-apply on current content
+            current = fs.current(rel)
+            if current != old:
+                await self.deny(agent, cid, tool, f"{tool} failed: {rel} was changed by a teammate meanwhile; read it again")
+                return
         if old == content:
             self.notice(agent.id, f"{rel} unchanged ({'nothing to append' if appending else 'identical content'}).")
             await self._tool_result(agent, cid, tool, True, "unchanged")
@@ -1381,6 +1634,10 @@ class RunRuntime(TeamMixin):
             await self.deny(agent, cid, tool, f"{tool} failed: {exc}")
             return
         self.mark_progress()
+        if not rel.startswith(PROJECT_DIRNAME + "/"):  # a deliverable (not a working doc)
+            self.mark_work(agent.id)
+            if self.first_deliverable_turn is None:
+                self.first_deliverable_turn = self.turn_no
         prev = self.artifacts.get(rel)
         if old is not None and prev is None and not planned and not await self.written_by_octopus(rel):
             # never silently overwrite the user's own file (whatever the permission level): say so, loudly
@@ -1403,6 +1660,7 @@ class RunRuntime(TeamMixin):
                                                           "edited": tool == "edit_file", "lines": added, "previous_lines": removed,
                                                           "created_at": art.created_at.isoformat()}})
         verb = "Planned" if planned else ("Created" if old is None else "Edited" if tool == "edit_file" else "Appended to" if appending else "Updated")
+        self.log(agent.id, f"{verb.lower()} {rel} (v{version})" + (f": {note[:200]}" if note else ""))
         await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
                                 content=f"{verb} `{rel}` (v{version})" + (f": {note}" if note else ""),
                                 meta={"path": rel, "version": version, "artifact_id": art.id, "planned": planned}, deliver=False)
@@ -1548,6 +1806,7 @@ class RunRuntime(TeamMixin):
                 await self.deny(agent, cid, "mcp_call", "Read-only mode: you may look at pages but not fill in forms.")
                 return
             await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
+            self.mark_work(agent.id)
             ok, out = await browser.call(self.run_id, agent.id, a.tool, a.arguments)
             if not ok and not browser.available():
                 out += ("\nThe browser can't run in this environment: don't retry it. Verify by reading the code instead, and say in "
@@ -1573,11 +1832,13 @@ class RunRuntime(TeamMixin):
             await self.deny(agent, cid, "mcp_call", reason)
             return
         await self.set_agent_status(agent.id, "tool", f"Calling {cfg.name}/{a.tool}…")
+        self.mark_work(agent.id)
         ok, out = await call_tool(cfg, a.tool, a.arguments)
         self.observe(agent.id, {"tool": f"mcp:{cfg.name}/{a.tool}", "ok": ok, "content": out})
         await self._tool_result(agent, cid, "mcp_call", ok, out)
 
     async def act_run_code(self, agent: AgentSpec, a: A.RunCode) -> None:
+        self.mark_work(agent.id)
         cid = await self._tool_event(agent, "run_code", {"command": a.command})
         level = self.levels.get(agent.id, self.level)
         try:
@@ -1616,7 +1877,16 @@ class RunRuntime(TeamMixin):
         await self._tool_result(agent, cid, "web_search", True, out)
 
     async def act_remember(self, agent: AgentSpec, a: A.Remember) -> None:
-        cid = await self._tool_event(agent, "remember", {"key": a.key})
+        cid = await self._tool_event(agent, "remember", {"key": a.key, "scope": a.scope})
+        if a.scope == "project":  # shared with the whole team, now and in future runs (.octopus/memory.json)
+            try:
+                self.memory = PM.remember(self.root, a.key, a.value, agent.name)
+                ok = True
+            except OSError:
+                ok = False
+            self.log(agent.id, f"project memory: {a.key} = {a.value[:200]}")
+            await self._tool_result(agent, cid, "remember", ok, a.key)
+            return
         agent.memory[a.key] = a.value
         try:
             async with self.db() as db:
@@ -1639,6 +1909,10 @@ class RunRuntime(TeamMixin):
         await self.set_agent_status(agent.id, "waiting")
 
     async def act_finish(self, agent: AgentSpec, a: A.Finish) -> None:
+        frame = DELEGATION.get()
+        if frame is not None and frame["worker"] == agent.id:  # a delegated sub-turn: hand the result back to the delegator
+            frame["summary"] = a.summary or "Done."
+            return
         if self.mode == "supervised":
             ok, reason = await self.request_approval(agent, "finish", f"{agent.name} wants to finish", a.summary, {"summary": a.summary})
             if not ok:
@@ -1651,6 +1925,7 @@ class RunRuntime(TeamMixin):
         else:
             self.done_agents.add(agent.id)
             self.mark_progress()
+            self.log(agent.id, f"finished: {(a.summary or '')[:300]}")
             await self.emit("agent_finished", {"agent_id": agent.id, "summary": a.summary})
 
     async def act_wait(self, agent: AgentSpec, a: A.Wait) -> None:
@@ -1665,6 +1940,10 @@ class RunRuntime(TeamMixin):
             final = "done" if (aid in self.done_agents or (status == "completed" and self.agent_turns[aid])) else "idle"
             await self.set_agent_status(aid, final)
         summary = self.finished_summary or reason
+        try:  # what this run did, for the agents of the next run in this project
+            self.memory = PM.add_run(self.root, self.retrospective(status, reason))
+        except OSError:  # pragma: no cover
+            log.warning("project_memory_write_failed", run_id=self.run_id)
         async with self.db() as db:
             await db.execute(update(Run).where(Run.id == self.run_id).values(
                 status=status, halt_reason=reason[:200], summary=summary, ended_at=utcnow(),

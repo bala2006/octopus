@@ -31,6 +31,11 @@ DESCRIPTIONS = {
     "list_files": "List the files in the project (or under a folder prefix).",
     "run_code": "Run a command in the project's sandboxed terminal (e.g. python -m pytest, node script.js, npm test).",
     "mcp_call": "Call a tool on an MCP server granted to you.",
+    "delegate": "Hand a piece of work to a teammate you have a delegate channel to. The teammate starts right away; its result "
+                "(summary, files changed, task status) comes back as this call's result. Several delegate calls in one reply run "
+                "at the same time.",
+    "search_project": "Search the project's files and the team's working docs (.octopus/work/) for text or a regex; returns "
+                      "path:line matches.",
     "update_task_board": "Create tasks (omit key) or update existing ones (status, assignee, description, acceptance criteria).",
     "remember": "Save a long-term memory note that you will see in future runs.",
     "request_user_input": "Ask the user a question and pause until they answer. Offer concrete options and mark the one you recommend.",

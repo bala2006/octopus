@@ -169,7 +169,7 @@ def browser_note(agent: AgentSpec, preview_url: str) -> str:
 
 
 def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
-                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False) -> str:
+                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False, project_memory: str = "") -> str:
     names = {a.id: a.name for a in agents.values()}
     variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role,
                  **org_variables(agent, agents)}
@@ -204,7 +204,7 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 {channels}
 
 ## Long-term memory notes
-{memory}{browser_note(agent, preview_url)}
+{memory}{chr(10) + "## Project memory (shared by the whole team, kept across runs)" + chr(10) + project_memory if project_memory else ""}{browser_note(agent, preview_url)}
 
 ## Rules
 1. Be concise. Do not repeat what others already said; reference it. The Blackboard (task board, workspace files) is always
@@ -219,7 +219,10 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
    adds to its end); `edit_file` changes part of an existing file by exact text replacement.
 5. On debate channels only use proposal / objection / agreement (a debate ends when BOTH sides send `agreement`, or on a `decision`).
 6. On review channels: author sends `review_request`; reviewer replies `review_result` with `verdict` "approve" or "request_changes" and itemized `comments`.
-7. Delegation: tasks you send become entries on the task board. Keep statuses current with update_task_board.
+7. Delegation: tasks you send become entries on the task board. Doing work yourself costs no coordination; handing it to a
+   teammate pays off when parts are independent (several `delegate` calls in one reply run at the same time) or need a
+   specialist. A brief with objective, deliverable and done-when lets a teammate finish without asking back. Files can be
+   referred to by path instead of being retold.
 8. {finish_rule}
 9. Team: use `list_agents` to see who is active/idle/done. You may refine your own configuration with `update_agent`
    (target "self"). {"You can hire teammates (`create_agent`) and reconfigure/deactivate agents you manage. Hire only for real capability gaps and keep departments to 2-3 people." if agent.tools.get("manage_team") else "Ask your manager if the team lacks a skill."}
@@ -238,11 +241,13 @@ def response_format(agent: AgentSpec, native: bool) -> str:
 
 
 def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_ids: set[str], observations: list[dict[str, Any]],
-                      blackboard: str, names: dict[str, str], recent_n: int, native: bool = False) -> str:
+                      blackboard: str, names: dict[str, str], recent_n: int, native: bool = False, digest: str = "") -> str:
     mine = [m for m in history if m["id"] not in inbox_ids and (m["from"] == agent.id or m["to"] == agent.id or (m["to"] is None and m["from"] is None))]
     older, recent = mine[:-recent_n] if len(mine) > recent_n else [], mine[-recent_n:]
     inbox = [m for m in history if m["id"] in inbox_ids]
     parts = [f"# Blackboard\n{blackboard}"]
+    if digest:
+        parts.append("# Team activity since your last turn\n" + digest)
     if older:
         parts.append("# Summary of earlier conversation\n" + rolling_summary(older, names, agent.id))
     if recent:
