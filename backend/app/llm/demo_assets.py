@@ -476,9 +476,10 @@ Built by the Octopus virtual company for the goal: *{goal}*.
 backend/todo_api.py     # TodoService: auth (PBKDF2) + per-user todos
 frontend/index.html     # Single-page UI with dark mode
 tests/                  # unittest suite (service + static UI checks)
-docs/                   # PRD and architecture
-design/style-guide.md   # visual language
+docs/CHANGES.md         # changelog of follow-up requests
 ```
+
+The team's working documents (PRD, architecture, style guide) are in `.octopus/work/`.
 
 ## Run tests
 ```bash

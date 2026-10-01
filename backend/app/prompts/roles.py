@@ -77,7 +77,7 @@ Convert the goal "{{{{goal}}}}" into a crisp, testable product spec and keep del
 
 ## Responsibilities
 - Challenge scope that doesn't fit an MVP; propose concrete compromises.
-- Write `docs/PRD.md`: problem, users, user stories, acceptance criteria, out-of-scope.
+- Write `.octopus/work/PRD.md` (working document, not part of the project): problem, users, user stories, acceptance criteria, out-of-scope.
 - Own the task board: create tasks with assignee + acceptance criteria, keep statuses current.
 - Collect status reports from QA/DevOps and send a `final_report` upward when all tasks are done.
 
@@ -106,7 +106,7 @@ After sending the final report upward. Do not finish while tasks are open unless
 Design the simplest architecture that satisfies the PRD for "{{{{goal}}}}", and guard code quality.
 
 ## Responsibilities
-- Write `docs/ARCHITECTURE.md`: components, data model, API contract, file layout, key trade-offs.
+- Write `.octopus/work/ARCHITECTURE.md` (working document): components, data model, API contract, file layout, key trade-offs.
 - Split implementation into clear tasks for developers with interfaces they must honour.
 - Review code on `review` channels: respond with `review_result`, verdict `approve` or `request_changes`, and itemized, actionable comments (file + issue + fix).
 - Reject security issues (plaintext secrets, injection, missing validation) every time.
@@ -227,7 +227,7 @@ After reporting final test results.
 Define a usable, accessible, good-looking experience for "{{{{goal}}}}".
 
 ## Responsibilities
-- Write `design/style-guide.md`: palette (hex), typography, spacing scale, components, key screens and states (empty, loading, error).
+- Write `.octopus/work/design/style-guide.md` (working document): palette (hex), typography, spacing scale, components, key screens and states (empty, loading, error).
 - Answer frontend questions with concrete values (not adjectives).
 - Enforce WCAG AA contrast and keyboard accessibility.
 

@@ -25,9 +25,12 @@ async def test_software_startup_demo(client, workspace) -> None:
     assert done["status"] == "completed", done["halt_reason"]
 
     root = Path(workspace["path"])
-    for f in ("docs/PRD.md", "docs/ARCHITECTURE.md", "backend/todo_api.py", "frontend/index.html", "tests/test_todo_api.py",
-              "tests/test_frontend_static.py", "design/style-guide.md", "Dockerfile", "README.md"):
-        assert (root / f).is_file(), f"missing {f}"
+    for f in ("backend/todo_api.py", "frontend/index.html", "tests/test_todo_api.py", "tests/test_frontend_static.py", "Dockerfile", "README.md"):
+        assert (root / f).is_file(), f"missing deliverable {f}"
+    # working material lives in .octopus/work/, never in the project tree (issue #33)
+    for f in ("PRD.md", "ARCHITECTURE.md", "design/style-guide.md"):
+        assert (root / ".octopus/work" / f).is_file(), f"missing working doc {f}"
+    assert not (root / "docs/PRD.md").exists() and not (root / "design").exists()
     assert "pbkdf2_hmac" in (root / "backend/todo_api.py").read_text(), "review feedback was applied"
 
     ws = f"/api/v1/w/{workspace['id']}/runs/{run['id']}"
@@ -115,7 +118,7 @@ async def test_finished_run_continues_like_a_chat(client, workspace) -> None:
     assert len(msgs) > msgs_before
     assert any(m["sender"] == "user" and "clear completed" in m["content"] for m in msgs)
     assert (root / "backend/todo_api.py").read_text() == api_before
-    for f in ("docs/PRD.md", "frontend/index.html", "README.md"):
+    for f in (".octopus/work/PRD.md", "frontend/index.html", "README.md"):
         assert (root / f).is_file(), f"{f} disappeared"
     assert "clear completed" in (root / "docs/CHANGES.md").read_text()
     assert again["turns"] > first["turns"] and again["tokens_used"] > first["tokens_used"]

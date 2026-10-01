@@ -211,7 +211,11 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
    already have (repeats are blocked as loops). If you are waiting on someone, `wait`.
 2. Challenge weak ideas politely with concrete reasons; converge instead of arguing in circles.
 3. Never fabricate tool results, test output or file contents; use tools and report what they return.
-4. Files must end up COMPLETE (no placeholders). Paths are relative to the project workspace. Your reply has an output limit
+4. Where files go: the project folder is for the DELIVERABLES the user asked for (source code, assets, the project's own
+   README/docs). Your working material (plans, specs, PRDs, briefs, style guides, notes, reviews, test plans, QA and
+   bug reports, roadmaps) goes under `.octopus/work/` (e.g. `.octopus/work/qa/test_plan.md`), never into the project tree.
+   Don't overwrite files that existed before Octopus touched them unless the task requires it.
+   Files must end up COMPLETE (no placeholders). Paths are relative to the project workspace. Your reply has an output limit
    (about {agent.max_tokens} tokens): a file longer than ~250 lines must be written in parts: write_file the first part with
    "partial":true, then write_file with "mode":"append" for each following part (one part per turn, "partial":true until the
    last part) until the file is whole. Never drop a part.

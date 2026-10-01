@@ -466,7 +466,8 @@ export interface paths {
         };
         /**
          * Project Tree
-         * @description The whole project folder as the agents see it (``.octopus``, ``.git``, dependency folders and secrets hidden).
+         * @description The project folder as the agents see it (``.git``, dependency folders and secrets hidden), plus the agents'
+         *     working documents from ``.octopus/work/`` (``area="work"``). The rest of ``.octopus`` stays hidden.
          */
         get: operations["project_tree_api_v1_w__workspace_id__tree_get"];
         put?: never;
@@ -484,7 +485,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Project Files */
+        /**
+         * Project Files
+         * @description The project's files plus the agents' working documents (``area="work"``, in ``.octopus/work/``).
+         *
+         *     ``generated`` tells files some run wrote apart from the user's own files.
+         */
         get: operations["project_files_api_v1_w__workspace_id__files_get"];
         put?: never;
         post?: never;
@@ -1918,6 +1924,17 @@ export interface components {
              * @default false
              */
             planned: boolean;
+            /**
+             * Area
+             * @default project
+             * @enum {string}
+             */
+            area: "project" | "work";
+            /**
+             * Generated
+             * @default false
+             */
+            generated: boolean;
         };
         /** FxRateOut */
         FxRateOut: {

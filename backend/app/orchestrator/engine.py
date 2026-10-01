@@ -1207,6 +1207,11 @@ class RunRuntime(TeamMixin):
             return
         self.mark_progress()
         prev = self.artifacts.get(rel)
+        if old is not None and prev is None and not planned and not await self.written_by_octopus(rel):
+            # never silently overwrite the user's own file (whatever the permission level): say so, loudly
+            await self.emit("error", {"kind": "warning", "agent_id": agent.id, "path": rel, "message": (
+                f"{agent.name} changed {rel}, a file that existed before Octopus touched it. "
+                "The original is kept: revert it from Artifacts → Run changes.")})
         version = (prev or {}).get("version", 0) + 1
         art = Artifact(id=new_id(), run_id=self.run_id, path=rel, content=content, version=version, author_agent_id=agent.id,
                        change_note=a.note[:1000], planned=planned, created_at=utcnow(),
@@ -1231,6 +1236,11 @@ class RunRuntime(TeamMixin):
         self.notice(agent.id, f"{verb} {rel} (v{version}).{size_note}"
                     + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""), activate=a.partial)
         await self._tool_result(agent, cid, "write_file", True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
+
+    async def written_by_octopus(self, rel: str) -> bool:
+        """Did any run in this project ever write ``rel``? (Otherwise it is the user's own file.)"""
+        async with self.db() as db:
+            return (await db.execute(select(Artifact.id).where(Artifact.path == rel).limit(1))).first() is not None
 
     async def act_create_folder(self, agent: AgentSpec, a: A.CreateFolder) -> None:
         cid = await self._tool_event(agent, "create_folder", {"path": a.path})
@@ -1315,7 +1325,10 @@ class RunRuntime(TeamMixin):
         cid = await self._tool_event(agent, "list_files", {"prefix": a.prefix})
         await self.set_agent_status(agent.id, "reading", f"Listing {a.prefix or 'project'} files…")
         try:
-            files = self.fs_for(agent.id).list(a.prefix.strip().strip("/"))
+            fs = self.fs_for(agent.id)
+            files = fs.list(a.prefix.strip().strip("/"))
+            if not a.prefix.strip().strip("/"):  # the whole project: working documents too (they live in .octopus/work/)
+                files += fs.list_work()
             out, ok = ("\n".join(files[:400]) + (f"\n… {len(files) - 400} more" if len(files) > 400 else "")) or "(no files)", True
         except WorkspaceError as exc:
             out, ok = str(exc), False

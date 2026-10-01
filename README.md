@@ -27,7 +27,7 @@
 
 | | |
 |---|---|
-| **Open any folder** | *Open project folder* shows your system's own folder window (Finder, Explorer, zenity/kdialog), where you can also create a new folder. Octopus creates and maintains `.octopus/`: a SQLite DB, plans, exports, browser output, a README, and `.gitignore = *`. Re-opening the folder brings everything back. |
+| **Open any folder** | *Open project folder* shows your system's own folder window (Finder, Explorer, zenity/kdialog), where you can also create a new folder. Octopus creates and maintains `.octopus/`: a SQLite DB, the agents' working docs (`work/`), plans, exports, browser output, a README, and `.gitignore = *`. Re-opening the folder brings everything back. |
 | **Start from a template** | 14 teams: Software Startup, Web App Studio, Indie Game Studio, Mobile App Team, SaaS Launch, Data Science Team, Security Audit, Content & Marketing Studio, Customer Support Desk, Full Company, Research Lab, Small Dev Team, Debate Panel, Self-organizing. You can also let AI design a team from a prompt, or save your own. |
 | **Design the org chart** | A canvas with departments, managers (♛) and typed channels: **delegate ↓**, **report ↑**, **review**, **debate**, **consult ↔**. Arrows go bottom → top between levels and side → side between peers. Undo/redo, copy/paste, auto-layout and JSON import/export are included, and changes autosave. |
 | **Configure every agent** | Click a card for quick settings: name, role, prompt with `{{variables}}`, tools, MCP servers, permission level, model, and **reasoning effort** (auto · none · low · medium · high · x-high · max). Double-click for the full inspector. |
@@ -193,7 +193,7 @@ The doodle octopus lives in [`docs/brand/`](docs/brand): `logo.svg` (full), `log
 
 ## Security
 
-- **File access.** Agents only see the project folder. Absolute paths, `..` and symlinks that escape the folder are rejected on real paths. `.octopus/` and `.git/` are off-limits, and secrets (`.env`, keys) are blocked outside danger mode.
+- **File access.** Agents only see the project folder. Absolute paths, `..` and symlinks that escape the folder are rejected on real paths. `.octopus/` and `.git/` are off-limits except `.octopus/work/`, where agents keep their working documents (specs, plans, briefs, QA notes) so your folder only gets the deliverables. Secrets (`.env`, keys) are blocked outside danger mode.
 - **Commands.** They run without a shell, with a scrubbed environment and rlimits (CPU, memory, file size, processes) plus a timeout, and without network (`unshare -n`) where available. An allowlist applies outside danger mode; `SANDBOX_MODE=docker` isolates commands in containers.
 - **Folder dialog.** It only opens for browsers on the same machine. The backend registers the chosen folder itself, so the browser never sends a path.
 - **Preview.** Project previews run in a CSP sandbox with an opaque origin and no access to the Octopus API.

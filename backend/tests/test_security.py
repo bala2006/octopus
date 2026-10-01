@@ -193,6 +193,47 @@ async def test_agent_cannot_touch_octopus_dir(client, workspace) -> None:
     assert all(not r["ok"] for r in results if r["tool"] in ("write_file", "read_file"))
 
 
+@pytest.mark.parametrize("path", [".octopus/octopus.db", ".octopus/plans/r1/x.py", ".octopus/exports/a.json", ".octopus/browser/s.png",
+                                  ".octopus/project.json", ".octopus/workspace/x", ".octopus"])
+def test_only_the_work_subtree_of_octopus_is_open(path: str) -> None:
+    with pytest.raises(WorkspaceError):
+        normalize_path(path)
+    assert normalize_path(".octopus/work/qa/test_plan.md") == ".octopus/work/qa/test_plan.md"
+    assert normalize_path("./.octopus/work") == ".octopus/work"
+
+
+def test_work_docs_are_listed_separately(tmp_path: Path) -> None:
+    fs = ProjectFS(tmp_path)
+    fs.write("index.html", "<html></html>")
+    fs.write(".octopus/work/qa/test_plan.md", "# plan")
+    assert fs.list() == ["index.html"], "the project tree holds deliverables only"
+    assert fs.list_work() == [".octopus/work/qa/test_plan.md"]
+    with pytest.raises(WorkspaceError):
+        fs.move(".octopus/work", "work")
+
+
+async def test_working_docs_go_to_octopus_work_and_user_files_are_flagged(client, workspace) -> None:
+    root = Path(workspace["path"])
+    (root / "notes.txt").write_text("my own notes")
+    cid = await make_company(client, workspace, [agent("w", "Wes", entry=True)], [])
+    set_provider_override(ScriptedProvider({"Wes": [env({"action": "write_file", "path": ".octopus/work/qa/test_plan.md", "content": "# QA plan"},
+                                                        {"action": "write_file", "path": "index.html", "content": "<html></html>"},
+                                                        {"action": "write_file", "path": "notes.txt", "content": "overwritten"}),
+                                                    env({"action": "finish", "summary": "x"})]}))
+    run = await start_run(client, workspace, cid, permission_level="danger")
+    await wait_status(client, workspace, run["id"])
+    assert (root / ".octopus/work/qa/test_plan.md").read_text() == "# QA plan"
+    files = {f["path"]: f for f in (await client.get(f"/api/v1/w/{workspace['id']}/files")).json()}
+    assert files[".octopus/work/qa/test_plan.md"]["area"] == "work" and files[".octopus/work/qa/test_plan.md"]["generated"]
+    assert files["index.html"]["area"] == "project" and files["index.html"]["generated"]
+    assert not any(p.startswith(".octopus/") and f["area"] == "project" for p, f in files.items())
+    content = await client.get(f"/api/v1/w/{workspace['id']}/files/content", params={"path": ".octopus/work/qa/test_plan.md"})
+    assert content.status_code == 200 and content.json()["content"] == "# QA plan"
+    assert (await client.get(f"/api/v1/w/{workspace['id']}/files/content", params={"path": ".octopus/octopus.db"})).status_code == 400
+    warns = [e["payload"] for e in await events(client, workspace, run["id"], "error") if e["payload"].get("kind") == "warning"]
+    assert [w["path"] for w in warns] == ["notes.txt"], "only the user's own pre-existing file is flagged"
+
+
 async def test_workspace_creation_and_browse(client, tmp_root) -> None:
     d = tmp_root / "brand-new"
     d.mkdir()

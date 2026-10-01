@@ -593,6 +593,8 @@ class FileNode(BaseModel):
     size: int
     modified: bool = False  # changed by agents in the selected run
     planned: bool = False
+    area: Literal["project", "work"] = "project"  # "work": the agents' working documents in .octopus/work/
+    generated: bool = False  # written by an Octopus run at some point (else: the user's own file)
 
 
 class ProjectTreeOut(BaseModel):
