@@ -135,7 +135,9 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
         ))}
       </div>
       {showQuick && (
-        <NodeToolbar isVisible position={Position.Right} offset={14} align="start" className="nodrag nowheel">
+        // NodeToolbar renders inside the React Flow pane: `nopan` keeps a drag in the panel from panning the canvas (React
+        // Flow checks these classes on the event target), `nodrag` from moving the node, `nowheel` from zooming.
+        <NodeToolbar isVisible position={Position.Right} offset={14} align="start" className={QUICK_CONFIG_GUARDS}>
           <NodeQuickConfig id={id} data={data} onClose={() => setQuick(null)} />
         </NodeToolbar>
       )}
@@ -144,3 +146,5 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
 }
 
 export const AgentNode = React.memo(AgentNodeImpl);
+/** React Flow interaction guards for anything interactive rendered inside the flow (see ChannelEdge's label). */
+export const QUICK_CONFIG_GUARDS = "nodrag nopan nowheel";
