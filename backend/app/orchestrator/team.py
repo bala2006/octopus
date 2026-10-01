@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 
 from app.db.base import new_id, utcnow
+from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
 from app.llm.demo_script import role_category
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
@@ -90,7 +91,7 @@ class TeamMixin:
                 db.add(AgentRow(
                     id=a["id"], company_id=self.company_id, name=a["name"], role=a["role"], description=a.get("description", ""),
                     avatar=a.get("avatar", ""), color=a.get("color", "#6366f1"), system_prompt=a.get("system_prompt", ""),
-                    provider=a["provider"], model=a["model"], temperature=a.get("temperature", 0.4), max_tokens=a.get("max_tokens", 2048),
+                    provider=a["provider"], model=a["model"], temperature=a.get("temperature", 0.4), max_tokens=a.get("max_tokens") or DEFAULT_AGENT_MAX_TOKENS,
                     tools_json=a.get("tools") or {}, behavior_json=a.get("behavior") or {}, permission_level=a.get("permission_level", "inherit"),
                     department=a.get("department", ""), is_manager=bool(a.get("is_manager")),
                     reports_to=a.get("reports_to") if a.get("reports_to") in existing | new_ids else None,
@@ -246,7 +247,7 @@ class TeamMixin:
         t, ch = self.agents[target_id], a.changes
         applied: dict[str, Any] = {}
         refused: list[str] = []
-        for f in ("name", "role", "description", "department", "temperature", "model"):
+        for f in ("name", "role", "description", "department", "temperature", "model", "max_tokens"):
             v = getattr(ch, f)
             if v is None or v == getattr(t, f):
                 continue

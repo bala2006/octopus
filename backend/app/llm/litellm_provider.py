@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
 
-from app.llm.base import LLMChunk, LLMError, LLMRequest, Usage, estimate_tokens
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens
 from app.llm.azure_v1 import legacy_api_base
 
 PREFIX = {
@@ -86,6 +86,7 @@ class LiteLLMProvider:
         kwargs = build_kwargs(req)
         text_parts: list[str] = []
         usage: Usage | None = None
+        length_cut = False
         try:
             response = await litellm.acompletion(**kwargs)
             async for chunk in response:  # type: ignore[union-attr]
@@ -96,6 +97,8 @@ class LiteLLMProvider:
                     if content:
                         text_parts.append(content)
                         yield LLMChunk(delta=content)
+                    if getattr(choices[0], "finish_reason", None) == "length":
+                        length_cut = True
                 u = getattr(chunk, "usage", None)
                 if u and getattr(u, "prompt_tokens", None) is not None:
                     usage = Usage(prompt_tokens=u.prompt_tokens or 0, completion_tokens=u.completion_tokens or 0)
@@ -118,3 +121,6 @@ class LiteLLMProvider:
         else:
             usage.cost_usd = compute_cost(req.extra.get("pricing_model") or kwargs["model"], usage.prompt_tokens, usage.completion_tokens)
         yield LLMChunk(usage=usage)
+        if length_cut:
+            raise LLMOutputTruncated(f"The model stopped at the output limit (finish_reason=length) after {len(''.join(text_parts))} characters",
+                                     partial="".join(text_parts))

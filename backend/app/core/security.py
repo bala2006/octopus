@@ -12,13 +12,22 @@ from cryptography.fernet import Fernet, InvalidToken
 from app.core.config import get_settings
 
 
+# bcrypt only ever uses the first 72 bytes of a password. bcrypt<5 truncated silently; bcrypt>=5 raises ValueError instead.
+# Truncating explicitly keeps long passwords working and keeps hashes created by older versions verifiable.
+BCRYPT_MAX_BYTES = 72
+
+
+def _pw_bytes(password: str) -> bytes:
+    return password.encode()[:BCRYPT_MAX_BYTES]
+
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(_pw_bytes(password), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(password.encode(), hashed.encode())
+        return bcrypt.checkpw(_pw_bytes(password), hashed.encode())
     except ValueError:
         return False
 

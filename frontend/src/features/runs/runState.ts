@@ -15,6 +15,8 @@ export interface Usage {
   input_tokens?: number; cached_tokens?: number; cache_write_tokens?: number; output_tokens?: number; reasoning_tokens?: number; llm_calls?: number; estimated_calls?: number;
   cost_breakdown?: { input?: number; cached_input?: number; cache_write?: number; output?: number };
   per_agent_cost?: Record<string, number>;
+  /** last turn that changed a file or moved the task board, and how many turns ago that was */
+  progress_turn?: number; turns_since_progress?: number;
 }
 export interface ProtocolState { kind: "debate" | "review"; result: string; edge_id: string; state: Record<string, any>; seq?: number } // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -82,6 +84,8 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
     case "agent_status":
       return { ...next, agentStatus: { ...s.agentStatus, [d.agent_id]: d.status }, activity: { ...s.activity, [d.agent_id]: d.activity ?? "" },
         streaming: ["idle", "done", "waiting", "error"].includes(d.status) ? { ...s.streaming, [d.agent_id]: "" } : s.streaming };
+    case "turn_skipped":
+      return { ...next, timeline: push({ type: e.type, agent_id: d.agent_id, tone: "error", label: `${n(d.agent_id)} skipped: over ${d.limit} autonomous turns` }) };
     case "turn_started":
       return { ...next, streaming: { ...s.streaming, [d.agent_id]: "" }, thoughts: { ...s.thoughts, [d.agent_id]: "" } };
     case "token_stream":
@@ -172,4 +176,4 @@ export function replayTo(events: RunEvent[], cursor: number, names: Record<strin
   return s;
 }
 
-export const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+export const TERMINAL = new Set(["completed", "incomplete", "failed", "cancelled"]);

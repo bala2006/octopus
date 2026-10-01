@@ -13,6 +13,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import ProjectBase, RegistryBase, new_id, utcnow
+from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
 
 PERMISSION_LEVELS = ("read_only", "plan", "ask", "danger")
 
@@ -114,7 +115,7 @@ class Agent(ProjectBase):
     provider: Mapped[str] = mapped_column(String(40), default="mock")
     model: Mapped[str] = mapped_column(String(120), default="mock/demo")
     temperature: Mapped[float] = mapped_column(Float, default=0.4)
-    max_tokens: Mapped[int] = mapped_column(Integer, default=2048)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=DEFAULT_AGENT_MAX_TOKENS)
     tools_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     behavior_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     permission_level: Mapped[str] = mapped_column(String(20), default="inherit")  # inherit | read_only | plan | ask | danger

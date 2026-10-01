@@ -94,7 +94,10 @@ async def call_tool(cfg: McpConfig, tool: str, args: dict[str, Any], timeout: fl
                 parts.append(text if text is not None else f"[{getattr(c, 'type', 'content')}]")
             if getattr(res, "structuredContent", None) and not parts:
                 parts.append(json.dumps(res.structuredContent)[:8000])
-            return (not res.isError), "\n".join(parts)[:12000]
+            out = "\n".join(parts)
+            if len(out) > 12000:  # mark the cut so the agent knows it saw only part of the result
+                out = out[:12000] + f"\n…[truncated: 12,000 of {len(out):,} characters]"
+            return (not res.isError), out
 
     try:
         return await asyncio.wait_for(go(), timeout)

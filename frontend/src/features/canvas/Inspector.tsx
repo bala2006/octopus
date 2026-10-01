@@ -93,7 +93,7 @@ export function Inspector() {
               <Field label={`Temperature: ${(d.temperature ?? 0.4).toFixed(2)}`}>
                 <Slider min={0} max={2} step={0.05} value={[d.temperature ?? 0.4]} onValueChange={([v]) => set({ temperature: v })} aria-label="Temperature" />
               </Field>
-              <Field label="Max output tokens"><Input type="number" min={64} max={64000} value={d.max_tokens ?? 2048} onChange={(e) => set({ max_tokens: Math.max(64, +e.target.value || 64) })} /></Field>
+              <Field label="Max output tokens"><Input type="number" min={64} max={64000} value={d.max_tokens ?? 8192} onChange={(e) => set({ max_tokens: Math.max(64, +e.target.value || 64) })} /></Field>
             </TabsContent>
 
             <TabsContent value="tools" className="space-y-4">

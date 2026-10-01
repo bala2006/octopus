@@ -159,7 +159,7 @@ def pm(ctx: Ctx) -> list[Action]:
             items = []
             if "architect" in roster:
                 items.append({"title": "System architecture & API contract", "assignee": roster["architect"], "status": "todo",
-                              "acceptance_criteria": "docs/ARCHITECTURE.md covers components, data model and service API"})
+                              "acceptance_criteria": ".octopus/work/ARCHITECTURE.md covers components, data model and service API"})
             be = roster.get("backend") or roster.get("developer")
             if be:
                 items.append({"title": "Backend: auth + todo service", "assignee": be, "status": "todo",
@@ -173,20 +173,20 @@ def pm(ctx: Ctx) -> list[Action]:
             if "devops" in roster:
                 items.append({"title": "Dockerfile + README", "assignee": roster["devops"], "status": "todo",
                               "acceptance_criteria": "docker build runs tests; README documents setup"})
-            out.append(_write("docs/PRD.md", A.prd(ctx["goal"]), "Initial PRD reflecting the agreed MVP scope"))
+            out.append(_write(".octopus/work/PRD.md", A.prd(ctx["goal"]), "Initial PRD reflecting the agreed MVP scope"))
             if items:
                 out.append(_tasks(*items))
             target = arch or dev
             if target:
                 ask = "design the architecture and split work across the developers." if arch else "implement the service and get it reviewed."
-                out.append(_msg(target, "task", "PRD is in docs/PRD.md and the task board is set up. Please take it from here: " + ask))
+                out.append(_msg(target, "task", "PRD is in .octopus/work/PRD.md and the task board is set up. Please take it from here: " + ask))
         elif t in ("status_update", "final_report", "review_result"):
             st.setdefault("reports", {})[m["from_category"]] = m["content"]
             done = [{"key": k["key"], "status": "done"} for k in ctx["tasks"] if k["assignee"] == frm and k["status"] != "done"]
             if done:
                 out.append(_tasks(*done))
         elif t == "question":
-            out.append(_msg(frm, "answer", "Follow docs/PRD.md; anything ambiguous: choose the simplest option that meets the acceptance criteria."))
+            out.append(_msg(frm, "answer", "Follow .octopus/work/PRD.md; anything ambiguous: choose the simplest option that meets the acceptance criteria."))
     reports = st.get("reports", {})
     needed = [c for c in ("qa", "devops") if _in_roster(ctx, c)] or ["developer"]
     if st.get("planned") and not st.get("reported") and all(c in reports for c in needed):
@@ -197,7 +197,7 @@ def pm(ctx: Ctx) -> list[Action]:
         if open_tasks:
             out.append(_tasks(*open_tasks))
         if ceo_name:
-            out.append(_msg(ceo_name, "final_report", summary + " Deliverables: backend/, frontend/, tests/, docs/, Dockerfile, README.md."))
+            out.append(_msg(ceo_name, "final_report", summary + " Deliverables: backend/, frontend/, tests/, Dockerfile, README.md (specs and plans in .octopus/work/)."))
         else:
             out.append(_finish(summary))
     return out
@@ -209,13 +209,13 @@ def architect(ctx: Ctx) -> list[Action]:
         t, frm = m["type"], m["from"]
         if t == "task" and not st.get("designed"):
             st["designed"] = True
-            out.append(_write("docs/ARCHITECTURE.md", A.ARCHITECTURE, "Architecture + service API contract"))
+            out.append(_write(".octopus/work/ARCHITECTURE.md", A.ARCHITECTURE, "Architecture + service API contract"))
             mine = [{"key": k["key"], "status": "done"} for k in ctx["tasks"] if k["assignee"] == ctx["agent"]["name"]]
             if mine:
                 out.append(_tasks(*mine))
             be, fe = _find(ctx, "backend", "developer"), _find(ctx, "frontend")
             if be:
-                out.append(_msg(be, "task", "Implement `backend/todo_api.py` per docs/ARCHITECTURE.md (TodoService API table). "
+                out.append(_msg(be, "task", "Implement `backend/todo_api.py` per .octopus/work/ARCHITECTURE.md (TodoService API table). "
                                 "Standard library only. Send it to me for review.", task_id=_task_key(ctx, be)))
             if fe:
                 out.append(_msg(fe, "task", "Build `frontend/index.html` (vanilla JS + localStorage). Get the visual spec from design first, then send it to me for review.",
@@ -231,7 +231,7 @@ def architect(ctx: Ctx) -> list[Action]:
             else:
                 out.append(_msg(frm, "review_result", "Looks good. Approved, hand it to QA.", verdict="approve", comments=[]))
         elif t == "question":
-            out.append(_msg(frm, "answer", "Follow the service API table in docs/ARCHITECTURE.md; keep it dependency-free."))
+            out.append(_msg(frm, "answer", "Follow the service API table in .octopus/work/ARCHITECTURE.md; keep it dependency-free."))
     return out
 
 
@@ -315,8 +315,8 @@ def designer(ctx: Ctx) -> list[Action]:
     out = []
     for m in ctx["inbox"]:
         if m["type"] in ("question", "task"):
-            out.append(_write("design/style-guide.md", A.STYLE_GUIDE, "Style guide for the todo MVP"))
-            out.append(_msg(m["from"], "answer", "Spec is in design/style-guide.md. Key values: accent #818cf8 (dark) / #6366f1 (light), "
+            out.append(_write(".octopus/work/design/style-guide.md", A.STYLE_GUIDE, "Style guide for the todo MVP"))
+            out.append(_msg(m["from"], "answer", "Spec is in .octopus/work/design/style-guide.md. Key values: accent #818cf8 (dark) / #6366f1 (light), "
                             "surface #141a2e, 44px touch targets, 4px spacing scale, focus ring 2px accent, empty state copy included."))
             out.append(_finish("Style guide delivered."))
             break

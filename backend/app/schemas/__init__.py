@@ -6,8 +6,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.llm.base import DEFAULT_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS
+
 EdgeType = Literal["delegate", "review", "debate", "report", "consult"]
-RunStatus = Literal["queued", "running", "paused", "awaiting_user", "completed", "failed", "cancelled"]
+# "incomplete": the run stopped with unfinished tasks on the board (it is never reported as "completed")
+RunStatus = Literal["queued", "running", "paused", "awaiting_user", "completed", "incomplete", "failed", "cancelled"]
 RunMode = Literal["autonomous", "step", "supervised"]
 PermissionLevel = Literal["read_only", "plan", "ask", "danger"]
 AgentPermission = Literal["inherit", "read_only", "plan", "ask", "danger"]
@@ -100,7 +103,7 @@ class AgentBase(BaseModel):
     provider: str = "mock"
     model: str = "mock/demo"
     temperature: float = Field(0.4, ge=0, le=2)
-    max_tokens: int = Field(2048, ge=64, le=64000)
+    max_tokens: int = Field(DEFAULT_AGENT_MAX_TOKENS, ge=64, le=MAX_AGENT_MAX_TOKENS)
     tools: AgentTools = Field(default_factory=AgentTools)
     behavior: AgentBehavior = Field(default_factory=AgentBehavior)
     permission_level: AgentPermission = "inherit"
@@ -334,9 +337,11 @@ class RunBudget(BaseModel):
     max_turns: int = Field(60, ge=1, le=2000)
     max_tokens: int = Field(400_000, ge=1000)
     max_cost_usd: float = Field(2.0, ge=0)
-    timeout_s: int = Field(900, ge=10, le=86400)
+    timeout_s: int = Field(900, ge=10, le=86400)  # active time: seconds spent working (paused / waiting for you is not counted)
     loop_threshold: float = Field(0.92, ge=0.5, le=1.0)
     max_loop_strikes: int = Field(3, ge=1, le=20)
+    # pause for a human after this many turns without a file change / task-board move (0 = off)
+    stall_turns: int = Field(30, ge=0, le=2000)
     context_recent: int = Field(10, ge=2, le=100)
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
@@ -352,6 +357,17 @@ class RunCreate(BaseModel):
     permission_level: PermissionLevel | None = None  # defaults to the workspace default
     budget: RunBudget = Field(default_factory=RunBudget)
     attachments: list[dict[str, str]] = Field(default_factory=list)
+
+
+class RunOutcome(BaseModel):
+    """What a run actually produced, so a list can tell a delivered run from a no-op (filled by the runs list)."""
+    tasks_total: int = 0
+    tasks_done: int = 0
+    tasks_open: int = 0  # todo / in_progress / in_review / blocked
+    tasks_blocked: int = 0
+    files: int = 0  # distinct paths written
+    errors: int = 0  # llm / parse / limit / loop / stall / permission errors
+    final_report: bool = False  # the entry agent called finish
 
 
 class RunOut(ORM):
@@ -371,6 +387,7 @@ class RunOut(ORM):
     created_at: datetime
     started_at: datetime | None
     ended_at: datetime | None
+    outcome: RunOutcome | None = None  # filled by the runs list
 
 
 class RunDetail(RunOut):
@@ -501,8 +518,10 @@ class FxRateOut(BaseModel):
 
 class BrowserStatusOut(BaseModel):
     enabled: bool
-    status: str  # stopped | starting | installing | ready | error
-    error: str = ""
+    # stopped | starting | installing | server_ready (MCP server up, browser launch not verified yet) | ready | error
+    status: str
+    verified: bool = False  # a real browser launched and rendered a test page
+    error: str = ""  # diagnosis (e.g. which system library is missing), not the raw Chromium command line
     browser: str = ""
     package: str = ""
     tools: list[str] = Field(default_factory=list)
@@ -588,6 +607,8 @@ class FileNode(BaseModel):
     size: int
     modified: bool = False  # changed by agents in the selected run
     planned: bool = False
+    area: Literal["project", "work"] = "project"  # "work": the agents' working documents in .octopus/work/
+    generated: bool = False  # written by an Octopus run at some point (else: the user's own file)
 
 
 class ProjectTreeOut(BaseModel):

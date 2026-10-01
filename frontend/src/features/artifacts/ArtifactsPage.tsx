@@ -6,12 +6,13 @@ import Editor, { DiffEditor } from "@monaco-editor/react";
 import { toast } from "sonner";
 import {
   ChevronRight, Download, Eye, FileCode2, FilePlus2, FilePen, FolderClosed, FolderOpen, GitCompare, History, ListChecks, Loader2, RotateCcw, Search,
-  ExternalLink, Code2, FolderTree,
+  ExternalLink, Code2, FolderTree, Bot, NotebookPen,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
 import { cn, download, languageFor, timeAgo } from "@/lib/utils";
 import { qk, useArtifacts, useCompanyId, useProjectTree, useRun, useRuns, useWorkspaceId } from "@/hooks/queries";
 import { Markdown } from "@/components/Markdown";
+import { splitWork } from "./files";
 import { useApp } from "@/stores/app";
 import type { AgentOut, ArtifactOut } from "@/types";
 import { AgentAvatar, EmptyState } from "@/components/common";
@@ -20,7 +21,7 @@ import { Badge, Input } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 
 type Source = "run" | "project";
-interface TreeNode { name: string; path: string; children: Map<string, TreeNode>; file?: { path: string; badge?: "created" | "modified" | "planned"; versions?: number } }
+interface TreeNode { name: string; path: string; children: Map<string, TreeNode>; file?: { path: string; badge?: "created" | "modified" | "planned"; versions?: number; area?: "project" | "work"; generated?: boolean } }
 
 function buildTree(files: TreeNode["file"][]): TreeNode {
   const root: TreeNode = { name: "", path: "", children: new Map() };
@@ -74,10 +75,13 @@ export default function ArtifactsPage() {
   const files = React.useMemo(() => {
     const list = source === "run"
       ? [...byPath.entries()].map(([path, vs]) => ({ path, versions: vs.length, badge: vs[0].planned ? ("planned" as const) : undefined }))
-      : (project.data?.files ?? []).map((f) => ({ path: f.path, badge: byPath.has(f.path) ? ("modified" as const) : undefined }));
+      : (project.data?.files ?? []).map((f) => ({ path: f.path, area: f.area, generated: f.generated, badge: byPath.has(f.path) ? ("modified" as const) : undefined }));
     return list.filter((f) => f.path.toLowerCase().includes(q.toLowerCase()));
   }, [source, byPath, project.data, q]);
-  const tree = React.useMemo(() => buildTree(files), [files]);
+  // Project files: the deliverables (the project folder) and, separately, the agents' working documents (.octopus/work)
+  const [projectFiles, workFiles] = React.useMemo(() => splitWork(files, source === "project"), [files, source]);
+  const tree = React.useMemo(() => buildTree(projectFiles), [projectFiles]);
+  const workTree = React.useMemo(() => buildTree(workFiles).children.get(".octopus")?.children.get("work"), [workFiles]);
 
   React.useEffect(() => { setSelected(null); setVersion(null); }, [selectedRun, source]);
   React.useEffect(() => { if (!selected && files.length) setSelected(files.find((f) => f.path.endsWith("README.md"))?.path ?? files[0].path); }, [files, selected]);
@@ -120,6 +124,7 @@ export default function ArtifactsPage() {
       toast.success("Download ready", { id: t });
     } catch (e) { toast.error((e as Error).message, { id: t }); }
   };
+  const pick = (p: string) => { setSelected(p); setVersion(null); setMode(previewKind(p) ? mode : mode === "preview" ? "view" : mode); };
   const kind = previewKind(selected);
   const previewBase = source === "run" ? `/api/v1/w/${w}/runs/${selectedRun}/preview/` : `/api/v1/w/${w}/preview/`;
   const previewUrl = selected ? `${previewBase}${selected.split("/").map(encodeURIComponent).join("/")}` : "";
@@ -150,15 +155,26 @@ export default function ArtifactsPage() {
                 <div className="truncate text-xs font-semibold">{project.data.name}</div>
                 <div className="truncate font-mono text-[10px] text-muted-foreground">{project.data.root}</div>
               </div>
-              <span className="shrink-0 text-[10px] text-muted-foreground">{project.data.files.length}{project.data.truncated ? "+" : ""} files</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{projectFiles.length}{project.data.truncated ? "+" : ""} files</span>
             </div>
           )}
           <div className="p-2"><div className="relative"><Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter files" className="h-7 pl-7 text-xs" aria-label="Filter files" /></div></div>
           <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2 text-[13px]" role="tree">
             {(arts.isLoading || project.isLoading) && <div className="space-y-1.5 p-2">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-5" />)}</div>}
-            {!files.length && !arts.isLoading && <p className="p-4 text-center text-xs text-muted-foreground">{source === "run" ? "This run didn't write any files." : "This folder has no files yet (.octopus, .git and dependency folders are hidden)."}</p>}
-            <TreeView node={tree} depth={0} selected={selected} onSelect={(p) => { setSelected(p); setVersion(null); setMode(previewKind(p) ? mode : mode === "preview" ? "view" : mode); }} />
+            {!projectFiles.length && !arts.isLoading && !project.isLoading && <p className="p-4 text-center text-xs text-muted-foreground">{source === "run" ? "This run didn't write any files." : "This folder has no files yet (.git and dependency folders are hidden)."}</p>}
+            <TreeView node={tree} depth={0} selected={selected} onSelect={pick} />
+            {workTree && (
+              <div className="mt-3 border-t border-border pt-2" role="group" aria-label="Agents' working documents">
+                <Tip content="Plans, specs, briefs, reviews and QA notes the agents wrote for themselves. Kept in .octopus/work so your project folder only holds the deliverables.">
+                  <div className="flex items-center gap-1.5 px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <NotebookPen className="h-3.5 w-3.5" />Working docs<span className="font-mono font-normal normal-case">.octopus/work</span>
+                    <span className="ml-auto font-normal normal-case tabular-nums">{workFiles.length}</span>
+                  </div>
+                </Tip>
+                <TreeView node={workTree} depth={0} selected={selected} onSelect={pick} />
+              </div>
+            )}
           </div>
         </aside>
 
@@ -273,6 +289,7 @@ function TreeItem({ node, depth, selected, onSelect }: { node: TreeNode; depth: 
         <Icon className={cn("h-3.5 w-3.5 shrink-0", f.badge === "planned" ? "text-steel" : f.badge === "modified" ? "text-terracotta" : "text-olive/80")} />
         <span className="truncate">{node.name}</span>
         {f.versions && f.versions > 1 && <Tip content={`${f.versions} versions`}><span className="ml-auto rounded bg-muted px-1 text-[10px] tabular-nums">{f.versions}</span></Tip>}
+        {f.generated && f.area !== "work" && <Tip content="Written by agents (not one of your original files)"><Bot className="ml-auto h-3 w-3 shrink-0 text-muted-foreground/70" aria-label="written by agents" /></Tip>}
       </button>
     );
   }

@@ -100,14 +100,15 @@ async def test_provider(body: TestProviderIn, db: AsyncSession = Depends(get_reg
     t0 = time.monotonic()
     try:
         req, warn = await prepare_request(db, user.id, req)
-        if warn and body.provider != "mock":
+        if warn and req.provider == "mock" and body.provider != "mock":  # not connected: fell back to the demo mock
             return TestProviderOut(ok=False, detail=warn)
         if req.model in (req.extra.get("reasoning_models") or []):
             req.extra["reasoning_model"] = True
         out = ""
         async for ch in stream_with_retry(req, retries=0):
             out += ch.delta
-        return TestProviderOut(ok=True, detail=f"Model replied: {out.strip()[:80]!r}", latency_ms=int((time.monotonic() - t0) * 1000))
+        return TestProviderOut(ok=True, detail=f"Model replied: {out.strip()[:80]!r}" + (f". Note: {warn}" if warn else ""),
+                               latency_ms=int((time.monotonic() - t0) * 1000))
     except LLMError as exc:
         return TestProviderOut(ok=False, detail=str(exc)[:500], latency_ms=int((time.monotonic() - t0) * 1000))
 
@@ -135,7 +136,8 @@ def _browser_status() -> BrowserStatusOut:
     from app.services.browser import browser
 
     s = get_settings()
-    return BrowserStatusOut(enabled=s.browser_enabled, status=browser.status, error=browser.error, browser=browser._browser_arg(),
+    return BrowserStatusOut(enabled=s.browser_enabled, status=browser.status, verified=browser.verified, error=browser.error,
+                            browser=browser._browser_arg(),
                             package=s.playwright_mcp_package, tools=[t["name"] for t in browser.tool_list()], node=bool(shutil.which("npx")))
 
 
@@ -149,17 +151,20 @@ async def browser_test(user: User = Depends(current_user)) -> BrowserTestOut:
     """Start the browser if needed, open a test page in a throwaway tab and read it back."""
     import time
 
-    from app.services.browser import browser
+    from app.services.browser import SMOKE_PAGE, SMOKE_TEXT, browser, diagnose
 
     t0 = time.monotonic()
-    page = "data:text/html,<title>Octopus</title><h1>Browser ready</h1>"
-    ok, out = await browser.call("settings-test", user.id, "browser_navigate", {"url": page})
+    await browser.recheck()  # the user may have fixed the environment since the last failure
+    ok, out = await browser.call("settings-test", user.id, "browser_navigate", {"url": SMOKE_PAGE})
     if ok:
         ok, out = await browser.call("settings-test", user.id, "browser_snapshot", {})
-        ok = ok and "Browser ready" in out
+        ok = ok and SMOKE_TEXT in out
     await browser.close_run("settings-test")
     ms = int((time.monotonic() - t0) * 1000)
-    return BrowserTestOut(ok=ok, detail="Opened a page and read it back" if ok else out[:400], latency_ms=ms)
+    if ok:
+        return BrowserTestOut(ok=True, detail="Opened a page and read it back", latency_ms=ms)
+    detail = out if out.startswith("Browser unavailable:") else diagnose(out)  # a diagnosis, not the Chromium command line
+    return BrowserTestOut(ok=False, detail=detail[:2000], latency_ms=ms)
 
 
 # ---------------- MCP servers

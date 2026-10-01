@@ -139,7 +139,7 @@ export const useCanvas = create<CanvasState>()((set, get) => {
           id, type: "agent", position: pos, selected: true,
           data: {
             id, name: m.name?.trim() || r.default_name, role: m.roleTitle?.trim() || r.role, description: r.description, avatar: r.avatar, color: r.color,
-            system_prompt: r.system_prompt, provider: "mock", model: "mock/demo", temperature: 0.4, max_tokens: 2048,
+            system_prompt: r.system_prompt, provider: "mock", model: "mock/demo", temperature: 0.4, max_tokens: 8192,
             tools: { ...r.tools, manage_team: isManager || !!r.tools.manage_team },
             behavior: { assertiveness: 0.5, creativity: 0.5, strictness: 0.5, debate_style: "balanced", max_autonomous_turns: isManager ? 20 : 14, template_key: r.key, reasoning_effort: "default" },
             permission_level: "inherit", department: spec.name, is_manager: isManager, reports_to: reportsTo, active: true, created_by: null, is_entry: false,
@@ -225,7 +225,7 @@ export const useCanvas = create<CanvasState>()((set, get) => {
         id, type: "agent", position: pos, selected: true,
         data: {
           id, name, role: tpl.role, description: tpl.description ?? "", avatar: tpl.avatar ?? "bot", color: tpl.color ?? "#D97756",
-          system_prompt: tpl.system_prompt ?? "", provider: "mock", model: "mock/demo", temperature: 0.4, max_tokens: 2048,
+          system_prompt: tpl.system_prompt ?? "", provider: "mock", model: "mock/demo", temperature: 0.4, max_tokens: 8192,
           tools: tpl.tools ?? { file_read: true, file_write: true, list_files: true, terminal: false, web_search: false, calculator: true, ask_user: false, send_message: true, manage_team: false, browser: true, mcp_servers: [] },
           behavior: { assertiveness: 0.5, creativity: 0.5, strictness: 0.5, debate_style: "balanced", max_autonomous_turns: 12, template_key: tpl.key ?? "", reasoning_effort: "default" },
           permission_level: "inherit", is_entry: n.length === 0, department: "", is_manager: !!tpl.tools?.manage_team, reports_to: null, active: true, created_by: null,

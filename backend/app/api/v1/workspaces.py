@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import ProjectCtx, current_user, load_project, project_ctx
 from app.db.session import close_project, get_registry_db
-from app.models import User, Workspace
+from app.models import Artifact, User, Workspace
 from app.orchestrator.engine import manager
 from app.schemas import (
     BrowseOut, DirEntryOut, FileContentOut, FileNode, MkdirIn, NativeDialogOut, NativeOpenIn, NativeOpenOut, ProjectTreeOut, WorkspaceIn,
@@ -144,10 +144,11 @@ async def forget_workspace(workspace_id: str, db: AsyncSession = Depends(get_reg
     await db.commit()
 
 
-# ---------------- project files (what agents see; .octopus/.git hidden)
+# ---------------- project files (what agents see: the project + .octopus/work; the rest of .octopus and .git hidden)
 @router.get("/w/{workspace_id}/tree", response_model=ProjectTreeOut, tags=["project files"])
 async def project_tree(ctx: ProjectCtx = Depends(project_ctx)) -> ProjectTreeOut:
-    """The whole project folder as the agents see it (``.octopus``, ``.git``, dependency folders and secrets hidden)."""
+    """The project folder as the agents see it (``.git``, dependency folders and secrets hidden), plus the agents'
+    working documents from ``.octopus/work/`` (``area="work"``). The rest of ``.octopus`` stays hidden."""
     files = await project_files(ctx)
     from app.tools.workspace import MAX_LIST
 
@@ -156,14 +157,20 @@ async def project_tree(ctx: ProjectCtx = Depends(project_ctx)) -> ProjectTreeOut
 
 @router.get("/w/{workspace_id}/files", response_model=list[FileNode], tags=["project files"])
 async def project_files(ctx: ProjectCtx = Depends(project_ctx)) -> list[FileNode]:
+    """The project's files plus the agents' working documents (``area="work"``, in ``.octopus/work/``).
+
+    ``generated`` tells files some run wrote apart from the user's own files."""
     fs = ProjectFS(ctx.root)
+    async with ctx.sf() as db:
+        generated = set((await db.execute(select(Artifact.path).distinct())).scalars())
     out = []
-    for rel in fs.list():
-        try:
-            size = (ctx.root / rel).stat().st_size
-        except OSError:
-            size = 0
-        out.append(FileNode(path=rel, size=size))
+    for area, paths in (("project", fs.list()), ("work", fs.list_work())):
+        for rel in paths:
+            try:
+                size = (ctx.root / rel).stat().st_size
+            except OSError:
+                size = 0
+            out.append(FileNode(path=rel, size=size, area=area, generated=rel in generated))
     return out
 
 

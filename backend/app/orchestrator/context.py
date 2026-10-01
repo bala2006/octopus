@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
 from app.orchestrator.actions import schema_doc
 from app.orchestrator.permissions import EdgeSpec, allowed_recipients
 
@@ -18,6 +19,17 @@ EDGE_MEANING = {
 
 MSG_TYPES = ("task, question, answer, proposal, critique, agreement, objection, decision, "
              "review_request, review_result, status_update, final_report")
+# Model-facing size limits (see docs/MODEL_QUALITY_AUDIT.md). Every cut is marked so the model knows it saw only part.
+TOOL_RESULT_CHARS = 12_000   # one tool result / notice in the prompt
+RECENT_MSG_CHARS = 1_500     # each message in the "recent conversation" window
+SUMMARY_CHARS = 6_000        # extractive summary of older messages
+
+
+def clip(text: str, limit: int, hint: str = "") -> str:
+    """Cut ``text`` to ``limit`` chars with an explicit marker (never a silent cut)."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n…[truncated: showing {limit:,} of {len(text):,} characters{'; ' + hint if hint else ''}]"
 
 
 @dataclass
@@ -50,7 +62,7 @@ class AgentSpec:
     def from_dict(cls, d: dict[str, Any], category: str) -> AgentSpec:
         return cls(id=d["id"], name=d["name"], role=d.get("role", ""), description=d.get("description", ""),
                    system_prompt=d.get("system_prompt", ""), provider=d.get("provider", "mock"), model=d.get("model", "mock/demo"),
-                   temperature=float(d.get("temperature", 0.4)), max_tokens=int(d.get("max_tokens", 2048)),
+                   temperature=float(d.get("temperature", 0.4)), max_tokens=int(d.get("max_tokens") or DEFAULT_AGENT_MAX_TOKENS),
                    tools=d.get("tools") or {}, behavior=d.get("behavior") or {}, is_entry=bool(d.get("is_entry")),
                    color=d.get("color", "#6366f1"), category=category, department=d.get("department") or "",
                    is_manager=bool(d.get("is_manager")), reports_to=d.get("reports_to"), active=d.get("active", True) is not False,
@@ -101,8 +113,14 @@ def team_roster(agents: dict[str, AgentSpec], status: dict[str, str] | None = No
     return "\n".join(lines)
 
 
+def sender_name(m: dict[str, Any], names: dict[str, str], me: str) -> str:
+    if m["from"] is None:
+        return "Octopus" if m.get("sender") == "system" else "User"
+    return "you" if m["from"] == me else names.get(m["from"], "?")
+
+
 def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500) -> str:
-    frm = "User" if m["from"] is None else ("you" if m["from"] == me else names.get(m["from"], "?"))
+    frm = sender_name(m, names, me)
     to = "everyone" if m["to"] is None else ("you" if m["to"] == me else names.get(m["to"], "?"))
     extra = ""
     meta = m.get("meta") or {}
@@ -110,16 +128,16 @@ def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500
         extra += f" [verdict: {meta['verdict']}]"
     if meta.get("task_id"):
         extra += f" [task {meta['task_id']}]"
-    content = m["content"] if len(m["content"]) <= limit else m["content"][:limit] + " …[truncated]"
+    content = m["content"] if len(m["content"]) <= limit else m["content"][:limit] + f" …[truncated: {limit:,} of {len(m['content']):,} chars]"
     return f"[turn {m['turn']}] {frm} → {to} ({m['type']}){extra}: {content}"
 
 
-def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str, max_chars: int = 3000) -> str:
+def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str, max_chars: int = SUMMARY_CHARS) -> str:
     """Extractive summary of older turns (first sentence of each message), newest kept when over budget."""
     lines = []
     for m in older:
         first = re.split(r"(?<=[.!?])\s|\n", m["content"].strip(), maxsplit=1)[0][:160]
-        frm = "User" if m["from"] is None else ("you" if m["from"] == me else names.get(m["from"], "?"))
+        frm = sender_name(m, names, me)
         to = "all" if m["to"] is None else ("you" if m["to"] == me else names.get(m["to"], "?"))
         lines.append(f"- t{m['turn']} {frm}→{to} {m['type']}: {first}")
     out: list[str] = []
@@ -127,7 +145,7 @@ def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str,
     for ln in reversed(lines):
         total += len(ln) + 1
         if total > max_chars:
-            out.append(f"- … {len(lines) - len(out)} earlier messages omitted")
+            out.append(f"- … {len(lines) - len(out)} earlier messages omitted (decisions, tasks and files are on the Blackboard)")
             break
         out.append(ln)
     return "\n".join(reversed(out))
@@ -188,10 +206,19 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 {memory}{browser_note(agent, preview_url)}
 
 ## Rules
-1. Be concise. Do not repeat what others already said; reference it.
+1. Be concise. Do not repeat what others already said; reference it. The Blackboard (task board, workspace files) is always
+   current: check it instead of asking a teammate whether something exists or is done, and never re-send a request they
+   already have (repeats are blocked as loops). If you are waiting on someone, `wait`.
 2. Challenge weak ideas politely with concrete reasons; converge instead of arguing in circles.
 3. Never fabricate tool results, test output or file contents; use tools and report what they return.
-4. Write COMPLETE files with write_file (no placeholders). Paths are relative to the project workspace.
+4. Where files go: the project folder is for the DELIVERABLES the user asked for (source code, assets, the project's own
+   README/docs). Your working material (plans, specs, PRDs, briefs, style guides, notes, reviews, test plans, QA and
+   bug reports, roadmaps) goes under `.octopus/work/` (e.g. `.octopus/work/qa/test_plan.md`), never into the project tree.
+   Don't overwrite files that existed before Octopus touched them unless the task requires it.
+   Files must end up COMPLETE (no placeholders). Paths are relative to the project workspace. Your reply has an output limit
+   (about {agent.max_tokens} tokens): a file longer than ~250 lines must be written in parts: write_file the first part with
+   "partial":true, then write_file with "mode":"append" for each following part (one part per turn, "partial":true until the
+   last part) until the file is whole. Never drop a part.
 5. On debate channels only use proposal / objection / agreement (a debate ends when BOTH sides send `agreement`, or on a `decision`).
 6. On review channels: author sends `review_request`; reviewer replies `review_result` with `verdict` "approve" or "request_changes" and itemized `comments`.
 7. Delegation: tasks you send become entries on the task board. Keep statuses current with update_task_board.
@@ -217,13 +244,14 @@ def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_
     if older:
         parts.append("# Summary of earlier conversation\n" + rolling_summary(older, names, agent.id))
     if recent:
-        parts.append("# Recent conversation\n" + "\n".join(fmt_msg(m, names, agent.id, 800) for m in recent))
+        parts.append("# Recent conversation\n" + "\n".join(fmt_msg(m, names, agent.id, RECENT_MSG_CHARS) for m in recent))
     parts.append("# NEW messages for you\n" + ("\n".join(fmt_msg(m, names, agent.id) for m in inbox) or "(none)"))
     if observations:
         obs = []
         for o in observations:
             head = f"[{o.get('tool', 'system')}{' OK' if o.get('ok') else ' FAILED' if o.get('ok') is False else ''}]"
-            obs.append(f"{head} {o.get('content', '')[:6000]}")
+            hint = "read_file with a larger offset for the rest" if o.get("tool") == "read_file" else ""
+            obs.append(f"{head} {clip(str(o.get('content', '')), TOOL_RESULT_CHARS, hint)}")
         parts.append("# Tool results & system notices\n" + "\n".join(obs))
     parts.append("Decide your next actions now. Respond with the JSON object only.")
     return "\n\n".join(parts)

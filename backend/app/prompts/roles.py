@@ -77,7 +77,7 @@ Convert the goal "{{{{goal}}}}" into a crisp, testable product spec and keep del
 
 ## Responsibilities
 - Challenge scope that doesn't fit an MVP; propose concrete compromises.
-- Write `docs/PRD.md`: problem, users, user stories, acceptance criteria, out-of-scope.
+- Write `.octopus/work/PRD.md` (working document, not part of the project): problem, users, user stories, acceptance criteria, out-of-scope.
 - Own the task board: create tasks with assignee + acceptance criteria, keep statuses current.
 - Collect status reports from QA/DevOps and send a `final_report` upward when all tasks are done.
 
@@ -106,7 +106,7 @@ After sending the final report upward. Do not finish while tasks are open unless
 Design the simplest architecture that satisfies the PRD for "{{{{goal}}}}", and guard code quality.
 
 ## Responsibilities
-- Write `docs/ARCHITECTURE.md`: components, data model, API contract, file layout, key trade-offs.
+- Write `.octopus/work/ARCHITECTURE.md` (working document): components, data model, API contract, file layout, key trade-offs.
 - Split implementation into clear tasks for developers with interfaces they must honour.
 - Review code on `review` channels: respond with `review_result`, verdict `approve` or `request_changes`, and itemized, actionable comments (file + issue + fix).
 - Reject security issues (plaintext secrets, injection, missing validation) every time.
@@ -227,7 +227,7 @@ After reporting final test results.
 Define a usable, accessible, good-looking experience for "{{{{goal}}}}".
 
 ## Responsibilities
-- Write `design/style-guide.md`: palette (hex), typography, spacing scale, components, key screens and states (empty, loading, error).
+- Write `.octopus/work/design/style-guide.md` (working document): palette (hex), typography, spacing scale, components, key screens and states (empty, loading, error).
 - Answer frontend questions with concrete values (not adjectives).
 - Enforce WCAG AA contrast and keyboard accessibility.
 
@@ -411,6 +411,17 @@ def all_roles() -> dict[str, RoleTemplate]:
     return {**ROLE_TEMPLATES, **ORG_ROLES}
 
 
+# Roles whose main output is source code: a single file easily exceeds the default answer budget.
+CODE_ROLES = {"frontend", "backend", "developer", "devops", "fullstack_dev", "gameplay_programmer", "mobile_dev", "sre",
+              "data_engineer", "ml_engineer", "security_engineer", "qa", "qa_engineer", "e2e_tester", "playtester", "architect", "techlead"}
+
+
+def default_max_tokens(key: str) -> int:
+    from app.llm.base import CODE_AGENT_MAX_TOKENS, DEFAULT_AGENT_MAX_TOKENS
+
+    return CODE_AGENT_MAX_TOKENS if key in CODE_ROLES else DEFAULT_AGENT_MAX_TOKENS
+
+
 def agent_from_role(key: str, *, name: str | None = None, entry: bool = False, x: float = 0, y: float = 0,
                     department: str = "", is_manager: bool | None = None, role: str | None = None) -> dict:
     from app.core.config import get_settings
@@ -431,6 +442,7 @@ def agent_from_role(key: str, *, name: str | None = None, entry: bool = False, x
         "system_prompt": t.system_prompt,
         "provider": settings.default_provider,
         "model": settings.default_model,
+        "max_tokens": default_max_tokens(key),
         "tools": tools,
         "behavior": behavior,
         "is_entry": entry,

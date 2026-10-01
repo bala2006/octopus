@@ -7,6 +7,7 @@
 | Registry | `$OCTOPUS_HOME/registry.db` (default `~/.octopus`) | users, Fernet-encrypted provider keys (+ Azure options), MCP servers (encrypted env/headers), list of workspaces |
 | Project | `<project>/.octopus/octopus.db` | companies, agents, edges, chat sessions, runs, messages, run events, tasks, artifact versions, agent memory |
 | Project files | `<project>/…` | what agents read and write (sandboxed) |
+| Working docs | `<project>/.octopus/work/` | agents' working material (specs, plans, briefs, reviews, QA notes); the only part of `.octopus/` agents can read or write |
 | Plans | `<project>/.octopus/plans/<run_id>/` | shadow files written in `plan` permission mode |
 
 Both databases are migrated with Alembic (`backend/migrations/{registry,project}`). The project DB is migrated when the folder is first opened. Opening a folder that already has `.octopus/project.json` re-attaches all of its history. When a project opens, any run that was `queued`/`running` in the previous process is marked `paused`, so it can be resumed.
@@ -193,7 +194,7 @@ The files are never touched, artifact versions keep counting on the same run, an
 ## 7d. Projects, folders and preview
 
 - **Native folder dialog (`services/native_dialog.py`).** It uses `osascript` on macOS, PowerShell `FolderBrowserDialog` on Windows, and zenity/kdialog/yad on Linux, with a Tk fallback. It runs only for requests from the same machine. `POST /workspaces/native` opens the dialog and registers the folder server-side; the allowed-roots check doesn't apply because the user picked the folder on their own desktop. Without a desktop (Docker/SSH) the UI falls back to the in-app browser.
-- **Self-managed `.octopus/`.** `ensure_layout()` creates or repairs `plans/`, `exports/`, `browser/`, `README.md` and `.gitignore` (`*`) every time a project is opened.
+- **Self-managed `.octopus/`.** `ensure_layout()` creates or repairs `work/`, `plans/`, `exports/`, `browser/`, `README.md` and `.gitignore` (`*`) every time a project is opened.
 - **Preview (`services/preview.py`).** It serves project files (plan shadow first for run previews) with real MIME types under a CSP sandbox. That CSP explicitly allows the preview base URL, because `'self'` matches nothing in an opaque-origin sandbox. It also allows `https:` CDNs and forbids forms and framing by other origins. `/api/v1/w/{id}/preview/…` serves the live folder, and `/runs/{id}/preview/…` serves a run's view.
 
 ## 8. Frontend

@@ -47,10 +47,22 @@ class SendMessage(BaseModel):
 
 
 class WriteFile(BaseModel):
+    """Write a file. ``mode="append"`` adds to the end of the file, so a large file can be built in parts across turns."""
     action: Literal["write_file"]
     path: str = Field(min_length=1, max_length=300)
     content: str = Field(max_length=1_000_000)
     note: str = ""
+    mode: Literal["overwrite", "append"] = "overwrite"
+    partial: bool = False  # more parts follow: the agent gets another turn to append the next one
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _mode_alias(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip().lower()
+            return {"write": "overwrite", "replace": "overwrite", "create": "overwrite", "w": "overwrite",
+                    "a": "append", "add": "append", "continue": "append"}.get(v, v)
+        return v
 
 
 class CreateFolder(BaseModel):
@@ -70,6 +82,7 @@ class MoveFile(BaseModel):
 class ReadFile(BaseModel):
     action: Literal["read_file"]
     path: str
+    offset: int = Field(0, ge=0)  # character offset: large files are returned in pages
 
 
 class ListFiles(BaseModel):
@@ -191,6 +204,7 @@ class AgentChanges(BaseModel):
     active: bool | None = None
     temperature: float | None = Field(None, ge=0, le=2)
     model: str | None = None
+    max_tokens: int | None = Field(None, ge=256, le=64000)  # answer budget per turn (raise it for large files)
     tools: ToolSpec | None = None
     behavior: dict[str, Any] | None = None
     permission_level: Literal["read_only", "plan", "ask", "danger"] | None = None
@@ -252,6 +266,9 @@ def tool_enabled(tools: dict[str, Any], key: str) -> bool:
     return bool(tools.get(key, TOOL_DEFAULTS.get(key, False)))
 
 
+MAX_ACTIONS = 20  # per reply
+
+
 class ParseResult(BaseModel):
     thought: str = ""
     actions: list[Any] = Field(default_factory=list)
@@ -296,7 +313,9 @@ def parse_envelope(text: str) -> ParseResult:
     if not isinstance(raw, list):
         return ParseResult(ok=False, errors=["'actions' must be a list"])
     res = ParseResult(thought=str(data.get("thought", ""))[:2000])
-    for i, item in enumerate(raw[:20]):
+    if len(raw) > MAX_ACTIONS:
+        res.errors.append(f"only the first {MAX_ACTIONS} of {len(raw)} actions were run; send the rest next turn")
+    for i, item in enumerate(raw[:MAX_ACTIONS]):
         if not isinstance(item, dict):
             res.errors.append(f"actions[{i}] is not an object")
             continue
@@ -333,9 +352,12 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
     if tool_enabled(enabled_tools, "list_files"):
         lines.append('{"action":"list_files","prefix":"optional/dir"}')
     if tool_enabled(enabled_tools, "file_read"):
-        lines.append('{"action":"read_file","path":"relative/path.ext"}')
+        lines.append('{"action":"read_file","path":"relative/path.ext","offset":0}  (big files come in pages; the result says which offset to read next)')
     if tool_enabled(enabled_tools, "file_write"):
         lines.append('{"action":"write_file","path":"relative/path.ext","content":"<FULL file content>","note":"why"}  (parent folders are created for you)')
+        lines.append('{"action":"write_file","path":"relative/path.ext","mode":"append","content":"<next part>","partial":true}  (large file? '
+                     'write the first ~250 lines with "partial":true, then append the rest one part per turn; "partial":true gives you '
+                     'another turn, leave it out on the last part)')
         lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
         lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):
@@ -349,7 +371,7 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
                      '{"label":"alternative"},{"label":"another alternative"}]}  (pauses the run until the user answers; ALWAYS give 2-5 concrete '
                      'options and mark exactly one recommended; the user may also type a different answer)')
     lines.append('{"action":"list_agents","include_inactive":true}  (see every teammate: department, manager, active/inactive, live status)')
-    lines.append('{"action":"update_agent","target":"self","changes":{"system_prompt"|"append_to_prompt"|"role"|"description"|"temperature"|"behavior"|"tools":...},"reason":"why"}'
+    lines.append('{"action":"update_agent","target":"self","changes":{"system_prompt"|"append_to_prompt"|"role"|"description"|"temperature"|"max_tokens"|"behavior"|"tools":...},"reason":"why"}'
                  '  (refine your OWN configuration; you cannot grant yourself new tools)')
     if tool_enabled(enabled_tools, "manage_team"):
         lines.append('{"action":"create_agent","name":"...","role":"...","department":"...","is_manager":false,"role_template":"optional",'

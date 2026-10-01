@@ -6,6 +6,7 @@ Layout::
       .octopus/
         project.json      # {id, name, created_at, app, schema}
         octopus.db        # companies, agents, edges, sessions, runs, messages, events, tasks, artifacts, memory
+        work/             # agents' working material: plans, specs, briefs, notes, reviews, QA reports
         plans/<run_id>/   # shadow files written in "plan" permission mode
         exports/          # company exports / run reports (on demand)
         browser/          # screenshots / traces from the agents' browser (Playwright MCP)
@@ -75,11 +76,14 @@ this project: companies (agent teams), chats, run history, file versions and pla
 
 - `project.json`  project id and name
 - `octopus.db`    companies, agents, channels, chats, runs, events, tasks, artifact history
+- `work/`         the agents' working documents (specs, plans, briefs, reviews, QA notes); your project folder
+                  only gets the deliverables you asked for
 - `plans/`        files proposed in Plan mode (applied to the project only when you approve)
 - `exports/`      exported companies and run reports
 - `browser/`      screenshots and traces from the agents' browser
 
-Deleting this folder resets the project in Octopus; your own files are never stored here.
+Deleting this folder resets the project in Octopus (including the agents' working documents in `work/`);
+your own files are never stored here.
 Git ignores this folder automatically (see `.gitignore` in here).
 """
 
@@ -88,7 +92,7 @@ def ensure_layout(root: Path) -> Path:
     """Create or repair ``<root>/.octopus`` (idempotent, runs every time a project is opened)."""
     data_dir = root / PROJECT_DIRNAME
     data_dir.mkdir(exist_ok=True)
-    for sub in ("plans", "exports", "browser"):
+    for sub in ("work", "plans", "exports", "browser"):
         (data_dir / sub).mkdir(exist_ok=True)
     gi = data_dir / ".gitignore"
     if not gi.exists() or gi.read_text(errors="ignore").strip() in ("", "# Octopus local data\noctopus.db*\nplans/"):

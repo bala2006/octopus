@@ -104,11 +104,15 @@ async def prepare_request(db: AsyncSession, user_id: str, req: LLMRequest) -> tu
     req.api_key, req.base_url = key, base
     req.extra = {**extra, **req.extra}
     allowed = allowed_models(extra)
+    warning = None
     if req.model not in allowed:  # e.g. gpt-4.1-mini from older templates → the configured deployment
+        if req.model and req.model != "mock/demo":  # never swap a model silently: the replacement may be weaker or stronger
+            warning = (f"Model '{req.model}' is not a deployment on your Azure resource; using '{allowed[0]}' instead "
+                       "(Settings → Model → deployments).")
         req.model = allowed[0]
     if req.model in (extra.get("reasoning_models") or []):
         req.extra["reasoning_model"] = True
-    return req, None
+    return req, warning
 
 
 async def stream_with_retry(

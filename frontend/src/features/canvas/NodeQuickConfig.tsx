@@ -81,7 +81,11 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
   };
 
   return (
-    <div ref={panelRef} className="flex max-h-[calc(100dvh-5rem)] w-[340px] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl animate-in fade-in-0 slide-in-from-left-2 zoom-in-95 duration-150"
+    // `nopan`/`nodrag`/`nowheel`: React Flow's pan/zoom filter ignores gestures that start inside the panel (a pan starts on
+    // pointerdown, so stopping `click` alone was too late). select-text: the canvas sets user-select: none, but labels and
+    // the system prompt must be selectable. (No React-level pointerdown stopPropagation: in React 18 that also stops the
+    // native event at the root, which breaks Radix's outside-click handling for the selects in this panel.)
+    <div ref={panelRef} className="nodrag nopan nowheel flex max-h-[calc(100dvh-5rem)] w-[340px] cursor-auto select-text flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl animate-in fade-in-0 slide-in-from-left-2 zoom-in-95 duration-150"
       role="dialog" aria-label={`Configure ${data.name}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <AgentAvatar name={data.name} color={data.color} avatar={data.avatar} size={24} />

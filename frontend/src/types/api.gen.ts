@@ -466,7 +466,8 @@ export interface paths {
         };
         /**
          * Project Tree
-         * @description The whole project folder as the agents see it (``.octopus``, ``.git``, dependency folders and secrets hidden).
+         * @description The project folder as the agents see it (``.git``, dependency folders and secrets hidden), plus the agents'
+         *     working documents from ``.octopus/work/`` (``area="work"``). The rest of ``.octopus`` stays hidden.
          */
         get: operations["project_tree_api_v1_w__workspace_id__tree_get"];
         put?: never;
@@ -484,7 +485,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Project Files */
+        /**
+         * Project Files
+         * @description The project's files plus the agents' working documents (``area="work"``, in ``.octopus/work/``).
+         *
+         *     ``generated`` tells files some run wrote apart from the user's own files.
+         */
         get: operations["project_files_api_v1_w__workspace_id__files_get"];
         put?: never;
         post?: never;
@@ -1283,7 +1289,7 @@ export interface components {
             temperature: number;
             /**
              * Max Tokens
-             * @default 2048
+             * @default 8192
              */
             max_tokens: number;
             tools?: components["schemas"]["AgentTools"];
@@ -1377,7 +1383,7 @@ export interface components {
             temperature: number;
             /**
              * Max Tokens
-             * @default 2048
+             * @default 8192
              */
             max_tokens: number;
             tools?: components["schemas"]["AgentTools"];
@@ -1632,6 +1638,11 @@ export interface components {
             enabled: boolean;
             /** Status */
             status: string;
+            /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
             /**
              * Error
              * @default
@@ -1918,6 +1929,17 @@ export interface components {
              * @default false
              */
             planned: boolean;
+            /**
+             * Area
+             * @default project
+             * @enum {string}
+             */
+            area: "project" | "work";
+            /**
+             * Generated
+             * @default false
+             */
+            generated: boolean;
         };
         /** FxRateOut */
         FxRateOut: {
@@ -2336,6 +2358,11 @@ export interface components {
              */
             max_loop_strikes: number;
             /**
+             * Stall Turns
+             * @default 30
+             */
+            stall_turns: number;
+            /**
              * Context Recent
              * @default 10
              */
@@ -2423,6 +2450,7 @@ export interface components {
             started_at: string | null;
             /** Ended At */
             ended_at: string | null;
+            outcome?: components["schemas"]["RunOutcome"] | null;
             /** Snapshot */
             snapshot?: {
                 [key: string]: unknown;
@@ -2491,6 +2519,48 @@ export interface components {
             started_at: string | null;
             /** Ended At */
             ended_at: string | null;
+            outcome?: components["schemas"]["RunOutcome"] | null;
+        };
+        /**
+         * RunOutcome
+         * @description What a run actually produced, so a list can tell a delivered run from a no-op (filled by the runs list).
+         */
+        RunOutcome: {
+            /**
+             * Tasks Total
+             * @default 0
+             */
+            tasks_total: number;
+            /**
+             * Tasks Done
+             * @default 0
+             */
+            tasks_done: number;
+            /**
+             * Tasks Open
+             * @default 0
+             */
+            tasks_open: number;
+            /**
+             * Tasks Blocked
+             * @default 0
+             */
+            tasks_blocked: number;
+            /**
+             * Files
+             * @default 0
+             */
+            files: number;
+            /**
+             * Errors
+             * @default 0
+             */
+            errors: number;
+            /**
+             * Final Report
+             * @default false
+             */
+            final_report: boolean;
         };
         /** SessionIn */
         SessionIn: {

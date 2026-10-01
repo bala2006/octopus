@@ -3,7 +3,9 @@
 Guarantees:
 - Every path is relative to the project root; absolute paths, ``..`` segments, NUL bytes and
   symlinks that resolve outside the root are rejected (checked on the *real* path).
-- Octopus' own data (``.octopus/``) and VCS internals (``.git/``) are never readable or writable by agents.
+- Octopus' own data (``.octopus/``) and VCS internals (``.git/``) are never readable or writable by agents, with one
+  exception: ``.octopus/work/`` is the agents' place for *working material* (plans, specs, briefs, notes, reviews, QA
+  reports), so it stays out of the user's project tree. The database, plans, exports and browser data stay sealed.
 - Secret-looking files (``.env``, keys, certificates) are blocked unless the run is in ``danger`` mode.
 - In ``plan`` mode writes go to a shadow directory (``.octopus/plans/<run_id>/``); reads prefer the
   shadow copy, so agents see their own planned changes while the project stays untouched.
@@ -23,6 +25,7 @@ MAX_LIST = 3000
 IGNORED_DIRS = {".git", PROJECT_DIRNAME, "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
                 ".ruff_cache", "dist", "build", ".next", ".turbo", ".idea", ".vscode", ".DS_Store"}
 PROTECTED_TOP = {PROJECT_DIRNAME, ".git"}
+WORK_DIR = f"{PROJECT_DIRNAME}/work"  # the only agent-accessible subtree of .octopus/
 SECRET_PATTERNS = [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", ".npmrc", ".pypirc",
                    ".netrc", "credentials*", "*.keystore", "secrets.*"]
 SECRET_ALLOW = {".env.example", ".env.sample", ".env.template"}
@@ -45,9 +48,14 @@ def normalize_path(path: str) -> str:
         raise WorkspaceError("Path traversal ('..') is not allowed")
     if not parts or len(p) > 400:
         raise WorkspaceError("Invalid path")
-    if parts[0] in PROTECTED_TOP:
-        raise WorkspaceError(f"'{parts[0]}/' is protected and cannot be accessed by agents")
+    if parts[0] in PROTECTED_TOP and not is_work_path(parts):
+        hint = f" (working documents go in {WORK_DIR}/)" if parts[0] == PROJECT_DIRNAME else ""
+        raise WorkspaceError(f"'{parts[0]}/' is protected and cannot be accessed by agents{hint}")
     return "/".join(parts)
+
+
+def is_work_path(parts: tuple[str, ...] | list[str]) -> bool:
+    return len(parts) >= 2 and parts[0] == PROJECT_DIRNAME and parts[1] == "work"
 
 
 def is_secret(rel: str) -> bool:
@@ -153,6 +161,13 @@ class ProjectFS:
                         return sorted(out)
         return sorted(out)
 
+    def list_work(self) -> list[str]:
+        """The agents' working documents (``.octopus/work/``), as project-relative paths."""
+        try:
+            return self.list(WORK_DIR)
+        except WorkspaceError:
+            return []
+
     def make_dir(self, path: str) -> str:
         """Create a folder (and its parents) inside the project; in plan mode it goes to the plan shadow."""
         rel, target = self.target_for_write(path)
@@ -167,6 +182,8 @@ class ProjectFS:
             raise WorkspaceError("Plan mode: files can't be moved; write the new file with write_file instead")
         s_rel, s_real = self.resolve(src)
         d_rel, d_real = self.resolve(dst)
+        if s_rel == WORK_DIR:
+            raise WorkspaceError(f"'{WORK_DIR}' itself can't be moved; move the files inside it")
         if not s_real.exists():
             raise WorkspaceError(f"Not found: {s_rel}")
         if s_real.is_symlink():

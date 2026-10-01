@@ -7,11 +7,17 @@
   already on the machine.
 
 Agents reach it through the ``browser`` tool (granted by default); it shows up to them as the MCP server ``browser``.
+
+Health is reported honestly: the MCP server answering (``server_ready``) is not the same as a browser that can launch.
+``@playwright/mcp`` starts Chromium lazily, so after the server is up Octopus opens a ``data:`` page and reads it back;
+only then is the status ``ready``. A launch failure later on degrades the status to ``error`` with a diagnosis
+(e.g. a missing system library) instead of the raw Chromium command line.
 """
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import socket
 import sys
@@ -47,6 +53,41 @@ FALLBACK_TOOLS: list[dict[str, Any]] = [
     {"name": "browser_navigate_back", "description": "Go back", "input_schema": {"properties": {}}},
 ]
 PREFERRED = [t["name"] for t in FALLBACK_TOOLS] + ["browser_select_option", "browser_hover", "browser_tabs", "browser_handle_dialog"]
+SMOKE_PAGE = "data:text/html,<title>Octopus</title><h1>Browser ready</h1>"
+SMOKE_TEXT = "Browser ready"
+_LAUNCH_FAILURE = re.compile(r"error while loading shared libraries|exit(?:ed)?(?: with)?(?: code)?[ =:]*127|exitCode=127|"
+                             r"Target page, context or browser has been closed|Failed to launch|browserType\.launch|"
+                             r"Executable doesn't exist|is not installed|initializeServer", re.I)
+DEPS_HINT = ("Install Chromium's system libraries: rebuild the Octopus Docker image (it includes them), or run "
+             "`npx playwright install-deps chromium` on this machine.")
+
+
+def is_launch_failure(out: str) -> bool:
+    """Does a tool result mean the browser itself can't start (as opposed to a page-level error)?"""
+    return bool(_LAUNCH_FAILURE.search(out or ""))
+
+
+def diagnose(out: str) -> str:
+    """Turn Playwright/Chromium launch output into an actionable sentence plus the log lines that matter.
+
+    The raw message is dominated by Chromium's command line (dozens of ``--flag`` lines), which used to push the real
+    cause out of the visible error."""
+    text = out or ""
+    lib = re.search(r"error while loading shared libraries: ([^\s:]+)", text)
+    if lib:
+        head = f"Chromium cannot start: the system library {lib.group(1)} is missing. {DEPS_HINT}"
+    elif re.search(r"exit(?:ed)?(?: with)?(?: code)?[ =:]*127|exitCode=127", text, re.I):
+        head = f"Chromium exited with code 127 right after launch: system libraries are missing. {DEPS_HINT}"
+    elif re.search(r"Executable doesn't exist|is not installed", text, re.I):
+        head = "The browser binary is not installed yet; it is downloaded on first use (needs internet access)."
+    elif re.search(r"Target page, context or browser has been closed|Failed to launch|initializeServer", text, re.I):
+        head = f"Chromium closed immediately after launch (most often: missing system libraries). {DEPS_HINT}"
+    else:
+        head = "The browser could not be used."
+    keep = [ln.strip() for ln in text.splitlines()
+            if ln.strip() and not ln.strip().startswith("--") and "<launching>" not in ln and not re.fullmatch(r"[-=\s]*", ln)]
+    detail = "\n".join(keep)[:1500]
+    return f"{head}\n{detail}" if detail else head
 
 
 def _free_port() -> int:
@@ -88,7 +129,10 @@ class _AgentSession:
                     try:
                         res = await asyncio.wait_for(session.call_tool(tool, args), CALL_TIMEOUT_S)
                         parts = [getattr(c, "text", None) or f"[{getattr(c, 'type', 'content')}]" for c in res.content]
-                        fut.set_result((not res.isError, "\n".join(parts)[:12000]))
+                        out = "\n".join(parts)
+                        if len(out) > 12000:
+                            out = out[:12000] + f"\n…[truncated: 12,000 of {len(out):,} characters]"
+                        fut.set_result((not res.isError, out))
                     except asyncio.TimeoutError:
                         fut.set_result((False, f"Browser tool '{tool}' timed out after {CALL_TIMEOUT_S}s"))
                     except Exception as exc:  # the session may be broken; report and stop
@@ -124,8 +168,10 @@ class BrowserService:
         self.proc: asyncio.subprocess.Process | None = None
         self.url: str | None = None
         self.tools: list[dict[str, Any]] = []
-        self.status = "stopped"  # stopped | starting | installing | ready | error
+        # stopped | starting | installing | server_ready (MCP up, browser not verified) | ready (a page was opened) | error
+        self.status = "stopped"
         self.error = ""
+        self.verified = False  # a browser actually launched and rendered a page
         self._lock = asyncio.Lock()
         self._sessions: dict[tuple[str, str], _AgentSession] = {}
         self._installed = False
@@ -165,8 +211,8 @@ class BrowserService:
                 await self._kill()
                 self.status, self.error = "error", f"Playwright MCP did not start: {exc}"
                 raise RuntimeError(self.error) from exc
-            self.status = "ready"
-            log.info("browser_started", url=self.url, browser=self._browser_arg())
+            self.status, self.verified = "server_ready", False
+            log.info("browser_server_started", url=self.url, browser=self._browser_arg())
         try:
             from app.tools.mcp_client import McpConfig, list_tools
 
@@ -175,7 +221,41 @@ class BrowserService:
             self.tools = sorted(listed, key=lambda t: order.get(t["name"], 99))
         except Exception as exc:  # tool listing is informative only
             log.warning("browser_tools_unavailable", error=str(exc))
+        if not self.verified:
+            await self._verify()
         return self.url
+
+    async def _verify(self) -> None:
+        """Launch smoke test: open a data: page and read it back. Sets ready or error (with a diagnosis)."""
+        async with self._lock:
+            if self.verified or not self.url:
+                return
+            sess = _AgentSession(self.url)
+            try:
+                ok, out = await sess.call("browser_navigate", {"url": SMOKE_PAGE})
+                if not ok and re.search(r"Executable doesn't exist|is not installed", out, re.I):
+                    try:
+                        await self._install_browser()
+                    except RuntimeError as exc:
+                        ok, out = False, str(exc)
+                    else:
+                        ok, out = await sess.call("browser_navigate", {"url": SMOKE_PAGE})
+                if ok:
+                    ok, out = await sess.call("browser_snapshot", {})
+                    ok = ok and SMOKE_TEXT in out
+            except Exception as exc:  # noqa: BLE001 - any failure here means "not usable"
+                ok, out = False, f"{type(exc).__name__}: {exc}"
+            finally:
+                await sess.close()
+            if ok:
+                self.status, self.error, self.verified = "ready", "", True
+                log.info("browser_verified")
+            else:
+                self.mark_broken(out)
+
+    def mark_broken(self, out: str) -> None:
+        self.status, self.error, self.verified = "error", diagnose(out), False
+        log.warning("browser_unusable", error=self.error[:300])
 
     async def _wait_listening(self) -> None:
         assert self.proc and self.proc.stdout
@@ -208,7 +288,7 @@ class BrowserService:
         if proc.returncode != 0:
             raise RuntimeError(f"Installing the browser failed: {out.decode(errors='replace')[-300:]}")
         self._installed = True
-        self.status = "ready"
+        self.status = "server_ready"
 
     async def _kill(self) -> None:
         if self.proc and self.proc.returncode is None:
@@ -224,17 +304,28 @@ class BrowserService:
             await sess.close()
         self._sessions.clear()
         await self._kill()
-        self.status = "stopped"
+        self.status, self.verified = "stopped", False
 
     # ---------------------------------------------------------------- tools
     def tool_list(self) -> list[dict[str, Any]]:
         return self.tools or FALLBACK_TOOLS
+
+    def available(self) -> bool:
+        return self.status != "error"
+
+    async def recheck(self) -> None:
+        """Re-run the launch smoke test (e.g. after the user installed the missing libraries)."""
+        if self.status == "error" and self.proc and self.proc.returncode is None and self.url:
+            self.status, self.verified = "server_ready", False
+            await self._verify()
 
     async def call(self, run_id: str, agent_id: str, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
         try:
             url = await self.ensure()
         except RuntimeError as exc:
             return False, str(exc)
+        if self.status == "error":  # the launch smoke test failed: don't let every agent call fail the same way
+            return False, f"Browser unavailable: {self.error}"
         key = (run_id, agent_id)
         sess = self._sessions.get(key)
         if sess is None or sess.task.done():
@@ -243,13 +334,21 @@ class BrowserService:
             ok, out = await sess.call(tool, args)
         except Exception as exc:
             self._sessions.pop(key, None)
-            return False, f"Browser unavailable: {exc}"
+            out = f"{type(exc).__name__}: {exc}"
+            if is_launch_failure(out):
+                self.mark_broken(out)
+            return False, f"Browser unavailable: {diagnose(out)}"
         if not ok and "is not installed" in out:  # first use on this machine: download the browser, then retry once
             try:
                 await self._install_browser()
             except RuntimeError as exc:
                 return False, str(exc)
             ok, out = await sess.call(tool, args)
+        if not ok and is_launch_failure(out):  # degrade health instead of staying "Running" forever
+            self.mark_broken(out)
+            return False, f"Browser unavailable: {self.error}"
+        if ok and not self.verified:
+            self.status, self.error, self.verified = "ready", "", True
         return ok, out
 
     async def close_run(self, run_id: str) -> None:

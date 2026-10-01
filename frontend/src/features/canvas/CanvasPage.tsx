@@ -1,7 +1,7 @@
 import * as React from "react";
 import { tone } from "@/lib/palette";
 import {
-  Background, BackgroundVariant, ConnectionMode, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow,
+  Background, BackgroundVariant, ConnectionMode, Controls, ReactFlow, ReactFlowProvider, useReactFlow,
 } from "@xyflow/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -28,6 +28,7 @@ import { edgeTypes, nodeTypes } from "./flowTypes";
 import { EdgeAnchorsProvider } from "./edgeAnchors";
 import { DepartmentBuilder } from "./DepartmentBuilder";
 import { DepartmentZones } from "./DepartmentZones";
+import { CanvasMiniMap } from "./CanvasMiniMap";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import { EdgeEditor } from "./EdgeEditor";
 import { Inspector } from "./Inspector";
@@ -172,7 +173,7 @@ function CanvasEditor({ workspaceId, companyId }: { workspaceId: string; company
                   useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: ids.includes(n.id) })) });
                 }} />
                 <Controls showInteractive={false} position="bottom-left" />
-                {!s.quickConfigId && <MiniMap pannable zoomable position="bottom-right" nodeColor={(n) => tone((n.data as { color?: string }).color)} nodeBorderRadius={8} maskColor="hsl(var(--background) / 0.7)" />}
+                <CanvasMiniMap departments={s.departments} onPick={(id) => useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: n.id === id })) })} />
               </ReactFlow>
               </EdgeAnchorsProvider>
             </div>

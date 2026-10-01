@@ -47,12 +47,14 @@ export function useRunStream(workspaceId: string, runId: string | undefined, nam
           if (!toasted.current.has(st)) {
             toasted.current.add(st);
             if (st === "completed") toast.success("Run completed", { description: e.data.summary?.slice(0, 160) });
+            else if (st === "incomplete") toast.warning("Run stopped with unfinished tasks", { description: e.data.reason });
             else if (st === "failed") toast.error("Run halted", { description: e.data.reason });
             else toast("Run stopped");
           }
         }
         if (e.type === "approval_requested") toast.warning("Approval needed", { description: e.data.summary, duration: 6000 });
         if (e.type === "error" && e.data.kind === "loop") toast.error("Loop detected", { description: e.data.message });
+        if (e.type === "error" && e.data.kind === "stall") toast.warning("Run paused: no progress", { description: e.data.message, duration: 10000 });
         if (e.type === "artifact_updated") qc.invalidateQueries({ queryKey: qk.artifacts(workspaceId, runId) });
         if (e.type === "file_moved" || e.type === "folder_created") qc.invalidateQueries({ queryKey: qk.files(workspaceId) });
         if ((e.type === "agent_created" || e.type === "agent_updated") && e.data.persisted) {

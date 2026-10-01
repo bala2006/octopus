@@ -104,7 +104,7 @@ test("ask mode: approval card gates file writes", async ({ page, request }) => {
   await page.goto(`/w/${ws.id}/runs/${run.id}`);
   const card = page.getByRole("alertdialog", { name: "Approval required" });
   await expect(card).toBeVisible({ timeout: 60_000 });
-  await expect(card.getByText("docs/PRD.md").first()).toBeVisible();
+  await expect(card.getByText(".octopus/work/PRD.md").first()).toBeVisible();
   await shoot(page, "09-approval");
   await card.getByRole("button", { name: "Always allow" }).click();
   await expect(card).toBeHidden();

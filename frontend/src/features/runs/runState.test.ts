@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialRun, reduceRun, replayTo } from "./runState";
+import { initialRun, reduceRun, replayTo, TERMINAL } from "./runState";
 import type { RunEvent } from "@/types";
 
 const msg = (id: string, from: string | null, to: string | null, type = "task", content = "hello"): RunEvent => ({
@@ -7,6 +7,18 @@ const msg = (id: string, from: string | null, to: string | null, type = "task", 
 });
 
 describe("reduceRun", () => {
+  it("makes skipped turns and stalls visible", () => {
+    let s = reduceRun(initialRun(), { type: "turn_skipped", seq: 1, data: { agent_id: "a", limit: 12, inbox: [] } }, { a: "Alice" });
+    expect(s.timeline.at(-1)).toMatchObject({ tone: "error", label: "Alice skipped: over 12 autonomous turns" });
+    s = reduceRun(s, { type: "usage_update", seq: 2, data: { tokens: 10, cost_usd: 0, turns: 30, progress_turn: 9, turns_since_progress: 21 } });
+    expect(s.usage).toMatchObject({ progress_turn: 9, turns_since_progress: 21 });
+  });
+
+  it("treats incomplete as a terminal status", () => {
+    expect(TERMINAL.has("incomplete")).toBe(true);
+    expect(TERMINAL.has("paused")).toBe(false);
+  });
+
   it("tracks statuses, streaming and last message", () => {
     let s = initialRun();
     s = reduceRun(s, { type: "agent_status", data: { agent_id: "a", status: "speaking", activity: "Drafting proposal to Bob…" } });
