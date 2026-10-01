@@ -5,6 +5,7 @@ import type { AgentOut, EdgeOut } from "@/types";
 import { EditableContext, LiveContext, type LiveOverlay } from "@/features/canvas/live";
 import { edgeTypes, nodeTypes } from "@/features/canvas/flowTypes";
 import { DepartmentZones } from "@/features/canvas/DepartmentZones";
+import { CanvasMiniMap } from "@/features/canvas/CanvasMiniMap";
 import { EdgeAnchorsProvider } from "@/features/canvas/edgeAnchors";
 
 /** Read-only, animated company graph for live runs and replays. Agents hired mid-run pop in without resetting the layout. */
@@ -49,6 +50,7 @@ function Graph({ agents, edges, overlay, departments, onSelect }: { agents: Agen
           <Background variant={BackgroundVariant.Dots} gap={20} size={1.3} color="hsl(var(--grid))" />
           <DepartmentZones departments={departments} />
           <Controls showInteractive={false} position="bottom-left" />
+          <CanvasMiniMap departments={departments} onPick={(id) => onSelect?.(id)} />
         </ReactFlow>
         </EdgeAnchorsProvider>
       </LiveContext.Provider>

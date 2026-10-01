@@ -6,28 +6,33 @@ import { deptColor, type AgentNode, type DeptMeta } from "@/stores/canvas";
 const PAD = 22;
 const LABEL_H = 26;
 
+export interface Zone { name: string; color: string; manager?: string; count: number; active: number; first: string; x: number; y: number; w: number; h: number }
+
+/** Bounding regions of each department's agents in flow coordinates (shared by the canvas and the minimap). */
+export function departmentZones(nodes: AgentNode[], departments: Record<string, DeptMeta>): Zone[] {
+  const groups = new Map<string, AgentNode[]>();
+  for (const n of nodes) {
+    const d = n.data.department;
+    if (!d) continue;
+    groups.set(d, [...(groups.get(d) ?? []), n]);
+  }
+  return [...groups.entries()].map(([name, ns]) => {
+    const xs = ns.map((n) => n.position.x), ys = ns.map((n) => n.position.y);
+    const x2 = ns.map((n) => n.position.x + (n.measured?.width ?? 250));
+    const y2 = ns.map((n) => n.position.y + (n.measured?.height ?? 130));
+    const manager = ns.find((n) => n.data.is_manager);
+    const active = ns.filter((n) => n.data.active !== false).length;
+    return {
+      name, color: deptColor(name, departments), manager: manager?.data.name, count: ns.length, active, first: ns[0].id,
+      x: Math.min(...xs) - PAD, y: Math.min(...ys) - PAD - LABEL_H, w: Math.max(...x2) - Math.min(...xs) + PAD * 2, h: Math.max(...y2) - Math.min(...ys) + PAD * 2 + LABEL_H,
+    };
+  });
+}
+
 /** Soft, labelled regions behind each department's agents (decoration only; agents remain the only node type). */
 export function DepartmentZones({ departments, onSelect }: { departments: Record<string, DeptMeta>; onSelect?: (dept: string) => void }) {
   const nodes = useNodes<AgentNode>();
-  const zones = React.useMemo(() => {
-    const groups = new Map<string, AgentNode[]>();
-    for (const n of nodes) {
-      const d = n.data.department;
-      if (!d) continue;
-      groups.set(d, [...(groups.get(d) ?? []), n]);
-    }
-    return [...groups.entries()].map(([name, ns]) => {
-      const xs = ns.map((n) => n.position.x), ys = ns.map((n) => n.position.y);
-      const x2 = ns.map((n) => n.position.x + (n.measured?.width ?? 250));
-      const y2 = ns.map((n) => n.position.y + (n.measured?.height ?? 130));
-      const manager = ns.find((n) => n.data.is_manager);
-      const active = ns.filter((n) => n.data.active !== false).length;
-      return {
-        name, color: deptColor(name, departments), manager: manager?.data.name, count: ns.length, active,
-        x: Math.min(...xs) - PAD, y: Math.min(...ys) - PAD - LABEL_H, w: Math.max(...x2) - Math.min(...xs) + PAD * 2, h: Math.max(...y2) - Math.min(...ys) + PAD * 2 + LABEL_H,
-      };
-    });
-  }, [nodes, departments]);
+  const zones = React.useMemo(() => departmentZones(nodes, departments), [nodes, departments]);
   return (
     <ViewportPortal>
       {zones.map((z) => (
