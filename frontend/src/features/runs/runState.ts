@@ -24,6 +24,9 @@ export interface BrowserAction {
   seq: number; ts?: string; agent_id: string; call_id?: string; tool: string; args: Record<string, unknown>; ok: boolean;
   url: string; title: string; frame?: string | null; note?: string;
 }
+/** The company workflow of the run (phases with owners), from `workflow_updated` events. */
+export interface WorkflowPhase { key: string; title: string; owner: string | null; status: "pending" | "active" | "done" | "skipped" | "failed"; loops?: number; summary?: string }
+export interface WorkflowState { track: string | null; index: number; ended: boolean; reason?: string; phases: WorkflowPhase[] }
 export interface ProtocolState { kind: "debate" | "review"; result: string; edge_id: string; state: Record<string, any>; seq?: number } // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export interface RunLive {
@@ -49,6 +52,7 @@ export interface RunLive {
   toolCalls: Record<string, ToolCall>;
   /** browser actions in order, all agents (each agent has its own tab) */
   browser: BrowserAction[];
+  workflow: WorkflowState | null;
   tasks: Record<string, LiveTask>;
   artifacts: Record<string, LiveArtifact>;
   usage: Usage;
@@ -68,7 +72,7 @@ export interface RunLive {
 export const initialRun = (): RunLive => ({
   status: "queued", reason: "", summary: "", agentStatus: {}, activity: {}, streaming: {}, thoughts: {}, thinking: {}, turnStart: {}, messages: [], rejected: [],
   extraAgents: [], extraEdges: [], agentPatches: {}, orgEvents: [], fresh: {}, departments: {},
-  toolCalls: {}, browser: [], tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
+  toolCalls: {}, browser: [], workflow: null, tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
   pendingApproval: null, awaiting: null, errors: [], timeline: [], approvals: [], lastSeq: 0, live: false, replayDone: false,
 });
 
@@ -148,6 +152,14 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
       return { ...next, browser: [...s.browser, a].slice(-300),
         timeline: push({ type: e.type, agent_id: a.agent_id, tone: a.ok ? "tool" : "error",
           label: `${n(a.agent_id)} ${browserVerb(a.tool)}${where && a.tool === "browser_navigate" ? ` ${clip(where, 50)}` : ""}${a.ok ? "" : " (failed)"}` }) };
+    }
+    case "workflow_updated": {
+      const wf = d.workflow as WorkflowState;
+      const prev = s.workflow?.phases.find((p) => p.status === "active")?.key;
+      const cur = wf.phases.find((p) => p.status === "active");
+      return { ...next, workflow: wf, timeline: cur && cur.key !== prev
+        ? push({ type: e.type, agent_id: cur.owner, tone: "protocol", label: `${cur.title}${cur.owner ? ` → ${n(cur.owner)}` : ""}${cur.loops ? ` (fix round ${cur.loops})` : ""}` })
+        : s.timeline };
     }
     case "task_updated": {
       const t = d.task as LiveTask;

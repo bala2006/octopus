@@ -3,6 +3,9 @@
 * One ``@playwright/mcp`` process listens on ``127.0.0.1`` (random free port) with a shared, in-memory browser context.
 * Each agent in a run keeps **one persistent MCP session** (its own tab), so ``browser_navigate`` followed by
   ``browser_snapshot`` / ``browser_click`` see the same page. Sessions close when the run ends.
+* Live view: Chromium is launched with a local DevTools port (``--remote-debugging-port`` via the MCP config file), and
+  each agent's session is mapped to its page target. The run's Browser tab then streams that real tab (CDP screencast,
+  ``services/browser_live.py``) and can forward the user's clicks and keys to it.
 * The browser binary is installed automatically on first use (``npx @playwright/mcp install-browser``) unless Chrome is
   already on the machine.
 
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import re
 import shutil
@@ -225,6 +229,10 @@ class BrowserService:
         self._lock = asyncio.Lock()
         self._sessions: dict[tuple[str, str], _AgentSession] = {}
         self._installed = False
+        self.cdp_port: int | None = None  # Chromium's DevTools port (live view); None when unavailable
+        self._targets: dict[tuple[str, str], str] = {}  # (run, agent) → CDP page target id of the agent's tab
+        self._urls: dict[tuple[str, str], str] = {}  # (run, agent) → last URL its tab reported
+        self._map_lock = asyncio.Lock()
 
     # ---------------------------------------------------------------- process
     def _browser_arg(self) -> str:
@@ -251,6 +259,12 @@ class BrowserService:
                     "--browser", self._browser_arg(), "--output-dir", str(out_dir), "--viewport-size", "1280x800"]
             if s.playwright_headless:
                 args.append("--headless")
+            self.cdp_port = None
+            if s.browser_live_view and self._browser_arg() not in ("firefox", "webkit"):
+                self.cdp_port = _free_port()
+                cfg = out_dir / "octopus-mcp-config.json"
+                cfg.write_text(json.dumps({"browser": {"launchOptions": {"args": [f"--remote-debugging-port={self.cdp_port}"]}}}))
+                args += ["--config", str(cfg)]
             self.status, self.error = "starting", ""
             self.proc = await asyncio.create_subprocess_exec(*args, cwd=str(out_dir), stdout=asyncio.subprocess.PIPE,
                                                              stderr=asyncio.subprocess.STDOUT)
@@ -347,7 +361,8 @@ class BrowserService:
                 await asyncio.wait_for(self.proc.wait(), 5)
             except asyncio.TimeoutError:
                 self.proc.kill()
-        self.proc, self.url = None, None
+        self.proc, self.url, self.cdp_port = None, None, None
+        self._targets.clear()
 
     async def shutdown(self) -> None:
         for sess in list(self._sessions.values()):
@@ -380,8 +395,9 @@ class BrowserService:
         sess = self._sessions.get(key)
         if sess is None or sess.task.done():
             sess = self._sessions[key] = _AgentSession(url)
+            self._targets.pop(key, None)
         try:
-            ok, out = await sess.call(tool, args)
+            ok, out = await self._call_mapped(key, sess, tool, args)
         except Exception as exc:
             self._sessions.pop(key, None)
             out = f"{type(exc).__name__}: {exc}"
@@ -399,7 +415,53 @@ class BrowserService:
             return False, f"Browser unavailable: {self.error}"
         if ok and not self.verified:
             self.status, self.error, self.verified = "ready", "", True
+        if ok and (page_url := page_info(out)[0]):
+            self._urls[key] = page_url
         return ok, out
+
+    # ---------------------------------------------------------------- live view (CDP)
+    async def pages(self) -> list[dict[str, Any]]:
+        """Chromium's page targets ({id, url, title, webSocketDebuggerUrl}); [] when the live view is unavailable."""
+        if not self.cdp_port:
+            return []
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=3) as c:
+                r = await c.get(f"http://127.0.0.1:{self.cdp_port}/json/list")
+            return [t for t in r.json() if t.get("type") == "page" and t.get("webSocketDebuggerUrl")]
+        except (httpx.HTTPError, ValueError, TypeError):
+            return []
+
+    async def _call_mapped(self, key: tuple[str, str], sess: _AgentSession, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
+        """Run a call; the first one of a session opens the agent's tab, which is how its CDP target is found."""
+        if not self.cdp_port or key in self._targets:
+            return await sess.call(tool, args)
+        async with self._map_lock:  # first calls one at a time, so the one new page target is this agent's
+            before = {t["id"] for t in await self.pages()}
+            res = await sess.call(tool, args)
+            taken = set(self._targets.values())
+            new = [t for t in await self.pages() if t["id"] not in before and t["id"] not in taken]
+            if len(new) == 1:
+                self._targets[key] = new[0]["id"]
+            return res
+
+    async def live_target(self, run_id: str, agent_id: str) -> dict[str, Any] | None:
+        """The CDP page target showing this agent's tab right now, or None (not browsing yet, run over, no live view)."""
+        key = (run_id, agent_id)
+        sess = self._sessions.get(key)
+        if not self.cdp_port or sess is None or sess.task.done():
+            return None
+        pages = await self.pages()
+        tid = self._targets.get(key)
+        hit = next((t for t in pages if t["id"] == tid), None)
+        if hit is None and (url := self._urls.get(key)):  # tab replaced or never mapped: find it by the URL the agent saw
+            taken = {v for k, v in self._targets.items() if k != key}
+            same = [t for t in pages if t["id"] not in taken and t.get("url") == url]
+            if len(same) == 1:
+                hit = same[0]
+                self._targets[key] = hit["id"]
+        return hit
 
     async def frame(self, run_id: str, agent_id: str, tool: str) -> bytes | None:
         """What the agent's tab shows right after `tool`, as an image, so people can watch the agent browse.
@@ -432,6 +494,9 @@ class BrowserService:
     async def close_run(self, run_id: str) -> None:
         for key in [k for k in self._sessions if k[0] == run_id]:
             await self._sessions.pop(key).close()
+        for d in (self._targets, self._urls):
+            for key in [k for k in d if k[0] == run_id]:
+                d.pop(key, None)
         prune_output_dir(run_id)
 
 

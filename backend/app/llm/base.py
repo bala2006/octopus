@@ -69,6 +69,29 @@ class LLMRequest:
     # of a tool loop, the provider-native items to append after `messages` (previous output items + tool outputs).
     tools: list[dict[str, Any]] = field(default_factory=list)
     continuation: list[dict[str, Any]] = field(default_factory=list)
+    # Images ({mime, data: base64}) shown with the first user message (vision input); providers add them in their own format.
+    images: list[dict[str, str]] = field(default_factory=list)
+
+
+def with_images(messages: list[dict[str, Any]], images: list[dict[str, str]], style: str) -> list[dict[str, Any]]:
+    """``messages`` with ``images`` attached to the first user message, as content parts.
+
+    ``style`` "responses" (Azure/OpenAI Responses API: input_text / input_image) or "chat" (Chat Completions and litellm:
+    text / image_url). Messages stay plain strings everywhere else in Octopus; only the request body carries parts."""
+    if not images:
+        return messages
+    out = list(messages)
+    i = next((n for n, m in enumerate(out) if m.get("role") == "user" and isinstance(m.get("content"), str)), None)
+    if i is None:
+        return messages
+    urls = [f"data:{im.get('mime') or 'image/png'};base64,{im.get('data', '')}" for im in images if im.get("data")]
+    text = out[i]["content"]
+    if style == "responses":
+        parts: list[dict[str, Any]] = [{"type": "input_text", "text": text}] + [{"type": "input_image", "image_url": u} for u in urls]
+    else:
+        parts = [{"type": "text", "text": text}] + [{"type": "image_url", "image_url": {"url": u}} for u in urls]
+    out[i] = {**out[i], "content": parts}
+    return out
 
 
 @dataclass
@@ -121,3 +144,73 @@ class LLMProvider(Protocol):
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+
+# ---------------------------------------------------------------- native function calling on Chat Completions
+# The engine's tool loop speaks Responses-API items (function_call / function_call_output / message / reasoning).
+# Chat Completions (Azure chat style, litellm) gets the same loop through these two translations, so no provider has to
+# fall back to the JSON envelope (and its parse/repair failures) just because it lacks the Responses API.
+
+def chat_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{"type": "function", "function": {"name": t["name"], "description": t.get("description", ""), "parameters": t["parameters"]}}
+            for t in tools]
+
+
+def chat_continuation(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Responses-style continuation items → Chat Completions messages (assistant tool_calls + tool results)."""
+    out: list[dict[str, Any]] = []
+    for it in items:
+        kind = it.get("type")
+        if kind == "message" and it.get("role", "assistant") == "assistant":
+            text = "".join(p.get("text", "") for p in it.get("content") or [] if isinstance(p, dict))
+            out.append({"role": "assistant", "content": text})
+        elif kind == "function_call":
+            call = {"id": it.get("call_id") or it.get("id") or "", "type": "function",
+                    "function": {"name": it.get("name", ""), "arguments": it.get("arguments") or "{}"}}
+            last = out[-1] if out else None
+            if last and last["role"] == "assistant":  # one assistant turn: its text and all of its calls
+                last.setdefault("tool_calls", []).append(call)
+                if not last.get("content"):
+                    last["content"] = None
+            else:
+                out.append({"role": "assistant", "content": None, "tool_calls": [call]})
+        elif kind == "function_call_output":
+            out.append({"role": "tool", "tool_call_id": it.get("call_id", ""), "content": str(it.get("output", ""))})
+    return out
+
+
+class ChatToolAccumulator:
+    """Collects streamed ``delta.tool_calls`` fragments (by index) into finished calls and replayable items."""
+
+    def __init__(self) -> None:
+        self.calls: dict[int, dict[str, str]] = {}
+
+    def add(self, fragments: list[Any]) -> list[str]:
+        """Feed one delta's tool_call fragments (dicts or objects); returns names of calls that just started."""
+        started = []
+        for f in fragments or []:
+            get = (lambda k, f=f: f.get(k)) if isinstance(f, dict) else (lambda k, f=f: getattr(f, k, None))
+            idx = int(get("index") or 0)
+            fn = get("function") or {}
+            fget = (lambda k, fn=fn: fn.get(k)) if isinstance(fn, dict) else (lambda k, fn=fn: getattr(fn, k, None))
+            c = self.calls.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+            if get("id"):
+                c["id"] = get("id")
+            if fget("name"):
+                if not c["name"]:
+                    started.append(fget("name"))
+                c["name"] += fget("name")
+            if fget("arguments"):
+                c["arguments"] += fget("arguments")
+        return started
+
+    def result(self, text: str) -> tuple[list[ToolCall], list[dict[str, Any]]]:
+        calls, items = [], []
+        if text:
+            items.append({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]})
+        for i in sorted(self.calls):
+            c = self.calls[i]
+            cid = c["id"] or f"call_{i}"
+            calls.append(ToolCall(id=cid, name=c["name"], arguments=c["arguments"] or "{}"))
+            items.append({"type": "function_call", "call_id": cid, "name": c["name"], "arguments": c["arguments"] or "{}"})
+        return calls, items

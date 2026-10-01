@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BookmarkPlus, Building2, Check, Crown, LayoutTemplate, RefreshCw, Sparkles, Swords, Users, Wand2, FlaskConical, Rocket, Network, User } from "lucide-react";
+import { BookmarkPlus, Building2, Check, Crown, LayoutTemplate, RefreshCw, Sparkles, Swords, Users, Wand2, FlaskConical, Rocket, Network, User, Bug, Gamepad2, Globe, UserCheck } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { tone } from "@/lib/palette";
@@ -17,7 +17,7 @@ type Generated = components["schemas"]["GenerateCompanyOut"];
 type DeptSummary = components["schemas"]["DepartmentSummary"];
 
 const ICONS: Record<string, typeof Building2> = {
-  software_startup: Rocket, full_company: Building2, self_organizing: Sparkles, research_lab: FlaskConical, small_dev_team: Users, debate_panel: Swords, blank: LayoutTemplate,
+  software_startup: Rocket, full_company: Building2, bug_squad: Bug, game_studio: Gamepad2, web_app_studio: Globe, solo_engineer: User, engineer_reviewer: UserCheck, self_organizing: Sparkles, research_lab: FlaskConical, small_dev_team: Users, debate_panel: Swords, blank: LayoutTemplate,
 };
 const EXAMPLES = [
   "Build and launch a habit-tracking mobile app, including a marketing campaign",
@@ -112,7 +112,9 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
           {t.source === "user" && <Badge variant="secondary">Mine</Badge>}</div>
         <div className="line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">{t.description || "Custom template"}</div>
         <div className="mt-2"><DepartmentChips departments={t.departments ?? []} max={6} /></div>
-        <div className="mt-1.5 text-[11px] text-muted-foreground">{t.agent_count} agents · {t.edge_count} channels</div>
+        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">{t.agent_count} agents · {t.edge_count} channels
+          {t.workflow && <span title="Runs the defined workflow: intake → spec → design → build → test → review → accept, each phase with its owner"
+            className="ml-auto rounded-full border border-success/40 px-1.5 py-px text-[10px] font-medium text-success">Workflow</span>}</div>
       </button>
     );
   };

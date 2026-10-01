@@ -285,11 +285,13 @@ function StreamingMessage({ s, agent }: { s: StreamingMsg; agent: AgentOut }) {
   );
 }
 
-function Composer({ placeholder, busy, onSend, onStop, disabled, extra }: {
+function Composer({ placeholder, busy, onSend, onStop, disabled, extra, images = false }: {
   placeholder: string; busy?: boolean; onSend: (text: string, att: import("@/types").ParsedFileOut[]) => void; onStop?: () => void; disabled?: boolean; extra?: React.ReactNode;
+  /** accept pasted / attached images (they go to the agents as images) */
+  images?: boolean;
 }) {
   const [text, setText] = React.useState("");
-  const att = useAttachments();
+  const att = useAttachments({ images });
   const [drag, setDrag] = React.useState(false);
   const ref = React.useRef<HTMLTextAreaElement>(null);
   React.useEffect(() => { if (ref.current) { ref.current.style.height = "auto"; ref.current.style.height = `${Math.min(200, ref.current.scrollHeight)}px`; } }, [text]);
@@ -306,10 +308,11 @@ function Composer({ placeholder, busy, onSend, onStop, disabled, extra }: {
         onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void att.upload(e.dataTransfer.files); }}>
         {att.files.length > 0 && <div className="px-3 pt-2"><AttachmentChips files={att.files} onRemove={att.remove} /></div>}
         <Textarea ref={ref} value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} rows={1} disabled={disabled}
+          onPaste={att.onPaste}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
           className="min-h-[44px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0" aria-label="Message" data-testid="composer" />
         <div className="flex items-center gap-1 px-2 pb-2">
-          <Tip content="Attach txt, md, pdf or code"><Button variant="ghost" size="icon-sm" onClick={att.pick} loading={att.uploading} aria-label="Attach file"><Paperclip /></Button></Tip>
+          <Tip content={images ? "Attach images, txt, md, pdf or code (or paste a screenshot)" : "Attach txt, md, pdf or code"}><Button variant="ghost" size="icon-sm" onClick={att.pick} loading={att.uploading} aria-label="Attach file"><Paperclip /></Button></Tip>
           {att.input}
           {extra}
           <span className="ml-auto text-[10px] text-muted-foreground"><kbd className="kbd">Enter</kbd> send · <kbd className="kbd">Shift+Enter</kbd> newline</span>
@@ -336,6 +339,7 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
   const filter = useApp((s) => s.chatFilter);
   const setFilter = useApp((s) => s.setChatFilter);
   const [goal, setGoal] = React.useState<string | null>(null);
+  const [goalFiles, setGoalFiles] = React.useState<import("@/types").ParsedFileOut[]>([]);
   const [target, setTarget] = React.useState("all");
   const nav = useNavigate();
   const live = !!liveRun && !TERMINAL.has(stream.state.status);
@@ -373,10 +377,11 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
       )}
       <Composer
         placeholder={live ? "Interject: your message is injected into the run…" : shownRun ? "Continue: ask for changes or the next step. The team keeps its context and files…" : "Give the company a goal…"}
-        onSend={(t) => {
+        images={!shownRun}
+        onSend={(t, files) => {
           // a finished run continues like a chat (same run, history and files); "New run" starts over explicitly
           if (shownRun) stream.send({ type: "interject", content: t, to_agent_id: target === "all" ? undefined : target });
-          else setGoal(t);
+          else { setGoalFiles(files); setGoal(t); }
         }}
         extra={shownRun ? (
           <Select ariaLabel="Send to" value={target} onValueChange={setTarget} className="h-7 w-[130px] text-xs"
@@ -386,7 +391,7 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
         )}
       />
       <RunDialog open={goal !== null} onOpenChange={(o) => !o && setGoal(null)} companyId={companyId} sessionId={session.id} initialGoal={goal ?? ""}
-        onStarted={() => { setGoal(null); void runs.refetch(); }} />
+        initialAttachments={goalFiles} onStarted={() => { setGoal(null); setGoalFiles([]); void runs.refetch(); }} />
     </div>
   );
 }

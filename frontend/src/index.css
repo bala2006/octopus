@@ -109,6 +109,9 @@
 .react-flow__controls-button { @apply border-b border-border bg-elevated text-foreground hover:bg-accent; }
 .react-flow__controls-button svg { fill: currentColor; }
 .react-flow__minimap { @apply overflow-hidden rounded-lg border border-border !bg-elevated; }
+/* An open agent quick-config panel lives in the node renderer (z 4), under React Flow's panels (minimap, controls: z 5):
+   lift the renderer while it is open so the panel is never covered (its bottom used to hide behind the minimap). */
+.react-flow:has(.react-flow__node-toolbar [role="dialog"]) .react-flow__renderer { z-index: 6; }
 .react-flow__handle { @apply !h-2.5 !w-2.5 !border-2 !border-background !bg-muted-foreground transition-transform; }
 .react-flow__handle:hover, .react-flow__handle.connectingfrom { @apply !scale-150 !bg-primary; }
 .react-flow__node.selected > div { @apply ring-2 ring-primary; }

@@ -35,6 +35,7 @@ async def main() -> None:
     ap.add_argument("--repeat", type=int, default=1, help="runs per case (models are not deterministic)")
     ap.add_argument("--max-turns", type=int, default=80)
     ap.add_argument("--demo", action="store_true", help="offline mock model")
+    ap.add_argument("--workflow", default="auto", choices=["auto", "on", "off"], help="how the team works (defined workflow or free-form)")
     ap.add_argument("--out", type=Path, default=Path("bench-results.json"))
     args = ap.parse_args()
 
@@ -42,7 +43,7 @@ async def main() -> None:
     if args.only:
         keep = set(args.only.split(","))
         tasks = [t for t in tasks if t["id"] in keep]
-    budget = {"max_turns": args.max_turns, "force_mock": args.demo}
+    budget = {"max_turns": args.max_turns, "force_mock": args.demo, "workflow": args.workflow}
     results = []
     async with httpx.AsyncClient(base_url=args.url, timeout=60) as client:
         for tpl in args.templates.split(","):

@@ -71,6 +71,22 @@ checks) per template against a backend and prints a comparison table.
 
 **Live activity.** While a reply streams, `live_activity()` scans the partial JSON for the action being composed. It emits `agent_status` updates such as *"Drafting proposal to Priya…"* or *"Writing backend/todo_api.py…"* before the action executes. During execution, statuses become `writing`, `reading`, `running`, `tool` and `awaiting_approval`.
 
+## 2b. Company workflow, roles and skills
+
+- **Workflow** (`orchestrator/workflow.py`, run option `workflow`: auto / on / off). The goal goes to the company head,
+  who calls `set_track` (quick / standard / large). The engine then briefs each phase owner in order: research, spec,
+  design, build, test, review, accept. Each owner is picked by role, gets the goal verbatim plus the earlier
+  documents, and has its `finish` gated: the document must exist, the build must have changed and been exercised, and
+  test/review must report pass or fail. A failure loops back to Build (at most 3 fix rounds). Phases nobody can own are
+  skipped. `auto` turns the workflow on when the team has a builder and an independent tester or reviewer.
+- **Roles** (`services/roles.py`, Settings → Roles). Built-in roles plus the user's edits and own roles (`user_roles`).
+  Agents link to a role (`behavior.template_key`, `prompt_linked`) and run with its current prompt plus
+  `extra_instructions`.
+- **Skills** (`services/skills.py`, `app/skills/*/SKILL.md`, Settings → Skills). Step-by-step playbooks in the Agent
+  Skills format. Prompts carry only names and descriptions; `use_skill` loads the steps. Skills come from three
+  sources: built-in, the user's (`user_skills`), and the project's `.octopus/skills`, `.agents/skills` or
+  `.claude/skills`.
+
 ## 3. Teams, departments and templates
 
 **Org model.** Every agent has `department`, `is_manager`, `reports_to`, `active` and `created_by`. Templates

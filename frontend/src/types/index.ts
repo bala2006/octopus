@@ -12,6 +12,7 @@ export type CanvasOut = S["CanvasOut"];
 export type CompanyOut = S["CompanyOut"];
 export type TemplateOut = S["TemplateOut"];
 export type RoleTemplateOut = S["RoleTemplateOut"];
+export type SkillOut = S["SkillOut"];
 export type SessionOut = S["SessionOut"];
 export type MessageOut = S["MessageOut"];
 export type RunOut = S["RunOut"];

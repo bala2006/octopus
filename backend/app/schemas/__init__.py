@@ -88,7 +88,12 @@ class AgentBehavior(BaseModel):
     strictness: float = Field(0.5, ge=0, le=1)
     debate_style: DebateStyle = "balanced"
     max_autonomous_turns: int = Field(12, ge=1, le=200)
-    template_key: str = ""
+    template_key: str = ""  # the agent's role in the role library (Settings → Roles)
+    # True: the system prompt follows the role (edits in Settings → Roles apply); False: the agent has its own prompt;
+    # None (agents from before roles were linked): linked while the prompt is still the built-in text
+    prompt_linked: bool | None = None
+    extra_instructions: str = Field("", max_length=8000)  # appended to the role prompt for this agent only
+    skills: list[str] = Field(default_factory=list, max_length=20)  # skills picked for this agent (on top of its role's)
     # reasoning effort for reasoning models (gpt-6-luna supports none..max); "default" = the model's own default (medium)
     reasoning_effort: ReasoningEffort = "default"
 
@@ -250,6 +255,7 @@ class TemplateOut(BaseModel):
     source: Literal["builtin", "user"] = "builtin"
     departments: list[DepartmentSummary] = Field(default_factory=list)
     updated_at: datetime | None = None
+    workflow: bool = False  # the team can run the defined workflow (head + builder + an independent tester/reviewer)
 
 
 class UserTemplateIn(BaseModel):
@@ -282,6 +288,37 @@ class RoleTemplateOut(BaseModel):
     description: str
     system_prompt: str
     tools: AgentTools
+    category: str = "General"
+    source: Literal["builtin", "modified", "custom"] = "builtin"  # modified = a built-in role the user edited
+
+
+class SkillOut(BaseModel):
+    name: str
+    description: str
+    body: str
+    roles: list[str] = Field(default_factory=list)
+    phases: list[str] = Field(default_factory=list)
+    source: Literal["builtin", "modified", "custom", "project"] = "builtin"
+
+
+class SkillIn(BaseModel):
+    name: str = Field(min_length=2, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
+    description: str = Field(min_length=1, max_length=400)
+    body: str = Field(min_length=1, max_length=40000)
+    roles: list[str] = Field(default_factory=list, max_length=60)
+    phases: list[str] = Field(default_factory=list, max_length=12)
+
+
+class RoleIn(BaseModel):
+    """Create a custom role (POST) or edit a role (PUT; for a built-in role this saves an override)."""
+    role: str = Field(min_length=1, max_length=120)
+    category: str = Field(default="", max_length=40)
+    description: str = Field(default="", max_length=2000)
+    system_prompt: str = Field(min_length=1, max_length=40000)
+    default_name: str = Field(default="", max_length=60)
+    color: str = Field(default="", max_length=20)
+    avatar: str = Field(default="", max_length=40)
+    tools: AgentTools | None = None
 
 
 class InstantiateTemplateIn(BaseModel):
@@ -330,6 +367,9 @@ class ParsedFileOut(BaseModel):
     chars: int
     text: str
     truncated: bool
+    kind: Literal["text", "image"] = "text"
+    mime: str = ""  # images: image/png | image/jpeg | image/gif | image/webp
+    data: str = ""  # images: base64 content (sent back with the run / message that uses it)
 
 
 # ---------- runs ----------
@@ -343,6 +383,11 @@ class RunBudget(BaseModel):
     # pause for a human after this many turns without a file change / task-board move (0 = off)
     stall_turns: int = Field(30, ge=0, le=2000)
     max_tool_rounds: int = Field(40, ge=1, le=200)  # model calls per agent turn with native tools (each returns tool results)
+    # an agent that can run code or browse is sent back once to verify when it finishes with unexercised code changes
+    verify_before_finish: bool = True
+    # how the team works: "on" = the defined workflow (intake → spec → design → build → test → review → accept with owners
+    # and gates), "off" = free-form, "auto" = the workflow when the team can staff a build and an independent check
+    workflow: Literal["auto", "on", "off"] = "auto"
     context_recent: int = Field(30, ge=2, le=200)  # own messages kept verbatim; older ones are summarised
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run

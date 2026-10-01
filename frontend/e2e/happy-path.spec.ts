@@ -35,6 +35,9 @@ test("create project → company from template → edit agent → run in Demo Mo
   const quick = page.getByRole("dialog", { name: "Configure Marcus" });
   await expect(quick).toBeVisible();
   await quick.getByLabel("Agent name").fill("Marcus Lee");
+  await expect(quick.getByLabel("Role")).toBeVisible(); // roles are picked from the library, not typed
+  await expect(quick.getByLabel("System prompt")).toHaveCount(0); // prompts live in Settings → Roles / All settings
+  await quick.getByRole("button", { name: "Customize" }).click();
   await quick.getByRole("switch", { name: /Terminal/ }).click();
   await shoot(page, "03-canvas-quick-config");
   await expect(page.getByText(/^Saved/)).toBeVisible();

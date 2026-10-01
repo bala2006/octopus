@@ -86,6 +86,44 @@ class UserTemplate(RegistryBase):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class UserRole(RegistryBase):
+    """A role edited or created by the user. ``key`` equal to a built-in role key overrides that role (delete the row to
+    restore the default); any other key (``custom:<slug>``) is a role of the user's own. Used in every project."""
+
+    __tablename__ = "user_roles"
+    __table_args__ = (UniqueConstraint("user_id", "key", name="uq_user_role_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(80))
+    role: Mapped[str] = mapped_column(String(120), default="")
+    category: Mapped[str] = mapped_column(String(40), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    default_name: Mapped[str] = mapped_column(String(60), default="")
+    color: Mapped[str] = mapped_column(String(20), default="")
+    avatar: Mapped[str] = mapped_column(String(40), default="")
+    tools_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class UserSkill(RegistryBase):
+    """A skill edited or written by the user (Settings → Skills). ``name`` equal to a built-in skill overrides it (delete
+    the row to restore the default); any other name is a skill of the user's own."""
+
+    __tablename__ = "user_skills"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_user_skill_name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(Text, default="")
+    roles: Mapped[str] = mapped_column(Text, default="")  # comma-separated role keys
+    phases: Mapped[str] = mapped_column(Text, default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 # ====================================================================== project
 class Company(ProjectBase):
     __tablename__ = "companies"
@@ -248,6 +286,6 @@ class AgentMemory(ProjectBase):
 
 
 __all__ = [
-    "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate",
+    "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate", "UserRole", "UserSkill",
     "Company", "Agent", "Edge", "ChatSession", "Run", "Message", "RunEvent", "Task", "Artifact", "AgentMemory",
 ]

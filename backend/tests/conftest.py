@@ -162,6 +162,8 @@ async def make_company(client: httpx.AsyncClient, ws: dict[str, Any], agents: li
 
 
 async def start_run(client: httpx.AsyncClient, ws: dict[str, Any], company_id: str, goal: str = "Do the thing", **kw: Any) -> dict[str, Any]:
+    # verify-before-finish sends a scripted agent back once; tests of other behaviour opt out (tests/test_verify.py covers it)
+    kw["budget"] = {"verify_before_finish": False, "workflow": "off", **(kw.get("budget") or {})}
     r = await client.post(f"/api/v1/w/{ws['id']}/runs", json={"company_id": company_id, "goal": goal, **kw})
     assert r.status_code == 201, r.text
     return r.json()

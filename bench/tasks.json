@@ -3,8 +3,18 @@
     "id": "fizzbuzz-cli",
     "goal": "Create fizzbuzz.py. Running `python fizzbuzz.py N` prints the numbers 1..N one per line, with Fizz for multiples of 3, Buzz for multiples of 5 and FizzBuzz for multiples of both.",
     "checks": [
-      {"type": "file_exists", "path": "fizzbuzz.py"},
-      {"type": "command", "cmd": "python fizzbuzz.py 15", "stdout_contains": ["1\n2\nFizz\n4\nBuzz", "14\nFizzBuzz"]}
+      {
+        "type": "file_exists",
+        "path": "fizzbuzz.py"
+      },
+      {
+        "type": "command",
+        "cmd": "python fizzbuzz.py 15",
+        "stdout_contains": [
+          "1\n2\nFizz\n4\nBuzz",
+          "14\nFizzBuzz"
+        ]
+      }
     ]
   },
   {
@@ -15,26 +25,87 @@
       "test_pricing.py": "import unittest\nfrom pricing import subtotal, apply_discount, total_with_tax\n\nITEMS = [{'price': 10, 'qty': 2}, {'price': 5, 'qty': 1}]\n\n\nclass T(unittest.TestCase):\n    def test_subtotal_uses_quantity(self):\n        self.assertEqual(subtotal(ITEMS), 25)\n\n    def test_discount_is_a_percentage(self):\n        self.assertEqual(apply_discount(100, 10), 90)\n\n    def test_total(self):\n        self.assertEqual(total_with_tax(ITEMS, 0.2, 10), 27.0)\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
     },
     "checks": [
-      {"type": "command", "cmd": "python -m unittest discover -q"},
-      {"type": "file_contains", "path": "test_pricing.py", "text": "self.assertEqual(total_with_tax(ITEMS, 0.2, 10), 27.0)"}
+      {
+        "type": "command",
+        "cmd": "python -m unittest discover -q"
+      },
+      {
+        "type": "file_contains",
+        "path": "test_pricing.py",
+        "text": "self.assertEqual(total_with_tax(ITEMS, 0.2, 10), 27.0)"
+      }
     ]
   },
   {
     "id": "todo-module-with-tests",
     "goal": "Create todo.py with add(title) -> id, complete(id), pending() -> list of titles (in insertion order), all in memory, and test_todo.py with unittest tests covering them. `python -m unittest discover -q` must pass.",
     "checks": [
-      {"type": "file_exists", "path": "todo.py"},
-      {"type": "file_exists", "path": "test_todo.py"},
-      {"type": "command", "cmd": "python -m unittest test_todo -q"},
-      {"type": "command", "cmd": "python -c \"import todo; a = todo.add('a'); todo.add('b'); todo.complete(a); assert todo.pending() == ['b'], todo.pending(); print('ok')\"", "stdout_contains": ["ok"]}
+      {
+        "type": "file_exists",
+        "path": "todo.py"
+      },
+      {
+        "type": "file_exists",
+        "path": "test_todo.py"
+      },
+      {
+        "type": "command",
+        "cmd": "python -m unittest test_todo -q"
+      },
+      {
+        "type": "command",
+        "cmd": "python -c \"import todo; a = todo.add('a'); todo.add('b'); todo.complete(a); assert todo.pending() == ['b'], todo.pending(); print('ok')\"",
+        "stdout_contains": [
+          "ok"
+        ]
+      }
     ]
   },
   {
     "id": "single-file-canvas-game",
     "goal": "Build a playable Snake game in a single index.html file (HTML, CSS and JavaScript inline, no external files): canvas rendering, arrow-key controls, food, growing snake, score, game over and restart.",
     "checks": [
-      {"type": "file_exists", "path": "index.html"},
-      {"type": "file_contains", "path": "index.html", "text": ["<canvas", "<script", "keydown", "requestAnimationFrame"]}
+      {
+        "type": "file_exists",
+        "path": "index.html"
+      },
+      {
+        "type": "file_contains",
+        "path": "index.html",
+        "text": [
+          "<canvas",
+          "<script",
+          "keydown",
+          "requestAnimationFrame"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "threejs-shooter-single-file",
+    "goal": "Create a 3D shooting game using Three.js in a single HTML file (index.html).",
+    "checks": [
+      {
+        "type": "file_exists",
+        "path": "index.html"
+      },
+      {
+        "type": "file_contains",
+        "path": "index.html",
+        "text": [
+          "three",
+          "requestAnimationFrame",
+          "<script"
+        ]
+      },
+      {
+        "type": "command",
+        "cmd": "python -c \"import re;h=open('index.html').read();print('HAS_SCORE' if re.search('score',h,re.I) else 'NO_SCORE');print('HAS_RESTART' if re.search('restart|play again|game over',h,re.I) else 'NO_RESTART')\"",
+        "stdout_contains": [
+          "HAS_SCORE",
+          "HAS_RESTART"
+        ]
+      }
     ]
   }
 ]

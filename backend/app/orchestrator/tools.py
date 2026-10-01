@@ -29,11 +29,14 @@ DESCRIPTIONS = {
     "move_file": "Move or rename a file or a whole folder inside the project.",
     "read_file": "Read a file from the project. Large files come in pages; the result says which offset to read next.",
     "list_files": "List the files in the project (or under a folder prefix).",
-    "run_code": "Run a command in the project's sandboxed terminal (e.g. python -m pytest, node script.js, npm test).",
+    "run_code": "Run one command in the project's sandboxed terminal, from the project root (e.g. python -m pytest, "
+                "node script.js, npm test). There is no shell: quoted arguments may contain any characters, but pipes, "
+                "&&, ;, redirects and $(...) only work at the danger permission level. Paths stay inside the project.",
     "mcp_call": "Call a tool on an MCP server granted to you.",
     "delegate": "Hand a piece of work to a teammate you have a delegate channel to. The teammate starts right away; its result "
                 "(summary, files changed, task status) comes back as this call's result. Several delegate calls in one reply run "
-                "at the same time.",
+                "at the same time: only send several together when the pieces are independent and can all start now (no review or "
+                "test of something that doesn't exist yet).",
     "search_project": "Search the project's files and the team's working docs (.octopus/work/) for text or a regex; returns "
                       "path:line matches.",
     "update_task_board": "Create tasks (omit key) or update existing ones (status, assignee, description, acceptance criteria).",
@@ -44,11 +47,17 @@ DESCRIPTIONS = {
     "create_agent": "Hire a new teammate into the company (you can only grant tools you have yourself).",
     "update_agent": "Change your own configuration (target \"self\") or that of an agent you manage.",
     "list_agents": "See every teammate: department, manager, active/inactive and live status.",
-    "finish": "Report that your part is done, with a summary. For the entry agent this completes the run.",
+    "use_skill": "Load one of the skills listed in your instructions (a step-by-step playbook for a kind of work: spec, design, "
+                 "implementation, testing, review…). The full steps come back; follow them.",
+    "set_track": "Company head, at intake only: pick the track for this goal (quick = one coherent deliverable; standard = a "
+                 "feature or app; large = several independent parts) and whether a research phase is needed. Octopus then "
+                 "briefs each phase owner in order and comes back to you to accept. Ends your turn.",
+    "finish": "Report that your part is done, with a summary. For the entry agent this completes the run. In a workflow Test or "
+              "Review phase set outcome \"pass\" or \"fail\" (fail sends your findings back to the builder).",
     "wait": "End your turn without acting; you are woken when a new message arrives.",
 }
 # turn-ending actions: the model is not called again in this turn after one of these
-TERMINAL_ACTIONS = {"finish", "wait", "request_user_input"}
+TERMINAL_ACTIONS = {"finish", "wait", "request_user_input", "set_track"}
 
 
 def _inline(schema: dict[str, Any]) -> dict[str, Any]:

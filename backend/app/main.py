@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import ws
-from app.api.v1 import agents, auth, companies, runs, sessions, settings, templates, workspaces
+from app.api.v1 import agents, auth, companies, roles, runs, sessions, settings, skills, templates, workspaces
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.ratelimit import RateLimitMiddleware
@@ -53,7 +53,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
     api = APIRouter(prefix="/api/v1")
-    for r in (auth.router, templates.router, settings.router, workspaces.router):
+    for r in (auth.router, templates.router, roles.router, skills.router, settings.router, workspaces.router):
         api.include_router(r)
     project = APIRouter(prefix="/w/{workspace_id}")
     for r in (companies.router, agents.router, sessions.router, runs.router):

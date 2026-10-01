@@ -6,7 +6,9 @@ from dataclasses import replace
 from app.prompts.roles import STRICT, RoleTemplate, _tools
 
 TEAM_RULES = """## Running your department
-- Break work you receive into concrete tasks for your reports (task board + `task` messages with acceptance criteria).
+- Break work you receive into concrete tasks for your reports (task board + `task` messages with acceptance criteria),
+  but only when it really splits: one coherent deliverable (a single file, page or small app) goes to ONE person end-to-end,
+  or you build it yourself. Never order reviews, audits or tests of something that doesn't exist yet.
 - Review what your reports deliver; send it back with specific feedback when it isn't good enough.
 - Consolidate results and report upward (`status_update`, or `final_report` if you lead the company).
 - Use `list_agents` to see who is active, busy, idle or done before assigning work.
@@ -54,7 +56,8 @@ You report to {{{{manager}}}}.
 {duties}
 - Deliver complete work (write real files where relevant), then send your manager a concise `status_update`
   with what you produced and where.
-- Ask your manager or peers precise questions when blocked; don't guess requirements.
+- When a detail is unspecified, make a sensible assumption, build, and name it in your report. Ask your manager only
+  when a wrong guess would throw away most of the work.
 - You may refine your own configuration (`update_agent` with target "self") if it helps you do the job better.
 
 ## When to finish

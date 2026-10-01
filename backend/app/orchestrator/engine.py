@@ -42,6 +42,7 @@ from app.orchestrator.permissions import (
     EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
 )
 from app.orchestrator.team import TeamMixin
+from app.orchestrator.workflow import WorkflowMixin
 from app.orchestrator.protocols import (
     DebateState, LoopDetector, ReviewState, debate_decided_externally, debate_on_message, infer_verdict,
     review_on_request, review_on_result,
@@ -49,6 +50,8 @@ from app.orchestrator.protocols import (
 from app.schemas import RunBudget
 from app.services import project_memory as PM
 from app.tools import basic
+from app.services import skills as SK
+from app.services.roles import resolve_prompt
 from app.tools.sandbox import SandboxError, parse_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError
 
@@ -93,11 +96,20 @@ def apply_edits(text: str, edits: list[A.Edit]) -> tuple[str, int]:
     for i, e in enumerate(edits, 1):
         n = text.count(e.old_string)
         label = f"edit {i}" if len(edits) > 1 else "old_string"
+        if n == 0 and not e.replace_all and (loose := loose_match(text, e.old_string, e.new_string)):
+            start, end, new = loose  # same lines, different indentation / trailing whitespace: apply, re-indented
+            line = text.count("\n", 0, start) + 1
+            first = line if first is None else min(first, line)
+            text = text[:start] + new + text[end:]
+            continue
         if n == 0:
             stripped = e.old_string.strip()
             hint = (" (it does appear with different surrounding whitespace or indentation)" if stripped and stripped in text
                     else " (read_file to get the exact current text)")
-            raise ValueError(f"{label}: old_string not found{hint}")
+            near = closest_region(text, e.old_string)
+            raise ValueError(f"{label}: old_string not found{hint}"
+                             + (f". The current text where it probably belongs (line numbers are not part of "
+                                f"the file):\n{near}" if near else ""))
         if n > 1 and not e.replace_all:
             raise ValueError(f"{label}: old_string occurs {n} times; include more surrounding lines to make it unique, "
                              "or set replace_all")
@@ -106,6 +118,64 @@ def apply_edits(text: str, edits: list[A.Edit]) -> tuple[str, int]:
         first = line if first is None else min(first, line)
         text = text.replace(e.old_string, e.new_string) if e.replace_all else text.replace(e.old_string, e.new_string, 1)
     return text, first or 1
+
+
+def loose_match(text: str, old: str, new: str) -> tuple[int, int, str] | None:
+    """Find ``old`` in ``text`` when it differs only by a uniform indentation shift and trailing whitespace (the most
+    common reason an edit from memory misses). Returns (start, end, new re-indented by the same shift), only when that
+    match is unique; otherwise None. Edits that differ in anything else still fail with a hint."""
+    o_lines = old.strip("\n").split("\n")
+    if not old.strip() or len(o_lines) > 400:
+        return None
+    lines = text.split("\n")
+    offsets = [0]
+    for ln in lines:
+        offsets.append(offsets[-1] + len(ln) + 1)
+    nonblank = [ln for ln in o_lines if ln.strip()]
+    o_ind = min(len(ln) - len(ln.lstrip()) for ln in nonblank)
+    o_core = [ln[o_ind:].rstrip() if ln.strip() else "" for ln in o_lines]
+    hits: list[tuple[int, str]] = []
+    for i in range(len(lines) - len(o_lines) + 1):
+        win = lines[i:i + len(o_lines)]
+        nb = [ln for ln in win if ln.strip()]
+        if len(nb) != len(nonblank):
+            continue
+        ind = min(len(ln) - len(ln.lstrip()) for ln in nb)
+        prefix = nb[0][:ind]
+        if any(ln.strip() and not ln.startswith(prefix) for ln in win):
+            continue
+        if [ln[ind:].rstrip() if ln.strip() else "" for ln in win] == o_core:
+            hits.append((i, prefix))
+            if len(hits) > 1:
+                return None
+    if len(hits) != 1:
+        return None
+    i, prefix = hits[0]
+    n_lines = new.strip("\n").split("\n") if new.strip() else []
+
+    def reindent(ln: str) -> str:  # keep each new line's indentation relative to the old text, on the file's base indent
+        lead = len(ln) - len(ln.lstrip())
+        if lead >= o_ind:
+            return prefix + ln[o_ind:]
+        return prefix[:max(0, len(prefix) - (o_ind - lead))] + ln.lstrip()
+
+    new_text = "\n".join(reindent(ln) if ln.strip() else "" for ln in n_lines)
+    start, end = offsets[i], offsets[i + len(o_lines)] - 1
+    return start, end, new_text
+
+
+def closest_region(text: str, old: str, span: int = 8) -> str:
+    """Where a missed edit most likely applies: the current lines around the first distinctive line of ``old_string``.
+
+    A missed old_string usually comes from editing from memory (an earlier read was shortened in a long tool loop, or a
+    teammate changed the file). Showing the real text there lets the model retry at once instead of re-reading a big file."""
+    lines = text.split("\n")
+    wanted = sorted({ln.strip() for ln in old.split("\n") if len(ln.strip()) >= 12}, key=len, reverse=True)
+    for w in wanted[:6]:
+        hits = [i for i, ln in enumerate(lines) if w in ln]
+        if len(hits) == 1:
+            return numbered_excerpt(text, hits[0] + 1, before=3, after=span + old.count("\n"))[:4000]
+    return ""
 
 
 def numbered_excerpt(text: str, line: int, before: int = 3, after: int = 12) -> str:
@@ -122,6 +192,9 @@ def head_tail(text: str, limit: int) -> str:
     return text[:half] + f"\n…[{len(text) - limit:,} characters omitted]…\n" + text[-half:]
 
 
+ROUND_WARNINGS = {5, 1}
+# code an agent can run or open: finishing with changes to these that nothing exercised is sent back once to verify
+VERIFIABLE_EXT = {"py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "html", "htm", "go", "rs", "java", "rb", "php", "sh"}  # tool rounds left in a turn at which the agent is told to wrap up
 KEEP_FULL_ROUNDS = 3  # the latest tool rounds are replayed verbatim; older ones are shortened
 OLD_ROUND_CHARS = 1500
 COMPACT_MARK = "; re-read the file or re-run the tool if you need it again]"
@@ -210,7 +283,7 @@ def live_activity(text: str) -> tuple[str, str]:
     return ("thinking", "Planning next step…")
 
 
-class RunRuntime(TeamMixin):
+class RunRuntime(TeamMixin, WorkflowMixin):
     def __init__(self, run: Run, user_id: str, project: ProjectRef) -> None:
         snap = run.snapshot_json or {}
         self.snapshot: dict[str, Any] = {"company": snap.get("company") or {}, "agents": list(snap.get("agents") or []),
@@ -234,7 +307,8 @@ class RunRuntime(TeamMixin):
             self.agents[a["id"]] = AgentSpec.from_dict(a, cat)
         self.edges = [EdgeSpec.from_dict(e) for e in snap.get("edges", [])]
         self.names = {a.id: a.name for a in self.agents.values()}
-        self.attachments: list[dict[str, str]] = (run.state_json or {}).get("attachments", [])
+        self.attachments: list[dict[str, Any]] = (run.state_json or {}).get("attachments", [])
+        self._goal_images: list[dict[str, str]] | None = None  # loaded on first use (base64, shown to every agent)
 
         self.history: list[dict[str, Any]] = []
         self.mailbox: dict[str, list[tuple[int, str]]] = {}
@@ -290,6 +364,17 @@ class RunRuntime(TeamMixin):
         self.tokens = run.tokens_used or 0
         self.cost = run.cost_usd or 0.0
         self.active_seconds = 0.0
+        from app.prompts.roles import all_roles
+
+        self.roles = all_roles()  # replaced by the owner's role library in load_roles()
+        self.skills: dict[str, SK.Skill] = SK.builtin_skills()  # + the owner's and the project's skills in load_roles()
+        self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
+        self.wf: dict[str, Any] | None = None  # the workflow's state (orchestrator/workflow.py); None = free-form run
+        # verify-before-finish: code changed since anything was last run / opened in the browser
+        self.unverified: dict[str, int] = {}  # deliverable path → turn it last changed without being exercised since
+        self.finish_bounces: set[str] = set()  # "agent|files" already sent back once (never twice for the same state)
+        self._bounced_finish: str | None = None
+        self.turn_t0: float | None = None  # monotonic start of the top-level turn in progress (counted live by the time limit)
         self.run_status = run.status
 
         self.wake = asyncio.Event()
@@ -343,6 +428,7 @@ class RunRuntime(TeamMixin):
             "budget_base": self.budget_base,
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
+            "broken_files": self.broken_files, "workflow": self.wf,
             "journal": self.journal[-JOURNAL_MAX:], "journal_n": self.journal_n, "seen": self.seen, "seen_turn": self.seen_turn,
             "metrics": self.efficiency(),
         }
@@ -360,6 +446,8 @@ class RunRuntime(TeamMixin):
         st = run.state_json or {}
         self.status.update(st.get("status", {}))
         self.done_agents = set(st.get("done_agents", []))
+        self.broken_files = dict(st.get("broken_files", {}))
+        self.wf = st.get("workflow") or None
         self.agent_turns = Counter(st.get("agent_turns", {}))
         self.agent_tokens = Counter(st.get("agent_tokens", {}))
         self.agent_cost = Counter(st.get("agent_cost", {}))
@@ -661,6 +749,11 @@ class RunRuntime(TeamMixin):
         return None
 
     # ------------------------------------------------------------------ limits & control
+    def active_now(self) -> float:
+        """Active time including the turn in progress: one long turn (a 40-round tool loop with nested delegations) used to
+        run far past the time limit, because the limit only saw the time of finished turns."""
+        return self.active_seconds + (time.monotonic() - self.turn_t0 if self.turn_t0 is not None else 0.0)
+
     def limit_reason(self, *, turns: bool = True) -> str | None:
         """``turns=False`` inside a turn's tool loop: the turn is already counted, only spend and time can run out."""
         b = self.budget
@@ -671,7 +764,7 @@ class RunRuntime(TeamMixin):
             reason = f"Budget: token budget exhausted ({self.tokens}/{b.max_tokens})"
         elif b.max_cost_usd > 0 and self.cost >= b.max_cost_usd:
             reason = f"Budget: cost budget exhausted (${self.cost:.4f}/${b.max_cost_usd:.2f})"
-        elif self.active_seconds >= b.timeout_s:  # time spent working; paused / waiting-for-you time is not counted
+        elif self.active_now() >= b.timeout_s:  # time spent working; paused / waiting-for-you time is not counted
             reason = f"Budget: active-time limit reached ({b.timeout_s}s of agent work)"
         if reason and self.followups:
             reason += f"; follow-ups share a lifetime ceiling of {FOLLOWUP_BUDGET_CEILING}x the run budget, start a new run to go further"
@@ -869,12 +962,36 @@ class RunRuntime(TeamMixin):
         roots = [aid for aid in active if aid not in targets]
         return roots[:1] or active[:1]
 
+    def goal_images(self) -> list[dict[str, str]]:
+        """Images the user attached to the goal, as model input. Every agent sees them (the builder needs the mock-up as
+        much as the CEO does); they sit in the first user message, so they stay in the prompt cache across a tool loop."""
+        if self._goal_images is None:
+            from app.services.run_attachments import load_images
+
+            try:
+                self._goal_images = load_images(self.root, self.run_id, self.attachments)
+            except OSError:
+                self._goal_images = []
+        return self._goal_images
+
     async def bootstrap(self) -> None:
         content = self.goal
+        images = [a for a in self.attachments if a.get("kind") == "image"]
         for att in self.attachments:
-            content += f"\n\n--- Attached file: {att.get('filename', 'file')} ---\n" + clip(str(att.get("text", "")), 30000)
+            if att.get("kind") != "image":
+                content += f"\n\n--- Attached file: {att.get('filename', 'file')} ---\n" + clip(str(att.get("text", "")), 30000)
+        if images:
+            content += "\n\n--- Attached image(s), shown to every agent as images: " + ", ".join(str(a.get("filename")) for a in images) + " ---"
+        meta: dict[str, Any] = {"goal": True}
+        if self.wf_enabled_for_run():
+            self.wf_init()
+            content += self.wf_intake_note()
+            await self.wf_emit()
+        if images:
+            meta["images"] = [{"filename": a.get("filename"), "name": a.get("name"), "mime": a.get("mime")} for a in images]
+        self.goal_content = content.split("\n\n--- How this company works ---")[0]
         for aid in self.entry_agents():
-            await self.post_message(sender="user", from_id=None, to_id=aid, type_="task", content=content, meta={"goal": True})
+            await self.post_message(sender="user", from_id=None, to_id=aid, type_="task", content=content, meta=meta)
 
     async def main(self, fresh: bool = True) -> None:
         try:
@@ -898,6 +1015,8 @@ class RunRuntime(TeamMixin):
                 if aid is None:
                     if self.awaiting:
                         continue
+                    if self.wf_active() and await self.nudge_workflow():
+                        continue
                     if await self.nudge_open_tasks():
                         continue
                     open_ = self.open_tasks()
@@ -907,10 +1026,11 @@ class RunRuntime(TeamMixin):
                     else:
                         await self.finalize("completed", "Run went quiescent without a final report: no open tasks, no agent has pending work")
                     return
-                t0 = time.monotonic()
+                t0 = self.turn_t0 = time.monotonic()
                 try:
                     await self.turn(aid)
                 finally:
+                    self.turn_t0 = None
                     self.active_seconds += time.monotonic() - t0
                 await self.save()
                 await self.usage_event()
@@ -958,6 +1078,11 @@ class RunRuntime(TeamMixin):
         if self.artifacts:
             lines.append("Workspace files:\n" + "\n".join(
                 f"- {p} v{a['version']} by {self.names.get(a['author'] or '', '?')}" for p, a in sorted(self.artifacts.items())))
+        if self.wf:
+            lines.append(self.wf_blackboard())
+        if self.broken_files:
+            lines.append("Files FAILING automatic checks (fix before anything else):\n" + "\n".join(
+                f"- {p}: {msg.splitlines()[0][:300]}" for p, msg in sorted(self.broken_files.items())))
         if self.user_notes:
             older = len(self.user_notes) - 10
             lines.append("User notes:\n" + (f"- ({older} earlier note(s) not shown)\n" if older > 0 else "")
@@ -1012,7 +1137,7 @@ class RunRuntime(TeamMixin):
         think: list[str] = []
         think_buf, think_last = "", time.monotonic()
         fresh_call = False
-        remaining = max(5.0, self.budget.timeout_s - self.active_seconds)
+        remaining = max(5.0, self.budget.timeout_s - self.active_now())
 
         idle: asyncio.Timeout | None = None
         t_start = time.monotonic()
@@ -1151,7 +1276,7 @@ class RunRuntime(TeamMixin):
         try:
             req, native = await self.build_request(agent, inbox_set, obs)
             if native:
-                await self.native_turn(agent, req)
+                await self.native_turn(agent, req, exclude=self.wf_tool_exclusions(agent))
                 await self.end_turn(aid)
                 return
             text = await self.call_llm_escalating(agent, req)
@@ -1217,13 +1342,20 @@ class RunRuntime(TeamMixin):
         native = self.native_tools_for(req)
         system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
                                      status=self.status, preview_url=self.preview_url(), native=native,
-                                     project_memory=PM.render(self.memory, exclude_run=self.run_id))
+                                     project_memory=PM.render(self.memory, exclude_run=self.run_id),
+                                     role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, self.roles),
+                                     skills_text=SK.prompt_section(self.skills, str(agent.behavior.get("template_key") or ""),
+                                                                   list(agent.behavior.get("skills") or [])))
         user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
                                  names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
                                  team_status=team_status(self.agents, self.status))
         if extra:
             user += "\n\n" + extra
         req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        if images := self.goal_images():
+            req.images = images
+            req.messages[-1]["content"] += (f"\n\n(The user attached {len(images)} image(s) to the goal; they follow this message. "
+                                            "Use them as reference for what to build.)")
         self.seen[aid], self.seen_turn[aid] = self.journal_n, self.turn_no
         return req, native
 
@@ -1287,6 +1419,12 @@ class RunRuntime(TeamMixin):
                 else:
                     out, ended = await self.run_tool_call(agent, call, mcp_map)
                 outputs.append({"type": "function_call_output", "call_id": call.id, "output": out})
+            left = self.budget.max_tool_rounds - rnd - 1
+            if outputs and not ended and left in ROUND_WARNINGS:  # a turn that silently runs out leaves its task half done
+                outputs[-1]["output"] += (f"\n\n[Octopus] {left} tool round{'s' if left != 1 else ''} left in this turn. "
+                                          + ("Stop exploring: finish the deliverable with what you have, then call `finish` "
+                                             "with what's done and what's open." if left > 1 else
+                                             "This is your last call: call `finish` now with what's done and what's open."))
             # replay the response (encrypted reasoning included) and answer every call, as the Responses API expects
             replay = [i for i in res.items if not (i.get("type") == "reasoning" and not i.get("encrypted_content"))]
             rounds.append(len(req.continuation))
@@ -1331,8 +1469,11 @@ class RunRuntime(TeamMixin):
                 lines.append(f"Sent to {action.to}.")
             else:
                 lines.append("Done.")
-        ended = (name in T.TERMINAL_ACTIONS or self.finished_summary is not None or aid in self.done_agents
-                 or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
+        bounced = name == "finish" and self._bounced_finish == aid  # sent back to verify: the turn goes on
+        if bounced:
+            self._bounced_finish = None
+        ended = not bounced and (name in T.TERMINAL_ACTIONS or self.finished_summary is not None or aid in self.done_agents
+                                 or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
         return clip("\n".join(lines), TOOL_RESULT_CHARS), ended
 
     # ------------------------------------------------------------------ delegation (orchestrator → worker)
@@ -1409,7 +1550,7 @@ class RunRuntime(TeamMixin):
         token = DELEGATION.set(frame)
         last = ""
         try:
-            last = await self.native_turn(worker, req, exclude={"request_user_input"})
+            last = await self.native_turn(worker, req, exclude={"request_user_input"} | self.wf_tool_exclusions(worker))
         except (LLMError, asyncio.TimeoutError) as exc:
             last = f"(stopped by a model error: {exc})"
             await self.emit("error", {"message": f"{worker.name}: LLM call failed: {exc}", "agent_id": wid, "kind": "llm"})
@@ -1485,6 +1626,22 @@ class RunRuntime(TeamMixin):
     async def _tool_result(self, agent: AgentSpec, cid: str, tool: str, ok: bool, output: str) -> None:
         await self.emit("tool_result", {"call_id": cid, "agent_id": agent.id, "tool": tool, "ok": ok, "output": output[:4000]})
 
+    def delegated_message_refusal(self, agent: AgentSpec, a: A.SendMessage) -> str | None:
+        """Inside a delegated sub-turn nobody can answer in time (answers arrive as later turns, after this one has ended),
+        and the `finish` summary already goes back to the delegator. Questions and progress reports there only cost turns:
+        in practice the builder asked design/QA questions, built anyway, and the answers landed after it was done."""
+        frame = DELEGATION.get()
+        if frame is None or frame["worker"] != agent.id:
+            return None
+        boss = self.names.get(frame["chain"][-1], "your delegator") if frame["chain"] else "your delegator"
+        if a.type == "question":
+            return (f"You are working on a task {boss} delegated to you: an answer would only arrive after this turn has ended. "
+                    "Check the Blackboard and the files, make a sensible assumption and name it in your `finish` summary, "
+                    "or `finish` now and say exactly what is blocking.")
+        if a.type in ("status_update", "final_report") and self.resolve_agent(a.to.strip()) == (frame["chain"] or ("",))[-1]:
+            return f"Not needed: your `finish` summary goes straight back to {boss}. Keep working, then call `finish`."
+        return None
+
     async def reject(self, agent: AgentSpec, to_id: str | None, a: A.SendMessage, reason: str, *, retry: bool = True) -> None:
         """``retry=False`` for loop / channel-limit rejections: the agent sees the notice next time it is woken, but the
         rejection itself does not buy it another turn (that just turned a loop into a spin)."""
@@ -1495,6 +1652,9 @@ class RunRuntime(TeamMixin):
 
     async def act_send_message(self, agent: AgentSpec, a: A.SendMessage) -> None:
         to = a.to.strip()
+        if (why := self.delegated_message_refusal(agent, a)):
+            await self.reject(agent, self.resolve_agent(to), a, why, retry=False)
+            return
         if to.lower() in ("all", "everyone", "broadcast", "team", "@all"):
             targets = list(allowed_recipients(self.edges, agent.id))
             if not targets:
@@ -1766,6 +1926,8 @@ class RunRuntime(TeamMixin):
         self.mark_progress()
         if not rel.startswith(PROJECT_DIRNAME + "/"):  # a deliverable (not a working doc)
             self.mark_work(agent.id)
+            if rel.rsplit(".", 1)[-1].lower() in VERIFIABLE_EXT and not planned:
+                self.unverified[rel] = self.turn_no
             if self.first_deliverable_turn is None:
                 self.first_deliverable_turn = self.turn_no
         prev = self.artifacts.get(rel)
@@ -1798,9 +1960,27 @@ class RunRuntime(TeamMixin):
                      else f" It now has {added} lines." if appending else "")
         if context_line is not None:  # show the edited region so the agent can check the result without re-reading the file
             size_note = f" Lines around the change:\n{numbered_excerpt(content, context_line)}"
+        problem = None if partial else await self.check_written(rel, content)
         self.notice(agent.id, f"{verb} {rel} (v{version}).{size_note}"
-                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""), activate=partial)
+                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else "")
+                    + (f"\n\nAUTOMATIC CHECK FAILED for {rel}:\n{problem}\nFix this before anything else." if problem else ""),
+                    activate=partial or bool(problem))
         await self._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
+
+    async def check_written(self, rel: str, content: str) -> str | None:
+        """Syntax-check a file right after it was written (services/checks.py); remembered until a later write fixes it."""
+        from app.services.checks import check_file
+
+        try:
+            problem = await check_file(rel, content)
+        except Exception as exc:  # noqa: BLE001 - a checker bug must never fail the write
+            log.warning("file_check_failed", path=rel, error=str(exc)[:200])
+            return None
+        if problem:
+            self.broken_files[rel] = problem[:1500]
+        else:
+            self.broken_files.pop(rel, None)
+        return problem
 
     async def written_by_octopus(self, rel: str) -> bool:
         """Did any run in this project ever write ``rel``? (Otherwise it is the user's own file.)"""
@@ -1904,8 +2084,20 @@ class RunRuntime(TeamMixin):
         """Where the agents' browser can open this project (served by Octopus, sandboxed)."""
         return f"{get_settings().public_url.rstrip('/')}/api/v1/w/{self.project.workspace_id}/preview/"
 
+    async def load_roles(self) -> None:
+        """The run owner's role library (built-in roles + their edits + their own roles): linked agents' prompts come from it."""
+        from app.services.roles import effective_roles
+
+        try:
+            async with registry_factory()() as rdb:
+                self.roles = await effective_roles(rdb, self.user_id)
+                self.skills = await SK.effective_skills(rdb, self.user_id, self.root)
+        except Exception as exc:  # noqa: BLE001 - built-in roles and skills still work
+            log.warning("roles_not_loaded", error=str(exc)[:200])
+
     async def load_mcp(self) -> None:
         """Resolve MCP servers granted to each agent (only the run owner's registered, enabled servers)."""
+        await self.load_roles()
         from app.models import McpServer
         from app.tools.mcp_client import McpConfig
 
@@ -1961,6 +2153,8 @@ class RunRuntime(TeamMixin):
             await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
             self.mark_work(agent.id)
             ok, out = await browser.call(self.run_id, agent.id, a.tool, a.arguments)
+            if ok:
+                self.unverified.clear()
             if not ok and not browser.available():
                 out += ("\nThe browser can't run in this environment: don't retry it. Verify by reading the code instead, and say in "
                         "your report that nothing was tested in a real browser.")
@@ -2006,6 +2200,7 @@ class RunRuntime(TeamMixin):
             await self.deny(agent, cid, "run_code", reason)
             return
         await self.set_agent_status(agent.id, "running", f"$ {a.command[:70]}")
+        self.unverified.clear()  # the code was exercised (whatever the outcome, the agent now sees real output)
         try:
             res = await run_command(a.command, self.root, danger=level == "danger")
             ok = res.ok
@@ -2062,7 +2257,72 @@ class RunRuntime(TeamMixin):
         self.awaiting = {"agent_id": agent.id, "question": a.question, "message_id": rec["id"], "options": options, "allow_other": True}
         await self.set_agent_status(agent.id, "waiting")
 
+    def finish_refusal(self, agent: AgentSpec) -> str | None:
+        """Verify before done (MAST: missing/incomplete verification is a top cause of multi-agent failure). An agent that
+        can run code or open a browser, finishing the run or a delegated task while code changed unexercised or a file
+        fails its automatic check, is sent back once with what to check. Asking again finishes (it may be unverifiable)."""
+        frame = DELEGATION.get()
+        if self.budget.force_mock or not self.budget.verify_before_finish or not (
+                agent.is_entry or (frame is not None and frame["worker"] == agent.id) or self.wf_owner_of_active(agent.id)):
+            return None
+        can_run = A.tool_enabled(agent.tools, "terminal")
+        can_browse = any(m.get("builtin") for m in agent.mcp)
+        if not (can_run or can_browse) or not (self.unverified or self.broken_files):
+            return None
+        key = f"{agent.id}|{sorted(self.unverified)}|{sorted(self.broken_files)}"
+        if key in self.finish_bounces:
+            return None
+        self.finish_bounces.add(key)
+        parts = []
+        if self.broken_files:
+            parts.append("these files fail their automatic check: " + "; ".join(
+                f"{p} ({m.splitlines()[0][:160]})" for p, m in sorted(self.broken_files.items())))
+        if self.unverified:
+            files = ", ".join(sorted(self.unverified)[:8])
+            how = []
+            if can_browse and any(p.endswith((".html", ".htm")) for p in self.unverified):
+                how.append(f"open it in your browser ({self.preview_url()}<path>), check browser_console_messages for errors and try it")
+            if can_run:
+                how.append("run it or its tests with run_code")
+            parts.append(f"{files} changed and nothing has run or opened it since; " + " or ".join(how or ["exercise it"]))
+        return ("Not finished yet: verify first. " + "; ".join(parts) + ". Fix what you find, then call `finish` again with "
+                "what you checked and what you saw. (If it really can't be verified here, call `finish` again and say so.)")
+
+    async def wf_finish_refusal(self, agent: AgentSpec, a: A.Finish) -> str | None:
+        """Workflow rules for `finish`: the head accepts at the end; a phase owner closes its phase (gate checked)."""
+        frame = DELEGATION.get()
+        if not self.wf_active() or (frame is not None and frame["worker"] == agent.id):
+            return None
+        ph = self.wf_phase()
+        if ph is None:
+            return None
+        if agent.is_entry and ph["key"] == "intake":  # answered without a build (e.g. a question): no workflow needed
+            self.wf.update({"ended": True, "reason": "finished at intake"})
+            await self.wf_emit()
+            return None
+        if agent.is_entry and ph["key"] == "accept":  # the head signs off: the run completes
+            ph.update({"status": "done", "summary": (a.summary or "")[:2000]})
+            self.wf["ended"] = True
+            await self.wf_emit()
+            return None
+        if agent.is_entry:
+            if self.wf.get("head_bounced") == ph["key"]:
+                self.wf.update({"ended": True, "reason": f"head finished during {ph['key']}"})
+                return None
+            self.wf["head_bounced"] = ph["key"]
+            return (f"The workflow is in the {ph['key']} phase ({self.names.get(ph['owner'], '?')} is on it). Wait for it to come "
+                    "back to you for acceptance (call `wait`). Finishing now would end the run unfinished; call finish again only "
+                    "if that is really what you want.")
+        if self.wf_owner_of_active(agent.id):
+            return await self.wf_on_finish(agent, a)
+        return None
+
     async def act_finish(self, agent: AgentSpec, a: A.Finish) -> None:
+        self._bounced_finish = None
+        if (why := self.finish_refusal(agent)) or (why := await self.wf_finish_refusal(agent, a)):
+            self._bounced_finish = agent.id
+            self.notice(agent.id, why, activate=True)
+            return
         frame = DELEGATION.get()
         if frame is not None and frame["worker"] == agent.id:  # a delegated sub-turn: hand the result back to the delegator
             frame["summary"] = a.summary or "Done."
@@ -2084,6 +2344,20 @@ class RunRuntime(TeamMixin):
 
     async def act_wait(self, agent: AgentSpec, a: A.Wait) -> None:
         return None
+
+    async def act_use_skill(self, agent: AgentSpec, a: A.UseSkill) -> None:
+        cid = await self._tool_event(agent, "use_skill", {"name": a.name})
+        key = a.name.strip().lower()
+        sk = self.skills.get(key) or next((s for s in self.skills.values() if key in s.name), None)
+        if sk is None:
+            out = f"No skill named '{a.name}'. Available: {', '.join(sorted(self.skills)) or 'none'}"
+            self.observe(agent.id, {"tool": "use_skill", "ok": False, "content": out})
+            await self._tool_result(agent, cid, "use_skill", False, out)
+            return
+        await self.set_agent_status(agent.id, "reading", f"Following the {sk.name} skill…")
+        self.log(agent.id, f"uses the {sk.name} skill")
+        self.observe(agent.id, {"tool": "use_skill", "ok": True, "content": f"# Skill: {sk.name}\n{sk.description}\n\n{sk.body}"})
+        await self._tool_result(agent, cid, "use_skill", True, sk.name)
 
     # ------------------------------------------------------------------ finalisation
     async def finalize(self, status: str, reason: str) -> None:

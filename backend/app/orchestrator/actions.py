@@ -274,15 +274,32 @@ class ListAgents(BaseModel):
 class Finish(BaseModel):
     action: Literal["finish"]
     summary: str = ""
+    # workflow test / review phases: "pass" moves on, "fail" sends the findings back to the builder
+    outcome: Literal["done", "pass", "fail"] = "done"
 
 
 class Wait(BaseModel):
     action: Literal["wait"]
 
 
+class SetTrack(BaseModel):
+    """Company head, during intake: choose how the goal is worked (Octopus then runs the phases with the right owners)."""
+    action: Literal["set_track"]
+    track: Literal["quick", "standard", "large"]
+    research: bool = False  # add a Research phase (real unknowns: an unfamiliar API, a library choice, a domain question)
+    reason: str = Field("", max_length=2000)  # why this track; assumptions you made
+    owners: dict[str, str] = Field(default_factory=dict)  # optional phase -> teammate name overrides, e.g. {"build": "Sam"}
+
+
+class UseSkill(BaseModel):
+    """Load a skill (a step-by-step playbook) by name; its full instructions come back as the result."""
+    action: Literal["use_skill"]
+    name: str = Field(min_length=1, max_length=80)
+
+
 Action = Annotated[
     Union[SendMessage, Delegate, WriteFile, EditFile, SearchProject, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
-          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, Finish, Wait],
+          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, UseSkill, SetTrack, Finish, Wait],
     Field(discriminator="action"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Action)
@@ -394,6 +411,7 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
     if tool_enabled(enabled_tools, "send_message"):
         lines.append('{"action":"delegate","to":"<teammate>","objective":"...","deliverable":"...","done_when":"...","context":"..."}'
                      '  (hand work to a teammate you have a delegate channel to; it goes on the task board)')
+    lines.append('{"action":"use_skill","name":"<skill name>"}  (load a step-by-step playbook from the Skills list, then follow it)')
     lines += [
         '{"action":"update_task_board","tasks":[{"key":"T-1 (omit to create)","title":"...","description":"...",'
         '"assignee":"<name>","status":"todo|in_progress|in_review|done|blocked","acceptance_criteria":"..."}]}',
@@ -413,7 +431,7 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
         lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
         lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):
-        lines.append('{"action":"run_code","command":"python -m unittest discover -s tests -v"}  (sandboxed terminal; allowlisted: python, node, npm test, pytest)')
+        lines.append('{"action":"run_code","command":"python -m unittest discover -s tests -v"}  (sandboxed terminal, one command, no shell; allowlisted: python, node, npm test, pytest; any command and shell operators at danger level)')
     if tool_enabled(enabled_tools, "web_search"):
         lines.append('{"action":"web_search","query":"..."}')
     if tool_enabled(enabled_tools, "calculator"):

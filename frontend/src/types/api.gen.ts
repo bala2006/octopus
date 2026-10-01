@@ -100,7 +100,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Roles */
+        /**
+         * List Roles
+         * @description The effective role library (built-in roles with the user's edits, plus their own roles); same as GET /roles.
+         */
         get: operations["list_roles_api_v1_templates_roles_get"];
         put?: never;
         post?: never;
@@ -146,6 +149,130 @@ export interface paths {
         head?: never;
         /** Update Template */
         patch: operations["update_template_api_v1_templates__key__patch"];
+        trace?: never;
+    };
+    "/api/v1/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Roles */
+        get: operations["list_roles_api_v1_roles_get"];
+        put?: never;
+        /**
+         * Create Role
+         * @description A role of the user's own (key ``custom:<slug>``).
+         */
+        post: operations["create_role_api_v1_roles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Role
+         * @description Edit a role. For a built-in role this saves the user's version; DELETE brings the default back.
+         */
+        put: operations["update_role_api_v1_roles__key__put"];
+        post?: never;
+        /**
+         * Delete Role
+         * @description Built-in role: restore its default. Custom role: delete it (agents using it keep their current prompt).
+         */
+        delete: operations["delete_role_api_v1_roles__key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/restore-defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Defaults
+         * @description Undo every edit of a built-in role (roles of the user's own are kept).
+         */
+        post: operations["restore_defaults_api_v1_roles_restore_defaults_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Skills */
+        get: operations["list_skills_api_v1_skills_get"];
+        put?: never;
+        /** Create Skill */
+        post: operations["create_skill_api_v1_skills_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Skill
+         * @description Edit a skill; for a built-in one this saves your version (DELETE restores the default). The name can't change.
+         */
+        put: operations["update_skill_api_v1_skills__name__put"];
+        post?: never;
+        /**
+         * Delete Skill
+         * @description Built-in skill: restore its default. Your own skill: delete it.
+         */
+        delete: operations["delete_skill_api_v1_skills__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/restore-defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Defaults */
+        post: operations["restore_defaults_api_v1_skills_restore_defaults_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/settings": {
@@ -1185,6 +1312,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/w/{workspace_id}/runs/{run_id}/attachments/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Attachment
+         * @description An image attached to the run's goal (named in the goal message's ``meta.images``).
+         */
+        get: operations["run_attachment_api_v1_w__workspace_id__runs__run_id__attachments__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/w/{workspace_id}/runs/{run_id}/preview/{path}": {
         parameters: {
             query?: never;
@@ -1259,6 +1406,15 @@ export interface components {
              * @default
              */
             template_key: string;
+            /** Prompt Linked */
+            prompt_linked?: boolean | null;
+            /**
+             * Extra Instructions
+             * @default
+             */
+            extra_instructions: string;
+            /** Skills */
+            skills?: string[];
             /**
              * Reasoning Effort
              * @default default
@@ -2243,6 +2399,22 @@ export interface components {
             text: string;
             /** Truncated */
             truncated: boolean;
+            /**
+             * Kind
+             * @default text
+             * @enum {string}
+             */
+            kind: "text" | "image";
+            /**
+             * Mime
+             * @default
+             */
+            mime: string;
+            /**
+             * Data
+             * @default
+             */
+            data: string;
         };
         /** ProjectTreeOut */
         ProjectTreeOut: {
@@ -2354,6 +2526,42 @@ export interface components {
              */
             to_version: number;
         };
+        /**
+         * RoleIn
+         * @description Create a custom role (POST) or edit a role (PUT; for a built-in role this saves an override).
+         */
+        RoleIn: {
+            /** Role */
+            role: string;
+            /**
+             * Category
+             * @default
+             */
+            category: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** System Prompt */
+            system_prompt: string;
+            /**
+             * Default Name
+             * @default
+             */
+            default_name: string;
+            /**
+             * Color
+             * @default
+             */
+            color: string;
+            /**
+             * Avatar
+             * @default
+             */
+            avatar: string;
+            tools?: components["schemas"]["AgentTools"] | null;
+        };
         /** RoleTemplateOut */
         RoleTemplateOut: {
             /** Key */
@@ -2371,6 +2579,17 @@ export interface components {
             /** System Prompt */
             system_prompt: string;
             tools: components["schemas"]["AgentTools"];
+            /**
+             * Category
+             * @default General
+             */
+            category: string;
+            /**
+             * Source
+             * @default builtin
+             * @enum {string}
+             */
+            source: "builtin" | "modified" | "custom";
         };
         /** RunBudget */
         RunBudget: {
@@ -2414,6 +2633,17 @@ export interface components {
              * @default 40
              */
             max_tool_rounds: number;
+            /**
+             * Verify Before Finish
+             * @default true
+             */
+            verify_before_finish: boolean;
+            /**
+             * Workflow
+             * @default auto
+             * @enum {string}
+             */
+            workflow: "auto" | "on" | "off";
             /**
              * Context Recent
              * @default 30
@@ -2689,6 +2919,38 @@ export interface components {
             /** Keys */
             keys: components["schemas"]["ProviderKeyOut"][];
         };
+        /** SkillIn */
+        SkillIn: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Body */
+            body: string;
+            /** Roles */
+            roles?: string[];
+            /** Phases */
+            phases?: string[];
+        };
+        /** SkillOut */
+        SkillOut: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Body */
+            body: string;
+            /** Roles */
+            roles?: string[];
+            /** Phases */
+            phases?: string[];
+            /**
+             * Source
+             * @default builtin
+             * @enum {string}
+             */
+            source: "builtin" | "modified" | "custom" | "project";
+        };
         /** TaskOut */
         TaskOut: {
             /** Id */
@@ -2737,6 +2999,11 @@ export interface components {
             departments?: components["schemas"]["DepartmentSummary"][];
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Workflow
+             * @default false
+             */
+            workflow: boolean;
         };
         /** TestProviderIn */
         TestProviderIn: {
@@ -3141,6 +3408,276 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    list_roles_api_v1_roles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleTemplateOut"][];
+                };
+            };
+        };
+    };
+    create_role_api_v1_roles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleTemplateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_role_api_v1_roles__key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleTemplateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_role_api_v1_roles__key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_defaults_api_v1_roles_restore_defaults_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_skills_api_v1_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillOut"][];
+                };
+            };
+        };
+    };
+    create_skill_api_v1_skills_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_skill_api_v1_skills__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_skill_api_v1_skills__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_defaults_api_v1_skills_restore_defaults_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5493,6 +6030,39 @@ export interface operations {
         };
     };
     browser_frame_api_v1_w__workspace_id__runs__run_id__browser__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                name: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_attachment_api_v1_w__workspace_id__runs__run_id__attachments__name__get: {
         parameters: {
             query?: never;
             header?: never;

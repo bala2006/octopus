@@ -48,6 +48,17 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
                 f"- First deliverable file at turn: {m.get('first_deliverable_turn') or 'none'}",
                 f"- Delegations: {m.get('delegations', 0)} ({m.get('parallel_delegations', 0)} run in parallel)", ""]
 
+    wf = state.get("workflow") or {}
+    if wf.get("phases"):
+        from app.orchestrator.workflow import PHASES
+
+        out += [f"## Workflow ({wf.get('track') or 'intake only'} track)", "", "| Phase | Owner | Status | Fix rounds | Summary |", "|---|---|---|---|---|"]
+        for p in wf["phases"]:
+            title = PHASES[p["key"]].title if p["key"] in PHASES else p["key"]
+            summary = (p.get("summary") or "").replace("\n", " ").replace("|", "/")[:160]
+            out.append(f"| {title} | {name(p.get('owner')) if p.get('owner') else '-'} | {p.get('status')} | {p.get('loops') or ''} | {summary} |")
+        out.append("")
+
     out += ["## Team", "", "| Agent | Role | Department | Model | Turns | Tokens |", "|---|---|---|---|---|---|"]
     turns = state.get("agent_turns", {})
     for aid, a in agents.items():

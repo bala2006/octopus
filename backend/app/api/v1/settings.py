@@ -21,7 +21,7 @@ from app.schemas import (
     TestProviderIn,
     TestProviderOut,
 )
-from app.services.files import UnsupportedFile, parse_file
+from app.services.files import UnsupportedFile, parse_file, parse_image
 from app.tools.mcp_client import McpConfig, McpError, list_tools
 
 router = APIRouter(tags=["settings"])
@@ -254,8 +254,12 @@ async def parse_upload(file: UploadFile = File(...), user: User = Depends(curren
     data = await file.read(10 * 1024 * 1024 + 1)
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(413, "File too large (max 10MB)")
+    name = file.filename or "file"
     try:
-        text, truncated = parse_file(file.filename or "file", data)
+        image = parse_image(name, data)
+        if image:
+            return ParsedFileOut(filename=name, chars=0, text="", truncated=False, kind="image", mime=image[0], data=image[1])
+        text, truncated = parse_file(name, data)
     except UnsupportedFile as exc:
         raise HTTPException(415, str(exc)) from exc
-    return ParsedFileOut(filename=file.filename or "file", chars=len(text), text=text, truncated=truncated)
+    return ParsedFileOut(filename=name, chars=len(text), text=text, truncated=truncated)
