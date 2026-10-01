@@ -19,10 +19,13 @@ import { Badge, Field, Input, Switch, Textarea } from "@/components/ui/primitive
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select, Tip } from "@/components/ui/overlays";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
 
-const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", Plug], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Appearance & currency", Palette]] as const;
+// The key is the URL hash (settings#appearance deep links must keep working); the label is what the nav and the panel show.
+export const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", Plug], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Preferences", Palette]] as const;
+/** The section for a URL hash; unknown or empty hashes fall back to the first section instead of rendering nothing. */
+export const sectionFromHash = (hash: string): string => { const h = hash.replace(/^#/, ""); return SECTIONS.some(([k]) => k === h) ? h : SECTIONS[0][0]; };
 
 export default function SettingsPage() {
-  const [section, setSection] = React.useState<string>(() => (location.hash.slice(1) || "providers"));
+  const [section, setSection] = React.useState<string>(() => sectionFromHash(location.hash));
   React.useEffect(() => { history.replaceState(null, "", `#${section}`); }, [section]);
   React.useEffect(() => { // in-app links like settings#providers while Settings is already open
     const onHash = () => { const h = location.hash.slice(1); if (h && SECTIONS.some(([k]) => k === h)) setSection(h); };
@@ -33,8 +36,9 @@ export default function SettingsPage() {
     <div className="flex h-full">
       <nav className="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-border bg-surface p-3" aria-label="Settings sections">
         {SECTIONS.map(([k, label, Icon]) => (
-          <button key={k} onClick={() => setSection(k)} className={cn("flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition hover:bg-accent", section === k && "bg-accent font-medium")}>
-            <Icon className="h-4 w-4 text-muted-foreground" />{label}
+          <button key={k} onClick={() => setSection(k)} title={label} aria-current={section === k ? "page" : undefined}
+            className={cn("flex h-8 w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 text-sm transition hover:bg-accent", section === k && "bg-accent font-medium")}>
+            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" /><span className="min-w-0 truncate">{label}</span>
           </button>
         ))}
       </nav>
@@ -458,11 +462,16 @@ function ProjectSettings() {
   );
 }
 
+/** "Preferences": per-device display settings (theme, currency). Section key stays "appearance" for deep links. */
 function Appearance() {
   const { theme, setTheme } = useApp();
   return (
     <>
-    <Section title="Appearance">
+    <div>
+      <h1 className="text-lg font-semibold">Preferences</h1>
+      <p className="text-sm text-muted-foreground">How Octopus looks and shows costs on this device.</p>
+    </div>
+    <Section title="Theme">
       <div className="grid grid-cols-2 gap-3">
         {(["dark", "light"] as const).map((t) => (
           <button key={t} onClick={() => setTheme(t)} className={cn("rounded-xl border p-4 text-left transition hover:border-primary/50", theme === t ? "border-primary bg-primary/5" : "border-border")}>
