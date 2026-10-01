@@ -5,6 +5,7 @@ import { wsUrl } from "@/lib/api";
 import { ResilientSocket, type SocketState } from "@/lib/socket";
 import { qk } from "@/hooks/queries";
 import type { MessageOut, ParsedFileOut } from "@/types";
+import type { PendingImage } from "@/lib/images";
 
 export interface StreamingMsg { id: string; text: string; phase: "thinking" | "writing" | "tool"; detail: string; tools: Array<{ name: string; args: unknown; result?: string }>; model?: string; startedAt: number }
 
@@ -46,7 +47,9 @@ export function useDirectChat(workspaceId: string, sessionId: string | undefined
 
   return {
     conn, streaming,
-    send: (content: string, attachments: ParsedFileOut[] = []) => sock.current?.send({ type: "user_message", content, attachments: attachments.map((a) => ({ filename: a.filename, text: a.text })) }),
+    send: (content: string, attachments: ParsedFileOut[] = [], images: PendingImage[] = []) => sock.current?.send({
+      type: "user_message", content, attachments: attachments.map((a) => ({ filename: a.filename, text: a.text })),
+      images: images.map((i) => ({ name: i.name, data_url: i.dataUrl })) }),
     stop: () => sock.current?.send({ type: "stop" }),
     regenerate: () => sock.current?.send({ type: "regenerate" }),
   };

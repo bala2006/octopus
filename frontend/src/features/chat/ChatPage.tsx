@@ -4,7 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Building2, Check, ChevronDown, Copy, Download, FileJson, Hash, MessageSquare, MoreHorizontal, Paperclip, Pencil, RefreshCw, Send, Square, Trash2, Wrench,
+  Building2, Check, ChevronDown, Copy, Download, FileJson, Hash, MessageSquare, MoreHorizontal, Pencil, RefreshCw, Trash2, Wrench,
   Play, Radio,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
@@ -16,7 +16,7 @@ import type { AgentOut, MessageOut, SessionOut } from "@/types";
 import { AgentAvatar, ConnectionDot, EmptyState, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/button";
-import { Badge, Input, Textarea } from "@/components/ui/primitives";
+import { Badge, Input } from "@/components/ui/primitives";
 import {
   ConfirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
   Select, Tip,
@@ -27,7 +27,11 @@ import { QuestionCard } from "@/features/runs/QuestionCard";
 import { ApprovalCard } from "@/features/runs/ApprovalCard";
 import { useRunStream } from "@/features/runs/useRunStream";
 import { TERMINAL } from "@/features/runs/runState";
-import { AttachmentChips, useAttachments } from "./attachments";
+import { AttachmentChips } from "./attachments";
+import { Composer } from "@/components/Composer";
+import { sendToRun } from "@/features/runs/sendToRun";
+import { ResizeHandle, usePanelWidth } from "@/components/ResizeHandle";
+import { MessageImages } from "@/features/runs/MessageImages";
 import { useDirectChat, type StreamingMsg } from "./useDirectChat";
 
 export default function ChatPage() {
@@ -88,6 +92,8 @@ function SidebarHeading({ id, children }: { id: string; children: React.ReactNod
   return <div id={id} className="shrink-0 px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</div>;
 }
 
+const CHAT_SIDEBAR_MAX = () => Math.max(260, Math.round(window.innerWidth * 0.45));
+
 function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
   agents: AgentOut[]; sessions: SessionOut[]; activeId?: string; onAgent: (id: string) => void; onCompany: () => void;
 }) {
@@ -98,6 +104,7 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
   const [deleting, setDeleting] = React.useState<SessionOut | null>(null);
   const [title, setTitle] = React.useState("");
   const active = sessions.find((s) => s.id === activeId);
+  const panel = usePanelWidth("chat-sidebar", 256, 200, CHAT_SIDEBAR_MAX);
   const rename = useMutation({
     mutationFn: () => unwrap(api.PATCH("/api/v1/w/{workspace_id}/sessions/{session_id}", { params: { path: { workspace_id: w, session_id: renaming!.id } }, body: { title } })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); setRenaming(null); },
@@ -114,7 +121,8 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
   return (
     // Bounded flex column: Agents takes its natural height up to 45% and scrolls beyond that; History gets the rest and
     // scrolls too. (Agents used to be unbounded, so with ~8+ agents History collapsed to zero height and never scrolled.)
-    <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r border-border bg-surface" aria-label="Chats">
+    <>
+    <aside className="flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-surface" style={{ width: panel.width }} aria-label="Chats">
       <div className="shrink-0 p-2">
         <button onClick={onCompany} className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium transition hover:bg-accent", active?.mode === "company" && "bg-accent")}>
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
@@ -162,6 +170,8 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
       <ConfirmDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title={`Delete "${deleting?.title}"?`} destructive confirmLabel="Delete"
         description="This removes the conversation history." onConfirm={() => deleting && del.mutate(deleting.id)} />
     </aside>
+    <ResizeHandle side="left" label="Resize the chat list" width={panel.width} onResize={panel.set} onReset={panel.reset} min={panel.min} max={panel.max()} className="-ml-1.5" />
+    </>
   );
 }
 
@@ -199,7 +209,8 @@ function DirectChat({ session, agent }: { session: SessionOut; agent?: AgentOut 
           <div ref={bottom} />
         </div>
       </div>
-      <Composer placeholder={`Message ${agent.name}…`} busy={!!chat.streaming} onStop={chat.stop} onSend={(t, a) => chat.send(t, a)} />
+      <Composer className="mx-auto w-full max-w-3xl" placeholder={`Message ${agent.name}…`} busy={!!chat.streaming} onStop={chat.stop}
+        onSend={(p) => chat.send(p.text, p.files, p.images)} />
     </div>
   );
 }
@@ -213,7 +224,8 @@ function ChatMessage({ m, agent, isLast, onRegenerate, busy }: { m: MessageOut; 
       <div className="flex justify-end animate-fade-up">
         <div className="max-w-[80%] space-y-1">
           {meta.attachments?.length > 0 && <AttachmentChips files={meta.attachments.map((a: { filename: string; chars: number }) => ({ filename: a.filename, chars: a.chars, text: "", truncated: false }))} />}
-          <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-sm text-primary-foreground shadow-sm">{meta.display ?? m.content}</div>
+          {meta.images?.length > 0 && <MessageImages align="end" images={(meta.images as { name: string; data_url: string }[]).map((i) => ({ name: i.name, src: i.data_url }))} />}
+          {(meta.display ?? m.content) && <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-sm text-primary-foreground shadow-sm">{meta.display ?? m.content}</div>}
           <div className="text-right text-[10px] text-muted-foreground">{clockTime(m.created_at)}</div>
         </div>
       </div>
@@ -285,45 +297,6 @@ function StreamingMessage({ s, agent }: { s: StreamingMsg; agent: AgentOut }) {
   );
 }
 
-function Composer({ placeholder, busy, onSend, onStop, disabled, extra }: {
-  placeholder: string; busy?: boolean; onSend: (text: string, att: import("@/types").ParsedFileOut[]) => void; onStop?: () => void; disabled?: boolean; extra?: React.ReactNode;
-}) {
-  const [text, setText] = React.useState("");
-  const att = useAttachments();
-  const [drag, setDrag] = React.useState(false);
-  const ref = React.useRef<HTMLTextAreaElement>(null);
-  React.useEffect(() => { if (ref.current) { ref.current.style.height = "auto"; ref.current.style.height = `${Math.min(200, ref.current.scrollHeight)}px`; } }, [text]);
-  const submit = () => {
-    if ((!text.trim() && !att.files.length) || busy || disabled) return;
-    onSend(text.trim(), att.files);
-    setText("");
-    att.clear();
-  };
-  return (
-    <div className="px-3 pb-3 pt-1">
-      <div className={cn("mx-auto max-w-3xl rounded-xl border bg-background shadow-sm transition-colors focus-within:border-primary/50", drag ? "border-primary border-dashed" : "border-border")}
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void att.upload(e.dataTransfer.files); }}>
-        {att.files.length > 0 && <div className="px-3 pt-2"><AttachmentChips files={att.files} onRemove={att.remove} /></div>}
-        <Textarea ref={ref} value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} rows={1} disabled={disabled}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
-          className="min-h-[44px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0" aria-label="Message" data-testid="composer" />
-        <div className="flex items-center gap-1 px-2 pb-2">
-          <Tip content="Attach txt, md, pdf or code"><Button variant="ghost" size="icon-sm" onClick={att.pick} loading={att.uploading} aria-label="Attach file"><Paperclip /></Button></Tip>
-          {att.input}
-          {extra}
-          <span className="ml-auto text-[10px] text-muted-foreground"><kbd className="kbd">Enter</kbd> send · <kbd className="kbd">Shift+Enter</kbd> newline</span>
-          {busy && onStop ? (
-            <Button size="sm" variant="secondary" onClick={onStop}><Square className="fill-current" />Stop</Button>
-          ) : (
-            <Button size="sm" onClick={submit} disabled={(!text.trim() && !att.files.length) || disabled} aria-label="Send"><Send />Send</Button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- company chat
 function CompanyChat({ session, agents, companyId }: { session: SessionOut; agents: Record<string, AgentOut>; companyId: string }) {
   const w = useWorkspaceId();
@@ -371,12 +344,12 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
             onDecide={(ok, scope, reason) => stream.send({ type: ok ? "approve" : "reject", approval_id: stream.state.pendingApproval!.id, scope, reason })} />
         </div>
       )}
-      <Composer
+      <Composer className="mx-auto w-full max-w-3xl"
         placeholder={live ? "Interject: your message is injected into the run…" : shownRun ? "Continue: ask for changes or the next step. The team keeps its context and files…" : "Give the company a goal…"}
-        onSend={(t) => {
+        onSend={(p) => {
           // a finished run continues like a chat (same run, history and files); "New run" starts over explicitly
-          if (shownRun) stream.send({ type: "interject", content: t, to_agent_id: target === "all" ? undefined : target });
-          else setGoal(t);
+          if (shownRun) void sendToRun(w, shownRun.id, p, target === "all" ? undefined : target, stream.send);
+          else setGoal(p.text);
         }}
         extra={shownRun ? (
           <Select ariaLabel="Send to" value={target} onValueChange={setTarget} className="h-7 w-[130px] text-xs"

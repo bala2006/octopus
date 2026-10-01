@@ -111,6 +111,9 @@ async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(ge
         m = rt.efficiency() if rt is not None else ((r.state_json or {}).get("metrics") or {})
         o.outcome.agent_turns, o.outcome.work_turns = int(m.get("turns", 0)), int(m.get("work_turns", 0))
         o.outcome.first_deliverable_turn, o.outcome.delegations = m.get("first_deliverable_turn"), int(m.get("delegations", 0))
+        for k in ("input_tokens", "cached_tokens", "loop_strikes", "rejected_messages", "recalls", "history_searches", "ledger_items"):
+            setattr(o.outcome, k, int(m.get(k, 0) or 0))
+        o.outcome.context_mode = str(m.get("context_mode") or (r.budget_json or {}).get("context_mode") or "pointers")
         result.append(o)
     return result
 
@@ -177,8 +180,19 @@ async def _send(run_id: str, body: InterjectIn, db: AsyncSession, user: User, ct
     agent_ids = {a.get("id") for a in (run.snapshot_json or {}).get("agents", [])}
     if body.to_agent_id and body.to_agent_id not in agent_ids and not (manager.get(run_id) and body.to_agent_id in manager.get(run_id).agents):
         raise HTTPException(422, "Unknown agent")
+    from app.services.images import ImageError, attach_text, parse_images
+
+    try:
+        images = parse_images([i.model_dump() for i in body.images])
+    except ImageError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    content = attach_text(body.content.strip(), [a.model_dump() for a in body.attachments])
+    if not content and images:
+        content = "(see the attached image" + ("s)" if len(images) > 1 else ")")
+    if not content:
+        raise HTTPException(422, "Write a message or attach a file or image")
     for _ in range(40):  # a run that is finalizing right now can be continued a moment later
-        if await manager.continue_run(run_id, ref(ctx), body.content, body.to_agent_id):
+        if await manager.continue_run(run_id, ref(ctx), content, body.to_agent_id, images):
             return {"ok": True}
         await asyncio.sleep(0.1)
     raise HTTPException(409, "Run could not be continued")
@@ -340,6 +354,24 @@ async def download_zip(run_id: str, db: AsyncSession = Depends(get_pdb), user: U
             zf.writestr("RUN_REPORT.md", run.report_md)
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="octopus-run-{run_id[:8]}.zip"'})
+
+
+@router.get("/{run_id}/images/{image_ref}")
+async def run_image(run_id: str, image_ref: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> Response:
+    """An image the user attached to a message in this run (messages carry its reference, e.g. "i2")."""
+    from app.models import RunRecord
+    from app.services.images import ImageError, decode
+
+    await owned_run(run_id, db, user)
+    rec = (await db.execute(select(RunRecord).where(RunRecord.run_id == run_id, RunRecord.ref == image_ref,
+                                                    RunRecord.kind == "image"))).scalar_one_or_none()
+    if rec is None:
+        raise HTTPException(404, "Image not found")
+    try:
+        media, data = decode(rec.content)
+    except ImageError as exc:
+        raise HTTPException(404, "Image not found") from exc
+    return Response(data, media_type=media, headers={"Cache-Control": "private, max-age=86400, immutable", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/{run_id}/browser/{name}")

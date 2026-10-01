@@ -343,7 +343,11 @@ class RunBudget(BaseModel):
     # pause for a human after this many turns without a file change / task-board move (0 = off)
     stall_turns: int = Field(30, ge=0, le=2000)
     max_tool_rounds: int = Field(40, ge=1, le=200)  # model calls per agent turn with native tools (each returns tool results)
-    context_recent: int = Field(30, ge=2, le=200)  # own messages kept verbatim; older ones are summarised
+    context_recent: int = Field(30, ge=2, le=200)  # own messages kept verbatim; older ones become pointers (or summaries)
+    # how agents' context is built: "pointers" = older items as one-line references into the run's archive (recall /
+    # search_history, team ledger, cache-friendly prompt order); "summary" = the previous approach (first-sentence summaries,
+    # shortened tool rounds), kept so the two can be compared with scripts/bench.py
+    context_mode: Literal["pointers", "summary"] = "pointers"
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
     persist_team: bool = True  # save agents hired / edited during the run back to the company
@@ -374,6 +378,15 @@ class RunOutcome(BaseModel):
     work_turns: int = 0
     first_deliverable_turn: int | None = None
     delegations: int = 0
+    # context efficiency (compare context modes with scripts/bench.py)
+    context_mode: str = ""
+    input_tokens: int = 0
+    cached_tokens: int = 0
+    loop_strikes: int = 0  # messages blocked as repeats by the loop detector
+    rejected_messages: int = 0  # messages refused (no channel, loop, limits)
+    recalls: int = 0
+    history_searches: int = 0
+    ledger_items: int = 0
 
 
 class RunOut(ORM):
@@ -402,9 +415,21 @@ class RunDetail(RunOut):
     report_md: str
 
 
+class ImageIn(BaseModel):
+    name: str = Field("image", max_length=120)
+    data_url: str = Field(max_length=7_500_000)  # data:image/...;base64,... (5 MB of image)
+
+
+class AttachmentIn(BaseModel):
+    filename: str = Field("file", max_length=200)
+    text: str = Field("", max_length=400_000)
+
+
 class InterjectIn(BaseModel):
-    content: str = Field(min_length=1, max_length=20000)
+    content: str = Field("", max_length=20000)
     to_agent_id: str | None = None
+    attachments: list[AttachmentIn] = Field(default_factory=list, max_length=5)  # parsed text files
+    images: list[ImageIn] = Field(default_factory=list, max_length=4)
 
 
 class ApprovalIn(BaseModel):

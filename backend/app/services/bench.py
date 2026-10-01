@@ -3,7 +3,9 @@
 Each task has a goal, optional seed files and objective checks (files exist / contain text / a command succeeds). A case
 creates a fresh project folder, opens it as a workspace, creates the company from a template, runs it, then checks the
 folder. Results include pass/fail plus the run's efficiency (turns, share of turns spent coordinating, turn of the first
-deliverable), tokens, cost and time, so "team vs. solo" can be decided with numbers. Driven by ``scripts/bench.py``.
+deliverable), tokens, cost and time, so "team vs. solo" can be decided with numbers. Context metrics (input tokens, the
+share served from the prompt cache, messages blocked as repeats, recalls / history searches) compare context modes
+("pointers" vs. the earlier "summary" approach). Driven by ``scripts/bench.py``.
 """
 from __future__ import annotations
 
@@ -79,25 +81,48 @@ async def run_case(client: httpx.AsyncClient, *, folder: Path, template: str, ta
                     if x["id"] == run_id), {})
     checks = evaluate(folder, task.get("checks") or [])
     turns = outcome.get("agent_turns") or run.get("turns", 0)
+    inp, cached = int(outcome.get("input_tokens", 0) or 0), int(outcome.get("cached_tokens", 0) or 0)
     return {"task": task["id"], "template": template, "status": run.get("status"), "passed": bool(checks) and all(c["ok"] for c in checks),
             "checks_passed": sum(c["ok"] for c in checks), "checks": len(checks), "turns": turns, "work_turns": outcome.get("work_turns", 0),
             "overhead_share": round(1 - outcome.get("work_turns", 0) / turns, 3) if turns else None,
             "first_deliverable_turn": outcome.get("first_deliverable_turn"), "delegations": outcome.get("delegations", 0),
             "tokens": run.get("tokens_used", 0), "cost_usd": run.get("cost_usd", 0.0), "seconds": round(time.monotonic() - t0, 1),
+            "context_mode": outcome.get("context_mode") or (budget or {}).get("context_mode") or "pointers",
+            "input_tokens": inp, "cached_tokens": cached, "cached_share": round(cached / inp, 3) if inp else None,
+            "loop_strikes": int(outcome.get("loop_strikes", 0) or 0), "rejected_messages": int(outcome.get("rejected_messages", 0) or 0),
+            "recalls": int(outcome.get("recalls", 0) or 0), "history_searches": int(outcome.get("history_searches", 0) or 0),
             "run_id": run_id, "halt_reason": run.get("halt_reason", ""), "check_results": checks}
 
 
+def _pct(x: float | None) -> str:
+    return f"{round(100 * x)}%" if x is not None else "-"
+
+
+def _mean(xs: list[float]) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
+
+
 def summarize(results: list[dict[str, Any]]) -> str:
-    lines = ["| Template | Task | Pass | Checks | Status | Turns | Overhead | 1st file at turn | Tokens | Cost | Time |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+    """Per-case table, then one row per (template, context mode): pass rate, turns, tokens, cache share, repeats."""
+    lines = ["| Template | Mode | Task | Pass | Checks | Status | Turns | Overhead | 1st file at turn | Tokens | Input | Cached | "
+             "Repeats blocked | Recalls | Cost | Time |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
-        oh = f"{round(100 * r['overhead_share'])}%" if r["overhead_share"] is not None else "-"
-        lines.append(f"| {r['template']} | {r['task']} | {'✅' if r['passed'] else '❌'} | {r['checks_passed']}/{r['checks']} | {r['status']} | "
-                     f"{r['turns']} | {oh} | {r['first_deliverable_turn'] or '-'} | {r['tokens']:,} | ${r['cost_usd']:.4f} | {r['seconds']}s |")
-    lines += ["", "| Template | Pass rate | Mean turns | Mean overhead | Mean tokens |", "|---|---|---|---|---|"]
-    for tpl in dict.fromkeys(r["template"] for r in results):
-        rs = [r for r in results if r["template"] == tpl]
+        mode = r.get("context_mode", "pointers")
+        lines.append(f"| {r['template']} | {mode} | {r['task']} | {'✅' if r['passed'] else '❌'} | {r['checks_passed']}/{r['checks']} | "
+                     f"{r['status']} | {r['turns']} | {_pct(r['overhead_share'])} | {r['first_deliverable_turn'] or '-'} | "
+                     f"{r['tokens']:,} | {r.get('input_tokens', 0):,} | {_pct(r.get('cached_share'))} | {r.get('loop_strikes', 0)} | "
+                     f"{r.get('recalls', 0) + r.get('history_searches', 0)} | ${r['cost_usd']:.4f} | {r['seconds']}s |")
+    lines += ["", "| Template | Mode | Pass rate | Mean turns | Mean overhead | Mean tokens | Mean input tokens | Cached share | "
+              "Repeats blocked | Rejected messages |", "|---|---|---|---|---|---|---|---|---|---|"]
+    groups = dict.fromkeys((r["template"], r.get("context_mode", "pointers")) for r in results)
+    for tpl, mode in groups:
+        rs = [r for r in results if r["template"] == tpl and r.get("context_mode", "pointers") == mode]
         ohs = [r["overhead_share"] for r in rs if r["overhead_share"] is not None]
-        lines.append(f"| {tpl} | {sum(r['passed'] for r in rs)}/{len(rs)} | {sum(r['turns'] for r in rs) / len(rs):.1f} | "
-                     f"{(100 * sum(ohs) / len(ohs)) if ohs else 0:.0f}% | {sum(r['tokens'] for r in rs) / len(rs):,.0f} |")
+        inp = sum(r.get("input_tokens", 0) for r in rs)
+        cached = sum(r.get("cached_tokens", 0) for r in rs)
+        lines.append(f"| {tpl} | {mode} | {sum(r['passed'] for r in rs)}/{len(rs)} | {_mean([r['turns'] for r in rs]):.1f} | "
+                     f"{100 * _mean(ohs):.0f}% | {_mean([r['tokens'] for r in rs]):,.0f} | {_mean([r.get('input_tokens', 0) for r in rs]):,.0f} | "
+                     f"{_pct(cached / inp if inp else None)} | {_mean([r.get('loop_strikes', 0) for r in rs]):.1f} | "
+                     f"{_mean([r.get('rejected_messages', 0) for r in rs]):.1f} |")
     return "\n".join(lines)

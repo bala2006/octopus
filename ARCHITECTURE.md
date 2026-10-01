@@ -23,7 +23,7 @@ flowchart TD
   L -- yes --> G[gate: pause / step credits / awaiting user]
   G --> N{next runnable agent<br/>FIFO over mailbox + activating observations}
   N -- none --> Q[finalize: completed (quiescent)]
-  N -- agent --> P[build prompt:<br/>system prompt + meta rules + roster + channels<br/>+ blackboard + rolling summary + recent + inbox + tool results]
+  N -- agent --> P[build prompt:<br/>system prompt + meta rules + roster + channels<br/>+ conversation: older messages as pointers, recent in full<br/>+ ledger + blackboard + inbox + tool results]
   P --> S[stream LLM → token_stream + live activity detection]
   S --> T{native function calls?<br/>Azure Responses API}
   T -- yes --> E2[run each call → function_call_output<br/>replay items, call the model again<br/>until it stops calling tools]
@@ -67,7 +67,13 @@ checks) per template against a backend and prints a comparison table.
 
 **Limits.** Global max turns, per-edge `max_turns`, token budget, cost budget, active wall-clock timeout (paused time is excluded), per-agent `max_autonomous_turns`, and a loop detector. The detector rejects near-duplicate messages on the same pair; after N strikes the run auto-pauses for human review. The kill switch cancels the task immediately; a report is still produced.
 
-**Context management.** Each turn contains the agent's last N messages verbatim. Older ones are compressed into an extractive rolling summary (first sentence per message, newest first within a character budget), plus the blackboard: goal, decisions, debate/review states, task board, file index, and user notes.
+**Context management (near-lossless).** Nothing an agent has seen is summarised away; it is kept in the run's archive under a short reference and shown in the prompt either in full or as a one-line pointer.
+
+- **References:** messages `m12`, tool outputs `o7`, long tool arguments `a3`, images the user attached `i2`, ledger items `L4`, file versions `path@v3` (messages, artifacts and the `run_records` table store the originals).
+- **Tools:** `recall(ref, offset)` returns the exact original (paged); `search_history(query)` searches every message (including teammates' conversations), tool output and ledger item; `update_ledger` adds or edits items of the team ledger (decisions, facts, open questions) one by one, keeping each item's history.
+- **Prompt order, stable → changing:** system prompt (cache breakpoint) · conversation: older messages as pointers, the last N in full; the cut moves in blocks so this part only grows at its end (cache breakpoint) · ledger, blackboard, team status and activity, new messages, tool results. Breakpoints are sent as `prompt_cache_breakpoint` blocks where the deployment supports them and dropped automatically otherwise; each agent has its own `prompt_cache_key`.
+- **Tool loops:** the last 3 rounds are replayed verbatim; older long outputs and arguments become pointers (`[hidden from this older round: … kept as o7: recall('o7')]`).
+- **Comparison:** `budget.context_mode = "summary"` restores the previous approach (first-sentence summaries, shortened rounds, no context tools). `scripts/bench.py --context-modes pointers,summary` reports pass rate, tokens, cached share and blocked repeats per mode.
 
 **Live activity.** While a reply streams, `live_activity()` scans the partial JSON for the action being composed. It emits `agent_status` updates such as *"Drafting proposal to Priya…"* or *"Writing backend/todo_api.py…"* before the action executes. During execution, statuses become `writing`, `reading`, `running`, `tool` and `awaiting_approval`.
 

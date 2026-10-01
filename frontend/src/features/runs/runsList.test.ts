@@ -4,7 +4,8 @@ import type { RunOut } from "@/types";
 
 const outcome = (o: Partial<NonNullable<RunOut["outcome"]>> = {}) =>
   ({ tasks_total: 0, tasks_done: 0, tasks_open: 0, tasks_blocked: 0, files: 0, errors: 0, final_report: false,
-     agent_turns: 0, work_turns: 0, first_deliverable_turn: null, delegations: 0, ...o });
+     agent_turns: 0, work_turns: 0, first_deliverable_turn: null, delegations: 0, context_mode: "pointers", input_tokens: 0, cached_tokens: 0,
+     loop_strikes: 0, rejected_messages: 0, recalls: 0, history_searches: 0, ledger_items: 0, ...o });
 const run = (p: Partial<RunOut>): RunOut => ({ id: "r", company_id: "c", session_id: null, goal: "g", status: "completed", mode: "autonomous",
   permission_level: "danger", budget: {}, tokens_used: 0, cost_usd: 0, turns: 0, halt_reason: "", summary: "", created_at: "2026-10-01T10:00:00",
   started_at: null, ended_at: null, outcome: outcome(), ...p }) as RunOut;

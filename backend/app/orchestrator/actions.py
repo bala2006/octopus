@@ -173,6 +173,37 @@ class SearchProject(BaseModel):
     max_results: int = Field(80, ge=1, le=300)
 
 
+class Recall(BaseModel):
+    """Get the exact original of something shown as a pointer: a message ("m12"), a tool output ("o7"), long tool arguments
+    ("a3"), an image ("i2"), a ledger item with its history ("L4") or a file version ("path/to/file.py@v2", or just the path for the latest)."""
+    action: Literal["recall"]
+    ref: str = Field(min_length=1, max_length=520)
+    offset: int = Field(0, ge=0, description="Character offset, for reading a long item in pages")
+
+
+class SearchHistory(BaseModel):
+    """Search everything this run has said and produced: every message (yours and your teammates'), tool output and ledger item."""
+    action: Literal["search_history"]
+    query: str = Field(min_length=1, max_length=300, description='Words to look for (all are tried), or an "exact phrase" in quotes')
+    kind: Literal["any", "messages", "outputs", "ledger"] = "any"
+    max_results: int = Field(20, ge=1, le=60)
+
+
+class LedgerEntry(BaseModel):
+    id: str | None = Field(None, max_length=12, description='An existing item to change ("L3"); omit to add a new item')
+    kind: Literal["decision", "fact", "question"] | None = Field(None, description="Required for a new item")
+    text: str | None = Field(None, max_length=4000, description="The item (required for a new item; replaces the text when editing)")
+    status: Literal["active", "open", "resolved", "superseded"] | None = None
+    note: str = Field("", max_length=2000, description="Why it changed, or the answer to a question")
+
+
+class UpdateLedger(BaseModel):
+    """Add items to the team ledger or change existing ones by id. The ledger is the team's shared list of decisions, facts and
+    open questions; every change is kept (recall the item id to see its history)."""
+    action: Literal["update_ledger"]
+    items: list[LedgerEntry] = Field(min_length=1, max_length=20)
+
+
 class Choice(BaseModel):
     label: str = Field(min_length=1, max_length=200)
     description: str = Field("", max_length=500)
@@ -282,7 +313,7 @@ class Wait(BaseModel):
 
 Action = Annotated[
     Union[SendMessage, Delegate, WriteFile, EditFile, SearchProject, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
-          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, Finish, Wait],
+          Recall, SearchHistory, UpdateLedger, WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, Finish, Wait],
     Field(discriminator="action"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Action)
@@ -294,7 +325,9 @@ ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "w
                   "mcp": "mcp_call", "call_tool": "mcp_call", "hire": "create_agent", "spawn_agent": "create_agent",
                   "add_agent": "create_agent", "update_self": "update_agent", "edit_agent": "update_agent", "configure_agent": "update_agent",
                   "mkdir": "create_folder", "make_dir": "create_folder", "create_directory": "create_folder", "mkdir_p": "create_folder",
-                  "move": "move_file", "rename": "move_file", "mv": "move_file", "rename_file": "move_file", "team": "list_agents", "roster": "list_agents", "view_agents": "list_agents"}
+                  "move": "move_file", "rename": "move_file", "mv": "move_file", "rename_file": "move_file", "team": "list_agents", "roster": "list_agents", "view_agents": "list_agents",
+                  "lookup": "recall", "expand": "recall", "get_ref": "recall", "search_messages": "search_history",
+                  "history_search": "search_history", "ledger": "update_ledger", "record_decision": "update_ledger"}
 
 # tool toggle required for each action (absent => always available). mcp_call is gated per server.
 ACTION_TOOL = {"send_message": "send_message", "delegate": "send_message", "search_project": "file_read", "write_file": "file_write", "edit_file": "file_write", "create_folder": "file_write", "move_file": "file_write", "read_file": "file_read", "list_files": "list_files",
@@ -385,7 +418,10 @@ def parse_envelope(text: str) -> ParseResult:
     return res
 
 
-def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] | None = None) -> str:
+CONTEXT_ACTIONS = {"recall", "search_history", "update_ledger"}
+
+
+def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] | None = None, *, context_tools: bool = True) -> str:
     """Human-readable action schema injected into every agent's prompt (only enabled tools)."""
     lines = []
     if tool_enabled(enabled_tools, "send_message"):
@@ -399,6 +435,14 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
         '"assignee":"<name>","status":"todo|in_progress|in_review|done|blocked","acceptance_criteria":"..."}]}',
         '{"action":"remember","key":"...","value":"...","scope":"self|project"}  (long-term note; "project" = shared with every agent, kept across runs)',
     ]
+    if context_tools:
+        lines += [
+            '{"action":"recall","ref":"m12 | o7 | a3 | i2 | L4 | path/file.py@v2","offset":0}  (the exact original of anything shown as a pointer)',
+            '{"action":"search_history","query":"words or \\"exact phrase\\"","kind":"any|messages|outputs|ledger"}  (search every '
+            'message, tool output and ledger item of this run)',
+            '{"action":"update_ledger","items":[{"kind":"decision|fact|question","text":"..."},{"id":"L3","status":"resolved","note":"answer"}]}'
+            '  (the team\'s shared decisions, facts and open questions: add items, or change one by id)',
+        ]
     if tool_enabled(enabled_tools, "list_files"):
         lines.append('{"action":"list_files","prefix":"optional/dir"}')
     if tool_enabled(enabled_tools, "file_read"):

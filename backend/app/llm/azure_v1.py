@@ -69,12 +69,36 @@ def legacy_api_base(base_url: str) -> str:
     return u.split("/openai", 1)[0]
 
 
+BREAKPOINT = "prompt_cache_breakpoint"
+
+
+def _message(m: dict[str, Any], style: ApiStyle, breakpoints: bool) -> dict[str, Any]:
+    """A prompt message for the API. Messages marked ``cache_breakpoint`` end a reusable prefix: with explicit prompt-cache
+    breakpoints (GPT-5.6 family and later) the text becomes a content block that carries the breakpoint, so what follows
+    can change without invalidating the cached prefix. Deployments that reject breakpoints get plain messages."""
+    role, content = m.get("role", "user"), m.get("content", "")
+    images = m.get("images") or []
+    if not isinstance(content, str):
+        return {"role": role, "content": content}
+    marked = breakpoints and m.get("cache_breakpoint") and content
+    if not marked and not images:
+        return {"role": role, "content": content}
+    block: dict[str, Any] = {"type": "input_text" if style == "responses" else "text", "text": content}
+    if marked:
+        block[BREAKPOINT] = {"mode": "explicit"}
+    pics = [{"type": "input_image", "image_url": u} if style == "responses" else {"type": "image_url", "image_url": {"url": u}}
+            for u in images]
+    return {"role": role, "content": [block, *pics]}
+
+
 def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
     reasoning = bool(req.extra.get("reasoning_model"))
+    breakpoints = BREAKPOINT not in drop
+    messages = [_message(m, style, breakpoints) for m in req.messages]
     if style == "responses":
         body: dict[str, Any] = {
             "model": req.model, "stream": True, "max_output_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)), "store": False,
-            "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages] + list(req.continuation),
+            "input": messages + list(req.continuation),
         }
         if req.tools:  # native function calling: the model emits function_call items instead of a JSON envelope
             body["tools"] = [{"type": "function", "name": t["name"], "description": t.get("description", ""), "parameters": t["parameters"]}
@@ -88,7 +112,7 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
             body["text"] = {"format": {"type": "json_object"}}
     else:
         body = {
-            "model": req.model, "stream": True, "messages": req.messages, "max_completion_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)),
+            "model": req.model, "stream": True, "messages": messages, "max_completion_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)),
             "stream_options": {"include_usage": True},
         }
         if req.json_mode:
@@ -121,6 +145,9 @@ def _rejected_param(status: int, text: str, body: dict[str, Any]) -> str | None:
         err = {}
     param = err.get("param") if isinstance(err, dict) else None
     msg = (err.get("message") if isinstance(err, dict) else None) or text
+    # explicit cache breakpoints only exist on newer models: fall back to plain messages (automatic prefix caching still works)
+    if (BREAKPOINT in msg or (isinstance(param, str) and BREAKPOINT in param)) and BREAKPOINT in json.dumps(body.get("input") or body.get("messages")):
+        return BREAKPOINT
     # an unsupported reasoning *summary* must not cost the reasoning effort: drop just the nested field
     if isinstance(body.get("reasoning"), dict) and "summary" in body["reasoning"] and (
             param == "reasoning.summary" or ("summary" in msg.lower() and "reasoning" in msg.lower())):

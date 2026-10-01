@@ -1165,6 +1165,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/w/{workspace_id}/runs/{run_id}/images/{image_ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Image
+         * @description An image the user attached to a message in this run (messages carry its reference, e.g. "i2").
+         */
+        get: operations["run_image_api_v1_w__workspace_id__runs__run_id__images__image_ref__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/w/{workspace_id}/runs/{run_id}/browser/{name}": {
         parameters: {
             query?: never;
@@ -1632,6 +1652,19 @@ export interface components {
              */
             size: number;
         };
+        /** AttachmentIn */
+        AttachmentIn: {
+            /**
+             * Filename
+             * @default file
+             */
+            filename: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
         /** AuthConfig */
         AuthConfig: {
             /** Single User Mode */
@@ -2040,6 +2073,16 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImageIn */
+        ImageIn: {
+            /**
+             * Name
+             * @default image
+             */
+            name: string;
+            /** Data Url */
+            data_url: string;
+        };
         /** InstantiateTemplateIn */
         InstantiateTemplateIn: {
             /** Template Key */
@@ -2049,10 +2092,17 @@ export interface components {
         };
         /** InterjectIn */
         InterjectIn: {
-            /** Content */
+            /**
+             * Content
+             * @default
+             */
             content: string;
             /** To Agent Id */
             to_agent_id?: string | null;
+            /** Attachments */
+            attachments?: components["schemas"]["AttachmentIn"][];
+            /** Images */
+            images?: components["schemas"]["ImageIn"][];
         };
         /** McpServerIn */
         McpServerIn: {
@@ -2420,6 +2470,12 @@ export interface components {
              */
             context_recent: number;
             /**
+             * Context Mode
+             * @default pointers
+             * @enum {string}
+             */
+            context_mode: "pointers" | "summary";
+            /**
              * Force Mock
              * @default false
              */
@@ -2630,6 +2686,46 @@ export interface components {
              * @default 0
              */
             delegations: number;
+            /**
+             * Context Mode
+             * @default
+             */
+            context_mode: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Cached Tokens
+             * @default 0
+             */
+            cached_tokens: number;
+            /**
+             * Loop Strikes
+             * @default 0
+             */
+            loop_strikes: number;
+            /**
+             * Rejected Messages
+             * @default 0
+             */
+            rejected_messages: number;
+            /**
+             * Recalls
+             * @default 0
+             */
+            recalls: number;
+            /**
+             * History Searches
+             * @default 0
+             */
+            history_searches: number;
+            /**
+             * Ledger Items
+             * @default 0
+             */
+            ledger_items: number;
         };
         /** SessionIn */
         SessionIn: {
@@ -5466,6 +5562,39 @@ export interface operations {
             header?: never;
             path: {
                 run_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_image_api_v1_w__workspace_id__runs__run_id__images__image_ref__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                image_ref: string;
                 workspace_id: string;
             };
             cookie?: never;

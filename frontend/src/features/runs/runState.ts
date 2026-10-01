@@ -24,6 +24,8 @@ export interface BrowserAction {
   seq: number; ts?: string; agent_id: string; call_id?: string; tool: string; args: Record<string, unknown>; ok: boolean;
   url: string; title: string; frame?: string | null; note?: string;
 }
+/** One item of the team ledger: a decision, fact or question, edited in place (each change is kept server-side). */
+export interface LedgerItem { id: string; kind: "decision" | "fact" | "question"; text: string; status: string; note?: string; by?: string | null; turn?: number; revisions?: number }
 export interface ProtocolState { kind: "debate" | "review"; result: string; edge_id: string; state: Record<string, any>; seq?: number } // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export interface RunLive {
@@ -49,6 +51,7 @@ export interface RunLive {
   toolCalls: Record<string, ToolCall>;
   /** browser actions in order, all agents (each agent has its own tab) */
   browser: BrowserAction[];
+  ledger: Record<string, LedgerItem>;
   tasks: Record<string, LiveTask>;
   artifacts: Record<string, LiveArtifact>;
   usage: Usage;
@@ -68,7 +71,7 @@ export interface RunLive {
 export const initialRun = (): RunLive => ({
   status: "queued", reason: "", summary: "", agentStatus: {}, activity: {}, streaming: {}, thoughts: {}, thinking: {}, turnStart: {}, messages: [], rejected: [],
   extraAgents: [], extraEdges: [], agentPatches: {}, orgEvents: [], fresh: {}, departments: {},
-  toolCalls: {}, browser: [], tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
+  toolCalls: {}, browser: [], ledger: {}, tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
   pendingApproval: null, awaiting: null, errors: [], timeline: [], approvals: [], lastSeq: 0, live: false, replayDone: false,
 });
 
@@ -148,6 +151,11 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
       return { ...next, browser: [...s.browser, a].slice(-300),
         timeline: push({ type: e.type, agent_id: a.agent_id, tone: a.ok ? "tool" : "error",
           label: `${n(a.agent_id)} ${browserVerb(a.tool)}${where && a.tool === "browser_navigate" ? ` ${clip(where, 50)}` : ""}${a.ok ? "" : " (failed)"}` }) };
+    }
+    case "ledger_updated": {
+      const items = (d.items ?? []) as LedgerItem[];
+      return { ...next, ledger: { ...s.ledger, ...Object.fromEntries(items.map((i) => [i.id, i])) },
+        timeline: push({ type: e.type, agent_id: d.agent_id, tone: "protocol", label: `${n(d.agent_id)} updated the ledger: ${items.map((i) => i.id).join(", ")}` }) };
     }
     case "task_updated": {
       const t = d.task as LiveTask;
