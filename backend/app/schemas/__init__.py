@@ -88,7 +88,11 @@ class AgentBehavior(BaseModel):
     strictness: float = Field(0.5, ge=0, le=1)
     debate_style: DebateStyle = "balanced"
     max_autonomous_turns: int = Field(12, ge=1, le=200)
-    template_key: str = ""
+    template_key: str = ""  # the agent's role in the role library (Settings → Roles)
+    # True: the system prompt follows the role (edits in Settings → Roles apply); False: the agent has its own prompt;
+    # None (agents from before roles were linked): linked while the prompt is still the built-in text
+    prompt_linked: bool | None = None
+    extra_instructions: str = Field("", max_length=8000)  # appended to the role prompt for this agent only
     # reasoning effort for reasoning models (gpt-6-luna supports none..max); "default" = the model's own default (medium)
     reasoning_effort: ReasoningEffort = "default"
 
@@ -282,6 +286,20 @@ class RoleTemplateOut(BaseModel):
     description: str
     system_prompt: str
     tools: AgentTools
+    category: str = "General"
+    source: Literal["builtin", "modified", "custom"] = "builtin"  # modified = a built-in role the user edited
+
+
+class RoleIn(BaseModel):
+    """Create a custom role (POST) or edit a role (PUT; for a built-in role this saves an override)."""
+    role: str = Field(min_length=1, max_length=120)
+    category: str = Field(default="", max_length=40)
+    description: str = Field(default="", max_length=2000)
+    system_prompt: str = Field(min_length=1, max_length=40000)
+    default_name: str = Field(default="", max_length=60)
+    color: str = Field(default="", max_length=20)
+    avatar: str = Field(default="", max_length=40)
+    tools: AgentTools | None = None
 
 
 class InstantiateTemplateIn(BaseModel):

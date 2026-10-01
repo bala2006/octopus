@@ -176,11 +176,14 @@ def browser_note(agent: AgentSpec, preview_url: str) -> str:
 
 
 def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
-                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False, project_memory: str = "") -> str:
+                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False, project_memory: str = "",
+                        role_prompt: str | None = None) -> str:
+    """``role_prompt``: the agent's prompt resolved from the role library (services/roles.py); default: its own."""
     names = {a.id: a.name for a in agents.values()}
     variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role,
                  **org_variables(agent, agents)}
-    base = render_template(agent.system_prompt or f"You are {agent.name}, {agent.role} at {company}.", variables)
+    base = render_template((agent.system_prompt if role_prompt is None else role_prompt)
+                           or f"You are {agent.name}, {agent.role} at {company}.", variables)
     allowed = allowed_recipients(edges, agent.id)
     channel_lines = []
     for rid, es in allowed.items():

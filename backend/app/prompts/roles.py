@@ -432,6 +432,7 @@ def agent_from_role(key: str, *, name: str | None = None, entry: bool = False, x
     behavior = {"assertiveness": 0.5, "creativity": 0.5, "strictness": 0.5, "debate_style": "balanced", "max_autonomous_turns": 12}
     behavior.update(t.behavior)
     behavior["template_key"] = key
+    behavior["prompt_linked"] = True  # the prompt follows the role library (Settings → Roles); see services/roles.py
     tools = dict(t.tools or _tools())
     manager = bool(tools.get("manage_team")) if is_manager is None else is_manager
     return {

@@ -50,7 +50,7 @@ describe("canvas store", () => {
 describe("departments", () => {
   beforeEach(() => useCanvas.getState().reset());
   const role = (key: string, name: string) => ({
-    key, role: key, default_name: name, color: "#8b5cf6", avatar: "code", description: "", system_prompt: "p",
+    key, role: key, default_name: name, color: "#8b5cf6", avatar: "code", description: "", system_prompt: "p", category: "Engineering", source: "builtin" as const,
     tools: { file_read: true, file_write: true, list_files: true, terminal: false, web_search: false, calculator: true, ask_user: false, send_message: true, manage_team: false, browser: true, mcp_servers: [] },
   });
 

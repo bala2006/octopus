@@ -49,6 +49,7 @@ from app.orchestrator.protocols import (
 from app.schemas import RunBudget
 from app.services import project_memory as PM
 from app.tools import basic
+from app.services.roles import resolve_prompt
 from app.tools.sandbox import SandboxError, parse_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError
 
@@ -361,6 +362,9 @@ class RunRuntime(TeamMixin):
         self.tokens = run.tokens_used or 0
         self.cost = run.cost_usd or 0.0
         self.active_seconds = 0.0
+        from app.prompts.roles import all_roles
+
+        self.roles = all_roles()  # replaced by the owner's role library in load_roles()
         self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
         # verify-before-finish: code changed since anything was last run / opened in the browser
         self.unverified: dict[str, int] = {}  # deliverable path → turn it last changed without being exercised since
@@ -1324,7 +1328,8 @@ class RunRuntime(TeamMixin):
         native = self.native_tools_for(req)
         system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
                                      status=self.status, preview_url=self.preview_url(), native=native,
-                                     project_memory=PM.render(self.memory, exclude_run=self.run_id))
+                                     project_memory=PM.render(self.memory, exclude_run=self.run_id),
+                                     role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, self.roles))
         user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
                                  names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
                                  team_status=team_status(self.agents, self.status))
@@ -2063,8 +2068,19 @@ class RunRuntime(TeamMixin):
         """Where the agents' browser can open this project (served by Octopus, sandboxed)."""
         return f"{get_settings().public_url.rstrip('/')}/api/v1/w/{self.project.workspace_id}/preview/"
 
+    async def load_roles(self) -> None:
+        """The run owner's role library (built-in roles + their edits + their own roles): linked agents' prompts come from it."""
+        from app.services.roles import effective_roles
+
+        try:
+            async with registry_factory()() as rdb:
+                self.roles = await effective_roles(rdb, self.user_id)
+        except Exception as exc:  # noqa: BLE001 - built-in roles still work
+            log.warning("roles_not_loaded", error=str(exc)[:200])
+
     async def load_mcp(self) -> None:
         """Resolve MCP servers granted to each agent (only the run owner's registered, enabled servers)."""
+        await self.load_roles()
         from app.models import McpServer
         from app.tools.mcp_client import McpConfig
 

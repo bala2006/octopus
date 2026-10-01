@@ -9,8 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import current_user
 from app.db.session import get_registry_db
 from app.models import User, UserTemplate
-from app.prompts.roles import all_roles
-from app.schemas import AgentTools, CanvasExport, DepartmentSummary, RoleTemplateOut, TemplateOut, UserTemplateIn
+from app.schemas import CanvasExport, DepartmentSummary, RoleTemplateOut, TemplateOut, UserTemplateIn
 from app.services.templates import TEMPLATES, build_from_template, summarize_departments, template_summary
 
 router = APIRouter(prefix="/templates", tags=["templates"])
@@ -50,10 +49,11 @@ async def list_templates(db: AsyncSession = Depends(get_registry_db), user: User
 
 
 @router.get("/roles", response_model=list[RoleTemplateOut])
-async def list_roles() -> list[RoleTemplateOut]:
-    return [RoleTemplateOut(key=r.key, role=r.role, default_name=r.default_name, color=r.color, avatar=r.avatar,
-                            description=r.description, system_prompt=r.system_prompt, tools=AgentTools(**r.tools) if r.tools else AgentTools())
-            for r in all_roles().values()]
+async def list_roles(db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> list[RoleTemplateOut]:
+    """The effective role library (built-in roles with the user's edits, plus their own roles); same as GET /roles."""
+    from app.api.v1.roles import role_list
+
+    return await role_list(db, user)
 
 
 @router.get("/{key}/spec", response_model=CanvasExport)

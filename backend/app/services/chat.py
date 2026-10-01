@@ -140,7 +140,13 @@ class ChatConnection:
                      "role": agent.role, "team": ", ".join(f"{a.name} ({a.role})" for a in company.agents),
                      "department": agent.department or "company", "manager": mgr.name if mgr else "the user",
                      "reports": ", ".join(x.name for x in company.agents if x.reports_to == agent.id) or "nobody yet"}
-        system = render_template(agent.system_prompt or f"You are {agent.name}, {agent.role}.", variables)
+        from app.db.session import registry_factory
+        from app.services.roles import effective_roles, resolve_prompt
+
+        async with registry_factory()() as rdb:
+            roles = await effective_roles(rdb, self.user_id)
+        prompt = resolve_prompt(agent.behavior_json or {}, agent.system_prompt or "", roles)
+        system = render_template(prompt or f"You are {agent.name}, {agent.role}.", variables)
         system += ("\n\n## Direct chat mode\nYou are chatting directly with the user (not with teammates). Ignore the JSON action "
                    "schema here and reply in clear GitHub-flavoured Markdown; use fenced code blocks with language tags.")
         if memory:
