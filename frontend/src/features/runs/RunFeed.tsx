@@ -3,6 +3,8 @@ import { tone } from "@/lib/palette";
 import { ArrowRight, Ban, ChevronDown, CircleCheck, CircleX, FileCode2, Gavel, Settings2, Sparkles, Terminal, User } from "lucide-react";
 import { MESSAGE_TYPE_LABEL, statusMeta } from "@/lib/meta";
 import { clockTime, cn } from "@/lib/utils";
+import { fetchRaw } from "@/lib/api";
+import { useWorkspaceId } from "@/hooks/queries";
 import type { AgentOut, MessageOut } from "@/types";
 import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
@@ -94,11 +96,22 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
   );
 }
 
+/** A delegation brief or its result: the work itself shows up as files and task-board changes, so these collapse to one line. */
+export const isDelegationMessage = (meta: Record<string, unknown>) => !!(meta.delegation || meta.delegation_result);
+
+/** First meaningful line of a message, without markdown markers: the collapsed view of a delegation. */
+export function firstLine(text: string): string {
+  const line = text.split("\n").map((l) => l.replace(/^[#>*\-\s]+/, "").trim()).find(Boolean) ?? "";
+  return line.length > 160 ? `${line.slice(0, 159)}…` : line;
+}
+
 function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, AgentOut> }) {
   const from = m.from_agent_id ? agents[m.from_agent_id] : null;
   const to = m.to_agent_id ? agents[m.to_agent_id] : null;
-  const [open, setOpen] = React.useState(m.content.length < 700 || m.type === "final_report");
   const meta = (m.meta ?? {}) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const delegated = isDelegationMessage(meta);
+  const [open, setOpen] = React.useState(!delegated && (m.content.length < 700 || m.type === "final_report"));
+  const expandable = delegated ? m.content.trim().length > 0 : m.content.length >= 700 && m.type !== "final_report";
   const isUser = m.sender === "user";
   const verdict = meta.verdict as string | undefined;
   return (
@@ -120,9 +133,17 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
             {meta.awaiting_input && <Badge variant="warning">asks you</Badge>}
             <span className="ml-auto text-[10px] tabular-nums text-muted-foreground opacity-0 transition group-hover:opacity-100">t{m.turn_no} · {clockTime(m.created_at)}</span>
           </div>
-          <div className={cn("relative mt-1 text-[13px]", !open && "max-h-28 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}>
-            <Markdown>{m.content}</Markdown>
-          </div>
+          {delegated && !open ? (
+            <button onClick={() => setOpen(true)} data-testid="delegation-collapsed" title="Show the full text"
+              className="mt-0.5 block w-full truncate text-left text-[12px] text-muted-foreground hover:text-foreground">
+              {meta.delegation_result ? "Result: " : ""}{firstLine(m.content) || "(empty)"}
+            </button>
+          ) : (
+            <div className={cn("relative mt-1 text-[13px]", !open && "max-h-28 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}>
+              <Markdown>{m.content}</Markdown>
+            </div>
+          )}
+          {Array.isArray(meta.images) && meta.images.length > 0 && <GoalImages runId={m.run_id ?? ""} images={meta.images} />}
           {Array.isArray(meta.options) && meta.options.length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Offered answers">
               {(meta.options as { label: string; recommended?: boolean }[]).map((o, i) => (
@@ -132,12 +153,40 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
               ))}
             </ul>
           )}
-          {m.content.length >= 700 && m.type !== "final_report" && (
+          {expandable && (open || !delegated) && (
             <button onClick={() => setOpen(!open)} className="mt-0.5 text-[11px] font-medium text-primary hover:underline">{open ? "Show less" : "Show more"}</button>
           )}
         </div>
       </div>
     </article>
+  );
+}
+
+/** Thumbnails of the images attached to the goal (click to open full size). */
+function GoalImages({ runId, images }: { runId: string; images: { name: string; filename?: string }[] }) {
+  const w = useWorkspaceId();
+  const [srcs, setSrcs] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    if (!runId || !w) return;
+    let alive = true;
+    const made: string[] = [];
+    for (const im of images) {
+      fetchRaw(`/api/v1/w/${w}/runs/${runId}/attachments/${encodeURIComponent(im.name)}`).then((r) => r.blob()).then((b) => {
+        const u = URL.createObjectURL(b);
+        made.push(u);
+        if (alive) setSrcs((s) => ({ ...s, [im.name]: u }));
+      }).catch(() => undefined);
+    }
+    return () => { alive = false; made.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [w, runId, images]);
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="goal-images">
+      {images.map((im) => srcs[im.name] ? (
+        <a key={im.name} href={srcs[im.name]} target="_blank" rel="noreferrer" title={im.filename ?? im.name}>
+          <img src={srcs[im.name]} alt={im.filename ?? "attached image"} className="h-20 max-w-[10rem] rounded border border-border object-cover" />
+        </a>
+      ) : <span key={im.name} className="flex h-20 w-28 items-center justify-center rounded border border-border text-[10px] text-muted-foreground">{im.filename ?? "image"}</span>)}
+    </div>
   );
 }
 

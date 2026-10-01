@@ -9,6 +9,9 @@
                      reject {approval_id, reason?}, pong
     On connect every persisted event with seq > last_seq is replayed first, so reconnects lose nothing.
 
+/ws/w/{workspace_id}/runs/{run_id}/browser/{agent_id}?token=
+    Live view of the agent's real browser tab: status, frame (base64 JPEG), url  ←→  mouse, wheel, key (take control)
+
 /ws/w/{workspace_id}/chat/{session_id}?token=
     Direct chat: user_message {content, attachments?}, stop, regenerate  →  stream_start, status, token_stream,
     stream_reset, tool_call, stream_end, message_created, message_deleted, error
@@ -119,6 +122,31 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
         pass
     finally:
         bus.unsubscribe(run_id, queue)
+        with contextlib.suppress(Exception):
+            await ws.close()
+
+
+@router.websocket("/ws/w/{workspace_id}/runs/{run_id}/browser/{agent_id}")
+async def browser_socket(ws: WebSocket, workspace_id: str, run_id: str, agent_id: str) -> None:
+    """Live view of one agent's browser tab (see services/browser_live.py for the protocol)."""
+    from app.services import browser_live
+
+    await ws.accept()
+    user, ctx = await _auth(ws, workspace_id)
+    if user is None or ctx is None:
+        await ws.close(code=4401 if user is None else 4404)
+        return
+    async with ctx.sf() as db:
+        run = await db.get(Run, run_id)
+        company = await db.get(Company, run.company_id) if run else None
+        if run is None or company is None or company.user_id != user.id:
+            await ws.close(code=4404)
+            return
+    try:
+        await browser_live.serve(ws, run_id, agent_id, run_live=lambda: manager.get(run_id) is not None)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
         with contextlib.suppress(Exception):
             await ws.close()
 

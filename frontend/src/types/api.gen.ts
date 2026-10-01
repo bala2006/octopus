@@ -1185,6 +1185,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/w/{workspace_id}/runs/{run_id}/attachments/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Attachment
+         * @description An image attached to the run's goal (named in the goal message's ``meta.images``).
+         */
+        get: operations["run_attachment_api_v1_w__workspace_id__runs__run_id__attachments__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/w/{workspace_id}/runs/{run_id}/preview/{path}": {
         parameters: {
             query?: never;
@@ -2243,6 +2263,22 @@ export interface components {
             text: string;
             /** Truncated */
             truncated: boolean;
+            /**
+             * Kind
+             * @default text
+             * @enum {string}
+             */
+            kind: "text" | "image";
+            /**
+             * Mime
+             * @default
+             */
+            mime: string;
+            /**
+             * Data
+             * @default
+             */
+            data: string;
         };
         /** ProjectTreeOut */
         ProjectTreeOut: {
@@ -5493,6 +5529,39 @@ export interface operations {
         };
     };
     browser_frame_api_v1_w__workspace_id__runs__run_id__browser__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                name: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_attachment_api_v1_w__workspace_id__runs__run_id__attachments__name__get: {
         parameters: {
             query?: never;
             header?: never;

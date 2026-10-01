@@ -1,12 +1,17 @@
-/** The run's Browser tab: watch what each agent does in its own browser tab (screenshots + every step, live and on replay). */
+/**
+ * The run's Browser tab: watch each agent's own browser tab. While the run is live it streams the real tab (Chromium
+ * screencast) and you can take control of it; every step is listed with a screenshot, so stepping back and replaying a
+ * finished run still works.
+ */
 import * as React from "react";
-import { AlertTriangle, Camera, Globe, ImageOff, Loader2, Radio } from "lucide-react";
+import { AlertTriangle, Camera, Globe, Hand, ImageOff, Loader2, MousePointer2, Radio } from "lucide-react";
 import { fetchRaw } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { AgentOut } from "@/types";
 import { AgentAvatar, EmptyState } from "@/components/common";
 import type { RunLive } from "./runState";
 import { browserAgents, describeAction, frameFor, isBrowsing } from "./browserSteps";
+import { controlHandlers, useLiveBrowser } from "./useLiveBrowser";
 
 // screenshot blobs by URL; small LRU so stepping back and forth through a run doesn't refetch
 const cache = new Map<string, string>();
@@ -35,7 +40,11 @@ function useFrame(url: string | null): { src?: string; error?: string } {
   return res;
 }
 
-export function BrowserView({ state, agents, w, runId }: { state: RunLive; agents: Record<string, AgentOut>; w: string; runId: string }) {
+export function BrowserView({ state, agents, w, runId, live: runLive = false }: {
+  state: RunLive; agents: Record<string, AgentOut>; w: string; runId: string;
+  /** the run is going and the view follows it (not scrubbing the timeline): stream the real tab */
+  live?: boolean;
+}) {
   const actions = state.browser;
   const ids = browserAgents(actions);
   const browsingNow = Object.keys(state.activity).filter((id) => isBrowsing(state.activity[id]));
@@ -48,6 +57,14 @@ export function BrowserView({ state, agents, w, runId }: { state: RunLive; agent
   const shot = frameFor(actions, index);
   const frame = useFrame(shot?.frame ? `/api/v1/w/${w}/runs/${runId}/browser/${shot.frame}` : null);
   const listRef = React.useRef<HTMLOListElement>(null);
+  const liveImg = React.useRef<HTMLImageElement>(null);
+  const screen = React.useRef<HTMLDivElement>(null);
+  const lb = useLiveBrowser(w, runId, agentId, runLive && pinned === null, liveImg);
+  const [control, setControl] = React.useState(false);
+  React.useEffect(() => setControl(false), [agentId, lb.live]);
+  React.useEffect(() => { if (control) screen.current?.focus(); }, [control]);
+  const handlers = React.useMemo(() => controlHandlers(lb, liveImg), [lb]);
+  const streaming = lb.live && pinned === null;
   React.useEffect(() => { if (pinned === null) listRef.current?.lastElementChild?.scrollIntoView({ block: "nearest" }); }, [mine.length, pinned]);
 
   if (!ids.length && !browsingNow.length) {
@@ -55,6 +72,7 @@ export function BrowserView({ state, agents, w, runId }: { state: RunLive; agent
       description="When an agent opens a page, clicks or types in its browser, you'll see each step here with a screenshot of what its tab showed." />;
   }
   const live = agentId ? isBrowsing(state.activity[agentId]) : false;
+  const shownUrl = streaming ? lb.url || step?.url : step?.url;
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="browser-view">
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 px-3 py-2">
@@ -77,17 +95,35 @@ export function BrowserView({ state, agents, w, runId }: { state: RunLive; agent
       <div className="m-3 overflow-hidden rounded-lg border border-border bg-background shadow-sm">
         <div className="flex items-center gap-2 border-b border-border bg-surface px-2 py-1.5 text-xs">
           <span className="flex gap-1" aria-hidden><i className="h-2 w-2 rounded-full bg-muted-foreground/30" /><i className="h-2 w-2 rounded-full bg-muted-foreground/30" /><i className="h-2 w-2 rounded-full bg-muted-foreground/30" /></span>
-          <div className="min-w-0 flex-1 truncate rounded bg-background px-2 py-0.5 font-mono text-[11px] text-muted-foreground" data-testid="browser-url" title={step?.url}>
-            {step?.url || "about:blank"}
+          <div className="min-w-0 flex-1 truncate rounded bg-background px-2 py-0.5 font-mono text-[11px] text-muted-foreground" data-testid="browser-url" title={shownUrl}>
+            {shownUrl || "about:blank"}
           </div>
+          {streaming && (
+            <span className="flex shrink-0 items-center gap-1 rounded bg-destructive/90 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-white" data-testid="browser-live-badge">
+              <Radio className="h-3 w-3" />Live
+            </span>
+          )}
+          {streaming && (
+            <button onClick={() => setControl(!control)} data-testid="browser-control"
+              className={cn("flex shrink-0 items-center gap-1 rounded border px-1.5 py-px text-[11px]", control ? "border-primary bg-primary/15 text-primary" : "border-border hover:bg-elevated")}
+              title={control ? "Give the tab back to the agent (Shift+Esc)" : "Click and type in the agent's tab yourself"}>
+              {control ? <><MousePointer2 className="h-3 w-3" />Release</> : <><Hand className="h-3 w-3" />Take control</>}
+            </button>
+          )}
           {live ? (
             <span className="flex shrink-0 items-center gap-1 text-success" data-testid="browser-live"><Loader2 className="h-3 w-3 animate-spin" />{state.activity[agentId!].replace(/^Browser:\s*/, "")}</span>
           ) : pinned !== null ? (
             <button className="shrink-0 text-primary hover:underline" onClick={() => setPinned(null)}>Latest</button>
           ) : null}
         </div>
-        <div className="relative flex aspect-[16/10] items-center justify-center bg-muted/30">
-          {frame.src ? (
+        <div ref={screen} className={cn("relative flex aspect-[16/10] items-center justify-center bg-muted/30 outline-none", control && "cursor-crosshair ring-2 ring-primary")}
+          tabIndex={control ? 0 : -1} data-testid="browser-screen"
+          {...(control ? handlers : {})}
+          onKeyDownCapture={(e) => { if (control && e.key === "Escape" && e.shiftKey) setControl(false); }}>
+          {/* the real tab, streamed (always mounted so frames can be written into it) */}
+          <img ref={liveImg} alt={step?.title || "Live browser tab"} data-testid="browser-live-frame" draggable={false}
+            className={cn("h-full w-full select-none object-contain object-top", !streaming && "hidden")} />
+          {streaming ? null : frame.src ? (
             <img src={frame.src} alt={step?.title || step?.url || "Browser screenshot"} data-testid="browser-frame"
               className={cn("h-full w-full object-contain object-top", shot !== step && "opacity-80")} />
           ) : frame.error ? (
@@ -96,10 +132,15 @@ export function BrowserView({ state, agents, w, runId }: { state: RunLive; agent
             <div className="flex flex-col items-center gap-1 text-xs text-muted-foreground"><Globe className="h-5 w-5" />{live ? "Opening…" : "No screenshot for this step"}</div>
           )}
         </div>
-        {step && (
+        {control && (
+          <div className="border-t border-primary/40 bg-primary/5 px-2 py-1 text-[11px] text-primary">
+            You're in control: clicks, scrolling and keys go to {agents[agentId!]?.name ?? "the agent"}'s tab. Shift+Esc or Release to hand it back.
+          </div>
+        )}
+        {step && !control && (
           <div className="border-t border-border px-2 py-1 text-[11px] text-muted-foreground">
             {step.title && <span className="font-medium text-foreground">{step.title} · </span>}
-            {describeAction(step)}{shot && shot !== step && " · showing the last screenshot before this step"}
+            {describeAction(step)}{streaming ? " · live view of the tab" : shot && shot !== step && " · showing the last screenshot before this step"}
           </div>
         )}
       </div>

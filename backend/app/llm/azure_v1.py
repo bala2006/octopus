@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap, with_images
 
 ApiStyle = str  # "responses" | "chat"
 _PROTECTED = {"model", "input", "messages", "stream", "tools", "tool_choice"}  # never auto-dropped
@@ -74,7 +74,8 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
     if style == "responses":
         body: dict[str, Any] = {
             "model": req.model, "stream": True, "max_output_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)), "store": False,
-            "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages] + list(req.continuation),
+            "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in with_images(req.messages, req.images, "responses")]
+                     + list(req.continuation),
         }
         if req.tools:  # native function calling: the model emits function_call items instead of a JSON envelope
             body["tools"] = [{"type": "function", "name": t["name"], "description": t.get("description", ""), "parameters": t["parameters"]}
@@ -88,7 +89,7 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
             body["text"] = {"format": {"type": "json_object"}}
     else:
         body = {
-            "model": req.model, "stream": True, "messages": req.messages, "max_completion_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)),
+            "model": req.model, "stream": True, "messages": with_images(req.messages, req.images, "chat"), "max_completion_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)),
             "stream_options": {"include_usage": True},
         }
         if req.json_mode:

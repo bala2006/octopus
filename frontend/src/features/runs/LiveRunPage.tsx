@@ -174,7 +174,7 @@ export default function LiveRunPage() {
           </TabsContent>
           <TabsContent value="team" className="min-h-0 flex-1 overflow-y-auto"><TeamView agents={agentsList} state={state} departments={departments} /></TabsContent>
           <TabsContent value="tasks" className="min-h-0 flex-1 overflow-y-auto"><TaskBoard tasks={Object.values(state.tasks)} agents={agents} /></TabsContent>
-          <TabsContent value="browser" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><BrowserView state={state} agents={agents} w={w} runId={runId} /></TabsContent>
+          <TabsContent value="browser" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><BrowserView state={state} agents={agents} w={w} runId={runId} live={isLive && cursor === null} /></TabsContent>
           <TabsContent value="tools" className="min-h-0 flex-1 overflow-y-auto"><ToolLog state={state} agents={agents} /></TabsContent>
           <TabsContent value="report" className="min-h-0 flex-1 overflow-y-auto"><ReportView w={w} runId={runId} enabled={terminal} /></TabsContent>
         </Tabs>

@@ -15,6 +15,7 @@ from app.schemas import (
     ApprovalIn, ArtifactContentOut, ArtifactOut, InterjectIn, MessageOut, RevertIn, RunCreate, RunDetail, RunEventOut, RunOut,
     RunOutcome, TaskOut,
 )
+from app.services import run_attachments
 from app.services.canvas import snapshot
 from app.tools.workspace import ProjectFS, WorkspaceError
 
@@ -54,9 +55,14 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
         session_id = s.id
     run = Run(company_id=company.id, session_id=session_id, goal=body.goal, mode=body.mode, status="queued",
               permission_level=body.permission_level or ctx.workspace.default_permission,
-              budget_json=body.budget.model_dump(), snapshot_json=snapshot(company),
-              state_json={"attachments": [{"filename": a.get("filename", "file")[:200], "text": a.get("text", "")[:30000]} for a in body.attachments[:5]]})
+              budget_json=body.budget.model_dump(), snapshot_json=snapshot(company), state_json={"attachments": []})
     db.add(run)
+    await db.flush()
+    try:  # images are kept as files next to the project database; text attachments stay in the run state
+        run.state_json = {"attachments": run_attachments.store(ctx.root, run.id, body.attachments)}
+    except (run_attachments.AttachmentError, OSError) as exc:
+        run_attachments.delete_run(ctx.root, run.id)
+        raise HTTPException(422, f"Attachment rejected: {exc}") from exc
     await db.commit()
     await db.refresh(run)
     await manager.start(run.id, ref(ctx))
@@ -127,7 +133,8 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User =
 
 
 @router.delete("/{run_id}", status_code=204, response_class=Response, response_model=None)
-async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> None:
+async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                     ctx: ProjectCtx = Depends(project_ctx)) -> None:
     run = await owned_run(run_id, db, user)
     if run.status in ACTIVE_STATES and manager.get(run_id):
         raise HTTPException(409, "Stop the run before deleting it")
@@ -136,6 +143,7 @@ async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: Use
     from app.services import browser_frames
 
     browser_frames.delete_run(run_id)
+    run_attachments.delete_run(ctx.root, run_id)
 
 
 async def _runtime(run_id: str, db: AsyncSession, user: User, ctx: ProjectCtx) -> RunRuntime:
@@ -352,6 +360,19 @@ async def browser_frame(run_id: str, name: str, db: AsyncSession = Depends(get_p
     if p is None:
         raise HTTPException(404, "Frame not found (frames beyond the most recent ones are not kept)")
     return Response(p.read_bytes(), media_type="image/png" if name.endswith(".png") else "image/jpeg",
+                    headers={"Cache-Control": "private, max-age=86400, immutable", "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/{run_id}/attachments/{name}")
+async def run_attachment(run_id: str, name: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                         ctx: ProjectCtx = Depends(project_ctx)) -> Response:
+    """An image attached to the run's goal (named in the goal message's ``meta.images``)."""
+    await owned_run(run_id, db, user)
+    p = run_attachments.path(ctx.root, run_id, name)
+    if p is None:
+        raise HTTPException(404, "Attachment not found")
+    mime = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}[name.rsplit(".", 1)[-1]]
+    return Response(p.read_bytes(), media_type=mime,
                     headers={"Cache-Control": "private, max-age=86400, immutable", "X-Content-Type-Options": "nosniff"})
 
 

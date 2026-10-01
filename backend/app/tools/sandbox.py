@@ -7,8 +7,9 @@ Backends:
 - ``docker``: throwaway container, ``--network none``, memory/CPU/pids caps, read-only root FS,
   project mounted at /work.
 
-Permission levels: outside ``danger`` mode only allowlisted commands run; ``danger`` allows any
-single command (still no shell operators, no paths outside the project, same limits).
+Permission levels: outside ``danger`` mode only allowlisted commands run, without a shell (operators inside quoted
+arguments are fine, unquoted ones are rejected); ``danger`` allows any command, and commands with shell operators run
+through ``sh -c`` (still no paths outside the project, same limits).
 """
 from __future__ import annotations
 
@@ -45,29 +46,79 @@ class SandboxError(ValueError):
     pass
 
 
+def shell_operators(command: str) -> list[str]:
+    """Shell operators that a shell would act on: outside quotes only.
+
+    Commands run without a shell, so ``node -e "const f = () => a && b"`` or ``python -c "if a < b: ..."`` are harmless:
+    their operators are inside one quoted argument. The old substring check rejected those (and every multi-line script),
+    even at danger level, which is what made agents give up on running and testing their own code."""
+    ops: list[str] = []
+    quote: str | None = None
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c == "\\":
+            i += 2
+            continue
+        elif c in "'\"":
+            quote = c
+        elif command.startswith("$(", i):
+            ops.append("$(")
+        elif c in FORBIDDEN_TOKENS or c == "&":
+            ops.append("newline" if c == "\n" else c)
+        i += 1
+    return ops
+
+
+def needs_shell(command: str) -> bool:
+    return bool(shell_operators(command))
+
+
 def parse_command(command: str, *, danger: bool = False) -> list[str]:
-    if any(tok in command for tok in FORBIDDEN_TOKENS):
-        raise SandboxError("Shell operators (; && || | > < ` $()) are not allowed; run a single command")
+    """Validate ``command`` and return the argv to execute.
+
+    Below danger level: one allowlisted program, no shell. At danger level any program, and commands with shell operators
+    (pipes, ``&&``, redirects…) run through ``sh -c``; the project-path checks still apply to every word."""
+    ops = shell_operators(command)
+    if ops and not danger:
+        raise SandboxError(f"Shell operators ({' '.join(sorted(set(ops)))}) need the danger permission level; run one command "
+                           "per call (quoted arguments may contain any characters), or write a script file and run that")
+    if ops and os.name != "posix":
+        raise SandboxError("Shell operators are not supported on this platform; run one command per call")
     try:
-        argv = shlex.split(command)
+        argv = shlex.split(command, comments=False)
     except ValueError as exc:
         raise SandboxError(f"Could not parse command: {exc}") from exc
     if not argv:
         raise SandboxError("Empty command")
+    if ops:
+        _check_paths(argv)
+        return ["sh", "-c", command]
     exe = os.path.basename(argv[0])
     if exe in BLOCKED_ALWAYS and not danger:
         raise SandboxError(f"'{exe}' is blocked; it requires danger mode")
     if not danger and not any(argv[: len(p)] == p for p in ALLOWED_PREFIXES):
         allowed = ", ".join(" ".join(p) for p in ALLOWED_PREFIXES)
         raise SandboxError(f"Command not allowed in this permission level. Allowed: {allowed}. (Danger mode allows any command.)")
+    inline = len(argv) > 2 and exe in ("python", "python3", "node") and argv[1] in ("-c", "-e", "--eval")
+    if inline and not danger:
+        raise SandboxError("Inline code (-c / -e) is not allowed; write a file first")
+    _check_paths([a for i, a in enumerate(argv) if not (inline and i == 2)])  # inline code is a program, not a path
+    return argv
+
+
+def _check_paths(argv: list[str]) -> None:
     for a in argv[1:]:
         if a.startswith(("/", "~")) or ".." in a.replace("\\", "/").split("/"):
             raise SandboxError("Arguments may not reference paths outside the project directory")
         if ".octopus" in a.split("/") or a.startswith(".git/"):
             raise SandboxError("Octopus data and .git internals are protected")
-    if not danger and exe in ("python", "python3", "node") and len(argv) > 1 and argv[1] in ("-c", "-e", "--eval"):
-        raise SandboxError("Inline code (-c / -e) is not allowed; write a file first")
-    return argv
 
 
 def _limits(memory_mb: int, cpu_s: int):  # type: ignore[no-untyped-def]

@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     playwright_headless: bool = True
     # After each browser action, screenshot the agent's tab so the run's Browser view shows what it is doing
     browser_live_frames: bool = True
+    # Stream each agent's real tab (Chromium screencast over CDP) to the Browser view, and let the user click / type in it
+    browser_live_view: bool = True
 
     # MCP: allow stdio servers (spawns user-configured commands on the backend host)
     mcp_allow_stdio: bool = True

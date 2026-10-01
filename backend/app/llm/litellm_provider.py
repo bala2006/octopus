@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap, with_images
 from app.llm.azure_v1 import legacy_api_base
 
 PREFIX = {
@@ -36,7 +36,7 @@ def entra_token_provider():  # type: ignore[no-untyped-def]
 def build_kwargs(req: LLMRequest) -> dict[str, Any]:
     model = litellm_model_name(req.provider, req.model)
     kwargs: dict[str, Any] = {
-        "model": model, "messages": req.messages, "temperature": req.temperature,
+        "model": model, "messages": with_images(req.messages, req.images, "chat"), "temperature": req.temperature,
         "max_tokens": output_cap(req.model, req.max_tokens), "stream": True, "stream_options": {"include_usage": True},
     }
     if req.base_url:

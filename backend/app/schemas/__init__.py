@@ -330,6 +330,9 @@ class ParsedFileOut(BaseModel):
     chars: int
     text: str
     truncated: bool
+    kind: Literal["text", "image"] = "text"
+    mime: str = ""  # images: image/png | image/jpeg | image/gif | image/webp
+    data: str = ""  # images: base64 content (sent back with the run / message that uses it)
 
 
 # ---------- runs ----------

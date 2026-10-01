@@ -82,10 +82,37 @@ def test_command_sandbox_rejects(cmd: str) -> None:
         parse_command(cmd)
 
 
-def test_danger_allows_more_but_not_shell_ops() -> None:
+def test_danger_allows_more_and_shell_ops_via_sh() -> None:
     assert parse_command("bash -c ls".replace("-c ls", "--version"), danger=True)[0] == "bash"
+    assert parse_command("ls && rm x", danger=True) == ["sh", "-c", "ls && rm x"]
+    with pytest.raises(SandboxError):  # the path checks still apply to every word
+        parse_command("ls && cat /etc/passwd", danger=True)
     with pytest.raises(SandboxError):
-        parse_command("ls && rm x", danger=True)
+        parse_command("ls && rm x")
+
+
+@pytest.mark.parametrize("cmd", ['node -e "const f = (a, b) => a && b || a > b; console.log(f(1, 2))"',
+                                 "python3 -c 'import sys\nif 1 < 2: print(\"ok | fine; done\")'"])
+def test_operators_inside_quotes_are_not_shell_ops(cmd: str) -> None:
+    argv = parse_command(cmd, danger=True)
+    assert argv[0] in ("node", "python3") and len(argv) == 3
+
+
+def test_unquoted_operators_detected() -> None:
+    from app.tools.sandbox import shell_operators
+
+    assert shell_operators("node a.js | head") == ["|"]
+    assert shell_operators("echo 'a|b' \"c>d\"") == []
+    assert shell_operators("python x.py\nls") == ["newline"]
+    assert shell_operators("echo $(ls)") == ["$("]
+
+
+async def test_danger_shell_command_runs(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("one\ntwo\n")
+    res = await run_command("cat a.txt | wc -l && echo done", tmp_path, danger=True)
+    assert res.ok and "2" in res.output and "done" in res.output
+    res = await run_command('node -e "const f = (a) => a > 1 && a < 3; console.log(f(2))"', tmp_path, danger=True)
+    assert res.ok and "true" in res.output
 
 
 async def test_sandbox_timeout_and_cwd(tmp_path: Path) -> None:

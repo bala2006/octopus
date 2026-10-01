@@ -6,13 +6,13 @@ import { ChevronDown, Footprints, Paperclip, Play, ShieldCheck, Sparkles, X, Zap
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { qk, useSettings, useWorkspace, useWorkspaceId } from "@/hooks/queries";
-import type { PermissionLevel, RunDetail } from "@/types";
+import type { ParsedFileOut, PermissionLevel, RunDetail } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/overlays";
 import { EffortPicker, type Effort } from "@/features/canvas/EffortPicker";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
-import { useAttachments, AttachmentChips } from "@/features/chat/attachments";
+import { useAttachments, AttachmentChips, attachmentPayload } from "@/features/chat/attachments";
 
 const MODES = [
   { v: "autonomous", label: "Autonomous", icon: Zap, d: "Runs until finished or a limit is hit" },
@@ -20,8 +20,10 @@ const MODES = [
   { v: "supervised", label: "Supervised", icon: ShieldCheck, d: "Pauses for approval at file writes and finish" },
 ] as const;
 
-export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoal = "", onStarted }: {
-  open: boolean; onOpenChange: (o: boolean) => void; companyId: string; sessionId?: string; initialGoal?: string; onStarted?: (r: RunDetail) => void;
+export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoal = "", initialAttachments, onStarted }: {
+  open: boolean; onOpenChange: (o: boolean) => void; companyId: string; sessionId?: string; initialGoal?: string;
+  /** e.g. files and screenshots already attached in the channel composer */
+  initialAttachments?: ParsedFileOut[]; onStarted?: (r: RunDetail) => void;
 }) {
   const w = useWorkspaceId();
   const ws = useWorkspace(w);
@@ -35,15 +37,20 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
   const [demo, setDemo] = React.useState(!anyConfigured);
   const [adv, setAdv] = React.useState(false);
   const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, stall_turns: 30, max_tool_rounds: 40, context_recent: 30, max_agents: 24, persist_team: true, reasoning_effort: "default" as Effort });
-  const att = useAttachments();
-  React.useEffect(() => { if (open) { setGoal(initialGoal); setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask"); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const att = useAttachments({ images: true });
+  React.useEffect(() => {
+    if (!open) return;
+    setGoal(initialGoal);
+    setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask");
+    if (initialAttachments?.length) att.setFiles(initialAttachments);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => setDemo(!anyConfigured), [anyConfigured]);
 
   const start = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/w/{workspace_id}/runs", {
       params: { path: { workspace_id: w } },
       body: { company_id: companyId, goal: goal.trim(), session_id: sessionId, mode, permission_level: perm,
-              budget: { ...budget, force_mock: demo }, attachments: att.files.map((f) => ({ filename: f.filename, text: f.text })) },
+              budget: { ...budget, force_mock: demo }, attachments: attachmentPayload(att.files) },
     })),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: qk.runs(w) });
@@ -63,11 +70,14 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
           <DialogDescription>The goal goes to the entry agent(s), then flows along your channels.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <Field label="Goal">
-            <Textarea autoFocus value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="Build a todo app with auth" className="min-h-[84px]"
-              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && goal.trim()) start.mutate(); }} data-testid="run-goal" />
-            <div className="flex items-center gap-2 pt-1">
-              <Button variant="ghost" size="xs" onClick={att.pick} loading={att.uploading}><Paperclip />Attach context</Button>
+          <Field label="Goal" hint="Paste screenshots (Ctrl+V) or drop images and files here; agents see images as images.">
+            <div {...att.drop}>
+              <Textarea autoFocus value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="Build a todo app with auth" className="min-h-[84px]"
+                onPaste={att.onPaste}
+                onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && goal.trim()) start.mutate(); }} data-testid="run-goal" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Button variant="ghost" size="xs" onClick={att.pick} loading={att.uploading} data-testid="attach-button"><Paperclip />Attach files or images</Button>
               <AttachmentChips files={att.files} onRemove={att.remove} />
               {att.input}
             </div>
@@ -115,7 +125,7 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
           <span className="text-[11px] text-muted-foreground"><kbd className="kbd">Ctrl</kbd>+<kbd className="kbd">Enter</kbd> to start</span>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}><X />Cancel</Button>
-            <Button disabled={!goal.trim()} loading={start.isPending} onClick={() => start.mutate()} data-testid="start-run"><Play />Start run</Button>
+            <Button disabled={!goal.trim() || att.uploading} loading={start.isPending} onClick={() => start.mutate()} data-testid="start-run"><Play />Start run</Button>
           </div>
         </div>
       </DialogContent>

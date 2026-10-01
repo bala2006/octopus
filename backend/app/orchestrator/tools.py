@@ -29,11 +29,14 @@ DESCRIPTIONS = {
     "move_file": "Move or rename a file or a whole folder inside the project.",
     "read_file": "Read a file from the project. Large files come in pages; the result says which offset to read next.",
     "list_files": "List the files in the project (or under a folder prefix).",
-    "run_code": "Run a command in the project's sandboxed terminal (e.g. python -m pytest, node script.js, npm test).",
+    "run_code": "Run one command in the project's sandboxed terminal, from the project root (e.g. python -m pytest, "
+                "node script.js, npm test). There is no shell: quoted arguments may contain any characters, but pipes, "
+                "&&, ;, redirects and $(...) only work at the danger permission level. Paths stay inside the project.",
     "mcp_call": "Call a tool on an MCP server granted to you.",
     "delegate": "Hand a piece of work to a teammate you have a delegate channel to. The teammate starts right away; its result "
                 "(summary, files changed, task status) comes back as this call's result. Several delegate calls in one reply run "
-                "at the same time.",
+                "at the same time: only send several together when the pieces are independent and can all start now (no review or "
+                "test of something that doesn't exist yet).",
     "search_project": "Search the project's files and the team's working docs (.octopus/work/) for text or a regex; returns "
                       "path:line matches.",
     "update_task_board": "Create tasks (omit key) or update existing ones (status, assignee, description, acceptance criteria).",

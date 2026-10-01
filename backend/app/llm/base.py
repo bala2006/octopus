@@ -69,6 +69,29 @@ class LLMRequest:
     # of a tool loop, the provider-native items to append after `messages` (previous output items + tool outputs).
     tools: list[dict[str, Any]] = field(default_factory=list)
     continuation: list[dict[str, Any]] = field(default_factory=list)
+    # Images ({mime, data: base64}) shown with the first user message (vision input); providers add them in their own format.
+    images: list[dict[str, str]] = field(default_factory=list)
+
+
+def with_images(messages: list[dict[str, Any]], images: list[dict[str, str]], style: str) -> list[dict[str, Any]]:
+    """``messages`` with ``images`` attached to the first user message, as content parts.
+
+    ``style`` "responses" (Azure/OpenAI Responses API: input_text / input_image) or "chat" (Chat Completions and litellm:
+    text / image_url). Messages stay plain strings everywhere else in Octopus; only the request body carries parts."""
+    if not images:
+        return messages
+    out = list(messages)
+    i = next((n for n, m in enumerate(out) if m.get("role") == "user" and isinstance(m.get("content"), str)), None)
+    if i is None:
+        return messages
+    urls = [f"data:{im.get('mime') or 'image/png'};base64,{im.get('data', '')}" for im in images if im.get("data")]
+    text = out[i]["content"]
+    if style == "responses":
+        parts: list[dict[str, Any]] = [{"type": "input_text", "text": text}] + [{"type": "input_image", "image_url": u} for u in urls]
+    else:
+        parts = [{"type": "text", "text": text}] + [{"type": "image_url", "image_url": {"url": u}} for u in urls]
+    out[i] = {**out[i], "content": parts}
+    return out
 
 
 @dataclass

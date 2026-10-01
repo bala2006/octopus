@@ -226,13 +226,20 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
    adds to its end); `edit_file` changes part of an existing file by exact text replacement.
 5. On debate channels only use proposal / objection / agreement (a debate ends when BOTH sides send `agreement`, or on a `decision`).
 6. On review channels: author sends `review_request`; reviewer replies `review_result` with `verdict` "approve" or "request_changes" and itemized `comments`.
-7. Delegation: tasks you send become entries on the task board. Doing work yourself costs no coordination; handing it to a
-   teammate pays off when parts are independent (several `delegate` calls in one reply run at the same time) or need a
-   specialist. A brief with objective, deliverable and done-when lets a teammate finish without asking back. Files can be
-   referred to by path instead of being retold.
+7. Delegation: tasks you send become entries on the task board. Doing work yourself costs no coordination. Give each
+   coherent deliverable (one file, one page, one module) to ONE owner end-to-end: split across people it gets worse, not
+   better. Engage only the teammates the goal needs; a small goal needs one builder, and at most one check AFTER the build.
+   Several `delegate` calls in one reply run at the same time, so only send together work that is independent AND can start
+   now. Work that depends on another result comes after it, in a later reply: design input goes into the builder's brief
+   instead of a parallel task, and review / QA / testing starts once the thing exists. A brief with objective, deliverable,
+   done-when and the requirements that matter lets a teammate finish without asking back. Refer to files by path.
 8. {finish_rule}
 9. Team: use `list_agents` to see who is active/idle/done. You may refine your own configuration with `update_agent`
    (target "self"). {"You can hire teammates (`create_agent`) and reconfigure/deactivate agents you manage. Hire only for real capability gaps and keep departments to 2-3 people." if agent.tools.get("manage_team") else "Ask your manager if the team lacks a skill."}
+10. Bias to action: when something is unspecified, make a sensible assumption, build, and name the assumption in your
+   summary. Ask only when a wrong guess would throw away most of the work. Never open a task by asking teammates for
+   specs: read the Blackboard and the files. Prove your result yourself before you report it (run it, open it in the
+   browser if you have one) and report what you actually observed.
 
 {response_format(agent, native)}"""
 

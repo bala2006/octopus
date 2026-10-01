@@ -97,7 +97,10 @@ def apply_edits(text: str, edits: list[A.Edit]) -> tuple[str, int]:
             stripped = e.old_string.strip()
             hint = (" (it does appear with different surrounding whitespace or indentation)" if stripped and stripped in text
                     else " (read_file to get the exact current text)")
-            raise ValueError(f"{label}: old_string not found{hint}")
+            near = closest_region(text, e.old_string)
+            raise ValueError(f"{label}: old_string not found{hint}"
+                             + (f". The current text where it probably belongs (line numbers are not part of "
+                                f"the file):\n{near}" if near else ""))
         if n > 1 and not e.replace_all:
             raise ValueError(f"{label}: old_string occurs {n} times; include more surrounding lines to make it unique, "
                              "or set replace_all")
@@ -106,6 +109,20 @@ def apply_edits(text: str, edits: list[A.Edit]) -> tuple[str, int]:
         first = line if first is None else min(first, line)
         text = text.replace(e.old_string, e.new_string) if e.replace_all else text.replace(e.old_string, e.new_string, 1)
     return text, first or 1
+
+
+def closest_region(text: str, old: str, span: int = 8) -> str:
+    """Where a missed edit most likely applies: the current lines around the first distinctive line of ``old_string``.
+
+    A missed old_string usually comes from editing from memory (an earlier read was shortened in a long tool loop, or a
+    teammate changed the file). Showing the real text there lets the model retry at once instead of re-reading a big file."""
+    lines = text.split("\n")
+    wanted = sorted({ln.strip() for ln in old.split("\n") if len(ln.strip()) >= 12}, key=len, reverse=True)
+    for w in wanted[:6]:
+        hits = [i for i, ln in enumerate(lines) if w in ln]
+        if len(hits) == 1:
+            return numbered_excerpt(text, hits[0] + 1, before=3, after=span + old.count("\n"))[:4000]
+    return ""
 
 
 def numbered_excerpt(text: str, line: int, before: int = 3, after: int = 12) -> str:
@@ -122,6 +139,7 @@ def head_tail(text: str, limit: int) -> str:
     return text[:half] + f"\n…[{len(text) - limit:,} characters omitted]…\n" + text[-half:]
 
 
+ROUND_WARNINGS = {5, 1}  # tool rounds left in a turn at which the agent is told to wrap up
 KEEP_FULL_ROUNDS = 3  # the latest tool rounds are replayed verbatim; older ones are shortened
 OLD_ROUND_CHARS = 1500
 COMPACT_MARK = "; re-read the file or re-run the tool if you need it again]"
@@ -234,7 +252,8 @@ class RunRuntime(TeamMixin):
             self.agents[a["id"]] = AgentSpec.from_dict(a, cat)
         self.edges = [EdgeSpec.from_dict(e) for e in snap.get("edges", [])]
         self.names = {a.id: a.name for a in self.agents.values()}
-        self.attachments: list[dict[str, str]] = (run.state_json or {}).get("attachments", [])
+        self.attachments: list[dict[str, Any]] = (run.state_json or {}).get("attachments", [])
+        self._goal_images: list[dict[str, str]] | None = None  # loaded on first use (base64, shown to every agent)
 
         self.history: list[dict[str, Any]] = []
         self.mailbox: dict[str, list[tuple[int, str]]] = {}
@@ -290,6 +309,7 @@ class RunRuntime(TeamMixin):
         self.tokens = run.tokens_used or 0
         self.cost = run.cost_usd or 0.0
         self.active_seconds = 0.0
+        self.turn_t0: float | None = None  # monotonic start of the top-level turn in progress (counted live by the time limit)
         self.run_status = run.status
 
         self.wake = asyncio.Event()
@@ -661,6 +681,11 @@ class RunRuntime(TeamMixin):
         return None
 
     # ------------------------------------------------------------------ limits & control
+    def active_now(self) -> float:
+        """Active time including the turn in progress: one long turn (a 40-round tool loop with nested delegations) used to
+        run far past the time limit, because the limit only saw the time of finished turns."""
+        return self.active_seconds + (time.monotonic() - self.turn_t0 if self.turn_t0 is not None else 0.0)
+
     def limit_reason(self, *, turns: bool = True) -> str | None:
         """``turns=False`` inside a turn's tool loop: the turn is already counted, only spend and time can run out."""
         b = self.budget
@@ -671,7 +696,7 @@ class RunRuntime(TeamMixin):
             reason = f"Budget: token budget exhausted ({self.tokens}/{b.max_tokens})"
         elif b.max_cost_usd > 0 and self.cost >= b.max_cost_usd:
             reason = f"Budget: cost budget exhausted (${self.cost:.4f}/${b.max_cost_usd:.2f})"
-        elif self.active_seconds >= b.timeout_s:  # time spent working; paused / waiting-for-you time is not counted
+        elif self.active_now() >= b.timeout_s:  # time spent working; paused / waiting-for-you time is not counted
             reason = f"Budget: active-time limit reached ({b.timeout_s}s of agent work)"
         if reason and self.followups:
             reason += f"; follow-ups share a lifetime ceiling of {FOLLOWUP_BUDGET_CEILING}x the run budget, start a new run to go further"
@@ -869,12 +894,31 @@ class RunRuntime(TeamMixin):
         roots = [aid for aid in active if aid not in targets]
         return roots[:1] or active[:1]
 
+    def goal_images(self) -> list[dict[str, str]]:
+        """Images the user attached to the goal, as model input. Every agent sees them (the builder needs the mock-up as
+        much as the CEO does); they sit in the first user message, so they stay in the prompt cache across a tool loop."""
+        if self._goal_images is None:
+            from app.services.run_attachments import load_images
+
+            try:
+                self._goal_images = load_images(self.root, self.run_id, self.attachments)
+            except OSError:
+                self._goal_images = []
+        return self._goal_images
+
     async def bootstrap(self) -> None:
         content = self.goal
+        images = [a for a in self.attachments if a.get("kind") == "image"]
         for att in self.attachments:
-            content += f"\n\n--- Attached file: {att.get('filename', 'file')} ---\n" + clip(str(att.get("text", "")), 30000)
+            if att.get("kind") != "image":
+                content += f"\n\n--- Attached file: {att.get('filename', 'file')} ---\n" + clip(str(att.get("text", "")), 30000)
+        if images:
+            content += "\n\n--- Attached image(s), shown to every agent as images: " + ", ".join(str(a.get("filename")) for a in images) + " ---"
+        meta: dict[str, Any] = {"goal": True}
+        if images:
+            meta["images"] = [{"filename": a.get("filename"), "name": a.get("name"), "mime": a.get("mime")} for a in images]
         for aid in self.entry_agents():
-            await self.post_message(sender="user", from_id=None, to_id=aid, type_="task", content=content, meta={"goal": True})
+            await self.post_message(sender="user", from_id=None, to_id=aid, type_="task", content=content, meta=meta)
 
     async def main(self, fresh: bool = True) -> None:
         try:
@@ -907,10 +951,11 @@ class RunRuntime(TeamMixin):
                     else:
                         await self.finalize("completed", "Run went quiescent without a final report: no open tasks, no agent has pending work")
                     return
-                t0 = time.monotonic()
+                t0 = self.turn_t0 = time.monotonic()
                 try:
                     await self.turn(aid)
                 finally:
+                    self.turn_t0 = None
                     self.active_seconds += time.monotonic() - t0
                 await self.save()
                 await self.usage_event()
@@ -1012,7 +1057,7 @@ class RunRuntime(TeamMixin):
         think: list[str] = []
         think_buf, think_last = "", time.monotonic()
         fresh_call = False
-        remaining = max(5.0, self.budget.timeout_s - self.active_seconds)
+        remaining = max(5.0, self.budget.timeout_s - self.active_now())
 
         idle: asyncio.Timeout | None = None
         t_start = time.monotonic()
@@ -1224,6 +1269,10 @@ class RunRuntime(TeamMixin):
         if extra:
             user += "\n\n" + extra
         req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        if images := self.goal_images():
+            req.images = images
+            req.messages[-1]["content"] += (f"\n\n(The user attached {len(images)} image(s) to the goal; they follow this message. "
+                                            "Use them as reference for what to build.)")
         self.seen[aid], self.seen_turn[aid] = self.journal_n, self.turn_no
         return req, native
 
@@ -1287,6 +1336,12 @@ class RunRuntime(TeamMixin):
                 else:
                     out, ended = await self.run_tool_call(agent, call, mcp_map)
                 outputs.append({"type": "function_call_output", "call_id": call.id, "output": out})
+            left = self.budget.max_tool_rounds - rnd - 1
+            if outputs and not ended and left in ROUND_WARNINGS:  # a turn that silently runs out leaves its task half done
+                outputs[-1]["output"] += (f"\n\n[Octopus] {left} tool round{'s' if left != 1 else ''} left in this turn. "
+                                          + ("Stop exploring: finish the deliverable with what you have, then call `finish` "
+                                             "with what's done and what's open." if left > 1 else
+                                             "This is your last call: call `finish` now with what's done and what's open."))
             # replay the response (encrypted reasoning included) and answer every call, as the Responses API expects
             replay = [i for i in res.items if not (i.get("type") == "reasoning" and not i.get("encrypted_content"))]
             rounds.append(len(req.continuation))
@@ -1485,6 +1540,22 @@ class RunRuntime(TeamMixin):
     async def _tool_result(self, agent: AgentSpec, cid: str, tool: str, ok: bool, output: str) -> None:
         await self.emit("tool_result", {"call_id": cid, "agent_id": agent.id, "tool": tool, "ok": ok, "output": output[:4000]})
 
+    def delegated_message_refusal(self, agent: AgentSpec, a: A.SendMessage) -> str | None:
+        """Inside a delegated sub-turn nobody can answer in time (answers arrive as later turns, after this one has ended),
+        and the `finish` summary already goes back to the delegator. Questions and progress reports there only cost turns:
+        in practice the builder asked design/QA questions, built anyway, and the answers landed after it was done."""
+        frame = DELEGATION.get()
+        if frame is None or frame["worker"] != agent.id:
+            return None
+        boss = self.names.get(frame["chain"][-1], "your delegator") if frame["chain"] else "your delegator"
+        if a.type == "question":
+            return (f"You are working on a task {boss} delegated to you: an answer would only arrive after this turn has ended. "
+                    "Check the Blackboard and the files, make a sensible assumption and name it in your `finish` summary, "
+                    "or `finish` now and say exactly what is blocking.")
+        if a.type in ("status_update", "final_report") and self.resolve_agent(a.to.strip()) == (frame["chain"] or ("",))[-1]:
+            return f"Not needed: your `finish` summary goes straight back to {boss}. Keep working, then call `finish`."
+        return None
+
     async def reject(self, agent: AgentSpec, to_id: str | None, a: A.SendMessage, reason: str, *, retry: bool = True) -> None:
         """``retry=False`` for loop / channel-limit rejections: the agent sees the notice next time it is woken, but the
         rejection itself does not buy it another turn (that just turned a loop into a spin)."""
@@ -1495,6 +1566,9 @@ class RunRuntime(TeamMixin):
 
     async def act_send_message(self, agent: AgentSpec, a: A.SendMessage) -> None:
         to = a.to.strip()
+        if (why := self.delegated_message_refusal(agent, a)):
+            await self.reject(agent, self.resolve_agent(to), a, why, retry=False)
+            return
         if to.lower() in ("all", "everyone", "broadcast", "team", "@all"):
             targets = list(allowed_recipients(self.edges, agent.id))
             if not targets:
