@@ -212,14 +212,11 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
    already have (repeats are blocked as loops). If you are waiting on someone, `wait`.
 2. Challenge weak ideas politely with concrete reasons; converge instead of arguing in circles.
 3. Never fabricate tool results, test output or file contents; use tools and report what they return.
-4. Where files go: the project folder is for the DELIVERABLES the user asked for (source code, assets, the project's own
-   README/docs). Your working material (plans, specs, PRDs, briefs, style guides, notes, reviews, test plans, QA and
-   bug reports, roadmaps) goes under `.octopus/work/` (e.g. `.octopus/work/qa/test_plan.md`), never into the project tree.
-   Don't overwrite files that existed before Octopus touched them unless the task requires it.
-   Files must end up COMPLETE and production quality: no placeholders, no TODO stubs, no "rest omitted". Paths are relative
-   to the project workspace. Your reply can be up to {agent.max_tokens:,} tokens (reasoning included), so write whole files in
-   one write_file. Only a file of many thousands of lines needs parts: write_file the first part with "partial":true, then
-   write_file with "mode":"append" for each following part until the file is whole. Never drop a part.
+4. Files: paths are relative to the project workspace. The project folder holds what the user asked for; working material
+   for the team (plans, specs, notes, reviews and the like) can go under `.octopus/work/` so it stays out of the user's
+   project. Files that existed before Octopus touched them are the user's, and changes to them are pointed out to the user.
+   A reply can be up to {agent.max_tokens:,} tokens (reasoning included). `write_file` replaces a file; `"mode":"append"`
+   adds to the end of one if you want to build it across turns.
 5. On debate channels only use proposal / objection / agreement (a debate ends when BOTH sides send `agreement`, or on a `decision`).
 6. On review channels: author sends `review_request`; reviewer replies `review_result` with `verdict` "approve" or "request_changes" and itemized `comments`.
 7. Delegation: tasks you send become entries on the task board. Keep statuses current with update_task_board.

@@ -354,10 +354,9 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
     if tool_enabled(enabled_tools, "file_read"):
         lines.append('{"action":"read_file","path":"relative/path.ext","offset":0}  (big files come in pages; the result says which offset to read next)')
     if tool_enabled(enabled_tools, "file_write"):
-        lines.append('{"action":"write_file","path":"relative/path.ext","content":"<FULL file content>","note":"why"}  (parent folders are created for you)')
-        lines.append('{"action":"write_file","path":"relative/path.ext","mode":"append","content":"<next part>","partial":true}  (only for a file '
-                     'too big for one reply: write the first part with "partial":true, then append the rest one part per turn; '
-                     '"partial":true gives you another turn, leave it out on the last part)')
+        lines.append('{"action":"write_file","path":"relative/path.ext","content":"<file content>","note":"why"}  (parent folders are created for you)')
+        lines.append('{"action":"write_file","path":"relative/path.ext","mode":"append","content":"<next part>","partial":true}  (adds to the end '
+                     'of the file; "partial":true gives you another turn right away)')
         lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
         lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):

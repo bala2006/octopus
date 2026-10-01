@@ -842,8 +842,8 @@ class RunRuntime(TeamMixin):
             await self.raise_output_budget(agent, new, str(exc))
             req.max_tokens = new
             req.messages = [*req.messages, {"role": "user", "content": (
-                "Note: your previous attempt at this reply was cut off at the output limit. Keep the reply compact; if you are writing "
-                "a large file, write the first part now and append the rest in later turns (write_file with \"mode\":\"append\").")}]
+                f"Note: your previous attempt at this reply was cut off at the output limit ({old:,} tokens) and nothing in it was "
+                f"applied. The limit is now {new:,} tokens.")}]
             return await self.call_llm(agent, req)
 
     async def raise_output_budget(self, agent: AgentSpec, new: int, why: str) -> None:
@@ -909,9 +909,8 @@ class RunRuntime(TeamMixin):
             await self.set_agent_status(aid, "error")
             await self.emit("error", {"message": f"{agent.name}: reply cut off at the output limit ({req.max_tokens} tokens): {exc}",
                                       "agent_id": aid, "kind": "llm"})
-            self.notice(aid, f"Your previous reply was cut off at the output limit ({req.max_tokens} tokens) and nothing in it was applied. "
-                             "Reply with less: write a large file in parts (write_file, then write_file with \"mode\":\"append\" for each "
-                             "further part, one part per turn).", activate=True)
+            self.notice(aid, f"Your previous reply was cut off at the output limit ({req.max_tokens:,} tokens, reasoning included) and "
+                             "nothing in it was applied. write_file with \"mode\":\"append\" can build a file across turns.", activate=True)
             return
         except (LLMError, asyncio.TimeoutError) as exc:
             await self.set_agent_status(aid, "error")
