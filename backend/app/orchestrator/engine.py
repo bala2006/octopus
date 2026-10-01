@@ -1372,6 +1372,14 @@ class RunRuntime(TeamMixin):
                 return
             await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
             ok, out = await browser.call(self.run_id, agent.id, a.tool, a.arguments)
+            if not ok and not browser.available():
+                out += ("\nThe browser can't run in this environment: don't retry it. Verify by reading the code instead, and say in "
+                        "your report that nothing was tested in a real browser.")
+                if "browser" not in self.warned:
+                    self.warned.add("browser")
+                    await self.emit("error", {"kind": "warning", "agent_id": agent.id, "message": (
+                        "The built-in browser is unavailable, so this run can only check the project by reading its source; "
+                        f"'it works in the browser' is unverified. {browser.error.splitlines()[0] if browser.error else ''}")})
             self.observe(agent.id, {"tool": f"browser/{a.tool}", "ok": ok, "content": out})
             await self._tool_result(agent, cid, "mcp_call", ok, out)
             return

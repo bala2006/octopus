@@ -321,6 +321,20 @@ function McpServers() {
   );
 }
 
+type BadgeVariant = "success" | "destructive" | "outline" | "warning";
+/** Browser health: green only once a real browser rendered a page (the MCP server answering is not enough). */
+export function browserBadge(status?: string): { label: string; variant: BadgeVariant } {
+  switch (status) {
+    case "ready": return { label: "Browser working", variant: "success" };
+    case "server_ready": return { label: "Not verified yet", variant: "warning" };
+    case "starting": return { label: "Starting…", variant: "outline" };
+    case "installing": return { label: "Installing browser…", variant: "outline" };
+    case "error": return { label: "Can't launch", variant: "destructive" };
+    case "stopped": case undefined: return { label: "Starts on first use", variant: "outline" };
+    default: return { label: status, variant: "outline" };
+  }
+}
+
 /** Octopus starts Playwright MCP itself on 127.0.0.1; every agent with the Browser tool gets its own tab. */
 function BrowserCard() {
   const status = useQuery({ queryKey: ["browser-status"], queryFn: () => unwrap(api.GET("/api/v1/settings/browser")), refetchInterval: 5000 });
@@ -330,7 +344,7 @@ function BrowserCard() {
     onSuccess: (r) => { setRes(r); status.refetch(); },
   });
   const st = status.data;
-  const label: Record<string, string> = { ready: "Running", starting: "Starting…", installing: "Installing browser…", stopped: "Starts on first use", error: "Error" };
+  const { label, variant } = browserBadge(st?.status);
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="flex items-center gap-3">
@@ -339,15 +353,25 @@ function BrowserCard() {
           <div className="flex items-center gap-2 text-sm font-semibold">Built-in browser<Badge variant="outline">Playwright MCP</Badge></div>
           <div className="text-xs text-muted-foreground">Managed by Octopus on this machine. Agents with the <b>Browser</b> tool (on by default) get their own tab to open the project preview, click through it and read console errors.</div>
         </div>
-        {st && <Badge variant={st.status === "ready" ? "success" : st.status === "error" ? "destructive" : "outline"}>{st.enabled ? label[st.status] ?? st.status : "Disabled"}</Badge>}
+        {st && <Badge variant={st.enabled ? variant : "outline"}>{st.enabled ? label : "Disabled"}</Badge>}
       </div>
-      {st?.error && <p className="mt-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">{st.error}</p>}
+      {st?.error && (
+        <div className="mt-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+          <p className="font-medium">{st.error.split("\n")[0]}</p>
+          {st.error.includes("\n") && <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[10.5px] opacity-80">{st.error.split("\n").slice(1).join("\n")}</pre>}
+          <p className="mt-1 text-[11px] opacity-90">Until this is fixed, agents can only check the project by reading its source: nothing is tested in a real browser.</p>
+        </div>
+      )}
       {st && !st.node && <p className="mt-2 rounded-md bg-warning/10 p-2 text-xs text-warning">Node.js 18+ (npx) is needed for the browser. Install it from nodejs.org.</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" onClick={() => test.mutate()} loading={test.isPending} disabled={!st?.enabled}><Wifi />Test browser</Button>
         {test.isPending && <span className="text-xs text-muted-foreground">The first run downloads the browser, which can take a minute.</span>}
         {res && <span className={cn("flex items-center gap-1 text-xs", res.ok ? "text-success" : "text-destructive")}>{res.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}{res.detail}{res.latency_ms ? <span className="text-muted-foreground">· {res.latency_ms}ms</span> : null}</span>}
-        {st && <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{st.package} · {st.browser} · {st.tools?.length ?? 0} tools</span>}
+        {st && (
+          <Tip content="The tool count comes from the MCP server; it says nothing about whether a browser can launch (that's the badge).">
+            <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{st.package} · {st.browser} · MCP server {["server_ready", "ready"].includes(st.status) ? "up" : "not running"} · {st.tools?.length ?? 0} tools</span>
+          </Tip>
+        )}
       </div>
     </div>
   );

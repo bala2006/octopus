@@ -1639,6 +1639,11 @@ export interface components {
             /** Status */
             status: string;
             /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
+            /**
              * Error
              * @default
              */

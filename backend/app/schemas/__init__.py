@@ -506,8 +506,10 @@ class FxRateOut(BaseModel):
 
 class BrowserStatusOut(BaseModel):
     enabled: bool
-    status: str  # stopped | starting | installing | ready | error
-    error: str = ""
+    # stopped | starting | installing | server_ready (MCP server up, browser launch not verified yet) | ready | error
+    status: str
+    verified: bool = False  # a real browser launched and rendered a test page
+    error: str = ""  # diagnosis (e.g. which system library is missing), not the raw Chromium command line
     browser: str = ""
     package: str = ""
     tools: list[str] = Field(default_factory=list)
