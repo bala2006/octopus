@@ -95,3 +95,42 @@ test("runs page: outcome facts, honest status, reachable actions, single-line me
   await page.goto(`/w/${w}/runs/${run.id}`);
   await expect(page.getByLabel("Minimap legend")).toContainText("Done");
 });
+
+test("browser tab: see when an agent is browsing and what its tab shows, step by step", async ({ page, request }) => {
+  const { w, company } = await setup(request);
+  const run = await (await request.post(`/api/v1/w/${w}/runs`, {
+    data: { company_id: company, goal: "Check the game in a browser", permission_level: "danger", budget: { force_mock: true, max_turns: 6 } },
+  })).json();
+  await expect.poll(async () => (await (await request.get(`/api/v1/w/${w}/runs/${run.id}`)).json()).status, { timeout: 120_000 }).not.toBe("running");
+  const agent = ((await (await request.get(`/api/v1/w/${w}/runs/${run.id}`)).json()).snapshot.agents as { id: string; name: string }[])[0];
+
+  // demo agents don't browse: replay the real run stream and add what a browsing agent produces
+  const ev = (seq: number, type: string, data: Record<string, unknown>) => JSON.stringify({ type, seq, ts: new Date().toISOString(), data });
+  const step = (seq: number, tool: string, args: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ev(seq, "browser_action", { agent_id: agent.id, call_id: `b${seq}`, tool, args, ok: true, url: "http://127.0.0.1:8000/", title: "Snake", frame: null, ...extra });
+  await page.routeWebSocket(/\/ws\/w\/.*\/runs\//, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((m) => {
+      ws.send(m);
+      if (typeof m === "string" && m.includes('"replay_done"')) {
+        ws.send(step(100001, "browser_navigate", { url: "http://127.0.0.1:8000/" }, { frame: "000001.jpeg" }));
+        ws.send(step(100002, "browser_click", { element: "Start game", target: "e7" }, { ok: false, note: "Ref e7 not found" }));
+        ws.send(ev(100003, "agent_status", { agent_id: agent.id, status: "tool", activity: "Browser: type…" }));
+      }
+    });
+  });
+  await page.route(/\/browser\/000001\.jpeg$/, (r) => r.fulfill({ contentType: "image/jpeg", body: fs.readFileSync(path.resolve("e2e/fixtures/browser-frame.jpeg")) }));
+  await page.goto(`/w/${w}/runs/${run.id}`);
+
+  await page.getByTestId("agent-browsing").click(); // the agent strip says who's browsing; clicking opens the Browser tab
+  const view = page.getByTestId("browser-view");
+  await expect(view.getByTestId("browser-url")).toHaveText("http://127.0.0.1:8000/");
+  await expect(view.getByTestId("browser-live")).toContainText("type");
+  const steps = view.getByTestId("browser-steps");
+  await expect(steps).toContainText("opened http://127.0.0.1:8000/");
+  await expect(steps).toContainText("clicked “Start game”");
+  await expect(steps).toContainText("Ref e7 not found");
+  const img = view.getByTestId("browser-frame");
+  await expect(img).toBeVisible();
+  expect(await img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBe(1280); // the real screenshot, loaded with auth
+});

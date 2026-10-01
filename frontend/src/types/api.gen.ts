@@ -1165,6 +1165,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/w/{workspace_id}/runs/{run_id}/browser/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browser Frame
+         * @description One screenshot of an agent's browser tab (named by a browser_action event).
+         */
+        get: operations["browser_frame_api_v1_w__workspace_id__runs__run_id__browser__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/w/{workspace_id}/runs/{run_id}/preview/{path}": {
         parameters: {
             query?: never;
@@ -2390,6 +2410,11 @@ export interface components {
              */
             stall_turns: number;
             /**
+             * Max Tool Rounds
+             * @default 40
+             */
+            max_tool_rounds: number;
+            /**
              * Context Recent
              * @default 30
              */
@@ -2588,6 +2613,23 @@ export interface components {
              * @default false
              */
             final_report: boolean;
+            /**
+             * Agent Turns
+             * @default 0
+             */
+            agent_turns: number;
+            /**
+             * Work Turns
+             * @default 0
+             */
+            work_turns: number;
+            /** First Deliverable Turn */
+            first_deliverable_turn?: number | null;
+            /**
+             * Delegations
+             * @default 0
+             */
+            delegations: number;
         };
         /** SessionIn */
         SessionIn: {
@@ -5424,6 +5466,39 @@ export interface operations {
             header?: never;
             path: {
                 run_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browser_frame_api_v1_w__workspace_id__runs__run_id__browser__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                name: string;
                 workspace_id: string;
             };
             cookie?: never;

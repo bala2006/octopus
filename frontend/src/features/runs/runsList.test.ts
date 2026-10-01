@@ -3,7 +3,8 @@ import { filterRuns, groupByDay, matchesFilter, outcomeFacts, outcomeOf } from "
 import type { RunOut } from "@/types";
 
 const outcome = (o: Partial<NonNullable<RunOut["outcome"]>> = {}) =>
-  ({ tasks_total: 0, tasks_done: 0, tasks_open: 0, tasks_blocked: 0, files: 0, errors: 0, final_report: false, ...o });
+  ({ tasks_total: 0, tasks_done: 0, tasks_open: 0, tasks_blocked: 0, files: 0, errors: 0, final_report: false,
+     agent_turns: 0, work_turns: 0, first_deliverable_turn: null, delegations: 0, ...o });
 const run = (p: Partial<RunOut>): RunOut => ({ id: "r", company_id: "c", session_id: null, goal: "g", status: "completed", mode: "autonomous",
   permission_level: "danger", budget: {}, tokens_used: 0, cost_usd: 0, turns: 0, halt_reason: "", summary: "", created_at: "2026-10-01T10:00:00",
   started_at: null, ended_at: null, outcome: outcome(), ...p }) as RunOut;
@@ -31,6 +32,8 @@ describe("outcomeFacts", () => {
     expect(outcomeFacts(run({ outcome: outcome({ tasks_total: 10, tasks_done: 2, tasks_blocked: 3, files: 9, errors: 4 }) })))
       .toEqual(["2/10 tasks done", "3 blocked", "9 files", "4 errors"]);
     expect(outcomeFacts(run({ outcome: outcome({ files: 1 }) }))).toEqual(["1 file"]);
+    expect(outcomeFacts(run({ outcome: outcome({ files: 2, agent_turns: 130, work_turns: 12, delegations: 3 }) })))
+      .toEqual(["2 files", "12/130 turns did work", "3 delegations"]);
   });
 });
 

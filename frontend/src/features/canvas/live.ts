@@ -6,6 +6,7 @@ export interface LiveOverlay {
   activity: Record<string, string>;
   lastMessage: Record<string, { text: string; type: string; to?: string }>;
   streaming: Record<string, string>;
+  thinking?: Record<string, string>;
   activeEdges: Record<string, { at: number; from: string; type: string }>;
   tokens: Record<string, number>;
   pendingApprovalAgent?: string | null;

@@ -25,15 +25,43 @@ flowchart TD
   N -- none --> Q[finalize: completed (quiescent)]
   N -- agent --> P[build prompt:<br/>system prompt + meta rules + roster + channels<br/>+ blackboard + rolling summary + recent + inbox + tool results]
   P --> S[stream LLM → token_stream + live activity detection]
-  S --> X[parse JSON envelope → validated actions<br/>one repair retry]
+  S --> T{native function calls?<br/>Azure Responses API}
+  T -- yes --> E2[run each call → function_call_output<br/>replay items, call the model again<br/>until it stops calling tools]
+  T -- no --> X[parse JSON envelope → validated actions<br/>one repair retry]
   X --> E[execute actions<br/>permissions · protocols · approvals]
+  E2 --> R
   E --> R[route messages → mailboxes<br/>persist + publish events]
   R --> D{entry agent finished?}
   D -- yes --> C[finalize: completed + report]
   D -- no --> L
 ```
 
-**Action schema** (`orchestrator/actions.py`). Every reply is `{"thought": "...", "actions": [...]}` with actions `send_message`, `write_file`, `read_file`, `list_files`, `run_code`, `mcp_call`, `update_task_board`, `remember`, `request_user_input`, `web_search`, `calculate`, `finish` and `wait`. The schema text injected into the prompt lists only the actions the agent's tools allow. JSON-in-text works the same for every provider (Azure, Foundry, Ollama, …).
+**Actions** (`orchestrator/actions.py`) are Pydantic models: `send_message`, `write_file`, `edit_file`, `read_file`, `list_files`, `run_code`, `mcp_call`, `update_task_board`, `remember`, `request_user_input`, `web_search`, `calculate`, team actions, `finish` and `wait`. Agents only get the actions their tools allow. They reach the model in one of two ways:
+
+- **Native function calling** (`orchestrator/tools.py`, used on the Azure Responses API). Each action is a function tool whose JSON schema is generated from its model; each MCP tool is its own function (`mcp__<server>__<tool>`). A turn is a tool loop: the model's `function_call` items are validated and executed, their results go back as `function_call_output` items together with the replayed output items (encrypted reasoning included, since requests are stateless with `store: false`), and the model continues until it stops calling tools, calls `wait`/`finish`, or asks the user (`budget.max_tool_rounds` calls per turn). Invalid arguments come back to the model as a tool error instead of failing the turn. `NATIVE_TOOLS=false` turns this off.
+- **JSON envelope** (everything else: the offline demo mock, Chat Completions, legacy endpoints). The reply is `{"thought": "...", "actions": [...]}`, described in the prompt, with one repair retry.
+
+**Editing files.** `edit_file` replaces exact existing text (`edits: [{old_string, new_string, replace_all?}]`). Each `old_string` must match exactly once unless `replace_all`; edits apply in order and all succeed or none do. The result shows the changed lines with line numbers. It goes through the same permission gate, version history and events as `write_file`.
+
+**Delegation** (`delegate` action). A lead hands work to a teammate it has a delegate channel to, with an objective,
+deliverable, done-when and context. Inside a native tool loop the teammate's sub-turn runs immediately (it is counted as
+that agent's turn, with its own tool loop) and its result comes back as the delegator's tool result: the teammate's
+`finish` summary, the files it changed and the task's status. No message round-trips, no question/answer turns. Several
+`delegate` calls in one reply run concurrently (asyncio); writes to the same file and approval cards are serialised.
+Delegation chains are limited to 3 levels and never cycle; outside a native tool loop (JSON envelope) a delegation
+becomes a structured task message.
+
+**Shared knowledge.** The engine keeps a team log (files written, task-board changes, decisions, delegations and their
+results, finishes, project notes). Every prompt carries "Team activity since your last turn": the log entries plus one
+line per message between other agents since that agent last acted. `search_project` greps the project and the working
+docs (`.octopus/work/`). **Project memory** (`.octopus/memory.json`, `services/project_memory.py`) outlives runs: notes saved
+with `remember(scope="project")` and an automatic retrospective of each finished run (goal, outcome, files, open tasks,
+decisions, efficiency) are shown to every agent in later runs.
+
+**Efficiency metrics.** Each agent turn is counted, and marked as work when it changes a deliverable (not a working doc)
+or runs a command or browser/MCP tool. Runs report work turns vs. all turns, the turn of the first deliverable file and
+delegations (Runs page, report, `state.metrics`). `scripts/bench.py` runs `bench/tasks.json` (coding tasks with objective
+checks) per template against a backend and prints a comparison table.
 
 **Routing** (`orchestrator/permissions.py`). `find_channel(edges, src, dst, type)` picks the edge a message travels on, preferring the edge type that matches the message type (`proposal`→debate, `review_*`→review, `task`→delegate, `status_update`→report…). It respects direction; debate edges only carry debate-protocol types. If no channel exists, the message is **rejected server-side**: it is never delivered, and the sender gets an activating notice explaining why (`no channel`, `one-way`, `wrong type`).
 

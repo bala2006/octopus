@@ -215,7 +215,7 @@ class TeamMixin:
         self.snapshot["departments"].setdefault(department, {"color": department_color(department), "description": ""})
         self.snapshot_dirty = True
         persisted = await self._persist_team(new_agents=[spec_dict], new_edges=edges) if persist else False
-        self.decisions.append(f"{agent.name} hired {name} ({a.role}, {department})")
+        self.decide(f"{agent.name} hired {name} ({a.role}, {department})", agent.id)
         await self.emit("agent_created", {"agent": {**spec_dict, "company_id": self.company_id},
                                           "edges": [{**e, "company_id": self.company_id} for e in edges], "created_by": agent.id,
                                           "persisted": persisted, "department": {"name": department, **self.snapshot["departments"][department]}})

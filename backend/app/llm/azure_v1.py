@@ -19,10 +19,10 @@ from typing import Any
 
 import httpx
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap
 
 ApiStyle = str  # "responses" | "chat"
-_PROTECTED = {"model", "input", "messages", "stream"}
+_PROTECTED = {"model", "input", "messages", "stream", "tools", "tool_choice"}  # never auto-dropped
 # Reasoning deployments (gpt-6-luna reasons at "medium" effort by default) spend output tokens on thinking before they
 # answer; max_output_tokens covers both, so the agent's answer budget gets extra room. A fixed allowance meant that raising
 # the effort silently shrank the space left for the answer, so the headroom scales with the requested effort.
@@ -74,9 +74,17 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
     if style == "responses":
         body: dict[str, Any] = {
             "model": req.model, "stream": True, "max_output_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)), "store": False,
-            "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages],
+            "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages] + list(req.continuation),
         }
-        if req.json_mode:
+        if req.tools:  # native function calling: the model emits function_call items instead of a JSON envelope
+            body["tools"] = [{"type": "function", "name": t["name"], "description": t.get("description", ""), "parameters": t["parameters"]}
+                             for t in req.tools]
+            body["tool_choice"] = "auto"
+            body["parallel_tool_calls"] = True
+            if reasoning or req.extra.get("reasoning_effort"):
+                # stateless (store=false): encrypted reasoning comes back so it can be replayed between tool calls
+                body["include"] = ["reasoning.encrypted_content"]
+        elif req.json_mode:
             body["text"] = {"format": {"type": "json_object"}}
     else:
         body = {
@@ -86,13 +94,18 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
         if req.json_mode:
             body["response_format"] = {"type": "json_object"}
     effort = req.extra.get("reasoning_effort")
+    if style == "responses" and (effort or reasoning) and effort != "none" and "reasoning.summary" not in drop:
+        # the model's reasoning itself is never returned; its summary is, and that's what the UI shows as "thinking"
+        body["reasoning"] = {"summary": "auto"}
     if effort:  # none | low | medium | high | xhigh | max
         if style == "responses":
-            body["reasoning"] = {"effort": effort}
+            body.setdefault("reasoning", {})["effort"] = effort
         else:
             body["reasoning_effort"] = effort
     if not reasoning:
         body["temperature"] = req.temperature
+    if req.metadata.get("cache_key"):  # routes calls that share a prompt prefix (one agent's turns) to the same prompt cache
+        body["prompt_cache_key"] = str(req.metadata["cache_key"])[:64]
     for k in drop:
         body.pop(k, None)
     return body
@@ -108,6 +121,10 @@ def _rejected_param(status: int, text: str, body: dict[str, Any]) -> str | None:
         err = {}
     param = err.get("param") if isinstance(err, dict) else None
     msg = (err.get("message") if isinstance(err, dict) else None) or text
+    # an unsupported reasoning *summary* must not cost the reasoning effort: drop just the nested field
+    if isinstance(body.get("reasoning"), dict) and "summary" in body["reasoning"] and (
+            param == "reasoning.summary" or ("summary" in msg.lower() and "reasoning" in msg.lower())):
+        return "reasoning.summary"
     if isinstance(param, str) and param in body and param not in _PROTECTED:
         return param
     low = msg.lower()
@@ -115,7 +132,8 @@ def _rejected_param(status: int, text: str, body: dict[str, Any]) -> str | None:
         for k in body:
             if k not in _PROTECTED and any(f"{q}{k}{q}" in msg for q in ("'", '"', "`")):
                 return k
-        for k in ("temperature", "reasoning", "reasoning_effort", "max_output_tokens", "max_completion_tokens", "store", "stream_options"):
+        for k in ("temperature", "reasoning", "reasoning_effort", "max_output_tokens", "max_completion_tokens", "store", "stream_options",
+                  "prompt_cache_key"):
             if k in body and k in low:
                 return k
     return None
@@ -165,6 +183,10 @@ def usage_from_responses(u: dict[str, Any]) -> Usage:
 class AzureV1Provider:
     name = "azure_v1"
 
+    @staticmethod
+    def supports_native_tools(req: LLMRequest) -> bool:
+        return supports_native_tools(req)
+
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport  # tests inject httpx.MockTransport
 
@@ -177,9 +199,10 @@ class AzureV1Provider:
         headers = {**(await _auth_headers(req)), "Content-Type": "application/json", "Accept": "text/event-stream"}
         cache_key = (base, req.model)
         text_parts: list[str] = []
+        out_items: dict[int, dict[str, Any]] = {}  # output_index -> finished output item (responses API)
         usage: Usage | None = None
         truncated: LLMOutputTruncated | None = None
-        timeout = httpx.Timeout(connect=20, read=300, write=60, pool=20)
+        timeout = httpx.Timeout(connect=20, read=360, write=60, pool=20)  # the engine's idle timeout (300s) fires first, with a clearer message
         async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
             for _ in range(4):  # original call + up to 3 "drop the rejected parameter" retries
                 body = _body(req, style, _dropped.get(cache_key, set()))
@@ -194,7 +217,7 @@ class AzureV1Provider:
                             s = resp.status_code
                             raise LLMError(_error_message(s, text), retryable=s in (408, 409, 429) or s >= 500)
                         try:
-                            async for chunk in self._events(resp, style, text_parts):
+                            async for chunk in self._events(resp, style, text_parts, out_items):
                                 if chunk.usage is not None:
                                     usage = chunk.usage
                                 else:
@@ -213,10 +236,16 @@ class AzureV1Provider:
 
         apply(usage, req.model, req.extra)  # exact Azure usage × deployment rates (Settings → Model → Pricing)
         yield LLMChunk(usage=usage)
+        if req.tools:
+            items = [out_items[i] for i in sorted(out_items)]
+            calls = [ToolCall(id=it.get("call_id") or it.get("id") or "", name=it.get("name", ""), arguments=it.get("arguments") or "{}")
+                     for it in items if it.get("type") == "function_call"]
+            yield LLMChunk(tool_calls=calls, items=items)
         if truncated is not None:
             raise truncated
 
-    async def _events(self, resp: httpx.Response, style: ApiStyle, text_parts: list[str]) -> AsyncIterator[LLMChunk]:
+    async def _events(self, resp: httpx.Response, style: ApiStyle, text_parts: list[str],
+                      out_items: dict[int, dict[str, Any]] | None = None) -> AsyncIterator[LLMChunk]:
         skip_items: set[str] = set()  # output items that aren't the final answer (phase = "commentary")
         length_cut = False  # chat completions: finish_reason == "length"
         async for line in resp.aiter_lines():
@@ -249,6 +278,19 @@ class AzureV1Provider:
                 item = ev.get("item") or {}
                 if item.get("phase") == "commentary" and item.get("id"):
                     skip_items.add(item["id"])
+                if item.get("type") == "function_call":
+                    yield LLMChunk(tool_started=item.get("name", ""))
+            elif kind == "response.reasoning_summary_text.delta":
+                if ev.get("delta"):
+                    yield LLMChunk(thinking=ev["delta"])
+            elif kind == "response.reasoning_summary_part.done":
+                yield LLMChunk(thinking="\n\n")  # paragraph break between summary parts
+            elif kind == "response.function_call_arguments.delta":
+                if ev.get("delta"):
+                    yield LLMChunk(tool_delta=ev["delta"])
+            elif kind == "response.output_item.done":
+                if out_items is not None and ev.get("item"):
+                    out_items[int(ev.get("output_index", len(out_items)))] = ev["item"]
             elif kind == "response.output_text.delta":
                 if ev.get("item_id") in skip_items:
                     continue
@@ -278,3 +320,10 @@ class AzureV1Provider:
         if length_cut:
             raise LLMOutputTruncated(f"Azure OpenAI stopped at the output limit (finish_reason=length) after "
                                      f"{len(''.join(text_parts))} characters", partial="".join(text_parts))
+
+
+def supports_native_tools(req: LLMRequest) -> bool:
+    """Native function calling is used on the Responses API (the default for v1 endpoints). Chat Completions only allows
+    function calling with reasoning disabled on gpt-6 models, so it keeps the JSON envelope."""
+    target = azure_v1_target(req.base_url, req.extra)
+    return bool(target and target[1] == "responses")

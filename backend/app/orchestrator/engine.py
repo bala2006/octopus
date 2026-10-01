@@ -15,6 +15,8 @@ watchdog (both auto-pause for a human), human pause and kill switch.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import json
 import re
 import time
 from collections import Counter
@@ -28,13 +30,14 @@ from app.core.config import PROJECT_DIRNAME, get_settings
 from app.core.logging import get_logger
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
-from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest
+from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest, LLMResult, ToolCall
 from app.llm.demo_script import role_category
-from app.llm.router import prepare_request, stream_with_retry
+from app.llm.router import get_provider, prepare_request, stream_with_retry
 from app.models import AgentMemory, Artifact, Message, Run, Task
 from app.orchestrator import actions as A
+from app.orchestrator import tools as T
 from app.orchestrator.bus import bus
-from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, clip
+from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, clip, team_status
 from app.orchestrator.permissions import (
     EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
 )
@@ -44,6 +47,7 @@ from app.orchestrator.protocols import (
     review_on_request, review_on_result,
 )
 from app.schemas import RunBudget
+from app.services import project_memory as PM
 from app.tools import basic
 from app.tools.sandbox import SandboxError, parse_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError
@@ -59,7 +63,18 @@ OPEN_TASK_STATES = {"todo", "in_progress", "in_review", "blocked"}
 MAX_SELF_TURNS = 3
 # A run and all of its follow-ups may spend at most this multiple of the run's original budget (turns, tokens, cost, time).
 FOLLOWUP_BUDGET_CEILING = 3
+# Delegation as a tool call: the delegated teammate's sub-turn runs inside the delegator's tool call. These context vars
+# follow each asyncio task, so parallel delegations each see their own frame.
+DELEGATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("octopus_delegation", default=None)
+IN_TOOL_LOOP: contextvars.ContextVar[bool] = contextvars.ContextVar("octopus_in_tool_loop", default=False)
+MAX_DELEGATION_DEPTH = 3  # delegator → worker → worker's report → … (cycles are refused)
+JOURNAL_MAX = 400
+MAX_REDELIVERIES = 2  # a message whose turn failed is shown again at most this many times
+DIGEST_LINES = 40
 READ_PAGE_CHARS = TOOL_RESULT_CHARS - 500  # one read_file page fits in a tool result with room for its header
+# A model call is only treated as hung after this long with *no* output (reasoning summaries, text or tool arguments).
+# There is no fixed cap on a call that keeps streaming: xhigh reasoning with a 128k output budget can take many minutes.
+LLM_IDLE_TIMEOUT_S = 300.0
 JUDGE_MAX_TOKENS = 16  # "YES"/"NO" plus slack; 5 often produced no answer at all (reasoning headroom is added on top)
 
 
@@ -71,12 +86,82 @@ def judge_verdict(text: str) -> bool | None:
     return True if t[0] == "YES" else False if t[0] == "NO" else None
 
 
+def apply_edits(text: str, edits: list[A.Edit]) -> tuple[str, int]:
+    """Apply exact-text edits in order. Returns (new text, 1-based line of the first change). Raises ValueError (nothing
+    applied) when an old_string is missing or ambiguous, with enough detail for the model to fix its call."""
+    first: int | None = None
+    for i, e in enumerate(edits, 1):
+        n = text.count(e.old_string)
+        label = f"edit {i}" if len(edits) > 1 else "old_string"
+        if n == 0:
+            stripped = e.old_string.strip()
+            hint = (" (it does appear with different surrounding whitespace or indentation)" if stripped and stripped in text
+                    else " (read_file to get the exact current text)")
+            raise ValueError(f"{label}: old_string not found{hint}")
+        if n > 1 and not e.replace_all:
+            raise ValueError(f"{label}: old_string occurs {n} times; include more surrounding lines to make it unique, "
+                             "or set replace_all")
+        pos = text.index(e.old_string)
+        line = text.count("\n", 0, pos) + 1
+        first = line if first is None else min(first, line)
+        text = text.replace(e.old_string, e.new_string) if e.replace_all else text.replace(e.old_string, e.new_string, 1)
+    return text, first or 1
+
+
+def numbered_excerpt(text: str, line: int, before: int = 3, after: int = 12) -> str:
+    lines = text.split("\n")
+    lo, hi = max(1, line - before), min(len(lines), line + after)
+    return "\n".join(f"{n:>5}  {lines[n - 1]}" for n in range(lo, hi + 1))
+
+
 def head_tail(text: str, limit: int) -> str:
     """Keep both ends of a long text: a malformed reply usually breaks at the end."""
     if len(text) <= limit:
         return text
     half = limit // 2
     return text[:half] + f"\n…[{len(text) - limit:,} characters omitted]…\n" + text[-half:]
+
+
+KEEP_FULL_ROUNDS = 3  # the latest tool rounds are replayed verbatim; older ones are shortened
+OLD_ROUND_CHARS = 1500
+COMPACT_MARK = "; re-read the file or re-run the tool if you need it again]"
+
+
+def _shorten(text: str, limit: int, what: str) -> str:
+    if len(text) <= limit or text.endswith(COMPACT_MARK):
+        return text
+    return f"{text[:limit]}\n…[{what} shortened: {len(text):,} chars, shown in full in an earlier round{COMPACT_MARK}"
+
+
+
+def compact_rounds(items: list[dict[str, Any]], rounds: list[int]) -> list[dict[str, Any]]:
+    """Keep a long tool loop from re-sending everything every round.
+
+    Each round replays the whole turn so far (up to max_tool_rounds rounds; one read_file result can be 60k characters,
+    one write_file call carries the whole file). Rounds older than the last KEEP_FULL_ROUNDS keep their structure,
+    reasoning items and call ids, but long tool outputs and long string arguments are shortened. Shortening is idempotent."""
+    if len(rounds) <= KEEP_FULL_ROUNDS:
+        return items
+    cut = rounds[-KEEP_FULL_ROUNDS]
+    out = []
+    for i, item in enumerate(items):
+        if i >= cut:
+            out.append(item)
+        elif item.get("type") == "function_call_output" and isinstance(item.get("output"), str):
+            out.append({**item, "output": _shorten(item["output"], OLD_ROUND_CHARS, "tool output")})
+        elif item.get("type") == "function_call" and len(item.get("arguments") or "") > OLD_ROUND_CHARS:
+            try:
+                args = json.loads(item["arguments"])
+            except (TypeError, ValueError):
+                out.append(item)
+                continue
+            if isinstance(args, dict):
+                args = {k: _shorten(v, OLD_ROUND_CHARS, k) if isinstance(v, str) else v for k, v in args.items()}
+                item = {**item, "arguments": json.dumps(args, ensure_ascii=False)}
+            out.append(item)
+        else:
+            out.append(item)
+    return out
 
 
 class StopRun(Exception):
@@ -108,8 +193,8 @@ def live_activity(text: str) -> tuple[str, str]:
     if act == "send_message":
         to, typ = get("to"), get("type").replace("_", " ")
         return ("speaking", f"Drafting {typ or 'message'}{' to ' + to if to else ''}…")
-    if act == "write_file":
-        return ("writing", f"Writing {get('path') or 'a file'}…")
+    if act in ("write_file", "edit_file"):
+        return ("writing", f"{'Editing' if act == 'edit_file' else 'Writing'} {get('path') or 'a file'}…")
     if act in ("read_file", "list_files"):
         return ("reading", f"Reading {get('path') or 'the project'}…")
     if act == "run_code":
@@ -178,12 +263,27 @@ class RunRuntime(TeamMixin):
         self.followups: list[str] = []  # messages sent after the run finished (the run continues like a chat)
         self.mock_state: dict[str, dict[str, Any]] = {}
         self.warned: set[str] = set()
+        self.redeliveries: Counter[str] = Counter()  # message id -> times re-delivered after a failed turn
+        self.browser_pages: dict[str, tuple[str, str]] = {}  # agent id -> (url, title) of its browser tab, for the Browser view
         self.rejections = 0
         # scheduling health: consecutive self-activated turns per agent, the last turn that moved the run forward,
         # and which open tasks were already nudged since then (task key -> progress_turn at nudge time)
         self.self_turns: Counter[str] = Counter()
         self.progress_turn = run.turns or 0
         self.nudged: dict[str, int] = {}
+        # shared team knowledge: an engine-kept log of what happened (files, tasks, decisions, delegations, finishes) and,
+        # per agent, the point up to which it has seen it, so every prompt can carry "what the team did since your last turn"
+        self.journal: list[dict[str, Any]] = []
+        self.journal_n = 0
+        self.seen: dict[str, int] = {}
+        self.seen_turn: dict[str, int] = {}
+        # efficiency: turns that changed a deliverable or ran something vs. turns spent coordinating
+        self.metrics: Counter[str] = Counter()
+        self.first_deliverable_turn: int | None = None
+        self.turn_work: dict[str, bool] = {}
+        self._file_locks: dict[str, asyncio.Lock] = {}
+        self._approval_lock = asyncio.Lock()
+        self.memory = PM.load(project.root)  # project memory shared across runs
 
         self.seq = 0
         self.turn_no = run.turns or 0
@@ -243,6 +343,8 @@ class RunRuntime(TeamMixin):
             "budget_base": self.budget_base,
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
+            "journal": self.journal[-JOURNAL_MAX:], "journal_n": self.journal_n, "seen": self.seen, "seen_turn": self.seen_turn,
+            "metrics": self.efficiency(),
         }
 
     async def save(self) -> None:
@@ -281,6 +383,13 @@ class RunRuntime(TeamMixin):
         self.progress_turn = int(st.get("progress_turn", self.turn_no))
         self.nudged = dict(st.get("nudged", {}))
         self.stall_ack = int(st.get("stall_ack", self.turn_no))
+        self.journal = list(st.get("journal", []))
+        self.journal_n = int(st.get("journal_n", len(self.journal)))
+        self.seen = dict(st.get("seen", {}))
+        self.seen_turn = dict(st.get("seen_turn", {}))
+        m = st.get("metrics") or {}
+        self.metrics = Counter({k: int(m.get(k, 0)) for k in ("turns", "work_turns", "delegations", "parallel_delegations")})
+        self.first_deliverable_turn = m.get("first_deliverable_turn")
         async with self.db() as db:
             msgs = (await db.execute(select(Message).where(Message.run_id == self.run_id).order_by(Message.created_at))).scalars().all()
             for m in msgs:
@@ -377,7 +486,8 @@ class RunRuntime(TeamMixin):
         self.observe(aid, {"tool": "system", "content": text}, activate=activate)
 
     async def post_message(self, *, sender: str, from_id: str | None, to_id: str | None, type_: str, content: str,
-                           edge_id: str | None = None, meta: dict[str, Any] | None = None, deliver: bool = True) -> dict[str, Any]:
+                           edge_id: str | None = None, meta: dict[str, Any] | None = None, deliver: bool = True,
+                           announce: bool = True) -> dict[str, Any]:
         m = Message(id=new_id(), run_id=self.run_id, session_id=self.session_id, sender=sender, from_agent_id=from_id,
                     to_agent_id=to_id, edge_id=edge_id, type=type_, content=content, meta_json=meta or {},
                     turn_no=self.turn_no, read=not (deliver and to_id in self.agents), created_at=utcnow())
@@ -392,11 +502,30 @@ class RunRuntime(TeamMixin):
                 self.done_agents.discard(to_id)
             if self.status.get(to_id) in ("idle", "done"):
                 await self.set_agent_status(to_id, "waiting")
-        await self.emit("message_created", {"message": {
-            "id": m.id, "run_id": m.run_id, "session_id": m.session_id, "sender": sender, "from_agent_id": from_id,
-            "to_agent_id": to_id, "edge_id": edge_id, "type": type_, "content": content, "meta": m.meta_json,
-            "turn_no": m.turn_no, "created_at": m.created_at.isoformat()}})
+        if announce:
+            await self.announce_message(rec, m.created_at.isoformat())
         return rec
+
+    async def announce_message(self, m: dict[str, Any], created_at: str, *, to_everyone: bool = False) -> None:
+        """Show a message in the run (feed, timeline, canvas). A broadcast's per-agent copies are announced once, to everyone."""
+        await self.emit("message_created", {"message": {
+            "id": m["id"], "run_id": self.run_id, "session_id": self.session_id, "sender": m["sender"], "from_agent_id": m["from"],
+            "to_agent_id": None if to_everyone else m["to"], "edge_id": m["edge_id"], "type": m["type"], "content": m["content"],
+            "meta": m["meta"], "turn_no": m["turn"], "created_at": created_at}})
+
+    async def requeue(self, aid: str, inbox_ids: list[str]) -> bool:
+        """A turn failed before the agent could act on its messages: deliver them again, so they stay NEW instead of silently
+        sliding into history (the agent then lost track of what it was asked and re-asked or looped). Bounded per message."""
+        again = [mid for mid in inbox_ids if self.redeliveries[mid] < MAX_REDELIVERIES]
+        if not again:
+            return False
+        for mid in again:
+            self.redeliveries[mid] += 1
+            self.deliver(aid, mid)
+        async with self.db() as db:
+            await db.execute(update(Message).where(Message.id.in_(again)).values(read=False))
+            await db.commit()
+        return True
 
     def next_runnable(self) -> str | None:
         """FIFO over queued messages and activating observations. An agent that has already taken MAX_SELF_TURNS turns in a
@@ -415,6 +544,53 @@ class RunRuntime(TeamMixin):
         return best[1] if best else None
 
     # ------------------------------------------------------------------ task board awareness
+    def log(self, aid: str | None, text: str) -> None:
+        """Record something the whole team should know about (shown to each agent once, in its next prompt)."""
+        self.journal_n += 1
+        self.journal.append({"n": self.journal_n, "turn": self.turn_no, "agent": aid, "text": text[:500]})
+        del self.journal[:-JOURNAL_MAX]
+
+    def decide(self, text: str, aid: str | None = None) -> None:
+        self.decisions.append(text)
+        self.log(aid, text)
+
+    def digest(self, aid: str) -> str:
+        """What teammates did since this agent's last turn: the engine's log plus one line per message between others."""
+        since, since_turn = self.seen.get(aid, 0), self.seen_turn.get(aid, -1)
+        rows: list[tuple[int, str]] = [(e["turn"], f"- t{e['turn']} {self.names.get(e['agent'] or '', 'Octopus')}: {e['text']}")
+                                       for e in self.journal if e["n"] > since and e["agent"] != aid]
+        for m in self.history:
+            if m["turn"] <= since_turn or aid in (m["from"], m["to"]) or m["type"] == "artifact_created" or m["from"] is None:
+                continue
+            first = (m["content"].strip().splitlines() or [""])[0][:200]
+            to = self.names.get(m["to"] or "", "everyone")
+            rows.append((m["turn"], f"- t{m['turn']} {self.names.get(m['from'], '?')} → {to} ({m['type']}): {first}"))
+        rows.sort(key=lambda r: r[0])
+        lines = [r[1] for r in rows]
+        if len(lines) > DIGEST_LINES:
+            lines = [f"- … {len(lines) - DIGEST_LINES} earlier entries (see the Blackboard and files)"] + lines[-DIGEST_LINES:]
+        return "\n".join(lines)
+
+    def mark_work(self, aid: str) -> None:
+        """This turn changed a deliverable or ran something (as opposed to only coordinating)."""
+        if not self.turn_work.get(aid):
+            self.turn_work[aid] = True
+            self.metrics["work_turns"] += 1
+
+    def start_turn_metrics(self, aid: str) -> None:
+        self.metrics["turns"] += 1
+        self.turn_work[aid] = False
+
+    def efficiency(self) -> dict[str, Any]:
+        turns = self.metrics["turns"]
+        return {"turns": turns, "work_turns": self.metrics["work_turns"],
+                "overhead_share": round(1 - self.metrics["work_turns"] / turns, 3) if turns else 0.0,
+                "first_deliverable_turn": self.first_deliverable_turn, "delegations": self.metrics["delegations"],
+                "parallel_delegations": self.metrics["parallel_delegations"]}
+
+    def file_lock(self, rel: str) -> asyncio.Lock:
+        return self._file_locks.setdefault(rel, asyncio.Lock())
+
     def mark_progress(self) -> None:
         """Something moved the run forward (a file changed, a task changed status, a verdict, a finish, user input)."""
         self.progress_turn = self.turn_no
@@ -485,10 +661,11 @@ class RunRuntime(TeamMixin):
         return None
 
     # ------------------------------------------------------------------ limits & control
-    def limit_reason(self) -> str | None:
+    def limit_reason(self, *, turns: bool = True) -> str | None:
+        """``turns=False`` inside a turn's tool loop: the turn is already counted, only spend and time can run out."""
         b = self.budget
         reason = None
-        if self.turn_no >= b.max_turns:
+        if turns and self.turn_no >= b.max_turns:
             reason = f"Budget: max turns reached ({b.max_turns})"
         elif self.tokens >= b.max_tokens:
             reason = f"Budget: token budget exhausted ({self.tokens}/{b.max_tokens})"
@@ -604,14 +781,25 @@ class RunRuntime(TeamMixin):
         self.wake.set()
 
     async def interject(self, content: str, to_agent_id: str | None) -> None:
-        targets = [to_agent_id] if to_agent_id else list(self.agents)
+        targets = [t for t in ([to_agent_id] if to_agent_id else self.agents) if t in self.agents and self.agents[t].active]
         self.user_notes.append(clip(content, 1000))
         self.mark_progress()  # new information from the user re-opens every nudge
+        # A message to everyone is one message: each agent gets its own copy in its inbox, but the run shows it once
+        # (it used to appear once per agent in the feed and timeline).
+        group = new_id() if len(targets) > 1 else None
+        first: dict[str, Any] | None = None
         for t in targets:
-            if t in self.agents:
-                await self.post_message(sender="user", from_id=None, to_id=t, type_="user_interjection", content=content)
-        if self.awaiting and (to_agent_id is None or to_agent_id == self.awaiting.get("agent_id")):
-            self.awaiting = None
+            meta = {"broadcast": group, "recipients": len(targets)} if group else {}
+            rec = await self.post_message(sender="user", from_id=None, to_id=t, type_="user_interjection", content=content,
+                                          meta=meta, announce=not group)
+            first = first or rec
+        if group and first:
+            await self.announce_message(first, utcnow().isoformat(), to_everyone=True)
+        # The user is talking to the team: that answers a pending question and resumes a paused run (a paused run used to
+        # stay paused after "continue" until Resume was pressed). Pause again any time with Pause / Space.
+        self.awaiting = None
+        if self.paused:  # step mode still waits for Next turn
+            self.resume()
         self.wake.set()
 
     def resolve_approval(self, approval_id: str, approved: bool, reason: str, scope: str = "once") -> bool:
@@ -628,6 +816,13 @@ class RunRuntime(TeamMixin):
         if f"{agent.id}:{kind}" in self.auto_approve:
             await self.emit("approval_resolved", {"id": None, "approved": True, "reason": "auto-approved (always allow)",
                                                   "agent_id": agent.id, "kind": kind, "summary": summary, "auto": True})
+            return True, "auto"
+        async with self._approval_lock:  # one approval card at a time, even when delegated teammates work in parallel
+            return await self._request_approval(agent, kind, summary, preview, details)
+
+    async def _request_approval(self, agent: AgentSpec, kind: str, summary: str, preview: str,
+                                details: dict[str, Any] | None = None) -> tuple[bool, str]:
+        if f"{agent.id}:{kind}" in self.auto_approve:  # an earlier card in the queue may have said "always"
             return True, "auto"
         aid = new_id()
         fut: asyncio.Future[tuple[bool, str]] = asyncio.get_running_loop().create_future()
@@ -805,14 +1000,62 @@ class RunRuntime(TeamMixin):
         return None if e in ("default", "") else e
 
     async def call_llm(self, agent: AgentSpec, req: LLMRequest) -> str:
+        return (await self.call_llm_result(agent, req)).text
+
+    async def call_llm_result(self, agent: AgentSpec, req: LLMRequest) -> LLMResult:
+        """Stream one model call: live status + token_stream events, usage accounting, text and (native) tool calls."""
         parts: list[str] = []
+        result = LLMResult()
         buf, last = "", time.monotonic()
         speaking = False
+        tool_buf = ""  # '"action":"<tool>", <streamed arguments>' so live_activity can describe a native call as it streams
+        think: list[str] = []
+        think_buf, think_last = "", time.monotonic()
+        fresh_call = False
         remaining = max(5.0, self.budget.timeout_s - self.active_seconds)
 
-        async def consume() -> None:
-            nonlocal buf, last, speaking
+        idle: asyncio.Timeout | None = None
+        t_start = time.monotonic()
+
+        async def _consume() -> None:
+            nonlocal buf, last, speaking, tool_buf, think_buf, think_last, fresh_call
             async for chunk in stream_with_retry(req):
+                if idle is not None:  # output is flowing: push the inactivity deadline out (never past the run's budget)
+                    left = remaining - (time.monotonic() - t_start)
+                    if left <= 0:
+                        raise asyncio.TimeoutError("the run's active-time budget ran out during a model call")
+                    idle.reschedule(asyncio.get_running_loop().time() + min(LLM_IDLE_TIMEOUT_S, left))
+                if chunk.thinking:  # reasoning summary: streamed live as the agent's "thinking"
+                    think.append(chunk.thinking)
+                    think_buf += chunk.thinking
+                    if len(think_buf) >= 60 or time.monotonic() - think_last > 0.15:
+                        await self.emit("thinking_stream", {"agent_id": agent.id, "delta": think_buf, "turn_no": self.turn_no})
+                        think_buf, think_last = "", time.monotonic()
+                    if not speaking:
+                        await self.set_agent_status(agent.id, "thinking", "Thinking…")
+                if chunk.tool_started:
+                    tool_buf = f'"action":"{chunk.tool_started}",'
+                    # mark where a new call starts in the live stream, in the same shape as the JSON envelope, so the UI can
+                    # show "Writing index.html" + the content instead of raw arguments
+                    buf += f'\n{{"action":"{chunk.tool_started}",'
+                    fresh_call = True
+                    status, activity = live_activity(tool_buf)
+                    await self.set_agent_status(agent.id, status, activity)
+                if chunk.tool_delta:
+                    tool_buf += chunk.tool_delta
+                    d = chunk.tool_delta
+                    if fresh_call:  # the arguments object's own "{" is already written by the marker above
+                        d, fresh_call = d.lstrip().removeprefix("{"), False
+                    buf += d
+                    if len(buf) >= 120 or time.monotonic() - last > 0.1:
+                        status, activity = live_activity(tool_buf[:2000])
+                        await self.set_agent_status(agent.id, status, activity)
+                        await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
+                        buf, last = "", time.monotonic()
+                if chunk.tool_calls is not None:
+                    result.tool_calls = list(chunk.tool_calls)
+                if chunk.items is not None:
+                    result.items = list(chunk.items)
                 if chunk.delta:
                     parts.append(chunk.delta)
                     buf += chunk.delta
@@ -827,13 +1070,33 @@ class RunRuntime(TeamMixin):
             if buf:
                 await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
 
-        await asyncio.wait_for(consume(), timeout=min(remaining, 300))
-        return "".join(parts)
+        # No fixed cap per call: a long reasoning call (xhigh effort, up to 128k output tokens) can legitimately run for many
+        # minutes. What counts is silence: if nothing arrives for LLM_IDLE_TIMEOUT_S the call is treated as hung. The run's
+        # active-time budget still bounds the whole call.
+        try:
+            async with asyncio.timeout(min(remaining, LLM_IDLE_TIMEOUT_S)) as idle:
+                await _consume()
+        except TimeoutError as exc:
+            if idle is not None and idle.expired() and not str(exc):
+                out_of_budget = time.monotonic() - t_start >= remaining
+                raise TimeoutError("the run's active-time budget ran out during a model call" if out_of_budget else
+                                   f"no output from the model for {LLM_IDLE_TIMEOUT_S:.0f}s") from exc
+            raise
+        if think_buf:
+            await self.emit("thinking_stream", {"agent_id": agent.id, "delta": think_buf, "turn_no": self.turn_no})
+        result.text = "".join(parts)
+        result.thinking = "".join(think).strip()
+        if result.thinking:  # persisted, so replays and the timeline show what the agent was thinking
+            await self.emit("thought", {"agent_id": agent.id, "text": result.thinking[:6000], "turn_no": self.turn_no, "kind": "reasoning"})
+        return result
 
     async def call_llm_escalating(self, agent: AgentSpec, req: LLMRequest) -> str:
+        return (await self.call_llm_escalating_result(agent, req)).text
+
+    async def call_llm_escalating_result(self, agent: AgentSpec, req: LLMRequest) -> LLMResult:
         """Call the model; if the reply hits the output limit, raise the agent's budget (and remember it) and retry once."""
         try:
-            return await self.call_llm(agent, req)
+            return await self.call_llm_result(agent, req)
         except LLMOutputTruncated as exc:
             old = req.max_tokens
             new = min(MAX_AGENT_MAX_TOKENS, max(old * 2, CODE_AGENT_MAX_TOKENS))
@@ -841,10 +1104,13 @@ class RunRuntime(TeamMixin):
                 raise
             await self.raise_output_budget(agent, new, str(exc))
             req.max_tokens = new
-            req.messages = [*req.messages, {"role": "user", "content": (
-                f"Note: your previous attempt at this reply was cut off at the output limit ({old:,} tokens) and nothing in it was "
-                f"applied. The limit is now {new:,} tokens.")}]
-            return await self.call_llm(agent, req)
+            note = {"role": "user", "content": (f"Note: your previous attempt at this reply was cut off at the output limit ({old:,} "
+                                                f"tokens) and nothing in it was applied. The limit is now {new:,} tokens.")}
+            if req.continuation:  # inside a tool loop the note belongs after the replayed items
+                req.continuation = [*req.continuation, note]
+            else:
+                req.messages = [*req.messages, note]
+            return await self.call_llm_result(agent, req)
 
     async def raise_output_budget(self, agent: AgentSpec, new: int, why: str) -> None:
         old = agent.max_tokens
@@ -877,26 +1143,17 @@ class RunRuntime(TeamMixin):
             return
         self.turn_no += 1
         self.agent_turns[aid] += 1
+        self.start_turn_metrics(aid)
         await self.emit("turn_started", {"agent_id": aid, "turn_no": self.turn_no, "inbox": inbox_ids})
         await self.set_agent_status(aid, "thinking", f"Reading {len(inbox_ids)} new message(s)…" if inbox_ids else "Reviewing results…")
         inbox_set = set(inbox_ids)
         inbox = [m for m in self.history if m["id"] in inbox_set]
-        system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
-                                     status=self.status, preview_url=self.preview_url())
-        user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_set, observations=obs,
-                                 blackboard=self.blackboard(), names=self.names, recent_n=self.budget.context_recent)
-        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
-                         extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {},
-                         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], json_mode=True,
-                         metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs)})
-        if self.budget.force_mock:
-            req.provider, req.model = "mock", "mock/demo"
         try:
-            async with registry_factory()() as rdb:
-                req, warn = await prepare_request(rdb, self.user_id, req)
-            if warn and aid not in self.warned:
-                self.warned.add(aid)
-                await self.emit("error", {"message": f"{agent.name}: {warn}", "agent_id": aid, "kind": "warning"})
+            req, native = await self.build_request(agent, inbox_set, obs)
+            if native:
+                await self.native_turn(agent, req)
+                await self.end_turn(aid)
+                return
             text = await self.call_llm_escalating(agent, req)
             parsed = A.parse_envelope(text)
             if not parsed.ok and req.provider != "mock":
@@ -911,15 +1168,19 @@ class RunRuntime(TeamMixin):
                                       "agent_id": aid, "kind": "llm"})
             self.notice(aid, f"Your previous reply was cut off at the output limit ({req.max_tokens:,} tokens, reasoning included) and "
                              "nothing in it was applied. write_file with \"mode\":\"append\" can build a file across turns.", activate=True)
+            await self.requeue(aid, inbox_ids)
             return
         except (LLMError, asyncio.TimeoutError) as exc:
             await self.set_agent_status(aid, "error")
             await self.emit("error", {"message": f"{agent.name}: LLM call failed: {exc}", "agent_id": aid, "kind": "llm"})
-            self.notice(aid, f"Your previous turn failed due to a model error ({exc}). Try again concisely.", activate=bool(inbox_ids))
+            back = await self.requeue(aid, inbox_ids)
+            self.notice(aid, f"Your previous turn failed due to a model error ({exc})."
+                             + (" The messages from that turn are shown again under NEW messages." if back else ""), activate=bool(inbox_ids))
             return
         if not parsed.ok:
             await self.set_agent_status(aid, "error")
             await self.emit("error", {"message": f"{agent.name} produced an invalid response: {'; '.join(parsed.errors)}", "agent_id": aid, "kind": "parse"})
+            await self.requeue(aid, inbox_ids)
             self.notice(aid, "Your last reply could not be parsed: " + "; ".join(parsed.errors) + ". Reply with the JSON object only.", activate=True)
             return
         if parsed.thought:
@@ -935,6 +1196,260 @@ class RunRuntime(TeamMixin):
             await self.execute(agent, action)
             if self.finished_summary is not None:
                 break
+        await self.end_turn(aid)
+
+    async def build_request(self, agent: AgentSpec, inbox_ids: set[str], obs: list[dict[str, Any]], *, extra: str = ""
+                            ) -> tuple[LLMRequest, bool]:
+        """Resolve the model, then build the prompts (native tools or JSON envelope) for one agent turn."""
+        aid = agent.id
+        inbox = [m for m in self.history if m["id"] in inbox_ids]
+        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
+                         extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {}, messages=[], json_mode=True,
+                         metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs),
+                                   "cache_key": f"octopus-{self.run_id[:18]}-{agent.id}"[:64]})
+        if self.budget.force_mock:
+            req.provider, req.model = "mock", "mock/demo"
+        async with registry_factory()() as rdb:
+            req, warn = await prepare_request(rdb, self.user_id, req)
+        if warn and aid not in self.warned:
+            self.warned.add(aid)
+            await self.emit("error", {"message": f"{agent.name}: {warn}", "agent_id": aid, "kind": "warning"})
+        native = self.native_tools_for(req)
+        system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
+                                     status=self.status, preview_url=self.preview_url(), native=native,
+                                     project_memory=PM.render(self.memory, exclude_run=self.run_id))
+        user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
+                                 names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
+                                 team_status=team_status(self.agents, self.status))
+        if extra:
+            user += "\n\n" + extra
+        req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        self.seen[aid], self.seen_turn[aid] = self.journal_n, self.turn_no
+        return req, native
+
+    # ------------------------------------------------------------------ native function calling
+    def native_tools_for(self, req: LLMRequest) -> bool:
+        """Use the model's own function calling when the provider supports it (Azure Responses API); otherwise the JSON envelope."""
+        if not get_settings().native_tools:
+            return False
+        check = getattr(get_provider(req.provider, req), "supports_native_tools", None)
+        return bool(check and check(req))
+
+    async def native_turn(self, agent: AgentSpec, req: LLMRequest, *, exclude: set[str] | frozenset[str] = frozenset()) -> str:
+        """One turn as a tool loop: the model calls tools, gets each result back, and keeps going until it stops calling tools
+        (or ends the turn with wait / finish / a question for the user). Errors are returned to the model as tool results."""
+        aid = agent.id
+        specs, mcp_map = T.tool_specs(agent.tools, agent.mcp)
+        req.tools = [t for t in specs if t["name"] not in exclude]
+        req.json_mode = False
+        req.continuation = []
+        token = IN_TOOL_LOOP.set(True)
+        try:
+            return await self._tool_loop(agent, req, mcp_map)
+        finally:
+            IN_TOOL_LOOP.reset(token)
+
+    async def _tool_loop(self, agent: AgentSpec, req: LLMRequest, mcp_map: dict[str, tuple[str, str]]) -> str:
+        aid = agent.id
+        last_text = ""
+        rounds: list[int] = []  # where each round's items start in req.continuation
+        for rnd in range(self.budget.max_tool_rounds):
+            if self.stop_requested:
+                raise StopRun()
+            if rnd and (self.paused or self.limit_reason(turns=False)):
+                break  # pause / budget are honoured between rounds too; the turn ends cleanly
+            res = await self.call_llm_escalating_result(agent, req)
+            if res.text.strip():
+                last_text = res.text.strip()
+                await self.emit("thought", {"agent_id": aid, "text": last_text[:4000], "turn_no": self.turn_no})
+            if not res.tool_calls:
+                legacy = A.parse_envelope(res.text) if res.text.lstrip().startswith(("{", "```")) else None
+                if legacy and legacy.ok and legacy.actions:  # the model answered with an old-style envelope: honour it
+                    for action in legacy.actions:
+                        await self.execute(agent, action)
+                        if self.finished_summary is not None:
+                            break
+                break
+            outputs: list[dict[str, Any]] = []
+            ended = False
+            # several delegations in one reply are independent work: run those teammates at the same time
+            delegations = [c for c in res.tool_calls if c.name == "delegate"]
+            ran: dict[str, tuple[str, bool]] = {}
+            if len(delegations) > 1:
+                self.metrics["parallel_delegations"] += len(delegations)
+                done = await asyncio.gather(*(self.run_tool_call(agent, c, mcp_map) for c in delegations))
+                ran = {c.id: r for c, r in zip(delegations, done)}
+            for call in res.tool_calls:
+                if call.id in ran:
+                    out, _ = ran[call.id]
+                elif ended:
+                    out = "Not run: an earlier call in this reply ended your turn."
+                else:
+                    out, ended = await self.run_tool_call(agent, call, mcp_map)
+                outputs.append({"type": "function_call_output", "call_id": call.id, "output": out})
+            # replay the response (encrypted reasoning included) and answer every call, as the Responses API expects
+            replay = [i for i in res.items if not (i.get("type") == "reasoning" and not i.get("encrypted_content"))]
+            rounds.append(len(req.continuation))
+            req.continuation = compact_rounds([*req.continuation, *replay, *outputs], rounds)
+            if ended:
+                break
+        else:
+            await self.emit("error", {"kind": "warning", "agent_id": aid,
+                                      "message": f"{agent.name} used all {self.budget.max_tool_rounds} tool rounds of this turn"})
+        return last_text
+
+    async def run_tool_call(self, agent: AgentSpec, call: ToolCall, mcp_map: dict[str, tuple[str, str]]) -> tuple[str, bool]:
+        """Run one function call through the normal action executor. Returns (result text for the model, turn ended?).
+
+        The executors report back through notices/observations (the envelope path shows those in the next prompt); here
+        they are taken out and returned as the call's output instead, so the agent sees them immediately."""
+        aid = agent.id
+        action, err = T.parse_tool_call(call.name, call.arguments, mcp_map)
+        if action is None:
+            await self.emit("error", {"message": f"{agent.name}: {call.name}: {err}", "agent_id": aid, "kind": "parse"})
+            return f"Error: {err}. Nothing was done; call the tool again with corrected arguments.", False
+        if action.action == "delegate":  # returns the teammate's result directly (and may run in parallel with others)
+            if not A.tool_enabled(agent.tools, "send_message"):
+                return "Error: delegating needs the Messaging tool, which you don't have.", False
+            return clip(await self.delegate(agent, action), TOOL_RESULT_CHARS), False
+        before = len(self.observations.get(aid, []))
+        await self.execute(agent, action)
+        produced = self.observations.get(aid, [])[before:]
+        if produced:
+            del self.observations[aid][before:]
+            if not self.observations[aid]:
+                self.observations.pop(aid)
+        lines = []
+        for o in (o for _, o in produced):
+            tag = "" if o.get("tool") == "system" else f"[{o.get('tool')}{' OK' if o.get('ok') else ' FAILED' if o.get('ok') is False else ''}] "
+            lines.append(tag + str(o.get("content", "")))
+        name = action.action
+        if not lines:
+            if name == "update_task_board":
+                lines.append("Task board:\n" + "\n".join(f"- {self.task_line(t)}" for t in self.tasks.values()))
+            elif name == "send_message":
+                lines.append(f"Sent to {action.to}.")
+            else:
+                lines.append("Done.")
+        ended = (name in T.TERMINAL_ACTIONS or self.finished_summary is not None or aid in self.done_agents
+                 or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
+        return clip("\n".join(lines), TOOL_RESULT_CHARS), ended
+
+    # ------------------------------------------------------------------ delegation (orchestrator → worker)
+    def brief_text(self, delegator: AgentSpec, a: A.Delegate) -> str:
+        parts = [f"Objective: {a.objective.strip()}"]
+        if a.deliverable.strip():
+            parts.append(f"Deliverable: {a.deliverable.strip()}")
+        if a.done_when.strip():
+            parts.append(f"Done when: {a.done_when.strip()}")
+        if a.context.strip():
+            parts.append(f"Context: {a.context.strip()}")
+        return "\n".join(parts)
+
+    async def act_delegate(self, agent: AgentSpec, a: A.Delegate) -> None:  # JSON-envelope path
+        self.notice(agent.id, await self.delegate(agent, a))
+
+    async def delegate(self, agent: AgentSpec, a: A.Delegate) -> str:
+        """Hand work to a teammate over a delegate channel. Inside a native tool loop the teammate's sub-turn runs right away
+        and its result is returned; otherwise (JSON envelope, or depth/cycle limits) it becomes a task message."""
+        tid = self.resolve_agent(a.to)
+        if tid is None:
+            can = [self.names[r] for r, es in allowed_recipients(self.edges, agent.id).items() if any(e.type == "delegate" for e in es)]
+            return f"Not delegated: unknown teammate '{a.to}'. You can delegate to: {', '.join(can) or 'nobody'}."
+        if tid == agent.id:
+            return "Not delegated: that's you. Just do the work."
+        worker = self.agents[tid]
+        if not worker.active:
+            return f"Not delegated: {worker.name} is inactive."
+        edge = find_channel(self.edges, agent.id, tid, "task")
+        if edge is None:
+            return "Not delegated: " + rejection_reason(self.edges, agent.id, tid, "task", self.names)
+        brief = self.brief_text(agent, a)
+        frame = DELEGATION.get()
+        chain: tuple[str, ...] = (*(frame["chain"] if frame else ()), agent.id)
+        self.metrics["delegations"] += 1
+        if not IN_TOOL_LOOP.get() or len(chain) > MAX_DELEGATION_DEPTH or tid in chain:
+            await self._send_one(agent, tid, A.SendMessage(action="send_message", to=worker.name, type="task", content=brief, task_id=a.task_id))
+            return f"Delegated to {worker.name} as a task message; the result arrives as a message when they report back."
+        req, native = await self.build_request(worker, set(), [o for _, o in self.observations.pop(tid, [])], extra="")
+        if not native:  # e.g. the teammate runs on another provider: fall back to a message
+            await self._send_one(agent, tid, A.SendMessage(action="send_message", to=worker.name, type="task", content=brief, task_id=a.task_id))
+            return f"Delegated to {worker.name} as a task message; the result arrives as a message when they report back."
+        key = await self.link_task(agent.id, tid, a.task_id, a.objective)
+        task = self.tasks[key]
+        if task["status"] in ("todo", "blocked"):
+            task["status"] = "in_progress"
+            await self.save_task(task)
+        self.edge_counts[edge.id] += 1
+        await self.post_message(sender="agent", from_id=agent.id, to_id=tid, type_="task", content=brief, edge_id=edge.id,
+                                meta={"task_id": key, "delegation": True}, deliver=False)
+        await self.emit("edge_activity", {"edge_id": edge.id, "from_agent_id": agent.id, "to_agent_id": tid, "type": "task",
+                                          "count": self.edge_counts[edge.id], "max_turns": int((edge.config or {}).get("max_turns", 20))})
+        self.log(agent.id, f"delegated {key} to {worker.name}: {a.objective[:200]}")
+        return await self.run_delegated(agent, worker, key, brief, req, chain)
+
+    async def run_delegated(self, delegator: AgentSpec, worker: AgentSpec, key: str, brief: str, req: LLMRequest,
+                            chain: tuple[str, ...]) -> str:
+        wid = worker.id
+        max_auto = int(worker.behavior.get("max_autonomous_turns", 12))
+        if self.agent_turns[wid] >= max_auto:
+            return f"{worker.name} has no turns left in this request (max {max_auto}); do it yourself or delegate to someone else."
+        if (why := self.limit_reason()):
+            return f"Not started: {why}"
+        self.turn_no += 1
+        self.agent_turns[wid] += 1
+        self.start_turn_metrics(wid)
+        await self.emit("turn_started", {"agent_id": wid, "turn_no": self.turn_no, "inbox": [], "delegated_by": delegator.id, "task": key})
+        await self.set_agent_status(wid, "thinking", f"Working on {key} for {delegator.name}…")
+        before = {p: v["version"] for p, v in self.artifacts.items()}
+        req.messages[-1]["content"] += (f"\n\n# Delegated to you by {delegator.name} (task {key})\n{brief}\n\nYour result goes straight back "
+                                        f"to {delegator.name}: when you're done, or can't go on, call `finish` with what you did, where "
+                                        "the results are, and anything still open.")
+        frame = {"worker": wid, "summary": None, "chain": chain}
+        token = DELEGATION.set(frame)
+        last = ""
+        try:
+            last = await self.native_turn(worker, req, exclude={"request_user_input"})
+        except (LLMError, asyncio.TimeoutError) as exc:
+            last = f"(stopped by a model error: {exc})"
+            await self.emit("error", {"message": f"{worker.name}: LLM call failed: {exc}", "agent_id": wid, "kind": "llm"})
+        finally:
+            DELEGATION.reset(token)
+        summary = frame["summary"] or last or "(no summary)"
+        task = self.tasks[key]
+        if frame["summary"] is not None and task["status"] not in ("done", "blocked"):
+            task["status"] = "done"
+            await self.save_task(task)
+            self.mark_progress()
+        changed = [f"{p} (v{v['version']})" for p, v in self.artifacts.items() if before.get(p) != v["version"]]
+        await self.end_turn(wid)
+        self.log(wid, f"{'finished' if frame['summary'] is not None else 'stopped'} {key} for {delegator.name}: {summary[:200]}")
+        await self.post_message(sender="agent", from_id=wid, to_id=delegator.id, type_="status_update", content=summary,
+                                meta={"task_id": key, "delegation_result": True}, deliver=False)
+        return (f"Result from {worker.name} ({key} is {task['status']}):\n{summary}\n"
+                + (f"Files changed: {', '.join(changed)}" if changed else "No files changed."))
+
+    async def act_search_project(self, agent: AgentSpec, a: A.SearchProject) -> None:
+        cid = await self._tool_event(agent, "search_project", {"query": a.query, "path_prefix": a.path_prefix})
+        await self.set_agent_status(agent.id, "reading", f"Searching for {a.query[:40]}…")
+        try:
+            hits, total, n = self.fs_for(agent.id).search(a.query, regex=a.regex, prefix=a.path_prefix, max_results=a.max_results)
+            out = (f"{total} match{'es' if total != 1 else ''} in {n} files" + (f" (showing {len(hits)})" if total > len(hits) else "")
+                   + (":\n" + "\n".join(hits) if hits else "."))
+            ok = True
+        except WorkspaceError as exc:
+            out, ok = str(exc), False
+        self.observe(agent.id, {"tool": "search_project", "ok": ok, "content": out})
+        await self._tool_result(agent, cid, "search_project", ok, out[:2000])
+
+    def retrospective(self, status: str, reason: str) -> dict[str, Any]:
+        open_ = self.open_tasks()
+        return {"run_id": self.run_id, "at": utcnow().isoformat(timespec="seconds"), "goal": self.goal[:500], "status": status,
+                "halt_reason": reason[:300], "summary": (self.finished_summary or "")[:800],
+                "files": sorted(self.artifacts)[:40], "open_tasks": [f"{t['key']} {t['status']} {t['title'][:80]}" for t in open_[:10]],
+                "decisions": self.decisions[-5:], "followups": [f[:200] for f in self.followups[-3:]], "efficiency": self.efficiency()}
+
+    async def end_turn(self, aid: str) -> None:
         if self.progress_turn == self.turn_no:  # productive turn: the agent may keep working on its own results
             self.self_turns[aid] = 0
         if aid in self.done_agents:
@@ -1032,7 +1547,7 @@ class RunRuntime(TeamMixin):
             activating = bool(v.event and v.event.get("result") == "max_rounds")
             meta["debate"] = {"round": st.rounds, "max_rounds": st.max_rounds, "status": st.status, "number": st.number}
             if st.status == "consensus" and protocol_event:
-                self.decisions.append(f"Consensus ({self.names[edge.source]} ↔ {self.names[edge.target]}): {st.outcome[:240]}")
+                self.decide(f"Consensus ({self.names[edge.source]} ↔ {self.names[edge.target]}): {st.outcome[:240]}", agent.id)
         elif a.type in ("review_request", "review_result"):
             if edge.type == "review":
                 author, reviewer = (agent.id, tid) if a.type == "review_request" else (tid, agent.id)
@@ -1070,7 +1585,7 @@ class RunRuntime(TeamMixin):
             for d in self.debates.values():
                 if tid in d.participants and debate_decided_externally(d, content):
                     await self.emit("protocol", {"kind": "debate", "result": "decided", "edge_id": d.edge_id, "state": d.to_dict()})
-            self.decisions.append(f"Decision by {agent.name}: {content.splitlines()[0][:240]}")
+            self.decide(f"Decision by {agent.name}: {content.splitlines()[0][:240]}", agent.id)
         if a.type == "decision" or (protocol_event and protocol_event.get("result") not in (None, "requested", "round")):
             self.mark_progress()  # verdicts, consensus and decisions move the run forward; another debate round does not
         if protocol_event:
@@ -1131,6 +1646,7 @@ class RunRuntime(TeamMixin):
              "acceptance_criteria": fields.get("acceptance_criteria") or "", "created_by": creator}
         self.tasks[t["key"]] = t
         await self.save_task(t, new=True)
+        self.log(creator, f"created {t['key']} \"{t['title'][:120]}\"" + (f" for {self.names.get(t['assignee'], '?')}" if t["assignee"] else ""))
         return t
 
     async def save_task(self, t: dict[str, Any], new: bool = False) -> None:
@@ -1176,6 +1692,9 @@ class RunRuntime(TeamMixin):
                 changed.append(f"created {t['key']}")
             else:
                 self.notice(agent.id, f"Unknown task key '{item.key}'. Existing: {', '.join(self.tasks) or 'none'}")
+        moved = [c for c in changed if not c.startswith("created")]
+        if moved:
+            self.log(agent.id, "task board: " + ", ".join(moved))
         await self._tool_result(agent, cid, "update_task_board", True, ", ".join(changed))
 
     async def act_write_file(self, agent: AgentSpec, a: A.WriteFile) -> None:
@@ -1189,24 +1708,66 @@ class RunRuntime(TeamMixin):
             return
         appending = a.mode == "append"
         content = (old or "") + a.content if appending else a.content
+        await self.commit_file(agent, cid, "write_file", rel, old, content, a.note, appending=appending, partial=a.partial)
+
+    async def act_edit_file(self, agent: AgentSpec, a: A.EditFile) -> None:
+        """Targeted change: each edit replaces exact existing text. All edits apply, or none do."""
+        cid = await self._tool_event(agent, "edit_file", {"path": a.path, "edits": len(a.edits), "note": a.note})
+        fs = self.fs_for(agent.id)
+        try:
+            rel, _ = fs.resolve(a.path)
+            old = fs.current(rel)
+        except WorkspaceError as exc:
+            await self.deny(agent, cid, "edit_file", f"edit_file failed: {exc}")
+            return
+        if old is None:
+            await self.deny(agent, cid, "edit_file", f"edit_file failed: {rel} does not exist (create it with write_file)")
+            return
+        try:
+            content, first_line = apply_edits(old, a.edits)
+        except ValueError as exc:
+            await self.deny(agent, cid, "edit_file", f"edit_file failed on {rel}: {exc}. The file was not changed.")
+            return
+        await self.commit_file(agent, cid, "edit_file", rel, old, content, a.note, context_line=first_line)
+
+    async def commit_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
+                          appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
+        """Permission gate, write, version history, events and the agent's confirmation, shared by write_file / edit_file.
+        One writer per path at a time (parallel delegations may touch the same file)."""
+        async with self.file_lock(rel):
+            await self._commit_file(agent, cid, tool, rel, old, content, note, appending=appending, partial=partial,
+                                    context_line=context_line)
+
+    async def _commit_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
+                           appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
+        fs = self.fs_for(agent.id)
+        if tool == "edit_file" or appending:  # the file may have changed while waiting for the lock: re-apply on current content
+            current = fs.current(rel)
+            if current != old:
+                await self.deny(agent, cid, tool, f"{tool} failed: {rel} was changed by a teammate meanwhile; read it again")
+                return
         if old == content:
             self.notice(agent.id, f"{rel} unchanged ({'nothing to append' if appending else 'identical content'}).")
-            await self._tool_result(agent, cid, "write_file", True, "unchanged")
+            await self._tool_result(agent, cid, tool, True, "unchanged")
             return
         planned = fs.shadow is not None
-        action = "append to" if appending and old is not None else ("create" if old is None else "modify")
+        action = "edit" if tool == "edit_file" else "append to" if appending and old is not None else ("create" if old is None else "modify")
         ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to {action} {rel}",
-                                      content, {"path": rel, "old": (old or "")[:20000], "new": content[:20000], "note": a.note})
+                                      content, {"path": rel, "old": (old or "")[:20000], "new": content[:20000], "note": note})
         if not ok:
-            await self.deny(agent, cid, "write_file", reason)
+            await self.deny(agent, cid, tool, reason)
             return
-        await self.set_agent_status(agent.id, "writing", f"{'Appending to' if appending else 'Saving'} {rel}…")
+        await self.set_agent_status(agent.id, "writing", f"{'Editing' if tool == 'edit_file' else 'Appending to' if appending else 'Saving'} {rel}…")
         try:
             fs.write(rel, content)
         except WorkspaceError as exc:
-            await self.deny(agent, cid, "write_file", f"write_file failed: {exc}")
+            await self.deny(agent, cid, tool, f"{tool} failed: {exc}")
             return
         self.mark_progress()
+        if not rel.startswith(PROJECT_DIRNAME + "/"):  # a deliverable (not a working doc)
+            self.mark_work(agent.id)
+            if self.first_deliverable_turn is None:
+                self.first_deliverable_turn = self.turn_no
         prev = self.artifacts.get(rel)
         if old is not None and prev is None and not planned and not await self.written_by_octopus(rel):
             # never silently overwrite the user's own file (whatever the permission level): say so, loudly
@@ -1215,28 +1776,31 @@ class RunRuntime(TeamMixin):
                 "The original is kept: revert it from Artifacts → Run changes.")})
         version = (prev or {}).get("version", 0) + 1
         art = Artifact(id=new_id(), run_id=self.run_id, path=rel, content=content, version=version, author_agent_id=agent.id,
-                       change_note=a.note[:1000], planned=planned, created_at=utcnow(),
+                       change_note=note[:1000], planned=planned, created_at=utcnow(),
                        previous_content=(fs.original(rel) if planned else old) if prev is None else None)
         async with self.db() as db:
             db.add(art)
             await db.commit()
         added = content.count("\n") + 1
         removed = (old or "").count("\n") + 1 if old else 0
-        self.artifacts[rel] = {"version": version, "author": agent.id, "note": a.note}
+        self.artifacts[rel] = {"version": version, "author": agent.id, "note": note}
         await self.emit("artifact_updated", {"artifact": {"id": art.id, "run_id": self.run_id, "path": rel, "version": version,
-                                                          "author_agent_id": agent.id, "change_note": a.note, "size": len(content),
+                                                          "author_agent_id": agent.id, "change_note": note, "size": len(content),
                                                           "planned": planned, "created": old is None, "appended": appending,
-                                                          "lines": added, "previous_lines": removed,
+                                                          "edited": tool == "edit_file", "lines": added, "previous_lines": removed,
                                                           "created_at": art.created_at.isoformat()}})
-        verb = "Planned" if planned else ("Created" if old is None else "Appended to" if appending else "Updated")
+        verb = "Planned" if planned else ("Created" if old is None else "Edited" if tool == "edit_file" else "Appended to" if appending else "Updated")
+        self.log(agent.id, f"{verb.lower()} {rel} (v{version})" + (f": {note[:200]}" if note else ""))
         await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
-                                content=f"{verb} `{rel}` (v{version})" + (f": {a.note}" if a.note else ""),
+                                content=f"{verb} `{rel}` (v{version})" + (f": {note}" if note else ""),
                                 meta={"path": rel, "version": version, "artifact_id": art.id, "planned": planned}, deliver=False)
-        size_note = (f" It now has {added} lines; append the next part now (mode \"append\")." if a.partial
+        size_note = (f" It now has {added} lines; append the next part now (mode \"append\")." if partial
                      else f" It now has {added} lines." if appending else "")
+        if context_line is not None:  # show the edited region so the agent can check the result without re-reading the file
+            size_note = f" Lines around the change:\n{numbered_excerpt(content, context_line)}"
         self.notice(agent.id, f"{verb} {rel} (v{version}).{size_note}"
-                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""), activate=a.partial)
-        await self._tool_result(agent, cid, "write_file", True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
+                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""), activate=partial)
+        await self._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
 
     async def written_by_octopus(self, rel: str) -> bool:
         """Did any run in this project ever write ``rel``? (Otherwise it is the user's own file.)"""
@@ -1359,6 +1923,29 @@ class RunRuntime(TeamMixin):
             if A.tool_enabled(a.tools, "browser") and get_settings().browser_enabled:
                 a.mcp.append({"id": SERVER_ID, "name": SERVER_NAME, "tools": browser.tool_list(), "builtin": True})
 
+    async def _browser_action(self, agent: AgentSpec, cid: str, a: A.McpCall, ok: bool, out: str) -> None:
+        """Record what the agent did in its browser tab and what the tab showed afterwards (the run's Browser view)."""
+        from app.services import browser_frames
+        from app.services.browser import browser, page_info
+
+        url, title = page_info(out)
+        if url:
+            self.browser_pages[agent.id] = (url, title)
+        else:
+            url, title = self.browser_pages.get(agent.id, ("", ""))
+        frame = None
+        if ok and get_settings().browser_live_frames:
+            data = await browser.frame(self.run_id, agent.id, a.tool)
+            if data:
+                try:
+                    frame = browser_frames.save(self.run_id, data)
+                except (OSError, ValueError) as exc:
+                    log.warning("browser_frame_not_saved", error=str(exc))
+        args = {k: (v[:300] if isinstance(v, str) else v) for k, v in (a.arguments or {}).items()}
+        await self.emit("browser_action", {"agent_id": agent.id, "call_id": cid, "tool": a.tool, "args": args, "ok": ok,
+                                           "url": url, "title": title[:200], "frame": frame,
+                                           "note": "" if ok else out[:500], "turn_no": self.turn_no})
+
     async def act_mcp_call(self, agent: AgentSpec, a: A.McpCall) -> None:
         from app.tools.mcp_client import call_tool
 
@@ -1372,6 +1959,7 @@ class RunRuntime(TeamMixin):
                 await self.deny(agent, cid, "mcp_call", "Read-only mode: you may look at pages but not fill in forms.")
                 return
             await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
+            self.mark_work(agent.id)
             ok, out = await browser.call(self.run_id, agent.id, a.tool, a.arguments)
             if not ok and not browser.available():
                 out += ("\nThe browser can't run in this environment: don't retry it. Verify by reading the code instead, and say in "
@@ -1383,6 +1971,7 @@ class RunRuntime(TeamMixin):
                         f"'it works in the browser' is unverified. {browser.error.splitlines()[0] if browser.error else ''}")})
             self.observe(agent.id, {"tool": f"browser/{a.tool}", "ok": ok, "content": out})
             await self._tool_result(agent, cid, "mcp_call", ok, out)
+            await self._browser_action(agent, cid, a, ok, out)
             return
         cfg = self.mcp_configs.get(sid) if sid else None
         if cfg is None:
@@ -1397,11 +1986,13 @@ class RunRuntime(TeamMixin):
             await self.deny(agent, cid, "mcp_call", reason)
             return
         await self.set_agent_status(agent.id, "tool", f"Calling {cfg.name}/{a.tool}…")
+        self.mark_work(agent.id)
         ok, out = await call_tool(cfg, a.tool, a.arguments)
         self.observe(agent.id, {"tool": f"mcp:{cfg.name}/{a.tool}", "ok": ok, "content": out})
         await self._tool_result(agent, cid, "mcp_call", ok, out)
 
     async def act_run_code(self, agent: AgentSpec, a: A.RunCode) -> None:
+        self.mark_work(agent.id)
         cid = await self._tool_event(agent, "run_code", {"command": a.command})
         level = self.levels.get(agent.id, self.level)
         try:
@@ -1440,7 +2031,16 @@ class RunRuntime(TeamMixin):
         await self._tool_result(agent, cid, "web_search", True, out)
 
     async def act_remember(self, agent: AgentSpec, a: A.Remember) -> None:
-        cid = await self._tool_event(agent, "remember", {"key": a.key})
+        cid = await self._tool_event(agent, "remember", {"key": a.key, "scope": a.scope})
+        if a.scope == "project":  # shared with the whole team, now and in future runs (.octopus/memory.json)
+            try:
+                self.memory = PM.remember(self.root, a.key, a.value, agent.name)
+                ok = True
+            except OSError:
+                ok = False
+            self.log(agent.id, f"project memory: {a.key} = {a.value[:200]}")
+            await self._tool_result(agent, cid, "remember", ok, a.key)
+            return
         agent.memory[a.key] = a.value
         try:
             async with self.db() as db:
@@ -1463,6 +2063,10 @@ class RunRuntime(TeamMixin):
         await self.set_agent_status(agent.id, "waiting")
 
     async def act_finish(self, agent: AgentSpec, a: A.Finish) -> None:
+        frame = DELEGATION.get()
+        if frame is not None and frame["worker"] == agent.id:  # a delegated sub-turn: hand the result back to the delegator
+            frame["summary"] = a.summary or "Done."
+            return
         if self.mode == "supervised":
             ok, reason = await self.request_approval(agent, "finish", f"{agent.name} wants to finish", a.summary, {"summary": a.summary})
             if not ok:
@@ -1475,6 +2079,7 @@ class RunRuntime(TeamMixin):
         else:
             self.done_agents.add(agent.id)
             self.mark_progress()
+            self.log(agent.id, f"finished: {(a.summary or '')[:300]}")
             await self.emit("agent_finished", {"agent_id": agent.id, "summary": a.summary})
 
     async def act_wait(self, agent: AgentSpec, a: A.Wait) -> None:
@@ -1489,6 +2094,10 @@ class RunRuntime(TeamMixin):
             final = "done" if (aid in self.done_agents or (status == "completed" and self.agent_turns[aid])) else "idle"
             await self.set_agent_status(aid, final)
         summary = self.finished_summary or reason
+        try:  # what this run did, for the agents of the next run in this project
+            self.memory = PM.add_run(self.root, self.retrospective(status, reason))
+        except OSError:  # pragma: no cover
+            log.warning("project_memory_write_failed", run_id=self.run_id)
         async with self.db() as db:
             await db.execute(update(Run).where(Run.id == self.run_id).values(
                 status=status, halt_reason=reason[:200], summary=summary, ended_at=utcnow(),

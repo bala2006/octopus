@@ -65,6 +65,28 @@ class WriteFile(BaseModel):
         return v
 
 
+class Edit(BaseModel):
+    old_string: str = Field(min_length=1, description="Exact text currently in the file (including whitespace and indentation)")
+    new_string: str = Field(description="Text to put in its place (empty to delete)")
+    replace_all: bool = Field(False, description="Replace every occurrence instead of requiring exactly one")
+
+
+class EditFile(BaseModel):
+    """Change part of an existing file by exact text replacement. Edits apply in order; all of them succeed or none do."""
+    action: Literal["edit_file"]
+    path: str = Field(min_length=1, max_length=300)
+    edits: list[Edit] = Field(min_length=1, max_length=50)
+    note: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _single_edit(cls, data: Any) -> Any:  # tolerate {"path", "old_string", "new_string"} for a single edit
+        if isinstance(data, dict) and "edits" not in data and "old_string" in data:
+            data = dict(data)
+            data["edits"] = [{k: data.pop(k) for k in ("old_string", "new_string", "replace_all") if k in data}]
+        return data
+
+
 class CreateFolder(BaseModel):
     action: Literal["create_folder"]
     path: str = Field(min_length=1, max_length=300)
@@ -125,6 +147,30 @@ class Remember(BaseModel):
     action: Literal["remember"]
     key: str = Field(min_length=1, max_length=200)
     value: str = Field(max_length=5000)
+    scope: Literal["self", "project"] = Field("self", description='"self": your own notes; "project": shared with every agent '
+                                                                  'in this project, in this and future runs')
+
+
+class Delegate(BaseModel):
+    """Hand a piece of work to a teammate you have a delegate channel to. With native tools the teammate starts right away and
+    its result (summary, files changed, task status) comes back as this call's result; several delegate calls in one reply
+    run at the same time."""
+    action: Literal["delegate"]
+    to: str = Field(min_length=1, max_length=120)
+    objective: str = Field(min_length=1, max_length=8000, description="What to achieve")
+    deliverable: str = Field("", max_length=4000, description="What to hand back, e.g. files and where they go")
+    done_when: str = Field("", max_length=4000, description="How the teammate can tell the work is finished")
+    context: str = Field("", max_length=20000, description="Facts, decisions and file paths the teammate needs")
+    task_id: str | None = None
+
+
+class SearchProject(BaseModel):
+    """Search the project's files (and the team's working docs in .octopus/work/) for text."""
+    action: Literal["search_project"]
+    query: str = Field(min_length=1, max_length=500)
+    regex: bool = False
+    path_prefix: str = Field("", max_length=300, description="Only search under this folder")
+    max_results: int = Field(80, ge=1, le=300)
 
 
 class Choice(BaseModel):
@@ -235,22 +281,23 @@ class Wait(BaseModel):
 
 
 Action = Annotated[
-    Union[SendMessage, WriteFile, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
+    Union[SendMessage, Delegate, WriteFile, EditFile, SearchProject, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
           WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, Finish, Wait],
     Field(discriminator="action"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Action)
 
-ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "write_file", "read": "read_file",
+ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "write_file", "read": "read_file", "edit": "edit_file", "str_replace": "edit_file",
+                  "replace": "edit_file", "patch_file": "edit_file",
                   "execute": "run_code", "run": "run_code", "terminal": "run_code", "tasks": "update_task_board", "done": "finish",
-                  "ask_user": "request_user_input", "search": "web_search", "calculator": "calculate", "ls": "list_files",
+                  "ask_user": "request_user_input", "search": "web_search", "calculator": "calculate", "ls": "list_files", "grep": "search_project", "search_files": "search_project", "assign": "delegate",
                   "mcp": "mcp_call", "call_tool": "mcp_call", "hire": "create_agent", "spawn_agent": "create_agent",
                   "add_agent": "create_agent", "update_self": "update_agent", "edit_agent": "update_agent", "configure_agent": "update_agent",
                   "mkdir": "create_folder", "make_dir": "create_folder", "create_directory": "create_folder", "mkdir_p": "create_folder",
                   "move": "move_file", "rename": "move_file", "mv": "move_file", "rename_file": "move_file", "team": "list_agents", "roster": "list_agents", "view_agents": "list_agents"}
 
 # tool toggle required for each action (absent => always available). mcp_call is gated per server.
-ACTION_TOOL = {"send_message": "send_message", "write_file": "file_write", "create_folder": "file_write", "move_file": "file_write", "read_file": "file_read", "list_files": "list_files",
+ACTION_TOOL = {"send_message": "send_message", "delegate": "send_message", "search_project": "file_read", "write_file": "file_write", "edit_file": "file_write", "create_folder": "file_write", "move_file": "file_write", "read_file": "file_read", "list_files": "list_files",
                "run_code": "terminal", "request_user_input": "ask_user", "web_search": "web_search", "calculate": "calculator",
                "create_agent": "manage_team"}
 TOOL_DEFAULTS = {"send_message": True, "file_read": True, "file_write": True, "list_files": True, "calculator": True, "browser": True}
@@ -344,19 +391,25 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
     if tool_enabled(enabled_tools, "send_message"):
         lines.append('{"action":"send_message","to":"<teammate name | all>","type":"<message type>","content":"...",'
                      ' "task_id":"T-1 (optional)","verdict":"approve|request_changes (review_result only)","comments":["..."]}')
+    if tool_enabled(enabled_tools, "send_message"):
+        lines.append('{"action":"delegate","to":"<teammate>","objective":"...","deliverable":"...","done_when":"...","context":"..."}'
+                     '  (hand work to a teammate you have a delegate channel to; it goes on the task board)')
     lines += [
         '{"action":"update_task_board","tasks":[{"key":"T-1 (omit to create)","title":"...","description":"...",'
         '"assignee":"<name>","status":"todo|in_progress|in_review|done|blocked","acceptance_criteria":"..."}]}',
-        '{"action":"remember","key":"...","value":"..."}  (long-term memory note)',
+        '{"action":"remember","key":"...","value":"...","scope":"self|project"}  (long-term note; "project" = shared with every agent, kept across runs)',
     ]
     if tool_enabled(enabled_tools, "list_files"):
         lines.append('{"action":"list_files","prefix":"optional/dir"}')
     if tool_enabled(enabled_tools, "file_read"):
+        lines.append('{"action":"search_project","query":"text or regex","regex":false,"path_prefix":""}  (find text across the project files)')
         lines.append('{"action":"read_file","path":"relative/path.ext","offset":0}  (big files come in pages; the result says which offset to read next)')
     if tool_enabled(enabled_tools, "file_write"):
         lines.append('{"action":"write_file","path":"relative/path.ext","content":"<file content>","note":"why"}  (parent folders are created for you)')
         lines.append('{"action":"write_file","path":"relative/path.ext","mode":"append","content":"<next part>","partial":true}  (adds to the end '
                      'of the file; "partial":true gives you another turn right away)')
+        lines.append('{"action":"edit_file","path":"relative/path.ext","edits":[{"old_string":"exact current text","new_string":"replacement"}]}'
+                     '  (change part of an existing file; each old_string must match exactly once unless "replace_all":true)')
         lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
         lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):

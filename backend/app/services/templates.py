@@ -135,6 +135,26 @@ TEMPLATES: dict[str, CompanyTemplate] = {
         ),
         links=(Link("dir", "ed", "review", True, "Accuracy review", {"max_revisions": 2}),),
     ),
+    # Coding work rarely splits into truly independent parts, and every handoff costs turns. These two templates keep the
+    # team as small as the work: one engineer, or one engineer plus a reviewer the engineer can delegate a review to.
+    "solo_engineer": CompanyTemplate(
+        key="solo_engineer", name="Solo Engineer",
+        description="One engineer with every tool: plans, builds, runs and checks the work itself. No coordination overhead; best "
+                    "for most coding goals.", head="eng", auto_wire=False,
+        departments=(Department("Engineering", M("eng", "fullstack_dev", name="Sam", role="Software Engineer", entry=True, x=300, y=0)),),
+    ),
+    "engineer_reviewer": CompanyTemplate(
+        key="engineer_reviewer", name="Engineer + Reviewer",
+        description="An engineer who builds, and a reviewer the engineer can hand a review to when a second pair of eyes is worth it.",
+        head="eng", auto_wire=False,
+        departments=(Department("Engineering", M("eng", "fullstack_dev", name="Sam", role="Software Engineer", entry=True, x=300, y=0),
+                                (M("rev", "techlead", name="Riya", role="Code Reviewer", x=300, y=260),)),),
+        links=(
+            Link("eng", "rev", "delegate", False, "Review requests"),
+            Link("eng", "rev", "review", True, "Code review", {"max_revisions": 3}),
+            Link("rev", "eng", "report", False, "Review results"),
+        ),
+    ),
     "small_dev_team": CompanyTemplate(
         key="small_dev_team", name="Small Dev Team",
         description="One team: a PM (manager), a Developer and QA with a code-review loop.", head="pm", auto_wire=False,

@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # Reasoning effort used when an agent / run says "Auto". xhigh: Azure's recommendation for long agentic runs, and the
     # best quality short of "max" (which is much slower). Set to "medium" (the model's own default) to trade quality for speed.
     default_reasoning_effort: str = "xhigh"
+    # Agents act through the model's native function calling where the provider supports it (Azure Responses API);
+    # false = always use the JSON action envelope.
+    native_tools: bool = True
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8080"])
     rate_limit_per_minute: int = 1200
@@ -76,6 +79,8 @@ class Settings(BaseSettings):
     playwright_mcp_port: int = 0  # 0 = pick a free port
     playwright_browser: str = ""  # chrome | msedge | chromium | firefox | webkit ("" = chrome if installed, else chromium)
     playwright_headless: bool = True
+    # After each browser action, screenshot the agent's tab so the run's Browser view shows what it is doing
+    browser_live_frames: bool = True
 
     # MCP: allow stdio servers (spawns user-configured commands on the backend host)
     mcp_allow_stdio: bool = True

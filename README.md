@@ -119,6 +119,16 @@ both:
 Plain `docker compose up --build` works too; you just get the in-app browser instead of the system dialog. Running
 natively (`make setup && make start`) needs neither: the backend opens the dialog itself.
 
+### Benchmark templates
+
+```bash
+backend/.venv/bin/python scripts/bench.py --projects-root ~/octopus-bench --templates solo_engineer,engineer_reviewer,software_startup
+```
+
+Runs the coding tasks in `bench/tasks.json` with each template (fresh folder per case, objective checks such as "the
+tests pass") and prints pass rate, turns, coordination overhead, tokens and cost per template. `--repeat 3` evens out
+model randomness; `--demo` checks the harness offline.
+
 ## How it works
 
 ```mermaid

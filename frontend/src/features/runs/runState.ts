@@ -1,6 +1,7 @@
 import type { AwaitingQuestion } from "./QuestionCard";
 /** Pure reducer turning run events (live or replayed) into view state. Used for live runs and timeline scrubbing. */
 import type { AgentOut, EdgeOut, MessageOut, PendingApproval, RunEvent } from "@/types";
+import { appendStream } from "./streamView";
 
 export interface ToolCall { call_id: string; agent_id: string; tool: string; args: Record<string, unknown>; ok?: boolean; output?: string; turn_no?: number; seq?: number }
 export interface LiveTask { key: string; title: string; status: string; assignee_agent_id?: string | null; description?: string; acceptance_criteria?: string }
@@ -18,6 +19,11 @@ export interface Usage {
   /** last turn that changed a file or moved the task board, and how many turns ago that was */
   progress_turn?: number; turns_since_progress?: number;
 }
+/** One thing an agent did in its browser tab, and (when the page changed) a screenshot of what the tab showed afterwards. */
+export interface BrowserAction {
+  seq: number; ts?: string; agent_id: string; call_id?: string; tool: string; args: Record<string, unknown>; ok: boolean;
+  url: string; title: string; frame?: string | null; note?: string;
+}
 export interface ProtocolState { kind: "debate" | "review"; result: string; edge_id: string; state: Record<string, any>; seq?: number } // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export interface RunLive {
@@ -28,6 +34,10 @@ export interface RunLive {
   activity: Record<string, string>;
   streaming: Record<string, string>;
   thoughts: Record<string, string>;
+  /** reasoning summary streaming in right now (cleared when the finished thought arrives) */
+  thinking: Record<string, string>;
+  /** when each agent's current turn started (ms), for the "working for 42s" counter */
+  turnStart: Record<string, number>;
   messages: FeedMessage[];
   extraAgents: AgentOut[];
   extraEdges: EdgeOut[];
@@ -37,6 +47,8 @@ export interface RunLive {
   departments: Record<string, { color: string }>;
   rejected: Array<Record<string, any>>; // eslint-disable-line @typescript-eslint/no-explicit-any
   toolCalls: Record<string, ToolCall>;
+  /** browser actions in order, all agents (each agent has its own tab) */
+  browser: BrowserAction[];
   tasks: Record<string, LiveTask>;
   artifacts: Record<string, LiveArtifact>;
   usage: Usage;
@@ -54,11 +66,23 @@ export interface RunLive {
 }
 
 export const initialRun = (): RunLive => ({
-  status: "queued", reason: "", summary: "", agentStatus: {}, activity: {}, streaming: {}, thoughts: {}, messages: [], rejected: [],
+  status: "queued", reason: "", summary: "", agentStatus: {}, activity: {}, streaming: {}, thoughts: {}, thinking: {}, turnStart: {}, messages: [], rejected: [],
   extraAgents: [], extraEdges: [], agentPatches: {}, orgEvents: [], fresh: {}, departments: {},
-  toolCalls: {}, tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
+  toolCalls: {}, browser: [], tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
   pendingApproval: null, awaiting: null, errors: [], timeline: [], approvals: [], lastSeq: 0, live: false, replayDone: false,
 });
+
+/** "browser_navigate" → "opened", for labels like "Ann opened Snake". */
+export function browserVerb(tool: string): string {
+  const t = tool.replace(/^browser_/, "");
+  const verbs: Record<string, string> = {
+    navigate: "opened", navigate_back: "went back", click: "clicked", type: "typed", fill_form: "filled a form", press_key: "pressed a key",
+    select_option: "picked an option", hover: "hovered", snapshot: "read the page", take_screenshot: "took a screenshot",
+    wait_for: "waited", evaluate: "ran a script", console_messages: "read the console", network_requests: "checked network requests",
+    resize: "resized the window", tabs: "managed tabs", handle_dialog: "answered a dialog", file_upload: "uploaded a file", drag: "dragged",
+  };
+  return verbs[t] ?? `used ${t.replace(/_/g, " ")}`;
+}
 
 const clip = (s: string, n = 90) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
@@ -87,11 +111,14 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
     case "turn_skipped":
       return { ...next, timeline: push({ type: e.type, agent_id: d.agent_id, tone: "error", label: `${n(d.agent_id)} skipped: over ${d.limit} autonomous turns` }) };
     case "turn_started":
-      return { ...next, streaming: { ...s.streaming, [d.agent_id]: "" }, thoughts: { ...s.thoughts, [d.agent_id]: "" } };
+      return { ...next, streaming: { ...s.streaming, [d.agent_id]: "" }, thoughts: { ...s.thoughts, [d.agent_id]: "" }, thinking: { ...s.thinking, [d.agent_id]: "" },
+        turnStart: { ...s.turnStart, [d.agent_id]: now } };
     case "token_stream":
-      return { ...next, streaming: { ...s.streaming, [d.agent_id]: ((s.streaming[d.agent_id] ?? "") + d.delta).slice(-4000) } };
+      return { ...next, streaming: { ...s.streaming, [d.agent_id]: appendStream(s.streaming[d.agent_id] ?? "", d.delta) } };
+    case "thinking_stream":
+      return { ...next, thinking: { ...s.thinking, [d.agent_id]: ((s.thinking[d.agent_id] ?? "") + d.delta).slice(-8000) } };
     case "thought":
-      return { ...next, thoughts: { ...s.thoughts, [d.agent_id]: d.text } };
+      return { ...next, thoughts: { ...s.thoughts, [d.agent_id]: d.text }, thinking: { ...s.thinking, [d.agent_id]: "" } };
     case "message_created": {
       const m = d.message as MessageOut;
       if (s.messages.some((x) => x.id === m.id)) return next;
@@ -100,7 +127,7 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
       return { ...next, messages: [...s.messages, { ...m, _seq: seq || undefined }], lastMessage: lm,
         awaiting: m.meta?.awaiting_input ? { agent_id: m.from_agent_id!, question: m.content, options: (m.meta.options as AwaitingQuestion["options"]) ?? [], allow_other: true } : s.awaiting,
         timeline: m.type === "artifact_created" ? s.timeline : push({ type: e.type, agent_id: m.from_agent_id, tone: "msg",
-          label: `${n(m.from_agent_id)} › ${m.to_agent_id ? n(m.to_agent_id) : "you"} · ${m.type.replace("_", " ")}` }) };
+          label: `${n(m.from_agent_id)} › ${m.to_agent_id ? n(m.to_agent_id) : m.sender === "user" ? "everyone" : "you"} · ${m.type.replace("_", " ")}` }) };
     }
     case "edge_activity":
       return { ...next, activeEdges: { ...s.activeEdges, [d.edge_id]: { at: now, from: d.from_agent_id, type: d.type, seq } } };
@@ -110,9 +137,17 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
       return { ...next, toolCalls: { ...s.toolCalls, [d.call_id]: { ...d, seq } as ToolCall } };
     case "tool_result": {
       const prev = s.toolCalls[d.call_id] ?? { call_id: d.call_id, agent_id: d.agent_id, tool: d.tool, args: {} };
-      const important = d.tool === "run_code" || d.tool === "mcp_call";
+      // browser calls get their own, more descriptive timeline entry from browser_action
+      const important = d.tool === "run_code" || (d.tool === "mcp_call" && prev.args?.server !== "browser");
       return { ...next, toolCalls: { ...s.toolCalls, [d.call_id]: { ...prev, ok: d.ok, output: d.output } },
         timeline: important ? push({ type: e.type, agent_id: d.agent_id, tone: d.ok ? "tool" : "error", label: `${n(d.agent_id)} ${d.tool === "run_code" ? "ran a command" : "called MCP"}: ${d.ok ? "ok" : "failed"}` }) : s.timeline };
+    }
+    case "browser_action": {
+      const a = { ...(d as BrowserAction), seq, ts: e.ts };
+      const where = a.title || a.url;
+      return { ...next, browser: [...s.browser, a].slice(-300),
+        timeline: push({ type: e.type, agent_id: a.agent_id, tone: a.ok ? "tool" : "error",
+          label: `${n(a.agent_id)} ${browserVerb(a.tool)}${where && a.tool === "browser_navigate" ? ` ${clip(where, 50)}` : ""}${a.ok ? "" : " (failed)"}` }) };
     }
     case "task_updated": {
       const t = d.task as LiveTask;

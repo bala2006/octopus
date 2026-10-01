@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -22,7 +23,11 @@ async def get_or_create_single_user(db: AsyncSession) -> User:
     if user is None:
         user = User(email=s.single_user_email, password_hash=hash_password(new_id()))
         db.add(user)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:  # a concurrent first request created it a moment ago
+            await db.rollback()
+            return (await db.execute(select(User).where(User.email == s.single_user_email))).scalar_one()
         await db.refresh(user)
     return user
 

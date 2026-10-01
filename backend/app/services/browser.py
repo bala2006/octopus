@@ -16,6 +16,7 @@ only then is the status ``ready``. A launch failure later on degrades the status
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import re
 import shutil
@@ -105,6 +106,53 @@ def chrome_installed() -> bool:
     return any(shutil.which(b) for b in ("google-chrome", "google-chrome-stable"))
 
 
+def _image(content: Any) -> bytes | None:
+    if getattr(content, "type", "") != "image" or not getattr(content, "data", None):
+        return None
+    try:
+        return base64.b64decode(content.data)
+    except (ValueError, TypeError):
+        return None
+
+
+# Tools that don't change what's on screen: no new live frame after them.
+NO_FRAME_TOOLS = {"browser_snapshot", "browser_console_messages", "browser_network_requests", "browser_tabs", "browser_close",
+                  "browser_install", "browser_take_screenshot"}
+_URL_RE = re.compile(r"Page URL:[ \t]*(.+)")  # the whole line: data: and file URLs may contain spaces
+_TITLE_RE = re.compile(r"Page Title:[ \t]*(.*)")
+
+
+def live_frame_name(run_id: str, agent_id: str) -> str:
+    return "live-" + re.sub(r"[^\w-]", "_", f"{run_id[:12]}-{agent_id}")[:80] + ".jpeg"
+
+
+OUTPUT_MAX_AGE_S = 3600
+
+
+def prune_output_dir(run_id: str) -> None:
+    """Playwright MCP writes a file for every page snapshot and screenshot into its output dir; without pruning that grows forever.
+
+    Removes this run's live frames and anything older than an hour (other runs' files in use are recent)."""
+    import time
+
+    d = get_settings().octopus_home / "browser"
+    if not d.is_dir():
+        return
+    prefix, cutoff = live_frame_name(run_id, "")[:-5], time.time() - OUTPUT_MAX_AGE_S
+    for p in d.iterdir():
+        try:
+            if p.is_file() and (p.name.startswith(prefix) or (p.name.startswith(("page-", "live-")) and p.stat().st_mtime < cutoff)):
+                p.unlink()
+        except OSError:
+            pass
+
+
+def page_info(out: str) -> tuple[str, str]:
+    """(url, title) from a Playwright MCP tool result ("- Page URL: …" / "- Page Title: …"), "" when absent."""
+    url, title = _URL_RE.search(out), _TITLE_RE.search(out)
+    return (url.group(1).strip() if url else ""), (title.group(1).strip() if title else "")
+
+
 class _AgentSession:
     """A long-lived MCP client session owned by one task (anyio contexts must be exited by the task that entered them)."""
 
@@ -112,6 +160,7 @@ class _AgentSession:
         self.url = url
         self.queue: asyncio.Queue[tuple[str, dict[str, Any], asyncio.Future[tuple[bool, str]]] | None] = asyncio.Queue()
         self.ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self.images: list[bytes] = []  # images (screenshots) returned by the last call; the agent only gets text
         self.task = asyncio.create_task(self._run(), name="browser-session")
 
     async def _run(self) -> None:
@@ -129,6 +178,7 @@ class _AgentSession:
                     try:
                         res = await asyncio.wait_for(session.call_tool(tool, args), CALL_TIMEOUT_S)
                         parts = [getattr(c, "text", None) or f"[{getattr(c, 'type', 'content')}]" for c in res.content]
+                        self.images = [img for c in res.content if (img := _image(c)) is not None]
                         out = "\n".join(parts)
                         if len(out) > 12000:
                             out = out[:12000] + f"\n…[truncated: 12,000 of {len(out):,} characters]"
@@ -351,9 +401,38 @@ class BrowserService:
             self.status, self.error, self.verified = "ready", "", True
         return ok, out
 
+    async def frame(self, run_id: str, agent_id: str, tool: str) -> bytes | None:
+        """What the agent's tab shows right after `tool`, as an image, so people can watch the agent browse.
+
+        A screenshot the agent took itself is reused; otherwise one viewport screenshot (JPEG, small and quick) is taken.
+        Never raises: the live view is a convenience and must not break the agent's work."""
+        sess = self._sessions.get((run_id, agent_id))
+        if sess is None or sess.task.done():
+            return None
+        if tool == "browser_take_screenshot":
+            imgs = getattr(sess, "images", [])
+            return imgs[0] if imgs else None
+        if tool in NO_FRAME_TOOLS:
+            return None
+        try:
+            # a fixed file name per agent: Playwright MCP writes every screenshot to disk (page-<timestamp> by default), and
+            # with a file name it returns no image, so the file is read back
+            name = live_frame_name(run_id, agent_id)
+            ok, _ = await sess.call("browser_take_screenshot", {"type": "jpeg", "filename": name})
+        except Exception:  # noqa: BLE001
+            return None
+        imgs = getattr(sess, "images", [])
+        if not ok or imgs:
+            return imgs[0] if ok else None
+        try:
+            return (get_settings().octopus_home / "browser" / name).read_bytes() or None
+        except OSError:
+            return None
+
     async def close_run(self, run_id: str) -> None:
         for key in [k for k in self._sessions if k[0] == run_id]:
             await self._sessions.pop(key).close()
+        prune_output_dir(run_id)
 
 
 browser = BrowserService()

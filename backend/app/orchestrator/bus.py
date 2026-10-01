@@ -13,7 +13,7 @@ from typing import Any
 from app.db.session import SessionFactory
 from app.models import RunEvent
 
-EPHEMERAL = {"token_stream"}
+EPHEMERAL = {"token_stream", "thinking_stream"}  # live-only; the finished thought is persisted as "thought"
 
 
 class EventBus:

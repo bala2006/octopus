@@ -98,6 +98,11 @@ def personality(behavior: dict[str, Any]) -> str:
             f"Debate style: {style.replace('_', ' ')}: {style_text}")
 
 
+def team_status(agents: dict[str, AgentSpec], status: dict[str, str]) -> str:
+    """Who is doing what right now. Changes every turn, so it goes in the turn's message, not the (cached) system prompt."""
+    return ", ".join(f"{a.name}: {status.get(a.id, 'idle')}" for a in agents.values() if a.active)
+
+
 def team_roster(agents: dict[str, AgentSpec], status: dict[str, str] | None = None) -> str:
     lines = []
     for a in agents.values():
@@ -125,6 +130,8 @@ def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500
     to = "everyone" if m["to"] is None else ("you" if m["to"] == me else names.get(m["to"], "?"))
     extra = ""
     meta = m.get("meta") or {}
+    if meta.get("broadcast") and m["to"] == me:  # one message to the whole team; each teammate got the same copy
+        to = f"everyone ({meta.get('recipients', '?')} agents, you included)"
     if meta.get("verdict"):
         extra += f" [verdict: {meta['verdict']}]"
     if meta.get("task_id"):
@@ -169,7 +176,7 @@ def browser_note(agent: AgentSpec, preview_url: str) -> str:
 
 
 def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
-                        status: dict[str, str] | None = None, preview_url: str = "") -> str:
+                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False, project_memory: str = "") -> str:
     names = {a.id: a.name for a in agents.values()}
     variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role,
                  **org_variables(agent, agents)}
@@ -197,14 +204,14 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 ## Personality
 {personality(agent.behavior)}
 
-## Team roster (live status)
-{team_roster(agents, status)}
+## Team roster (current status of each teammate: "# Team status" in each turn's message)
+{team_roster(agents)}
 
 ## Your communication channels (you may ONLY message these agents)
 {channels}
 
 ## Long-term memory notes
-{memory}{browser_note(agent, preview_url)}
+{memory}{chr(10) + "## Project memory (shared by the whole team, kept across runs)" + chr(10) + project_memory if project_memory else ""}{browser_note(agent, preview_url)}
 
 ## Rules
 1. Be concise. Do not repeat what others already said; reference it. The Blackboard (task board, workspace files) is always
@@ -215,30 +222,42 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 4. Files: paths are relative to the project workspace. The project folder holds what the user asked for; working material
    for the team (plans, specs, notes, reviews and the like) can go under `.octopus/work/` so it stays out of the user's
    project. Files that existed before Octopus touched them are the user's, and changes to them are pointed out to the user.
-   A reply can be up to {agent.max_tokens:,} tokens (reasoning included). `write_file` replaces a file; `"mode":"append"`
-   adds to the end of one if you want to build it across turns.
+   A reply can be up to {agent.max_tokens:,} tokens (reasoning included). `write_file` replaces a whole file (`"mode":"append"`
+   adds to its end); `edit_file` changes part of an existing file by exact text replacement.
 5. On debate channels only use proposal / objection / agreement (a debate ends when BOTH sides send `agreement`, or on a `decision`).
 6. On review channels: author sends `review_request`; reviewer replies `review_result` with `verdict` "approve" or "request_changes" and itemized `comments`.
-7. Delegation: tasks you send become entries on the task board. Keep statuses current with update_task_board.
+7. Delegation: tasks you send become entries on the task board. Doing work yourself costs no coordination; handing it to a
+   teammate pays off when parts are independent (several `delegate` calls in one reply run at the same time) or need a
+   specialist. A brief with objective, deliverable and done-when lets a teammate finish without asking back. Files can be
+   referred to by path instead of being retold.
 8. {finish_rule}
 9. Team: use `list_agents` to see who is active/idle/done. You may refine your own configuration with `update_agent`
    (target "self"). {"You can hire teammates (`create_agent`) and reconfigure/deactivate agents you manage. Hire only for real capability gaps and keep departments to 2-3 people." if agent.tools.get("manage_team") else "Ask your manager if the team lacks a skill."}
 
-## Response format
-Reply with ONE JSON object and nothing else:
-{{"thought": "<1-2 sentences of private reasoning>", "actions": [ ... ]}}
-Message types: {MSG_TYPES}.
-Available actions:
-{schema_doc(agent.tools, agent.mcp)}
-"""
+{response_format(agent, native)}"""
+
+
+def response_format(agent: AgentSpec, native: bool) -> str:
+    if native:  # the tools themselves carry names, descriptions and argument schemas
+        return (f"## Acting\nYou act by calling your tools. Each call's result comes back to you within this turn, so you can "
+                f"read, run, check and continue as far as you choose; several independent calls can go in one reply. The turn "
+                f"ends when you stop calling tools, call `wait` or `finish`, or ask the user. Message types: {MSG_TYPES}.\n")
+    return ("## Response format\nReply with ONE JSON object and nothing else:\n"
+            '{"thought": "<1-2 sentences of private reasoning>", "actions": [ ... ]}\n'
+            f"Message types: {MSG_TYPES}.\nAvailable actions:\n{schema_doc(agent.tools, agent.mcp)}\n")
 
 
 def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_ids: set[str], observations: list[dict[str, Any]],
-                      blackboard: str, names: dict[str, str], recent_n: int) -> str:
+                      blackboard: str, names: dict[str, str], recent_n: int, native: bool = False, digest: str = "",
+                      team_status: str = "") -> str:
     mine = [m for m in history if m["id"] not in inbox_ids and (m["from"] == agent.id or m["to"] == agent.id or (m["to"] is None and m["from"] is None))]
     older, recent = mine[:-recent_n] if len(mine) > recent_n else [], mine[-recent_n:]
     inbox = [m for m in history if m["id"] in inbox_ids]
     parts = [f"# Blackboard\n{blackboard}"]
+    if team_status:
+        parts.append("# Team status\n" + team_status)
+    if digest:
+        parts.append("# Team activity since your last turn\n" + digest)
     if older:
         parts.append("# Summary of earlier conversation\n" + rolling_summary(older, names, agent.id))
     if recent:
@@ -251,5 +270,5 @@ def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_
             hint = "read_file with a larger offset for the rest" if o.get("tool") == "read_file" else ""
             obs.append(f"{head} {clip(str(o.get('content', '')), TOOL_RESULT_CHARS, hint)}")
         parts.append("# Tool results & system notices\n" + "\n".join(obs))
-    parts.append("Decide your next actions now. Respond with the JSON object only.")
+    parts.append("Decide what to do next." if native else "Decide your next actions now. Respond with the JSON object only.")
     return "\n\n".join(parts)

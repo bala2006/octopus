@@ -46,6 +46,9 @@ export function outcomeFacts(r: Pick<RunOut, "outcome">): string[] {
   if (o.tasks_blocked) facts.push(`${o.tasks_blocked} blocked`);
   facts.push(`${o.files} file${o.files === 1 ? "" : "s"}`);
   if (o.errors) facts.push(`${o.errors} error${o.errors === 1 ? "" : "s"}`);
+  // efficiency: how many agent turns changed a deliverable or ran something (the rest was coordination)
+  if (o.agent_turns) facts.push(`${o.work_turns}/${o.agent_turns} turns did work`);
+  if (o.delegations) facts.push(`${o.delegations} delegation${o.delegations === 1 ? "" : "s"}`);
   return facts;
 }
 
