@@ -2390,6 +2390,11 @@ export interface components {
              */
             stall_turns: number;
             /**
+             * Max Tool Rounds
+             * @default 40
+             */
+            max_tool_rounds: number;
+            /**
              * Context Recent
              * @default 30
              */

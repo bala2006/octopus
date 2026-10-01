@@ -65,6 +65,28 @@ class WriteFile(BaseModel):
         return v
 
 
+class Edit(BaseModel):
+    old_string: str = Field(min_length=1, description="Exact text currently in the file (including whitespace and indentation)")
+    new_string: str = Field(description="Text to put in its place (empty to delete)")
+    replace_all: bool = Field(False, description="Replace every occurrence instead of requiring exactly one")
+
+
+class EditFile(BaseModel):
+    """Change part of an existing file by exact text replacement. Edits apply in order; all of them succeed or none do."""
+    action: Literal["edit_file"]
+    path: str = Field(min_length=1, max_length=300)
+    edits: list[Edit] = Field(min_length=1, max_length=50)
+    note: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _single_edit(cls, data: Any) -> Any:  # tolerate {"path", "old_string", "new_string"} for a single edit
+        if isinstance(data, dict) and "edits" not in data and "old_string" in data:
+            data = dict(data)
+            data["edits"] = [{k: data.pop(k) for k in ("old_string", "new_string", "replace_all") if k in data}]
+        return data
+
+
 class CreateFolder(BaseModel):
     action: Literal["create_folder"]
     path: str = Field(min_length=1, max_length=300)
@@ -235,13 +257,14 @@ class Wait(BaseModel):
 
 
 Action = Annotated[
-    Union[SendMessage, WriteFile, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
+    Union[SendMessage, WriteFile, EditFile, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
           WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, Finish, Wait],
     Field(discriminator="action"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Action)
 
-ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "write_file", "read": "read_file",
+ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "write_file", "read": "read_file", "edit": "edit_file", "str_replace": "edit_file",
+                  "replace": "edit_file", "patch_file": "edit_file",
                   "execute": "run_code", "run": "run_code", "terminal": "run_code", "tasks": "update_task_board", "done": "finish",
                   "ask_user": "request_user_input", "search": "web_search", "calculator": "calculate", "ls": "list_files",
                   "mcp": "mcp_call", "call_tool": "mcp_call", "hire": "create_agent", "spawn_agent": "create_agent",
@@ -250,7 +273,7 @@ ACTION_ALIASES = {"message": "send_message", "send": "send_message", "write": "w
                   "move": "move_file", "rename": "move_file", "mv": "move_file", "rename_file": "move_file", "team": "list_agents", "roster": "list_agents", "view_agents": "list_agents"}
 
 # tool toggle required for each action (absent => always available). mcp_call is gated per server.
-ACTION_TOOL = {"send_message": "send_message", "write_file": "file_write", "create_folder": "file_write", "move_file": "file_write", "read_file": "file_read", "list_files": "list_files",
+ACTION_TOOL = {"send_message": "send_message", "write_file": "file_write", "edit_file": "file_write", "create_folder": "file_write", "move_file": "file_write", "read_file": "file_read", "list_files": "list_files",
                "run_code": "terminal", "request_user_input": "ask_user", "web_search": "web_search", "calculate": "calculator",
                "create_agent": "manage_team"}
 TOOL_DEFAULTS = {"send_message": True, "file_read": True, "file_write": True, "list_files": True, "calculator": True, "browser": True}
@@ -357,6 +380,8 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
         lines.append('{"action":"write_file","path":"relative/path.ext","content":"<file content>","note":"why"}  (parent folders are created for you)')
         lines.append('{"action":"write_file","path":"relative/path.ext","mode":"append","content":"<next part>","partial":true}  (adds to the end '
                      'of the file; "partial":true gives you another turn right away)')
+        lines.append('{"action":"edit_file","path":"relative/path.ext","edits":[{"old_string":"exact current text","new_string":"replacement"}]}'
+                     '  (change part of an existing file; each old_string must match exactly once unless "replace_all":true)')
         lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
         lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):
