@@ -387,6 +387,9 @@ export interface paths {
         /**
          * Create Workspace
          * @description Select a directory as a project. Creates ``<dir>/.octopus`` (or re-opens an existing one with all its data).
+         *
+         *     In Docker ``path`` may be a laptop path (e.g. picked with the laptop's own folder dialog); it is translated to the
+         *     shared folder inside the container.
          */
         post: operations["create_workspace_api_v1_workspaces_post"];
         delete?: never;
@@ -1289,7 +1292,7 @@ export interface components {
             temperature: number;
             /**
              * Max Tokens
-             * @default 8192
+             * @default 128000
              */
             max_tokens: number;
             tools?: components["schemas"]["AgentTools"];
@@ -1383,7 +1386,7 @@ export interface components {
             temperature: number;
             /**
              * Max Tokens
-             * @default 8192
+             * @default 128000
              */
             max_tokens: number;
             tools?: components["schemas"]["AgentTools"];
@@ -1631,6 +1634,15 @@ export interface components {
             entries: components["schemas"]["DirEntryOut"][];
             /** Roots */
             roots: string[];
+            /**
+             * Display Path
+             * @default
+             */
+            display_path: string;
+            /** Root Labels */
+            root_labels?: {
+                [key: string]: string;
+            };
         };
         /** BrowserStatusOut */
         BrowserStatusOut: {
@@ -1821,6 +1833,11 @@ export interface components {
             is_project: boolean;
             /** Is Git */
             is_git: boolean;
+            /**
+             * Display Path
+             * @default
+             */
+            display_path: string;
         };
         /** EdgeConfig */
         EdgeConfig: {
@@ -2170,6 +2187,16 @@ export interface components {
              * @default
              */
             reason: string;
+            /**
+             * Bridge Url
+             * @default
+             */
+            bridge_url: string;
+            /**
+             * Host Dir
+             * @default
+             */
+            host_dir: string;
         };
         /** NativeOpenIn */
         NativeOpenIn: {
@@ -2364,7 +2391,7 @@ export interface components {
             stall_turns: number;
             /**
              * Context Recent
-             * @default 10
+             * @default 30
              */
             context_recent: number;
             /**
@@ -2779,6 +2806,11 @@ export interface components {
              * @default false
              */
             existing_project: boolean;
+            /**
+             * Display Path
+             * @default
+             */
+            display_path: string;
         };
         /** WorkspacePatch */
         WorkspacePatch: {

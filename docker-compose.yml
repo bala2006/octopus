@@ -1,14 +1,24 @@
-# Optional containerised setup (still fully local). The folder in OCTOPUS_PROJECTS is exposed to the
-# directory picker as /workspaces; each project keeps its data in <project>/.octopus/.
+# Containerised setup (still fully local). Start it with ./start.sh (macOS/Linux) or start.bat (Windows): they also
+# run the laptop-side folder picker (scripts/folder_bridge.py), so "Open project folder" shows your OS's own dialog.
+#
+# Your laptop folder OCTOPUS_HOST_DIR (default: your home folder) is shared with the container at /host, so any folder
+# inside it can be opened as a project. Paths are shown as laptop paths. Narrow it if you like, e.g.
+#   OCTOPUS_HOST_DIR=C:\Users\me\code   or   OCTOPUS_HOST_DIR=$HOME/code
+# Note: whatever is shared is reachable by processes inside the container (agents stay sandboxed to the project
+# folder, but "danger" permission mode allows broader commands), so share only what you want Octopus to see.
 services:
   backend:
     build: ./backend
     env_file: [{ path: .env, required: false }]
     environment:
       OCTOPUS_HOME: /data
-      WORKSPACE_ALLOWED_ROOTS: '["/workspaces"]'
+      WORKSPACE_ALLOWED_ROOTS: '["/host", "/workspaces"]'
+      HOST_DIR: ${OCTOPUS_HOST_DIR:-${HOME:-${USERPROFILE}}}
+      HOST_DIR_MOUNT: /host
+      FOLDER_BRIDGE_URL: http://127.0.0.1:${OCTOPUS_BRIDGE_PORT:-8765}
     volumes:
       - octopus-data:/data
+      - ${OCTOPUS_HOST_DIR:-${HOME:-${USERPROFILE}}}:/host
       - ${OCTOPUS_PROJECTS:-./projects}:/workspaces
     ports: ["127.0.0.1:8000:8000"]
     restart: unless-stopped

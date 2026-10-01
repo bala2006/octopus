@@ -7,18 +7,19 @@ reveal real paths). Every picker used here lets the user create a new folder too
 * Windows — PowerShell ``FolderBrowserDialog``
 * Linux   — ``zenity``, ``kdialog`` or ``yad``; falls back to Tk's ``askdirectory``
 
-When no desktop is available (Docker, SSH, CI) :func:`availability` says so and the UI falls back to its built-in browser.
+When no desktop is available (Docker, SSH, CI) :func:`availability` says so. With Docker, the browser then asks the
+laptop-side helper ``scripts/folder_bridge.py`` (which imports this module, so it must stay standard-library only), and
+otherwise falls back to its built-in folder browser.
 """
 from __future__ import annotations
 
 import asyncio
 import os
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-
-from app.core.config import get_settings
 
 PROMPT = "Choose a project folder for Octopus"
 TIMEOUT_S = 15 * 60
@@ -47,8 +48,12 @@ def _tk_available() -> bool:
     return True
 
 
-def availability() -> Availability:
-    if not get_settings().native_dialogs:
+def availability(enabled: bool | None = None) -> Availability:
+    if enabled is None:
+        from app.core.config import get_settings  # lazy: the laptop-side helper has no backend dependencies
+
+        enabled = get_settings().native_dialogs
+    if not enabled:
         return Availability(False, reason="Native dialogs are disabled (NATIVE_DIALOGS=false)")
     if sys.platform == "darwin":
         return Availability(bool(shutil.which("osascript")), "osascript", "" if shutil.which("osascript") else "osascript not found")
@@ -96,6 +101,32 @@ def _command(method: str, start: str) -> list[str]:
     return [sys.executable, "-c", code]
 
 
+def _result(returncode: int, out: bytes, err: bytes) -> Path | None:
+    path = out.decode("utf-8", "replace").strip()
+    if returncode != 0 or not path:
+        msg = err.decode("utf-8", "replace").strip()
+        # every tool exits non-zero on Cancel (osascript: "User canceled. (-128)")
+        if returncode in (1, 255) or "-128" in msg or not msg:
+            return None
+        raise DialogError(msg[:300])
+    p = Path(path).expanduser()
+    p.mkdir(parents=True, exist_ok=True)  # Tk may return a new folder name that doesn't exist yet
+    return p.resolve()
+
+
+def pick_directory_sync(start: str | None = None, *, enabled: bool = True) -> Path | None:
+    """Blocking variant (used by the laptop-side helper)."""
+    av = availability(enabled)
+    if not av.available:
+        raise DialogError(av.reason or "The system folder dialog is not available")
+    start_dir = start if start and Path(start).is_dir() else str(Path.home())
+    try:
+        res = subprocess.run(_command(av.method, start_dir), capture_output=True, timeout=TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return None
+    return _result(res.returncode, res.stdout, res.stderr)
+
+
 async def pick_directory(start: str | None = None) -> Path | None:
     """Show the dialog and wait for the user. Returns the chosen folder, or ``None`` if they cancelled."""
     av = availability()
@@ -109,13 +140,4 @@ async def pick_directory(start: str | None = None) -> Path | None:
     except asyncio.TimeoutError:
         proc.kill()
         return None
-    path = out.decode("utf-8", "replace").strip()
-    if proc.returncode != 0 or not path:
-        msg = err.decode("utf-8", "replace").strip()
-        # every tool exits non-zero on Cancel (osascript: "User canceled. (-128)")
-        if proc.returncode in (1, 255) or "-128" in msg or not msg:
-            return None
-        raise DialogError(msg[:300])
-    p = Path(path).expanduser()
-    p.mkdir(parents=True, exist_ok=True)  # Tk may return a new folder name that doesn't exist yet
-    return p.resolve()
+    return _result(proc.returncode or 0, out, err)

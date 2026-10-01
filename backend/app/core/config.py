@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     demo_mode: bool = True  # when true, the mock provider is used for any agent lacking a key
     default_provider: str = "azure"
     default_model: str = "gpt-6-luna"  # Azure OpenAI deployment name
+    # Reasoning effort used when an agent / run says "Auto". xhigh: Azure's recommendation for long agentic runs, and the
+    # best quality short of "max" (which is much slower). Set to "medium" (the model's own default) to trade quality for speed.
+    default_reasoning_effort: str = "xhigh"
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8080"])
     rate_limit_per_minute: int = 1200
@@ -60,6 +63,12 @@ class Settings(BaseSettings):
 
     # Open the operating system's folder dialog from the local backend (off for shared / remote deployments)
     native_dialogs: bool = True
+    # Docker: the laptop folder shared into the container (HOST_DIR, e.g. C:\Users\me or /Users/me) and where it is
+    # mounted (HOST_DIR_MOUNT, e.g. /host). Paths are shown and accepted as laptop paths and translated both ways.
+    host_dir: str = ""
+    host_dir_mount: str = ""
+    # The laptop-side folder-picker helper (scripts/folder_bridge.py) the browser calls when the backend has no desktop.
+    folder_bridge_url: str = "http://127.0.0.1:8765"
 
     # Built-in browser for agents: Playwright MCP, started and managed by Octopus on 127.0.0.1
     browser_enabled: bool = True

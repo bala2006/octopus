@@ -12,7 +12,8 @@ from sqlalchemy import delete, select
 
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
-from app.llm.base import LLMError, LLMRequest
+from app.core.config import get_settings
+from app.llm.base import LLMError, LLMRequest, effective_max_tokens
 from app.llm.demo_script import role_category
 from app.llm.router import prepare_request, stream_with_retry
 from app.models import Agent, AgentMemory, ChatSession, Company, Message
@@ -159,9 +160,11 @@ class ChatConnection:
         try:
             for _round in range(MAX_TOOL_ROUNDS + 1):
                 effort = str((agent.behavior_json or {}).get("reasoning_effort") or "default")
+                if effort == "default":
+                    effort = get_settings().default_reasoning_effort or "default"
                 req = LLMRequest(provider=agent.provider, model=agent.model, messages=messages, temperature=agent.temperature,
                                  extra={} if effort == "default" else {"reasoning_effort": effort},
-                                 max_tokens=agent.max_tokens,
+                                 max_tokens=effective_max_tokens(agent.max_tokens),
                                  metadata={"kind": "chat", "agent_name": agent.name, "agent_role": agent.role,
                                            "category": role_category(agent.role, (agent.behavior_json or {}).get("template_key", "")),
                                            "memory_keys": list(memory)})

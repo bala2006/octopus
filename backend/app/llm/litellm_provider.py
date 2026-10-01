@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap
 from app.llm.azure_v1 import legacy_api_base
 
 PREFIX = {
@@ -37,7 +37,7 @@ def build_kwargs(req: LLMRequest) -> dict[str, Any]:
     model = litellm_model_name(req.provider, req.model)
     kwargs: dict[str, Any] = {
         "model": model, "messages": req.messages, "temperature": req.temperature,
-        "max_tokens": req.max_tokens, "stream": True, "stream_options": {"include_usage": True},
+        "max_tokens": output_cap(req.model, req.max_tokens), "stream": True, "stream_options": {"include_usage": True},
     }
     if req.base_url:
         kwargs["api_base"] = legacy_api_base(req.base_url) if req.provider == "azure" else req.base_url

@@ -342,7 +342,7 @@ class RunBudget(BaseModel):
     max_loop_strikes: int = Field(3, ge=1, le=20)
     # pause for a human after this many turns without a file change / task-board move (0 = off)
     stall_turns: int = Field(30, ge=0, le=2000)
-    context_recent: int = Field(10, ge=2, le=100)
+    context_recent: int = Field(30, ge=2, le=200)  # own messages kept verbatim; older ones are summarised
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
     persist_team: bool = True  # save agents hired / edited during the run back to the company
@@ -557,9 +557,12 @@ class NativeOpenIn(BaseModel):
 
 
 class NativeDialogOut(BaseModel):
-    available: bool
+    available: bool  # the backend itself can show the OS dialog (Octopus running natively on this machine)
     method: str = ""
     reason: str = ""
+    # Docker: the browser can ask the laptop-side helper (scripts/folder_bridge.py) at this URL to show the dialog
+    bridge_url: str = ""
+    host_dir: str = ""  # the laptop folder shared with the container (only folders inside it can be opened)
 
 
 class WorkspacePatch(BaseModel):
@@ -576,6 +579,7 @@ class WorkspaceOut(ORM):
     last_opened_at: datetime
     exists: bool = True
     existing_project: bool = False
+    display_path: str = ""  # the path as the user knows it on their laptop (differs from `path` in Docker)
 
 
 class NativeOpenOut(BaseModel):
@@ -588,6 +592,7 @@ class DirEntryOut(BaseModel):
     path: str
     is_project: bool
     is_git: bool
+    display_path: str = ""
 
 
 class BrowseOut(BaseModel):
@@ -595,6 +600,8 @@ class BrowseOut(BaseModel):
     parent: str | None
     entries: list[DirEntryOut]
     roots: list[str]
+    display_path: str = ""  # `path` as a laptop path
+    root_labels: dict[str, str] = Field(default_factory=dict)  # root → laptop path
 
 
 class MkdirIn(BaseModel):

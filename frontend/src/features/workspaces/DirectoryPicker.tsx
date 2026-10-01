@@ -52,9 +52,12 @@ export function DirectoryPicker({ open, onOpenChange, notice }: { open: boolean;
   const current = browse.data?.path ?? null;
   const entries = browse.data?.entries ?? [];
   const target = selected ?? current;
+  // In Docker the backend works on /host/…; show (and accept) the path as it is on the laptop.
+  const display = (p: string | null) => !p ? "" : p === current ? (browse.data?.display_path || p) : (entries.find((e) => e.path === p)?.display_path || p);
+  const [goTo, setGoTo] = React.useState("");
 
   React.useEffect(() => { setCursor(0); setSelected(null); }, [path]);
-  React.useEffect(() => { if (target) setName(target.split("/").filter(Boolean).pop() ?? ""); }, [target]);
+  React.useEffect(() => { if (target) setName(target.split(/[\\/]/).filter(Boolean).pop() ?? ""); }, [target]);
 
   const mkdir = useMutation({
     mutationFn: (n: string) => unwrap(api.POST("/api/v1/fs/mkdir", { body: { parent: current!, name: n } })),
@@ -66,7 +69,7 @@ export function DirectoryPicker({ open, onOpenChange, notice }: { open: boolean;
     onSuccess: (w) => {
       qc.invalidateQueries({ queryKey: qk.workspaces });
       toast.success(w.existing_project ? `Re-opened ${w.name}. All its data was restored from .octopus/` : `Project ${w.name} is ready`, {
-        description: `Octopus data lives in ${w.path}/.octopus`,
+        description: `Octopus data lives in ${w.display_path || w.path}/.octopus`,
       });
       onOpenChange(false);
       nav(`/w/${w.id}/canvas`);
@@ -79,7 +82,7 @@ export function DirectoryPicker({ open, onOpenChange, notice }: { open: boolean;
     const roots = browse.data?.roots ?? [];
     const root = roots.filter((r) => current === r || current.startsWith(r.endsWith("/") ? r : r + "/")).sort((a, b) => b.length - a.length)[0] ?? "/";
     const rest = current.slice(root.length).split("/").filter(Boolean);
-    const out = [{ label: root, path: root }];
+    const out = [{ label: browse.data?.root_labels?.[root] || root, path: root }];
     let acc = root;
     for (const seg of rest) { acc = acc.endsWith("/") ? acc + seg : `${acc}/${seg}`; out.push({ label: seg, path: acc }); }
     return out;
@@ -126,6 +129,12 @@ export function DirectoryPicker({ open, onOpenChange, notice }: { open: boolean;
           )}
         </div>
 
+        <form className="mx-3 flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (goTo.trim()) { setPath(goTo.trim()); setGoTo(""); } }}>
+          <Input value={goTo} onChange={(e) => setGoTo(e.target.value)} aria-label="Go to folder path" className="h-8 font-mono text-xs"
+            placeholder={browse.data?.root_labels ? `Paste a folder path, e.g. ${Object.values(browse.data.root_labels)[0] ?? "/home/me/code"}` : "Paste a folder path"} />
+          <Button size="sm" variant="outline" type="submit" disabled={!goTo.trim()}>Go</Button>
+        </form>
+
         <div ref={listRef} tabIndex={0} onKeyDown={onKey} role="listbox" aria-label="Folders"
           className="mx-3 h-64 overflow-y-auto rounded-lg border border-border bg-background/40 p-1 focus-visible:ring-2">
           {newFolder !== null && (
@@ -168,8 +177,8 @@ export function DirectoryPicker({ open, onOpenChange, notice }: { open: boolean;
         <div className="space-y-3 border-t border-border bg-surface px-5 py-4">
           <div className="grid grid-cols-[1fr_auto] items-end gap-3">
             <Field label="Selected directory">
-              <div className="flex h-9 items-center truncate rounded-md border border-dashed border-border px-3 font-mono text-xs text-muted-foreground" title={target ?? ""}>
-                {target ?? "Browse to a folder…"}
+              <div className="flex h-9 items-center truncate rounded-md border border-dashed border-border px-3 font-mono text-xs text-muted-foreground" title={display(target)}>
+                {target ? display(target) : "Browse to a folder…"}
               </div>
             </Field>
             <Field label="Project name"><Input value={name} onChange={(e) => setName(e.target.value)} className="w-48" placeholder="my-app" /></Field>

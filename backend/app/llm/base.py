@@ -29,11 +29,28 @@ class Usage:
                 "estimated": self.estimated}
 
 
-# Answer budget per agent turn. 2048 was too small for any single file of real size (a JSON write_file envelope
-# for a ~300-line HTML game is already ~6k tokens); code-writing roles get CODE_AGENT_MAX_TOKENS.
-DEFAULT_AGENT_MAX_TOKENS = 8192
-CODE_AGENT_MAX_TOKENS = 16384
-MAX_AGENT_MAX_TOKENS = 64000
+# Output budget per reply. Azure documents 128,000 max output tokens for the GPT-6 family (gpt-6-luna, gpt-6-sol,
+# gpt-6-astra, gpt-6.1-sol) and that this cap covers reasoning AND visible output; hitting it returns an incomplete reply
+# with no answer. Output is billed per generated token, so the model maximum costs nothing extra: agents default to it.
+# https://learn.microsoft.com/en-us/azure/ai-services/openai/overview (Max Output Tokens column)
+MODEL_MAX_OUTPUT_TOKENS: dict[str, int] = {"gpt-6-luna": 128_000, "gpt-6-sol": 128_000, "gpt-6-astra": 128_000, "gpt-6.1-sol": 128_000,
+                                           "gpt-5.6-luna": 128_000, "gpt-5.6-sol": 128_000, "gpt-5.6-terra": 128_000}
+MAX_AGENT_MAX_TOKENS = 128_000
+DEFAULT_AGENT_MAX_TOKENS = MAX_AGENT_MAX_TOKENS
+CODE_AGENT_MAX_TOKENS = MAX_AGENT_MAX_TOKENS
+# Answer budgets saved by earlier versions (2048 default, 8192/16384 defaults, 32768/64000 automatic escalations):
+# treated as "not chosen by the user" and upgraded to the model maximum.
+LEGACY_MAX_TOKENS = {2048, 8192, 16384, 32768, 64000}
+
+
+def output_cap(model: str, requested: int) -> int:
+    """The max_output_tokens to send: the agent's budget, never above what the deployment's model allows."""
+    limit = MODEL_MAX_OUTPUT_TOKENS.get((model or "").lower(), MAX_AGENT_MAX_TOKENS)
+    return max(1, min(requested, limit))
+
+
+def effective_max_tokens(value: int | None) -> int:
+    return DEFAULT_AGENT_MAX_TOKENS if not value or value in LEGACY_MAX_TOKENS else int(value)
 
 
 @dataclass

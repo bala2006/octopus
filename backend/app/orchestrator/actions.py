@@ -204,7 +204,7 @@ class AgentChanges(BaseModel):
     active: bool | None = None
     temperature: float | None = Field(None, ge=0, le=2)
     model: str | None = None
-    max_tokens: int | None = Field(None, ge=256, le=64000)  # answer budget per turn (raise it for large files)
+    max_tokens: int | None = Field(None, ge=256, le=128_000)  # answer budget per turn (raise it for large files)
     tools: ToolSpec | None = None
     behavior: dict[str, Any] | None = None
     permission_level: Literal["read_only", "plan", "ask", "danger"] | None = None
@@ -354,10 +354,9 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
     if tool_enabled(enabled_tools, "file_read"):
         lines.append('{"action":"read_file","path":"relative/path.ext","offset":0}  (big files come in pages; the result says which offset to read next)')
     if tool_enabled(enabled_tools, "file_write"):
-        lines.append('{"action":"write_file","path":"relative/path.ext","content":"<FULL file content>","note":"why"}  (parent folders are created for you)')
-        lines.append('{"action":"write_file","path":"relative/path.ext","mode":"append","content":"<next part>","partial":true}  (large file? '
-                     'write the first ~250 lines with "partial":true, then append the rest one part per turn; "partial":true gives you '
-                     'another turn, leave it out on the last part)')
+        lines.append('{"action":"write_file","path":"relative/path.ext","content":"<file content>","note":"why"}  (parent folders are created for you)')
+        lines.append('{"action":"write_file","path":"relative/path.ext","mode":"append","content":"<next part>","partial":true}  (adds to the end '
+                     'of the file; "partial":true gives you another turn right away)')
         lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
         lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):

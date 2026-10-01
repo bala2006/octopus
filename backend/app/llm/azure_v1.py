@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap
 
 ApiStyle = str  # "responses" | "chat"
 _PROTECTED = {"model", "input", "messages", "stream"}
@@ -73,14 +73,14 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
     reasoning = bool(req.extra.get("reasoning_model"))
     if style == "responses":
         body: dict[str, Any] = {
-            "model": req.model, "stream": True, "max_output_tokens": req.max_tokens + reasoning_headroom(req), "store": False,
+            "model": req.model, "stream": True, "max_output_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)), "store": False,
             "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages],
         }
         if req.json_mode:
             body["text"] = {"format": {"type": "json_object"}}
     else:
         body = {
-            "model": req.model, "stream": True, "messages": req.messages, "max_completion_tokens": req.max_tokens + reasoning_headroom(req),
+            "model": req.model, "stream": True, "messages": req.messages, "max_completion_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)),
             "stream_options": {"include_usage": True},
         }
         if req.json_mode:
