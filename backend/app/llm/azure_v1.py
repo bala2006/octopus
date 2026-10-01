@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from app.llm.base import LLMChunk, LLMError, LLMRequest, Usage, estimate_tokens
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens
 
 ApiStyle = str  # "responses" | "chat"
 _PROTECTED = {"model", "input", "messages", "stream"}
@@ -172,6 +172,7 @@ class AzureV1Provider:
         cache_key = (base, req.model)
         text_parts: list[str] = []
         usage: Usage | None = None
+        truncated: LLMOutputTruncated | None = None
         timeout = httpx.Timeout(connect=20, read=300, write=60, pool=20)
         async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
             for _ in range(4):  # original call + up to 3 "drop the rejected parameter" retries
@@ -186,11 +187,14 @@ class AzureV1Provider:
                                 continue
                             s = resp.status_code
                             raise LLMError(_error_message(s, text), retryable=s in (408, 409, 429) or s >= 500)
-                        async for chunk in self._events(resp, style, text_parts):
-                            if chunk.usage is not None:
-                                usage = chunk.usage
-                            else:
-                                yield chunk
+                        try:
+                            async for chunk in self._events(resp, style, text_parts):
+                                if chunk.usage is not None:
+                                    usage = chunk.usage
+                                else:
+                                    yield chunk
+                        except LLMOutputTruncated as exc:  # still bill the tokens, then report the truncation
+                            truncated = exc
                     break
                 except httpx.HTTPError as exc:
                     raise LLMError(f"Azure OpenAI connection error: {type(exc).__name__}: {exc}", retryable=True) from exc
@@ -203,9 +207,12 @@ class AzureV1Provider:
 
         apply(usage, req.model, req.extra)  # exact Azure usage × deployment rates (Settings → Model → Pricing)
         yield LLMChunk(usage=usage)
+        if truncated is not None:
+            raise truncated
 
     async def _events(self, resp: httpx.Response, style: ApiStyle, text_parts: list[str]) -> AsyncIterator[LLMChunk]:
         skip_items: set[str] = set()  # output items that aren't the final answer (phase = "commentary")
+        length_cut = False  # chat completions: finish_reason == "length"
         async for line in resp.aiter_lines():
             if not line.startswith("data:"):
                 continue
@@ -222,6 +229,8 @@ class AzureV1Provider:
                     if content:
                         text_parts.append(content)
                         yield LLMChunk(delta=content)
+                    if ch.get("finish_reason") == "length":
+                        length_cut = True
                 u = ev.get("usage")
                 if u and u.get("prompt_tokens") is not None:
                     pd, cd = u.get("prompt_tokens_details") or {}, u.get("completion_tokens_details") or {}
@@ -243,10 +252,16 @@ class AzureV1Provider:
                     yield LLMChunk(delta=delta)
             elif kind in ("response.completed", "response.incomplete"):
                 r = ev.get("response") or {}
-                if kind == "response.incomplete" and not text_parts:
+                if kind == "response.incomplete":
                     reason = (r.get("incomplete_details") or {}).get("reason", "incomplete")
-                    raise LLMError(f"Azure OpenAI returned no text ({reason}). For reasoning deployments raise the agent's Max tokens.",
-                                   retryable=False)
+                    if reason == "max_output_tokens":  # a cut-off reply is never usable: report it so the caller can raise the budget
+                        yield LLMChunk(usage=usage_from_responses(r.get("usage") or {}))
+                        raise LLMOutputTruncated(
+                            f"Azure OpenAI stopped at the output limit (max_output_tokens) after {len(''.join(text_parts))} characters"
+                            + ("" if text_parts else " without any answer text (reasoning used the whole budget)"),
+                            partial="".join(text_parts))
+                    if not text_parts:
+                        raise LLMError(f"Azure OpenAI returned no text ({reason}).", retryable=False)
                 yield LLMChunk(usage=usage_from_responses(r.get("usage") or {}))
             elif kind == "response.failed":
                 err = (ev.get("response") or {}).get("error") or {}
@@ -254,3 +269,6 @@ class AzureV1Provider:
             elif kind == "error":
                 msg = ev.get("message") or (ev.get("error") or {}).get("message") or data[:300]
                 raise LLMError(f"Azure OpenAI: {msg}", retryable=False)
+        if length_cut:
+            raise LLMOutputTruncated(f"Azure OpenAI stopped at the output limit (finish_reason=length) after "
+                                     f"{len(''.join(text_parts))} characters", partial="".join(text_parts))

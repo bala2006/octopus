@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.llm.base import DEFAULT_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS
+
 EdgeType = Literal["delegate", "review", "debate", "report", "consult"]
 RunStatus = Literal["queued", "running", "paused", "awaiting_user", "completed", "failed", "cancelled"]
 RunMode = Literal["autonomous", "step", "supervised"]
@@ -100,7 +102,7 @@ class AgentBase(BaseModel):
     provider: str = "mock"
     model: str = "mock/demo"
     temperature: float = Field(0.4, ge=0, le=2)
-    max_tokens: int = Field(2048, ge=64, le=64000)
+    max_tokens: int = Field(DEFAULT_AGENT_MAX_TOKENS, ge=64, le=MAX_AGENT_MAX_TOKENS)
     tools: AgentTools = Field(default_factory=AgentTools)
     behavior: AgentBehavior = Field(default_factory=AgentBehavior)
     permission_level: AgentPermission = "inherit"

@@ -1283,7 +1283,7 @@ export interface components {
             temperature: number;
             /**
              * Max Tokens
-             * @default 2048
+             * @default 8192
              */
             max_tokens: number;
             tools?: components["schemas"]["AgentTools"];
@@ -1377,7 +1377,7 @@ export interface components {
             temperature: number;
             /**
              * Max Tokens
-             * @default 2048
+             * @default 8192
              */
             max_tokens: number;
             tools?: components["schemas"]["AgentTools"];

@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
 from app.orchestrator.actions import schema_doc
 from app.orchestrator.permissions import EdgeSpec, allowed_recipients
 
@@ -50,7 +51,7 @@ class AgentSpec:
     def from_dict(cls, d: dict[str, Any], category: str) -> AgentSpec:
         return cls(id=d["id"], name=d["name"], role=d.get("role", ""), description=d.get("description", ""),
                    system_prompt=d.get("system_prompt", ""), provider=d.get("provider", "mock"), model=d.get("model", "mock/demo"),
-                   temperature=float(d.get("temperature", 0.4)), max_tokens=int(d.get("max_tokens", 2048)),
+                   temperature=float(d.get("temperature", 0.4)), max_tokens=int(d.get("max_tokens") or DEFAULT_AGENT_MAX_TOKENS),
                    tools=d.get("tools") or {}, behavior=d.get("behavior") or {}, is_entry=bool(d.get("is_entry")),
                    color=d.get("color", "#6366f1"), category=category, department=d.get("department") or "",
                    is_manager=bool(d.get("is_manager")), reports_to=d.get("reports_to"), active=d.get("active", True) is not False,
@@ -191,7 +192,10 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 1. Be concise. Do not repeat what others already said; reference it.
 2. Challenge weak ideas politely with concrete reasons; converge instead of arguing in circles.
 3. Never fabricate tool results, test output or file contents; use tools and report what they return.
-4. Write COMPLETE files with write_file (no placeholders). Paths are relative to the project workspace.
+4. Files must end up COMPLETE (no placeholders). Paths are relative to the project workspace. Your reply has an output limit
+   (about {agent.max_tokens} tokens): a file longer than ~250 lines must be written in parts: write_file the first part with
+   "partial":true, then write_file with "mode":"append" for each following part (one part per turn, "partial":true until the
+   last part) until the file is whole. Never drop a part.
 5. On debate channels only use proposal / objection / agreement (a debate ends when BOTH sides send `agreement`, or on a `decision`).
 6. On review channels: author sends `review_request`; reviewer replies `review_result` with `verdict` "approve" or "request_changes" and itemized `comments`.
 7. Delegation: tasks you send become entries on the task board. Keep statuses current with update_task_board.

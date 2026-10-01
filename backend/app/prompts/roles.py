@@ -411,6 +411,17 @@ def all_roles() -> dict[str, RoleTemplate]:
     return {**ROLE_TEMPLATES, **ORG_ROLES}
 
 
+# Roles whose main output is source code: a single file easily exceeds the default answer budget.
+CODE_ROLES = {"frontend", "backend", "developer", "devops", "fullstack_dev", "gameplay_programmer", "mobile_dev", "sre",
+              "data_engineer", "ml_engineer", "security_engineer", "qa", "qa_engineer", "e2e_tester", "playtester", "architect", "techlead"}
+
+
+def default_max_tokens(key: str) -> int:
+    from app.llm.base import CODE_AGENT_MAX_TOKENS, DEFAULT_AGENT_MAX_TOKENS
+
+    return CODE_AGENT_MAX_TOKENS if key in CODE_ROLES else DEFAULT_AGENT_MAX_TOKENS
+
+
 def agent_from_role(key: str, *, name: str | None = None, entry: bool = False, x: float = 0, y: float = 0,
                     department: str = "", is_manager: bool | None = None, role: str | None = None) -> dict:
     from app.core.config import get_settings
@@ -431,6 +442,7 @@ def agent_from_role(key: str, *, name: str | None = None, entry: bool = False, x
         "system_prompt": t.system_prompt,
         "provider": settings.default_provider,
         "model": settings.default_model,
+        "max_tokens": default_max_tokens(key),
         "tools": tools,
         "behavior": behavior,
         "is_entry": entry,

@@ -27,7 +27,7 @@ from app.core.config import PROJECT_DIRNAME, get_settings
 from app.core.logging import get_logger
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
-from app.llm.base import LLMError, LLMRequest
+from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest
 from app.llm.demo_script import role_category
 from app.llm.router import prepare_request, stream_with_retry
 from app.models import AgentMemory, Artifact, Message, Run, Task
@@ -673,6 +673,34 @@ class RunRuntime(TeamMixin):
         await asyncio.wait_for(consume(), timeout=min(remaining, 300))
         return "".join(parts)
 
+    async def call_llm_escalating(self, agent: AgentSpec, req: LLMRequest) -> str:
+        """Call the model; if the reply hits the output limit, raise the agent's budget (and remember it) and retry once."""
+        try:
+            return await self.call_llm(agent, req)
+        except LLMOutputTruncated as exc:
+            old = req.max_tokens
+            new = min(MAX_AGENT_MAX_TOKENS, max(old * 2, CODE_AGENT_MAX_TOKENS))
+            if new <= old:
+                raise
+            await self.raise_output_budget(agent, new, str(exc))
+            req.max_tokens = new
+            req.messages = [*req.messages, {"role": "user", "content": (
+                "Note: your previous attempt at this reply was cut off at the output limit. Keep the reply compact; if you are writing "
+                "a large file, write the first part now and append the rest in later turns (write_file with \"mode\":\"append\").")}]
+            return await self.call_llm(agent, req)
+
+    async def raise_output_budget(self, agent: AgentSpec, new: int, why: str) -> None:
+        old = agent.max_tokens
+        agent.max_tokens = new
+        snap = self._snapshot_agent(agent.id)
+        if snap is not None:
+            snap["max_tokens"] = new
+            self.snapshot_dirty = True
+        persisted = await self._persist_team(updates={agent.id: {"max_tokens": new}}) if self.budget.persist_team else False
+        await self.emit("error", {"message": f"{agent.name}: the reply hit the output limit ({old} tokens). Retrying once with {new} tokens"
+                                             f"{' and saving the higher limit on the agent' if persisted else ''}. ({why})",
+                                  "agent_id": agent.id, "kind": "warning"})
+
     async def turn(self, aid: str) -> None:
         agent = self.agents[aid]
         inbox_ids = [mid for _, mid in self.mailbox.pop(aid, [])]
@@ -710,14 +738,22 @@ class RunRuntime(TeamMixin):
             if warn and aid not in self.warned:
                 self.warned.add(aid)
                 await self.emit("error", {"message": f"{agent.name}: {warn}", "agent_id": aid, "kind": "warning"})
-            text = await self.call_llm(agent, req)
+            text = await self.call_llm_escalating(agent, req)
             parsed = A.parse_envelope(text)
             if not parsed.ok and req.provider != "mock":
                 req.messages += [{"role": "assistant", "content": text[:4000]},
                                  {"role": "user", "content": "Your reply was not valid per the response format ("
                                   + "; ".join(parsed.errors) + "). Reply again with ONLY the JSON object."}]
-                text = await self.call_llm(agent, req)
+                text = await self.call_llm_escalating(agent, req)
                 parsed = A.parse_envelope(text)
+        except LLMOutputTruncated as exc:
+            await self.set_agent_status(aid, "error")
+            await self.emit("error", {"message": f"{agent.name}: reply cut off at the output limit ({req.max_tokens} tokens): {exc}",
+                                      "agent_id": aid, "kind": "llm"})
+            self.notice(aid, f"Your previous reply was cut off at the output limit ({req.max_tokens} tokens) and nothing in it was applied. "
+                             "Reply with less: write a large file in parts (write_file, then write_file with \"mode\":\"append\" for each "
+                             "further part, one part per turn).", activate=True)
+            return
         except (LLMError, asyncio.TimeoutError) as exc:
             await self.set_agent_status(aid, "error")
             await self.emit("error", {"message": f"{agent.name}: LLM call failed: {exc}", "agent_id": aid, "kind": "llm"})
@@ -969,44 +1005,50 @@ class RunRuntime(TeamMixin):
         except WorkspaceError as exc:
             await self.deny(agent, cid, "write_file", f"write_file failed: {exc}")
             return
-        if old == a.content:
-            self.notice(agent.id, f"{rel} unchanged (identical content).")
+        appending = a.mode == "append"
+        content = (old or "") + a.content if appending else a.content
+        if old == content:
+            self.notice(agent.id, f"{rel} unchanged ({'nothing to append' if appending else 'identical content'}).")
             await self._tool_result(agent, cid, "write_file", True, "unchanged")
             return
         planned = fs.shadow is not None
-        ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to {'create' if old is None else 'modify'} {rel}",
-                                      a.content, {"path": rel, "old": (old or "")[:20000], "new": a.content[:20000], "note": a.note})
+        action = "append to" if appending and old is not None else ("create" if old is None else "modify")
+        ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to {action} {rel}",
+                                      content, {"path": rel, "old": (old or "")[:20000], "new": content[:20000], "note": a.note})
         if not ok:
             await self.deny(agent, cid, "write_file", reason)
             return
-        await self.set_agent_status(agent.id, "writing", f"Saving {rel}…")
+        await self.set_agent_status(agent.id, "writing", f"{'Appending to' if appending else 'Saving'} {rel}…")
         try:
-            fs.write(rel, a.content)
+            fs.write(rel, content)
         except WorkspaceError as exc:
             await self.deny(agent, cid, "write_file", f"write_file failed: {exc}")
             return
         prev = self.artifacts.get(rel)
         version = (prev or {}).get("version", 0) + 1
-        art = Artifact(id=new_id(), run_id=self.run_id, path=rel, content=a.content, version=version, author_agent_id=agent.id,
+        art = Artifact(id=new_id(), run_id=self.run_id, path=rel, content=content, version=version, author_agent_id=agent.id,
                        change_note=a.note[:1000], planned=planned, created_at=utcnow(),
                        previous_content=(fs.original(rel) if planned else old) if prev is None else None)
         async with self.db() as db:
             db.add(art)
             await db.commit()
-        added = a.content.count("\n") + 1
+        added = content.count("\n") + 1
         removed = (old or "").count("\n") + 1 if old else 0
         self.artifacts[rel] = {"version": version, "author": agent.id, "note": a.note}
         await self.emit("artifact_updated", {"artifact": {"id": art.id, "run_id": self.run_id, "path": rel, "version": version,
-                                                          "author_agent_id": agent.id, "change_note": a.note, "size": len(a.content),
-                                                          "planned": planned, "created": old is None,
+                                                          "author_agent_id": agent.id, "change_note": a.note, "size": len(content),
+                                                          "planned": planned, "created": old is None, "appended": appending,
                                                           "lines": added, "previous_lines": removed,
                                                           "created_at": art.created_at.isoformat()}})
-        verb = "Planned" if planned else ("Created" if old is None else "Updated")
+        verb = "Planned" if planned else ("Created" if old is None else "Appended to" if appending else "Updated")
         await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
                                 content=f"{verb} `{rel}` (v{version})" + (f": {a.note}" if a.note else ""),
                                 meta={"path": rel, "version": version, "artifact_id": art.id, "planned": planned}, deliver=False)
-        self.notice(agent.id, f"{verb} {rel} (v{version})." + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""))
-        await self._tool_result(agent, cid, "write_file", True, f"{rel} v{version}{' (planned)' if planned else ''}")
+        size_note = (f" It now has {added} lines; append the next part now (mode \"append\")." if a.partial
+                     else f" It now has {added} lines." if appending else "")
+        self.notice(agent.id, f"{verb} {rel} (v{version}).{size_note}"
+                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""), activate=a.partial)
+        await self._tool_result(agent, cid, "write_file", True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
 
     async def act_create_folder(self, agent: AgentSpec, a: A.CreateFolder) -> None:
         cid = await self._tool_event(agent, "create_folder", {"path": a.path})

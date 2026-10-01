@@ -47,10 +47,22 @@ class SendMessage(BaseModel):
 
 
 class WriteFile(BaseModel):
+    """Write a file. ``mode="append"`` adds to the end of the file, so a large file can be built in parts across turns."""
     action: Literal["write_file"]
     path: str = Field(min_length=1, max_length=300)
     content: str = Field(max_length=1_000_000)
     note: str = ""
+    mode: Literal["overwrite", "append"] = "overwrite"
+    partial: bool = False  # more parts follow: the agent gets another turn to append the next one
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _mode_alias(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip().lower()
+            return {"write": "overwrite", "replace": "overwrite", "create": "overwrite", "w": "overwrite",
+                    "a": "append", "add": "append", "continue": "append"}.get(v, v)
+        return v
 
 
 class CreateFolder(BaseModel):
@@ -191,6 +203,7 @@ class AgentChanges(BaseModel):
     active: bool | None = None
     temperature: float | None = Field(None, ge=0, le=2)
     model: str | None = None
+    max_tokens: int | None = Field(None, ge=256, le=64000)  # answer budget per turn (raise it for large files)
     tools: ToolSpec | None = None
     behavior: dict[str, Any] | None = None
     permission_level: Literal["read_only", "plan", "ask", "danger"] | None = None
@@ -336,6 +349,9 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
         lines.append('{"action":"read_file","path":"relative/path.ext"}')
     if tool_enabled(enabled_tools, "file_write"):
         lines.append('{"action":"write_file","path":"relative/path.ext","content":"<FULL file content>","note":"why"}  (parent folders are created for you)')
+        lines.append('{"action":"write_file","path":"relative/path.ext","mode":"append","content":"<next part>","partial":true}  (large file? '
+                     'write the first ~250 lines with "partial":true, then append the rest one part per turn; "partial":true gives you '
+                     'another turn, leave it out on the last part)')
         lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
         lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):
@@ -349,7 +365,7 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
                      '{"label":"alternative"},{"label":"another alternative"}]}  (pauses the run until the user answers; ALWAYS give 2-5 concrete '
                      'options and mark exactly one recommended; the user may also type a different answer)')
     lines.append('{"action":"list_agents","include_inactive":true}  (see every teammate: department, manager, active/inactive, live status)')
-    lines.append('{"action":"update_agent","target":"self","changes":{"system_prompt"|"append_to_prompt"|"role"|"description"|"temperature"|"behavior"|"tools":...},"reason":"why"}'
+    lines.append('{"action":"update_agent","target":"self","changes":{"system_prompt"|"append_to_prompt"|"role"|"description"|"temperature"|"max_tokens"|"behavior"|"tools":...},"reason":"why"}'
                  '  (refine your OWN configuration; you cannot grant yourself new tools)')
     if tool_enabled(enabled_tools, "manage_team"):
         lines.append('{"action":"create_agent","name":"...","role":"...","department":"...","is_manager":false,"role_template":"optional",'

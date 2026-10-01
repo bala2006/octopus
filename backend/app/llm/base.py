@@ -29,13 +29,20 @@ class Usage:
                 "estimated": self.estimated}
 
 
+# Answer budget per agent turn. 2048 was too small for any single file of real size (a JSON write_file envelope
+# for a ~300-line HTML game is already ~6k tokens); code-writing roles get CODE_AGENT_MAX_TOKENS.
+DEFAULT_AGENT_MAX_TOKENS = 8192
+CODE_AGENT_MAX_TOKENS = 16384
+MAX_AGENT_MAX_TOKENS = 64000
+
+
 @dataclass
 class LLMRequest:
     provider: str
     model: str
     messages: list[dict[str, str]]
     temperature: float = 0.4
-    max_tokens: int = 2048
+    max_tokens: int = DEFAULT_AGENT_MAX_TOKENS
     api_key: str | None = None
     base_url: str | None = None
     json_mode: bool = False
@@ -53,6 +60,16 @@ class LLMError(Exception):
     def __init__(self, message: str, *, retryable: bool = True) -> None:
         super().__init__(message)
         self.retryable = retryable
+
+
+class LLMOutputTruncated(LLMError):
+    """The reply hit the output-token limit before it was complete (any text produced so far is unusable as-is).
+
+    Not retried blindly by ``stream_with_retry``: the caller decides whether to retry with a larger budget."""
+
+    def __init__(self, message: str, *, partial: str = "") -> None:
+        super().__init__(message, retryable=False)
+        self.partial = partial
 
 
 class LLMProvider(Protocol):
