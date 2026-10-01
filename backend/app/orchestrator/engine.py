@@ -93,6 +93,12 @@ def apply_edits(text: str, edits: list[A.Edit]) -> tuple[str, int]:
     for i, e in enumerate(edits, 1):
         n = text.count(e.old_string)
         label = f"edit {i}" if len(edits) > 1 else "old_string"
+        if n == 0 and not e.replace_all and (loose := loose_match(text, e.old_string, e.new_string)):
+            start, end, new = loose  # same lines, different indentation / trailing whitespace: apply, re-indented
+            line = text.count("\n", 0, start) + 1
+            first = line if first is None else min(first, line)
+            text = text[:start] + new + text[end:]
+            continue
         if n == 0:
             stripped = e.old_string.strip()
             hint = (" (it does appear with different surrounding whitespace or indentation)" if stripped and stripped in text
@@ -109,6 +115,50 @@ def apply_edits(text: str, edits: list[A.Edit]) -> tuple[str, int]:
         first = line if first is None else min(first, line)
         text = text.replace(e.old_string, e.new_string) if e.replace_all else text.replace(e.old_string, e.new_string, 1)
     return text, first or 1
+
+
+def loose_match(text: str, old: str, new: str) -> tuple[int, int, str] | None:
+    """Find ``old`` in ``text`` when it differs only by a uniform indentation shift and trailing whitespace (the most
+    common reason an edit from memory misses). Returns (start, end, new re-indented by the same shift), only when that
+    match is unique; otherwise None. Edits that differ in anything else still fail with a hint."""
+    o_lines = old.strip("\n").split("\n")
+    if not old.strip() or len(o_lines) > 400:
+        return None
+    lines = text.split("\n")
+    offsets = [0]
+    for ln in lines:
+        offsets.append(offsets[-1] + len(ln) + 1)
+    nonblank = [ln for ln in o_lines if ln.strip()]
+    o_ind = min(len(ln) - len(ln.lstrip()) for ln in nonblank)
+    o_core = [ln[o_ind:].rstrip() if ln.strip() else "" for ln in o_lines]
+    hits: list[tuple[int, str]] = []
+    for i in range(len(lines) - len(o_lines) + 1):
+        win = lines[i:i + len(o_lines)]
+        nb = [ln for ln in win if ln.strip()]
+        if len(nb) != len(nonblank):
+            continue
+        ind = min(len(ln) - len(ln.lstrip()) for ln in nb)
+        prefix = nb[0][:ind]
+        if any(ln.strip() and not ln.startswith(prefix) for ln in win):
+            continue
+        if [ln[ind:].rstrip() if ln.strip() else "" for ln in win] == o_core:
+            hits.append((i, prefix))
+            if len(hits) > 1:
+                return None
+    if len(hits) != 1:
+        return None
+    i, prefix = hits[0]
+    n_lines = new.strip("\n").split("\n") if new.strip() else []
+
+    def reindent(ln: str) -> str:  # keep each new line's indentation relative to the old text, on the file's base indent
+        lead = len(ln) - len(ln.lstrip())
+        if lead >= o_ind:
+            return prefix + ln[o_ind:]
+        return prefix[:max(0, len(prefix) - (o_ind - lead))] + ln.lstrip()
+
+    new_text = "\n".join(reindent(ln) if ln.strip() else "" for ln in n_lines)
+    start, end = offsets[i], offsets[i + len(o_lines)] - 1
+    return start, end, new_text
 
 
 def closest_region(text: str, old: str, span: int = 8) -> str:
@@ -309,6 +359,7 @@ class RunRuntime(TeamMixin):
         self.tokens = run.tokens_used or 0
         self.cost = run.cost_usd or 0.0
         self.active_seconds = 0.0
+        self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
         self.turn_t0: float | None = None  # monotonic start of the top-level turn in progress (counted live by the time limit)
         self.run_status = run.status
 
@@ -363,6 +414,7 @@ class RunRuntime(TeamMixin):
             "budget_base": self.budget_base,
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
+            "broken_files": self.broken_files,
             "journal": self.journal[-JOURNAL_MAX:], "journal_n": self.journal_n, "seen": self.seen, "seen_turn": self.seen_turn,
             "metrics": self.efficiency(),
         }
@@ -380,6 +432,7 @@ class RunRuntime(TeamMixin):
         st = run.state_json or {}
         self.status.update(st.get("status", {}))
         self.done_agents = set(st.get("done_agents", []))
+        self.broken_files = dict(st.get("broken_files", {}))
         self.agent_turns = Counter(st.get("agent_turns", {}))
         self.agent_tokens = Counter(st.get("agent_tokens", {}))
         self.agent_cost = Counter(st.get("agent_cost", {}))
@@ -1003,6 +1056,9 @@ class RunRuntime(TeamMixin):
         if self.artifacts:
             lines.append("Workspace files:\n" + "\n".join(
                 f"- {p} v{a['version']} by {self.names.get(a['author'] or '', '?')}" for p, a in sorted(self.artifacts.items())))
+        if self.broken_files:
+            lines.append("Files FAILING automatic checks (fix before anything else):\n" + "\n".join(
+                f"- {p}: {msg.splitlines()[0][:300]}" for p, msg in sorted(self.broken_files.items())))
         if self.user_notes:
             older = len(self.user_notes) - 10
             lines.append("User notes:\n" + (f"- ({older} earlier note(s) not shown)\n" if older > 0 else "")
@@ -1872,9 +1928,27 @@ class RunRuntime(TeamMixin):
                      else f" It now has {added} lines." if appending else "")
         if context_line is not None:  # show the edited region so the agent can check the result without re-reading the file
             size_note = f" Lines around the change:\n{numbered_excerpt(content, context_line)}"
+        problem = None if partial else await self.check_written(rel, content)
         self.notice(agent.id, f"{verb} {rel} (v{version}).{size_note}"
-                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""), activate=partial)
+                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else "")
+                    + (f"\n\nAUTOMATIC CHECK FAILED for {rel}:\n{problem}\nFix this before anything else." if problem else ""),
+                    activate=partial or bool(problem))
         await self._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
+
+    async def check_written(self, rel: str, content: str) -> str | None:
+        """Syntax-check a file right after it was written (services/checks.py); remembered until a later write fixes it."""
+        from app.services.checks import check_file
+
+        try:
+            problem = await check_file(rel, content)
+        except Exception as exc:  # noqa: BLE001 - a checker bug must never fail the write
+            log.warning("file_check_failed", path=rel, error=str(exc)[:200])
+            return None
+        if problem:
+            self.broken_files[rel] = problem[:1500]
+        else:
+            self.broken_files.pop(rel, None)
+        return problem
 
     async def written_by_octopus(self, rel: str) -> bool:
         """Did any run in this project ever write ``rel``? (Otherwise it is the user's own file.)"""

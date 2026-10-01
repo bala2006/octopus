@@ -30,7 +30,9 @@ def test_apply_edits_is_atomic_and_explains_failures() -> None:
     with pytest.raises(ValueError, match="edit 2: old_string not found"):
         apply_edits(src, [Edit(old_string="y = 2", new_string="y = 5"), Edit(old_string="z = 9", new_string="")])
     with pytest.raises(ValueError, match="different surrounding whitespace"):
-        apply_edits("    indented()\n", [Edit(old_string="indented() \n", new_string="x")])
+        apply_edits("a = 1; indented()\n", [Edit(old_string="  indented()", new_string="x")])
+    # only indentation / trailing spaces differ: applied, on the file's indentation
+    assert apply_edits("    indented()\n", [Edit(old_string="indented() \n", new_string="x")])[0] == "    x\n"
     assert apply_edits(src, [Edit(old_string="x = 1", new_string="x = 3", replace_all=True)])[0] == "x = 3\nx = 3\ny = 2\n"
 
 
