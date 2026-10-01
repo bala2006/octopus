@@ -9,6 +9,8 @@ import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/primitives";
 import type { OrgEvent, RunLive } from "./runState";
 import { LiveWriting, ThinkingView } from "./LiveWriting";
+import { MessageImages } from "./MessageImages";
+import { useWorkspaceId } from "@/hooks/queries";
 import { humanizeStream } from "./streamView";
 
 export type FeedFilter = "all" | "user" | "internal";
@@ -95,6 +97,7 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
 }
 
 function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, AgentOut> }) {
+  const w = useWorkspaceId();
   const from = m.from_agent_id ? agents[m.from_agent_id] : null;
   const to = m.to_agent_id ? agents[m.to_agent_id] : null;
   const [open, setOpen] = React.useState(m.content.length < 700 || m.type === "final_report");
@@ -123,6 +126,10 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
           <div className={cn("relative mt-1 text-[13px]", !open && "max-h-28 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}>
             <Markdown>{m.content}</Markdown>
           </div>
+          {Array.isArray(meta.images) && meta.images.length > 0 && m.run_id && (
+            <div className="mt-1.5"><MessageImages images={(meta.images as { ref: string; name: string }[]).map((i) => ({
+              name: i.name, ref: i.ref, url: `/api/v1/w/${w}/runs/${m.run_id}/images/${i.ref}` }))} /></div>
+          )}
           {Array.isArray(meta.options) && meta.options.length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Offered answers">
               {(meta.options as { label: string; recommended?: boolean }[]).map((o, i) => (

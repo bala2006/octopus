@@ -33,10 +33,19 @@ def entra_token_provider():  # type: ignore[no-untyped-def]
     return get_bearer_token_provider(DefaultAzureCredential(exclude_interactive_browser_credential=True), AZURE_SCOPE)
 
 
+def _chat_message(m: dict[str, Any]) -> dict[str, Any]:
+    """Chat Completions shape: drop Octopus-only keys; attached images become image_url content parts."""
+    out = {k: v for k, v in m.items() if k not in ("cache_breakpoint", "images")}
+    if m.get("images") and isinstance(m.get("content"), str):
+        out["content"] = [{"type": "text", "text": m["content"]}, *({"type": "image_url", "image_url": {"url": u}} for u in m["images"])]
+    return out
+
+
 def build_kwargs(req: LLMRequest) -> dict[str, Any]:
     model = litellm_model_name(req.provider, req.model)
     kwargs: dict[str, Any] = {
-        "model": model, "messages": req.messages, "temperature": req.temperature,
+        "model": model, "messages": [_chat_message(m) for m in req.messages],
+        "temperature": req.temperature,
         "max_tokens": output_cap(req.model, req.max_tokens), "stream": True, "stream_options": {"include_usage": True},
     }
     if req.base_url:

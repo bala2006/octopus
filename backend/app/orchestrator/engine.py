@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 
 from app.core.config import PROJECT_DIRNAME, get_settings
 from app.core.logging import get_logger
@@ -33,11 +33,13 @@ from app.db.session import SessionFactory, registry_factory
 from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest, LLMResult, ToolCall
 from app.llm.demo_script import role_category
 from app.llm.router import get_provider, prepare_request, stream_with_retry
-from app.models import AgentMemory, Artifact, Message, Run, Task
+from app.models import AgentMemory, Artifact, Message, Run, RunRecord, Task
 from app.orchestrator import actions as A
 from app.orchestrator import tools as T
 from app.orchestrator.bus import bus
-from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, clip, team_status
+from app.orchestrator.context import (
+    TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, build_user_prompt_parts, clip, team_status,
+)
 from app.orchestrator.permissions import (
     EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
 )
@@ -69,6 +71,7 @@ DELEGATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextV
 IN_TOOL_LOOP: contextvars.ContextVar[bool] = contextvars.ContextVar("octopus_in_tool_loop", default=False)
 MAX_DELEGATION_DEPTH = 3  # delegator → worker → worker's report → … (cycles are refused)
 JOURNAL_MAX = 400
+POINTER_MIN_CHARS = 600  # tool output shorter than this is shown in full everywhere (a pointer would save nothing)
 MAX_REDELIVERIES = 2  # a message whose turn failed is shown again at most this many times
 DIGEST_LINES = 40
 READ_PAGE_CHARS = TOOL_RESULT_CHARS - 500  # one read_file page fits in a tool result with room for its header
@@ -162,6 +165,41 @@ def compact_rounds(items: list[dict[str, Any]], rounds: list[int]) -> list[dict[
         else:
             out.append(item)
     return out
+
+
+def mask_rounds(items: list[dict[str, Any]], rounds: list[int], refs: dict[str, tuple[str | None, str | None]]) -> list[dict[str, Any]]:
+    """Pointer mode for long tool loops: rounds older than the last KEEP_FULL_ROUNDS keep their structure, reasoning and call
+    ids, but long outputs and long arguments are replaced by a pointer to the exact original in the run archive (nothing is
+    cut or summarised; recall brings it back). Idempotent; items without an archived original are left as they are."""
+    if len(rounds) <= KEEP_FULL_ROUNDS:
+        return items
+    cut = rounds[-KEEP_FULL_ROUNDS]
+    out = []
+    for i, item in enumerate(items):
+        oref, aref = refs.get(item.get("call_id") or "", (None, None))
+        if i >= cut or not (oref or aref):
+            out.append(item)
+        elif item.get("type") == "function_call_output" and oref and not str(item.get("output", "")).startswith(MASK_MARK):
+            n = len(str(item.get("output", "")))
+            out.append({**item, "output": f"{MASK_MARK} {n:,} characters of output, kept as {oref}: recall('{oref}') shows it exactly]"})
+        elif item.get("type") == "function_call" and aref:
+            try:
+                args = json.loads(item.get("arguments") or "{}")
+            except (TypeError, ValueError):
+                out.append(item)
+                continue
+            if isinstance(args, dict):
+                args = {k: (f"{MASK_MARK} {len(v):,} characters, kept as {aref}: recall('{aref}')]"
+                            if isinstance(v, str) and len(v) > OLD_ROUND_CHARS and not v.startswith(MASK_MARK) else v)
+                        for k, v in args.items()}
+                item = {**item, "arguments": json.dumps(args, ensure_ascii=False)}
+            out.append(item)
+        else:
+            out.append(item)
+    return out
+
+
+MASK_MARK = "[hidden from this older round:"
 
 
 class StopRun(Exception):
@@ -264,6 +302,11 @@ class RunRuntime(TeamMixin):
         self.mock_state: dict[str, dict[str, Any]] = {}
         self.warned: set[str] = set()
         self.redeliveries: Counter[str] = Counter()  # message id -> times re-delivered after a failed turn
+        # archive references: m<n> messages, o<n> tool outputs, a<n> long tool arguments, L<n> ledger items
+        self.refs: Counter[str] = Counter()
+        self.ledger: list[dict[str, Any]] = []
+        self.call_refs: dict[str, tuple[str | None, str | None]] = {}  # native call id -> (output ref, arguments ref)
+        self.pending_images: dict[str, list[str]] = {}  # agent id -> image refs it recalled (shown to it on its next model call)
         self.browser_pages: dict[str, tuple[str, str]] = {}  # agent id -> (url, title) of its browser tab, for the Browser view
         self.rejections = 0
         # scheduling health: consecutive self-activated turns per agent, the last turn that moved the run forward,
@@ -344,6 +387,7 @@ class RunRuntime(TeamMixin):
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
             "journal": self.journal[-JOURNAL_MAX:], "journal_n": self.journal_n, "seen": self.seen, "seen_turn": self.seen_turn,
+            "refs": dict(self.refs), "ledger": self.ledger,
             "metrics": self.efficiency(),
         }
 
@@ -388,12 +432,17 @@ class RunRuntime(TeamMixin):
         self.seen = dict(st.get("seen", {}))
         self.seen_turn = dict(st.get("seen_turn", {}))
         m = st.get("metrics") or {}
-        self.metrics = Counter({k: int(m.get(k, 0)) for k in ("turns", "work_turns", "delegations", "parallel_delegations")})
+        self.metrics = Counter({k: int(m.get(k, 0)) for k in ("turns", "work_turns", "delegations", "parallel_delegations",
+                                                              "recalls", "history_searches")})
+        self.refs = Counter(st.get("refs", {}))
+        self.ledger = list(st.get("ledger", []))
         self.first_deliverable_turn = m.get("first_deliverable_turn")
         async with self.db() as db:
             msgs = (await db.execute(select(Message).where(Message.run_id == self.run_id).order_by(Message.created_at))).scalars().all()
             for m in msgs:
                 rec = self._rec(m)
+                if not rec["ref"]:  # runs from before references existed: number their messages in order
+                    rec["ref"] = self.next_ref("m")
                 self.history.append(rec)
                 if not m.read and m.to_agent_id in self.agents:
                     self.seq += 1
@@ -417,7 +466,8 @@ class RunRuntime(TeamMixin):
     @staticmethod
     def _rec(m: Message) -> dict[str, Any]:
         return {"id": m.id, "from": m.from_agent_id, "to": m.to_agent_id, "type": m.type, "content": m.content,
-                "turn": m.turn_no, "edge_id": m.edge_id, "meta": m.meta_json or {}, "sender": m.sender}
+                "turn": m.turn_no, "edge_id": m.edge_id, "meta": m.meta_json or {}, "sender": m.sender,
+                "ref": (m.meta_json or {}).get("ref")}
 
     @staticmethod
     def _task_dict(t: Task) -> dict[str, Any]:
@@ -488,8 +538,10 @@ class RunRuntime(TeamMixin):
     async def post_message(self, *, sender: str, from_id: str | None, to_id: str | None, type_: str, content: str,
                            edge_id: str | None = None, meta: dict[str, Any] | None = None, deliver: bool = True,
                            announce: bool = True) -> dict[str, Any]:
+        meta = {**(meta or {})}
+        meta.setdefault("ref", self.next_ref("m"))  # a broadcast's copies share one reference
         m = Message(id=new_id(), run_id=self.run_id, session_id=self.session_id, sender=sender, from_agent_id=from_id,
-                    to_agent_id=to_id, edge_id=edge_id, type=type_, content=content, meta_json=meta or {},
+                    to_agent_id=to_id, edge_id=edge_id, type=type_, content=content, meta_json=meta,
                     turn_no=self.turn_no, read=not (deliver and to_id in self.agents), created_at=utcnow())
         async with self.db() as db:
             db.add(m)
@@ -527,6 +579,201 @@ class RunRuntime(TeamMixin):
             await db.commit()
         return True
 
+    # ------------------------------------------------------------------ archive, recall, search, ledger
+    def next_ref(self, prefix: str) -> str:
+        self.refs[prefix] += 1
+        return f"{prefix}{self.refs[prefix]}"
+
+    @property
+    def pointers(self) -> bool:
+        return self.budget.context_mode == "pointers"
+
+    async def archive(self, kind: str, aid: str | None, title: str, content: str) -> str:
+        """Keep the exact text under a short reference ("o7" output, "a3" arguments); prompts can then show a pointer."""
+        ref = self.next_ref("o" if kind == "output" else "a")
+        async with self.db() as db:
+            db.add(RunRecord(run_id=self.run_id, ref=ref, kind=kind, agent_id=aid, turn_no=self.turn_no, title=title[:300], content=content))
+            await db.commit()
+        return ref
+
+    async def archive_observations(self, obs: list[dict[str, Any]]) -> None:
+        """Long tool results waiting for an agent's next prompt get a reference, so a cut result can be read in full."""
+        for o in obs:
+            text = str(o.get("content", ""))
+            if not o.get("ref") and o.get("tool") != "system" and len(text) > POINTER_MIN_CHARS:
+                o["ref"] = await self.archive("output", None, str(o.get("tool", "")), text)
+
+    async def recall_text(self, ref: str, offset: int = 0) -> tuple[bool, str]:
+        ref = ref.strip().strip("'\"`")
+        head, body = "", None
+        if re.fullmatch(r"m\d+", ref):
+            m = next((x for x in self.history if x.get("ref") == ref), None)
+            if m:
+                to = "everyone" if m["to"] is None or (m.get("meta") or {}).get("broadcast") else self.names.get(m["to"], "?")
+                frm = "User" if m["from"] is None else self.names.get(m["from"], "?")
+                head, body = f"{ref} · turn {m['turn']} · {frm} → {to} · {m['type']}", m["content"]
+        elif re.fullmatch(r"i\d+", ref):
+            async with self.db() as db:
+                r = (await db.execute(select(RunRecord).where(RunRecord.run_id == self.run_id, RunRecord.ref == ref))).scalar_one_or_none()
+            if r:
+                return True, f"{ref} · {r.title} · the image is attached to your next look at the conversation"
+        elif re.fullmatch(r"[oa]\d+", ref):
+            async with self.db() as db:
+                r = (await db.execute(select(RunRecord).where(RunRecord.run_id == self.run_id, RunRecord.ref == ref))).scalar_one_or_none()
+            if r:
+                who = self.names.get(r.agent_id or "", "")
+                head, body = f"{ref} · turn {r.turn_no}{' · ' + who if who else ''} · {r.kind} of {r.title or 'a tool'}", r.content
+        elif re.fullmatch(r"L\d+", ref):
+            it = next((x for x in self.ledger if x["id"] == ref), None)
+            if it:
+                head = f"{ref} · {it['kind']} · {it['status']} · added by {self.names.get(it['by'] or '', 'Octopus')} at turn {it['turn']}"
+                hist = "".join(f"\n- earlier (changed by {self.names.get(h.get('by') or '', 'Octopus')} at turn {h['turn']}): "
+                               f"[{h['status']}] {h['text']}" + (f" (note: {h['note']})" if h.get("note") else "") for h in it["history"])
+                body = it["text"] + (f"\nNote: {it['note']}" if it.get("note") else "") + (f"\nHistory:{hist}" if hist else "")
+        else:
+            path, _, ver = ref.partition("@")
+            path = path.strip().lstrip("./")
+            q = select(Artifact).where(Artifact.run_id == self.run_id, Artifact.path == path)
+            q = q.where(Artifact.version == int(ver.lstrip("v"))) if ver.lstrip("v").isdigit() else q.order_by(Artifact.version.desc())
+            async with self.db() as db:
+                a = (await db.execute(q.limit(1))).scalar_one_or_none()
+            if a:
+                head, body = f"{a.path}@v{a.version} · by {self.names.get(a.author_agent_id or '', '?')}" + (
+                    f" · {a.change_note}" if a.change_note else ""), a.content
+        if body is None:
+            return False, (f"Nothing is recorded under '{ref}'. References look like m12 (message), o7 (tool output), a3 (tool "
+                           "arguments), i2 (image), L4 (ledger item) or path/file.ext@v2 (a file version written in this run).")
+        page = body[offset:offset + READ_PAGE_CHARS]
+        end = offset + len(page)
+        more = (f"\n…[showing characters {offset:,}-{end:,} of {len(body):,}; recall('{ref}', offset={end}) for the rest]"
+                if end < len(body) else (f"\n[characters {offset:,}-{end:,} of {len(body):,}]" if offset else ""))
+        return True, f"{head}\n{page}{more}"
+
+    async def act_recall(self, agent: AgentSpec, a: A.Recall) -> None:
+        cid = await self._tool_event(agent, "recall", {"ref": a.ref, "offset": a.offset})
+        self.metrics["recalls"] += 1
+        ok, out = await self.recall_text(a.ref, a.offset)
+        if ok and re.fullmatch(r"i\d+", a.ref.strip().strip("'\"`")):
+            self.pending_images.setdefault(agent.id, []).append(a.ref.strip().strip("'\"`"))
+        self.observe(agent.id, {"tool": "recall", "ok": ok, "content": out})
+        await self._tool_result(agent, cid, "recall", ok, out[:2000])
+
+    async def act_search_history(self, agent: AgentSpec, a: A.SearchHistory) -> None:
+        cid = await self._tool_event(agent, "search_history", {"query": a.query, "kind": a.kind})
+        self.metrics["history_searches"] += 1
+        await self.set_agent_status(agent.id, "reading", f"Searching the run for {a.query[:40]}…")
+        out = await self.search_history(a.query, a.kind, a.max_results)
+        self.observe(agent.id, {"tool": "search_history", "ok": True, "content": out})
+        await self._tool_result(agent, cid, "search_history", True, out[:2000])
+
+    async def search_history(self, query: str, kind: str = "any", limit: int = 20) -> str:
+        q = query.strip()
+        phrase = q[1:-1].strip().lower() if len(q) > 2 and q[0] == q[-1] == '"' else ""
+        terms = [phrase] if phrase else list(dict.fromkeys(t for t in re.findall(r"[\w./@#-]{2,}", q.lower())))[:8]
+        if not terms:
+            return "Give at least one word to search for."
+        found: list[tuple[int, int, str, str]] = []  # (terms matched, recency, line, text) per item
+
+        def score(text: str) -> int:
+            low = text.lower()
+            return sum(t in low for t in terms)
+
+        def snippet(text: str) -> str:
+            low = text.lower()
+            i = min((p for t in terms if (p := low.find(t)) >= 0), default=0)
+            s0 = max(0, i - 80)
+            return ("…" if s0 else "") + " ".join(text[s0:i + 160].split()) + ("…" if i + 160 < len(text) else "")
+
+        if kind in ("any", "messages"):
+            seen: set[str] = set()
+            for n, m in enumerate(self.history):
+                if m.get("ref") in seen or m["type"] == "artifact_created":
+                    continue
+                seen.add(m.get("ref") or m["id"])
+                if (k := score(m["content"])):
+                    frm = "User" if m["from"] is None else self.names.get(m["from"], "?")
+                    to = "everyone" if m["to"] is None or (m.get("meta") or {}).get("broadcast") else self.names.get(m["to"], "?")
+                    found.append((k, n, f"{m.get('ref')} t{m['turn']} {frm}→{to} {m['type']}", m["content"]))
+        if kind in ("any", "outputs"):
+            async with self.db() as db:
+                rows = (await db.execute(select(RunRecord).where(
+                    RunRecord.run_id == self.run_id, or_(*(RunRecord.content.ilike(f"%{t}%") for t in terms))
+                ).order_by(RunRecord.created_at.desc()).limit(300))).scalars().all()
+            for r in rows:
+                if (k := score(r.content)):
+                    found.append((k, 10**6 + int(r.ref[1:]), f"{r.ref} t{r.turn_no} {r.kind} of {r.title}", r.content))
+        if kind in ("any", "ledger"):
+            for n, it in enumerate(self.ledger):
+                text = " ".join([it["text"], it.get("note", ""), *(h["text"] for h in it["history"])])
+                if (k := score(text)):
+                    found.append((k, 2 * 10**6 + n, f"{it['id']} {it['kind']} ({it['status']})", text))
+        if not found:
+            return f"No matches for {query!r} in this run's messages, tool outputs or ledger."
+        need = 1 if phrase or len(terms) == 1 else 2 if len(terms) <= 3 else (len(terms) + 1) // 2
+        best = sorted(found, key=lambda f: (-f[0], -f[1]))
+        strong = [f for f in best if f[0] >= need] or best
+        lines = [f"- {head}: {snippet(text)}" for _, _, head, text in strong[:limit]]
+        extra = len(strong) - len(lines)
+        return (f"{len(strong)} match{'es' if len(strong) != 1 else ''} for {query!r} (best first"
+                + (f", {extra} more not shown" if extra > 0 else "") + "; recall a reference for the exact text):\n" + "\n".join(lines))
+
+    def ledger_add(self, kind: str, text: str, aid: str | None, note: str = "") -> dict[str, Any]:
+        it = {"id": self.next_ref("L"), "kind": kind, "text": text, "status": "open" if kind == "question" else "active",
+              "note": note, "by": aid, "turn": self.turn_no, "history": []}
+        self.ledger.append(it)
+        return it
+
+    def ledger_text(self) -> str:
+        """Current items in full; resolved / superseded ones as one line (their full text and history: recall the id)."""
+        lines = []
+        for it in self.ledger:
+            who = self.names.get(it["by"] or "", "Octopus")
+            if it["status"] in ("active", "open"):
+                lines.append(f"- {it['id']} [{it['kind']}{', OPEN' if it['status'] == 'open' else ''}] {it['text']}"
+                             + (f" (note: {it['note']})" if it.get("note") else "") + f" ({who}, t{it['turn']})")
+            else:
+                first = it["text"].strip().splitlines()[0] if it["text"].strip() else ""
+                lines.append(f"- {it['id']} [{it['kind']}, {it['status']}] {first[:100]}{'…' if len(first) > 100 else ''}"
+                             + (f" → {it['note'][:160]}" if it.get("note") else ""))
+        return "\n".join(lines)
+
+    async def act_update_ledger(self, agent: AgentSpec, a: A.UpdateLedger) -> None:
+        cid = await self._tool_event(agent, "update_ledger", {"items": [e.model_dump(exclude_none=True) for e in a.items]})
+        done, errors, changed = [], [], []
+        for e in a.items:
+            if e.id:
+                it = next((x for x in self.ledger if x["id"].lower() == e.id.strip().lower()), None)
+                if it is None:
+                    errors.append(f"{e.id}: no such ledger item")
+                    continue
+                if e.text is None and e.status is None and not e.note and e.kind is None:
+                    errors.append(f"{e.id}: nothing to change (give text, status or a note)")
+                    continue
+                it["history"].append({k: it.get(k, "") for k in ("text", "status", "note", "by", "turn")})
+                it["text"] = e.text if e.text is not None else it["text"]
+                it["status"] = e.status or it["status"]
+                it["kind"] = e.kind or it["kind"]
+                it["note"] = e.note or it["note"]
+                it["by"], it["turn"] = agent.id, self.turn_no
+                verb = f"changed {it['id']}" + (f" to {it['status']}" if e.status else "")
+            else:
+                if not e.kind or not (e.text or "").strip():
+                    errors.append("a new item needs kind and text")
+                    continue
+                it = self.ledger_add(e.kind, e.text.strip(), agent.id, e.note)
+                if e.status:
+                    it["status"] = e.status
+                verb = f"added {it['id']} ({it['kind']})"
+            changed.append(it)
+            done.append(f"{verb}: {it['text'][:200]}")
+            self.log(agent.id, f"ledger {verb}: {it['text'][:200]}" + (f" (note: {it['note'][:120]})" if it.get("note") else ""))
+        if changed:
+            await self.emit("ledger_updated", {"agent_id": agent.id, "items": [{k: v for k, v in it.items() if k != "history"} | {
+                "revisions": len(it["history"])} for it in changed]})
+        out = "\n".join([*done, *(f"Not applied: {x}" for x in errors)]) or "Nothing changed."
+        self.observe(agent.id, {"tool": "update_ledger", "ok": not errors, "content": out}, activate=False)
+        await self._tool_result(agent, cid, "update_ledger", not errors, out)
+
     def next_runnable(self) -> str | None:
         """FIFO over queued messages and activating observations. An agent that has already taken MAX_SELF_TURNS turns in a
         row on its own observations (no new message, no progress) is only woken by a message again."""
@@ -551,7 +798,9 @@ class RunRuntime(TeamMixin):
         del self.journal[:-JOURNAL_MAX]
 
     def decide(self, text: str, aid: str | None = None) -> None:
+        """A protocol outcome (debate decision, review verdict): kept on the ledger like any other decision."""
         self.decisions.append(text)
+        self.ledger_add("decision", text, aid)
         self.log(aid, text)
 
     def digest(self, aid: str) -> str:
@@ -564,7 +813,8 @@ class RunRuntime(TeamMixin):
                 continue
             first = (m["content"].strip().splitlines() or [""])[0][:200]
             to = self.names.get(m["to"] or "", "everyone")
-            rows.append((m["turn"], f"- t{m['turn']} {self.names.get(m['from'], '?')} → {to} ({m['type']}): {first}"))
+            ref = f"{m['ref']} " if m.get("ref") and self.pointers else ""
+            rows.append((m["turn"], f"- t{m['turn']} {ref}{self.names.get(m['from'], '?')} → {to} ({m['type']}): {first}"))
         rows.sort(key=lambda r: r[0])
         lines = [r[1] for r in rows]
         if len(lines) > DIGEST_LINES:
@@ -586,7 +836,12 @@ class RunRuntime(TeamMixin):
         return {"turns": turns, "work_turns": self.metrics["work_turns"],
                 "overhead_share": round(1 - self.metrics["work_turns"] / turns, 3) if turns else 0.0,
                 "first_deliverable_turn": self.first_deliverable_turn, "delegations": self.metrics["delegations"],
-                "parallel_delegations": self.metrics["parallel_delegations"]}
+                "parallel_delegations": self.metrics["parallel_delegations"],
+                "context_mode": self.budget.context_mode, "input_tokens": self.usage_totals["input"],
+                "cached_tokens": self.usage_totals["cached"],
+                "cached_share": round(self.usage_totals["cached"] / self.usage_totals["input"], 3) if self.usage_totals["input"] else 0.0,
+                "loop_strikes": self.loop.total_strikes(), "rejected_messages": self.rejections,
+                "recalls": self.metrics["recalls"], "history_searches": self.metrics["history_searches"], "ledger_items": len(self.ledger)}
 
     def file_lock(self, rel: str) -> asyncio.Lock:
         return self._file_locks.setdefault(rel, asyncio.Lock())
@@ -738,7 +993,7 @@ class RunRuntime(TeamMixin):
         if self.task and not self.task.done():
             self.task.cancel()
 
-    async def continue_with(self, content: str, to_agent_id: str | None) -> None:
+    async def continue_with(self, content: str, to_agent_id: str | None, images: list[dict[str, str]] | None = None) -> None:
         """Re-open a finished run with a follow-up. Same run, same history, files and task board; budgets get fresh headroom."""
         self.followups.append(content)  # bounded by the API (20k); shown with a visible cut on the Blackboard
         self.finalized = False
@@ -771,25 +1026,51 @@ class RunRuntime(TeamMixin):
             targets = [to_agent_id]
         else:  # "entry agent": the entry agent plus everyone who still owns an open task (they'd never be woken otherwise)
             targets = list(dict.fromkeys(self.entry_agents() + self.open_task_owners()))
+        stored = await self.store_images(images)
         for t in targets:
             mine = [x for x in self.open_tasks() if x["assignee"] == t]
             owned = ("\n\nYou still own these open tasks:\n" + "\n".join(f"- {self.task_line(x)}" for x in mine)
                      + "\nContinue them, or update the task board.") if mine else ""
-            await self.post_message(sender="user", from_id=None, to_id=t, type_="task", meta={"followup": True},
+            await self.post_message(sender="user", from_id=None, to_id=t, type_="task", meta={"followup": True, **({"images": stored} if stored else {})},
                                     content=f"Follow-up from the user: {content}\n\nThe previous work is in the project (see Workspace files). "
                                             f"Change what's needed and report back; don't start over.{owned}")
         self.wake.set()
 
-    async def interject(self, content: str, to_agent_id: str | None) -> None:
+    async def store_images(self, images: list[dict[str, str]] | None) -> list[dict[str, str]]:
+        """Images attached by the user: archived under i<n> references; messages carry only the references."""
+        out = []
+        for img in images or []:
+            ref = self.next_ref("i")
+            async with self.db() as db:
+                db.add(RunRecord(run_id=self.run_id, ref=ref, kind="image", agent_id=None, turn_no=self.turn_no,
+                                 title=f"{img['name']} ({img['media_type']})", content=img["data_url"]))
+                await db.commit()
+            out.append({"ref": ref, "name": img["name"], "media_type": img["media_type"]})
+        return out
+
+    async def image_urls(self, refs: list[str]) -> list[str]:
+        if not refs:
+            return []
+        async with self.db() as db:
+            rows = (await db.execute(select(RunRecord).where(RunRecord.run_id == self.run_id, RunRecord.kind == "image",
+                                                             RunRecord.ref.in_(refs)))).scalars().all()
+        by = {r.ref: r.content for r in rows}
+        return [by[r] for r in refs if r in by]
+
+    async def interject(self, content: str, to_agent_id: str | None, images: list[dict[str, str]] | None = None) -> None:
+        stored = await self.store_images(images)
         targets = [t for t in ([to_agent_id] if to_agent_id else self.agents) if t in self.agents and self.agents[t].active]
         self.user_notes.append(clip(content, 1000))
         self.mark_progress()  # new information from the user re-opens every nudge
         # A message to everyone is one message: each agent gets its own copy in its inbox, but the run shows it once
         # (it used to appear once per agent in the feed and timeline).
         group = new_id() if len(targets) > 1 else None
+        shared_ref = self.next_ref("m") if group else None
         first: dict[str, Any] | None = None
         for t in targets:
-            meta = {"broadcast": group, "recipients": len(targets)} if group else {}
+            meta = {"broadcast": group, "recipients": len(targets), "ref": shared_ref} if group else {}
+            if stored:
+                meta["images"] = stored
             rec = await self.post_message(sender="user", from_id=None, to_id=t, type_="user_interjection", content=content,
                                           meta=meta, announce=not group)
             first = first or rec
@@ -939,7 +1220,7 @@ class RunRuntime(TeamMixin):
             lines.append("Follow-up requests from the user (newest last; the earlier work is done, build on it, don't start over):\n"
                          + (f"- ({older} earlier follow-up(s) not shown)\n" if older > 0 else "")
                          + "\n".join(f"- {clip(f, 2000)}" for f in self.followups[-5:]))
-        if self.decisions:
+        if self.decisions and not self.pointers:  # pointer mode: decisions are on the team ledger
             older = len(self.decisions) - 20
             lines.append("Decisions:\n" + (f"- ({older} earlier decision(s) not shown)\n" if older > 0 else "")
                          + "\n".join(f"- {d}" for d in self.decisions[-20:]))
@@ -956,7 +1237,7 @@ class RunRuntime(TeamMixin):
                 f"- {t['key']} [{t['status']}] {t['title']} (assignee: {self.names.get(t['assignee'] or '', 'unassigned')})"
                 for t in self.tasks.values()))
         if self.artifacts:
-            lines.append("Workspace files:\n" + "\n".join(
+            lines.append(("Workspace files (recall('path@vN') shows any earlier version):\n" if self.pointers else "Workspace files:\n") + "\n".join(
                 f"- {p} v{a['version']} by {self.names.get(a['author'] or '', '?')}" for p, a in sorted(self.artifacts.items())))
         if self.user_notes:
             older = len(self.user_notes) - 10
@@ -1217,13 +1498,30 @@ class RunRuntime(TeamMixin):
         native = self.native_tools_for(req)
         system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
                                      status=self.status, preview_url=self.preview_url(), native=native,
-                                     project_memory=PM.render(self.memory, exclude_run=self.run_id))
-        user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
-                                 names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
-                                 team_status=team_status(self.agents, self.status))
-        if extra:
-            user += "\n\n" + extra
-        req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+                                     project_memory=PM.render(self.memory, exclude_run=self.run_id), context_tools=self.pointers)
+        common = dict(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
+                      names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
+                      team_status=team_status(self.agents, self.status))
+        if self.pointers:
+            await self.archive_observations(obs)
+            # stable → changing: system prompt, then the conversation (only grows at its end), then everything that changes
+            # every turn. The breakpoints mark the reusable prefixes for the provider's prompt cache.
+            stable, user = build_user_prompt_parts(**common, ledger=self.ledger_text())
+            if extra:
+                user += "\n\n" + extra
+            req.messages = [{"role": "system", "content": system, "cache_breakpoint": True}]
+            if stable:
+                req.messages.append({"role": "user", "content": stable, "cache_breakpoint": True})
+            req.messages.append({"role": "user", "content": user})
+        else:
+            user = build_user_prompt(**common)
+            if extra:
+                user += "\n\n" + extra
+            req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        # images: those attached to the new messages, and those the agent recalled (the model sees them, not just their names)
+        refs = [i["ref"] for m in inbox for i in (m.get("meta") or {}).get("images", [])] + self.pending_images.pop(aid, [])
+        if urls := await self.image_urls(list(dict.fromkeys(refs))):
+            req.messages[-1]["images"] = urls
         self.seen[aid], self.seen_turn[aid] = self.journal_n, self.turn_no
         return req, native
 
@@ -1240,7 +1538,8 @@ class RunRuntime(TeamMixin):
         (or ends the turn with wait / finish / a question for the user). Errors are returned to the model as tool results."""
         aid = agent.id
         specs, mcp_map = T.tool_specs(agent.tools, agent.mcp)
-        req.tools = [t for t in specs if t["name"] not in exclude]
+        hidden = set(exclude) | (set() if self.pointers else A.CONTEXT_ACTIONS)
+        req.tools = [t for t in specs if t["name"] not in hidden]
         req.json_mode = False
         req.continuation = []
         token = IN_TOOL_LOOP.set(True)
@@ -1290,7 +1589,11 @@ class RunRuntime(TeamMixin):
             # replay the response (encrypted reasoning included) and answer every call, as the Responses API expects
             replay = [i for i in res.items if not (i.get("type") == "reasoning" and not i.get("encrypted_content"))]
             rounds.append(len(req.continuation))
-            req.continuation = compact_rounds([*req.continuation, *replay, *outputs], rounds)
+            items = [*req.continuation, *replay, *outputs]
+            if (pending := self.pending_images.pop(aid, [])) and (urls := await self.image_urls(pending)):
+                items.append({"role": "user", "content": [{"type": "input_text", "text": f"Recalled image(s): {', '.join(pending)}"},
+                                                          *({"type": "input_image", "image_url": u} for u in urls)]})
+            req.continuation = mask_rounds(items, rounds, self.call_refs) if self.pointers else compact_rounds(items, rounds)
             if ended:
                 break
         else:
@@ -1303,6 +1606,15 @@ class RunRuntime(TeamMixin):
 
         The executors report back through notices/observations (the envelope path shows those in the next prompt); here
         they are taken out and returned as the call's output instead, so the agent sees them immediately."""
+        out, ended = await self._run_tool_call(agent, call, mcp_map)
+        if self.pointers:  # keep the exact output (and long arguments) so older rounds can be shown as pointers
+            oref = await self.archive("output", agent.id, call.name, out) if len(out) > POINTER_MIN_CHARS else None
+            aref = (await self.archive("args", agent.id, call.name, call.arguments or "")
+                    if len(call.arguments or "") > OLD_ROUND_CHARS else None)
+            self.call_refs[call.id] = (oref, aref)
+        return out, ended
+
+    async def _run_tool_call(self, agent: AgentSpec, call: ToolCall, mcp_map: dict[str, tuple[str, str]]) -> tuple[str, bool]:
         aid = agent.id
         action, err = T.parse_tool_call(call.name, call.arguments, mcp_map)
         if action is None:
@@ -2167,13 +2479,14 @@ class RunManager:
         rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
         return rt
 
-    async def continue_run(self, run_id: str, project: ProjectRef, content: str, to_agent_id: str | None = None) -> RunRuntime | None:
+    async def continue_run(self, run_id: str, project: ProjectRef, content: str, to_agent_id: str | None = None,
+                           images: list[dict[str, str]] | None = None) -> RunRuntime | None:
         """Send a message to a run. Live runs get an interjection; finished runs are re-opened and continue with full context."""
         rt = await self.ensure(run_id, project)
         if rt is not None:
             if rt.finalized or rt.run_status in TERMINAL_STATES:
                 return None  # finishing right now; caller retries
-            await rt.interject(content, to_agent_id)
+            await rt.interject(content, to_agent_id, images)
             return rt
         loaded = await self._load(run_id, project)
         if not loaded:
@@ -2184,7 +2497,7 @@ class RunManager:
         rt.mailbox.clear()  # stale unread messages from the finished run are context, not new work
         await rt.load_mcp()
         self.runtimes[run_id] = rt
-        await rt.continue_with(content, to_agent_id)
+        await rt.continue_with(content, to_agent_id, images)
         rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
         return rt
 

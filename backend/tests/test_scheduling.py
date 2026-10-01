@@ -125,9 +125,15 @@ async def test_runs_list_reports_what_each_run_produced(client, workspace) -> No
     shipped = await start_run(client, workspace, cid, permission_level="danger")
     await wait_status(client, workspace, shipped["id"])
     runs = {r["id"]: r for r in (await client.get(f"/api/v1/w/{workspace['id']}/runs", params={"company_id": cid})).json()}
-    assert runs[stuck["id"]]["outcome"] == {"tasks_total": 1, "tasks_done": 0, "tasks_open": 1, "tasks_blocked": 0, "files": 0,
+    def outcome(rid: str, expected: dict) -> dict:  # the fields this test is about (the outcome also carries context metrics)
+        return {k: runs[rid]["outcome"][k] for k in expected}
+
+    exp = {"tasks_total": 1, "tasks_done": 0, "tasks_open": 1, "tasks_blocked": 0, "files": 0,
                                             "errors": 0, "final_report": False,
                                             "agent_turns": 3, "work_turns": 0, "first_deliverable_turn": None, "delegations": 0}
-    assert runs[shipped["id"]]["outcome"] == {"tasks_total": 1, "tasks_done": 1, "tasks_open": 0, "tasks_blocked": 0, "files": 2,
+    assert outcome(stuck["id"], exp) == exp
+    exp = {"tasks_total": 1, "tasks_done": 1, "tasks_open": 0, "tasks_blocked": 0, "files": 2,
                                               "errors": 0, "final_report": True,
                                               "agent_turns": 1, "work_turns": 1, "first_deliverable_turn": 1, "delegations": 0}
+    assert outcome(shipped["id"], exp) == exp
+    assert runs[shipped["id"]]["outcome"]["context_mode"] == "pointers"

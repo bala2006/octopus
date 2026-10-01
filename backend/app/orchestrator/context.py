@@ -136,8 +136,48 @@ def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500
         extra += f" [verdict: {meta['verdict']}]"
     if meta.get("task_id"):
         extra += f" [task {meta['task_id']}]"
-    content = m["content"] if len(m["content"]) <= limit else m["content"][:limit] + f" …[truncated: {limit:,} of {len(m['content']):,} chars]"
-    return f"[turn {m['turn']}] {frm} → {to} ({m['type']}){extra}: {content}"
+    if meta.get("images"):
+        extra += " [images: " + ", ".join(f"{i['ref']} {i['name']}" for i in meta["images"]) + "]"
+    ref = m.get("ref")
+    more = f"; recall('{ref}') for all of it" if ref else ""
+    content = m["content"] if len(m["content"]) <= limit else m["content"][:limit] + f" …[truncated: {limit:,} of {len(m['content']):,} chars{more}]"
+    return f"{ref + ' ' if ref else ''}[turn {m['turn']}] {frm} → {to} ({m['type']}){extra}: {content}"
+
+
+POINTER_PREVIEW = 100   # characters of a message's first line shown in its pointer (a label, not a summary)
+POINTER_BLOCK = 100     # pointers beyond the newest POINTER_MAX collapse in whole blocks, so the prompt prefix stays stable
+POINTER_MAX = 400
+
+
+def pointer_line(m: dict[str, Any], names: dict[str, str], me: str) -> str:
+    """One line standing in for an older message: who, what, how long, and its reference. The text itself is untouched
+    in the archive; recall(ref) returns it exactly."""
+    frm = sender_name(m, names, me)
+    to = "all" if m["to"] is None else ("you" if m["to"] == me else names.get(m["to"], "?"))
+    first = (m["content"].strip().splitlines() or [""])[0]
+    label = first[:POINTER_PREVIEW] + ("…" if len(first) > POINTER_PREVIEW else "")
+    imgs = (m.get("meta") or {}).get("images") or []
+    pics = f" [images {', '.join(i['ref'] for i in imgs)}]" if imgs else ""
+    return f"- {m.get('ref') or '?'} t{m['turn']} {frm}→{to} {m['type']} ({len(m['content']):,} chars){pics}: {label}"
+
+
+def pointer_lines(older: list[dict[str, Any]], names: dict[str, str], me: str) -> str:
+    hidden = 0
+    if len(older) > POINTER_MAX:  # collapse whole blocks of the oldest pointers (the cut moves rarely, the prefix stays)
+        hidden = ((len(older) - POINTER_MAX + POINTER_BLOCK - 1) // POINTER_BLOCK) * POINTER_BLOCK
+    lines = []
+    if hidden:
+        first, last = older[0].get("ref") or "?", older[hidden - 1].get("ref") or "?"
+        lines.append(f"- {first} … {last}: {hidden} earlier messages (search_history finds them, recall shows any of them)")
+    lines += [pointer_line(m, names, me) for m in older[hidden:]]
+    return "\n".join(lines)
+
+
+def window_cut(n: int, recent_n: int) -> int:
+    """How many of an agent's n messages are shown as pointers. The cut moves in blocks of recent_n/2, not one message per
+    turn, so the full messages after it (and the cached prompt prefix) stay the same for several turns."""
+    block = max(1, recent_n // 2)
+    return (max(0, n - recent_n) // block) * block
 
 
 def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str, max_chars: int = SUMMARY_CHARS) -> str:
@@ -176,7 +216,8 @@ def browser_note(agent: AgentSpec, preview_url: str) -> str:
 
 
 def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
-                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False, project_memory: str = "") -> str:
+                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False, project_memory: str = "",
+                        context_tools: bool = True) -> str:
     names = {a.id: a.name for a in agents.values()}
     variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role,
                  **org_variables(agent, agents)}
@@ -234,17 +275,56 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 9. Team: use `list_agents` to see who is active/idle/done. You may refine your own configuration with `update_agent`
    (target "self"). {"You can hire teammates (`create_agent`) and reconfigure/deactivate agents you manage. Hire only for real capability gaps and keep departments to 2-3 people." if agent.tools.get("manage_team") else "Ask your manager if the team lacks a skill."}
 
-{response_format(agent, native)}"""
+{response_format(agent, native, context_tools)}"""
 
 
-def response_format(agent: AgentSpec, native: bool) -> str:
+def response_format(agent: AgentSpec, native: bool, context_tools: bool = True) -> str:
     if native:  # the tools themselves carry names, descriptions and argument schemas
         return (f"## Acting\nYou act by calling your tools. Each call's result comes back to you within this turn, so you can "
                 f"read, run, check and continue as far as you choose; several independent calls can go in one reply. The turn "
                 f"ends when you stop calling tools, call `wait` or `finish`, or ask the user. Message types: {MSG_TYPES}.\n")
     return ("## Response format\nReply with ONE JSON object and nothing else:\n"
             '{"thought": "<1-2 sentences of private reasoning>", "actions": [ ... ]}\n'
-            f"Message types: {MSG_TYPES}.\nAvailable actions:\n{schema_doc(agent.tools, agent.mcp)}\n")
+            f"Message types: {MSG_TYPES}.\nAvailable actions:\n{schema_doc(agent.tools, agent.mcp, context_tools=context_tools)}\n")
+
+
+def build_user_prompt_parts(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_ids: set[str], observations: list[dict[str, Any]],
+                            blackboard: str, names: dict[str, str], recent_n: int, native: bool = False, digest: str = "",
+                            team_status: str = "", ledger: str = "") -> tuple[str, str]:
+    """The turn's message as (stable, changing). Stable: the conversation, older messages as pointers and the newer ones in
+    full; it only grows at its end, so it is a reusable (cached) prompt prefix. Changing: ledger, Blackboard, team status
+    and activity, new messages and tool results. Nothing is summarised: every pointer leads back to the original."""
+    mine = [m for m in history if m["id"] not in inbox_ids and (m["from"] == agent.id or m["to"] == agent.id or (m["to"] is None and m["from"] is None))]
+    cut = window_cut(len(mine), recent_n)
+    older, recent = mine[:cut], mine[cut:]
+    stable = []
+    if older:
+        stable.append("# Earlier conversation (one line per message; recall(ref) gives the exact text, search_history(query) "
+                      "searches everything)\n" + pointer_lines(older, names, agent.id))
+    if recent:
+        stable.append("# Recent conversation\n" + "\n".join(fmt_msg(m, names, agent.id, RECENT_MSG_CHARS) for m in recent))
+    inbox = [m for m in history if m["id"] in inbox_ids]
+    parts = []
+    if ledger:
+        parts.append("# Team ledger (decisions, facts, open questions; change items with update_ledger, recall(id) shows an item's history)\n"
+                     + ledger)
+    parts.append(f"# Blackboard\n{blackboard}")
+    if team_status:
+        parts.append("# Team status\n" + team_status)
+    if digest:
+        parts.append("# Team activity since your last turn\n" + digest)
+    parts.append("# NEW messages for you\n" + ("\n".join(fmt_msg(m, names, agent.id) for m in inbox) or "(none)"))
+    if observations:
+        obs = []
+        for o in observations:
+            head = f"[{o.get('tool', 'system')}{' OK' if o.get('ok') else ' FAILED' if o.get('ok') is False else ''}]"
+            ref = o.get("ref")
+            hint = (f"recall('{ref}', offset={TOOL_RESULT_CHARS}) for the rest" if ref
+                    else "read_file with a larger offset for the rest" if o.get("tool") == "read_file" else "")
+            obs.append(f"{head}{' ' + ref if ref else ''} {clip(str(o.get('content', '')), TOOL_RESULT_CHARS, hint)}")
+        parts.append("# Tool results & system notices\n" + "\n".join(obs))
+    parts.append("Decide what to do next." if native else "Decide your next actions now. Respond with the JSON object only.")
+    return "\n\n".join(stable), "\n\n".join(parts)
 
 
 def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_ids: set[str], observations: list[dict[str, Any]],

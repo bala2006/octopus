@@ -23,6 +23,7 @@ from app.tools import basic
 TOOL_RE = re.compile(r"^\s*```tool\s*(\{.*?\})\s*```", re.S)
 MAX_TOOL_ROUNDS = 3
 HISTORY_VERBATIM = 24
+IMAGE_MESSAGES = 6  # images are sent with the last few messages only
 
 
 def msg_out(m: Message) -> dict[str, Any]:
@@ -62,11 +63,18 @@ class ChatConnection:
             await self.send("error", {"message": "A response is already streaming; stop it first."})
             return
         if kind == "user_message":
+            from app.services.images import ImageError, parse_images
+
             content = str(event.get("content", "")).strip()
             atts = event.get("attachments") or []
-            if not content and not atts:
+            try:
+                images = parse_images(event.get("images"))
+            except ImageError as exc:
+                await self.send("error", {"message": f"Image not sent: {exc}"})
                 return
-            self.task = asyncio.create_task(self.respond(content[:20000], atts))
+            if not content and not atts and not images:
+                return
+            self.task = asyncio.create_task(self.respond(content[:20000], atts, images))
         elif kind == "regenerate":
             self.task = asyncio.create_task(self.regenerate())
 
@@ -97,7 +105,7 @@ class ChatConnection:
             await self.send("message_deleted", {"id": mid})
         await self.generate()
 
-    async def respond(self, content: str, attachments: list[dict[str, Any]]) -> None:
+    async def respond(self, content: str, attachments: list[dict[str, Any]], images: list[dict[str, str]] | None = None) -> None:
         s, agent, _ = await self._context()
         att_meta = [{"filename": str(a.get("filename", "file"))[:200], "chars": len(str(a.get("text", "")))} for a in attachments[:5]]
         full = content
@@ -105,7 +113,8 @@ class ChatConnection:
             full += f"\n\n--- Attached file: {a.get('filename', 'file')} ---\n" + clip(str(a.get('text', '')), 30000)
         async with self.sf() as db:
             m = Message(id=new_id(), session_id=self.session_id, sender="user", to_agent_id=agent.id, type="chat", content=full,
-                        meta_json={"attachments": att_meta, "display": content}, read=True, created_at=utcnow())
+                        meta_json={"attachments": att_meta, "display": content, **({"images": images} if images else {})},
+                        read=True, created_at=utcnow())
             db.add(m)
             if s.title in ("New chat", "") and content:
                 s2 = await db.get(ChatSession, self.session_id)
@@ -119,7 +128,11 @@ class ChatConnection:
         async with self.sf() as db:
             msgs = (await db.execute(select(Message).where(Message.session_id == self.session_id, Message.run_id.is_(None))
                                      .order_by(Message.created_at))).scalars().all()
-        conv = [{"role": "user" if m.sender == "user" else "assistant", "content": m.content} for m in msgs if m.type in ("chat", "answer")]
+        conv = [{"role": "user" if m.sender == "user" else "assistant", "content": m.content or "(image)",
+                 **({"images": [i["data_url"] for i in (m.meta_json or {}).get("images", [])]} if (m.meta_json or {}).get("images") else {})}
+                for m in msgs if m.type in ("chat", "answer")]
+        for c in conv[:-IMAGE_MESSAGES]:  # older images are not re-sent on every reply (the text around them stays)
+            c.pop("images", None)
         if len(conv) > HISTORY_VERBATIM:
             older = conv[:-HISTORY_VERBATIM]
             recs = [{"from": None if c["role"] == "user" else agent.id, "to": agent.id if c["role"] == "user" else None,

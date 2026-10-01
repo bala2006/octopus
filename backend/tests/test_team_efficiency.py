@@ -198,5 +198,10 @@ async def test_bench_case_end_to_end(client, tmp_root: Path) -> None:
     assert res["status"] == "completed" and res["checks"] == 2
     assert res["passed"] is False and res["check_results"][1]["ok"] is True, "the mock doesn't fix bugs; the seeded test file is intact"
     assert res["turns"] >= 1 and res["overhead_share"] is not None
-    table = summarize([res])
-    assert "| solo_engineer | fix-failing-tests | ❌ | 1/2 |" in table and "| solo_engineer | 0/1 |" in table
+    assert res["context_mode"] == "pointers" and {"input_tokens", "cached_share", "loop_strikes", "recalls"} <= set(res)
+    legacy = await run_case(client, folder=tmp_root / f"bench-legacy-{tmp_root.stat().st_ino}", template="solo_engineer", task=task,
+                            budget={"force_mock": True, "max_turns": 20, "context_mode": "summary"}, timeout_s=60)
+    assert legacy["context_mode"] == "summary"
+    table = summarize([res, legacy])
+    assert "| solo_engineer | pointers | fix-failing-tests | ❌ | 1/2 |" in table
+    assert "| solo_engineer | pointers | 0/1 |" in table and "| solo_engineer | summary | 0/1 |" in table, "one summary row per mode"

@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, Pause, Play, Send, Wrench, History,
+  ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, Pause, Play, Wrench, History,
   MessagesSquare, UsersRound, Globe,
 } from "lucide-react";
 import { fetchRaw } from "@/lib/api";
@@ -15,18 +15,24 @@ import type { AgentOut, EdgeOut, PermissionLevel } from "@/types";
 import { AgentAvatar, ConnectionDot, EmptyState, PermissionBadge } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/button";
-import { Badge, Textarea } from "@/components/ui/primitives";
+import { Badge } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 import { ApprovalCard } from "./ApprovalCard";
+import { Composer, type ComposerPayload } from "@/components/Composer";
+import { sendToRun } from "./sendToRun";
+import { ResizeHandle, usePanelWidth } from "@/components/ResizeHandle";
 import { BrowserView } from "./BrowserView";
 import { isBrowsing } from "./browserSteps";
 import { RunFeed, ToolLog, type FeedFilter } from "./RunFeed";
 import { RunGraph } from "./RunGraph";
 import { QuestionCard, type AwaitingQuestion } from "./QuestionCard";
 import { TaskBoard, Timeline, UsageMeter } from "./RunWidgets";
+import { Ledger } from "./Ledger";
 import { TeamView } from "./TeamView";
 import { replayTo, TERMINAL } from "./runState";
 import { useRunStream } from "./useRunStream";
+
+const SIDE_PANEL_MAX = () => Math.max(360, Math.round(window.innerWidth * 0.72));
 
 export default function LiveRunPage() {
   const w = useWorkspaceId();
@@ -56,6 +62,7 @@ export default function LiveRunPage() {
   const filter = useApp((s) => s.chatFilter);
   const setFilter = useApp((s) => s.setChatFilter);
   const [tab, setTab] = React.useState("feed");
+  const panel = usePanelWidth("run-side-panel", Math.round(window.innerWidth * 0.4), 340, SIDE_PANEL_MAX);
   const [stopping, setStopping] = React.useState(false);
   const status = liveState.status;
   const terminal = TERMINAL.has(status);
@@ -129,8 +136,8 @@ export default function LiveRunPage() {
       </div>
 
       {/* body */}
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(380px,40%)]">
-        <div className="relative flex min-h-0 flex-col border-r border-border">
+      <div className="flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <AgentStrip agents={agentsList} state={state} onBrowse={() => setTab("browser")} />
           <div className="relative min-h-0 flex-1">
           {agentsList.length ? <RunGraph agents={agentsList} edges={edgesList} overlay={overlay} departments={departments} /> : null}
@@ -142,9 +149,10 @@ export default function LiveRunPage() {
           </div>
         </div>
 
-        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
-          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-            <TabsList>
+        <ResizeHandle side="right" label="Resize the side panel" width={panel.width} onResize={panel.set} onReset={panel.reset} min={panel.min} max={panel.max()} />
+        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 shrink-0 flex-col" style={{ width: panel.width }} data-testid="run-side-panel">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+            <TabsList className="max-w-full overflow-x-auto">
               <TabsTrigger value="feed"><MessagesSquare />Feed</TabsTrigger>
               <TabsTrigger value="team" data-testid="tab-team"><UsersRound />Team <span className="tabular-nums text-muted-foreground">{agentsList.filter((a) => a.active !== false).length}</span></TabsTrigger>
               <TabsTrigger value="tasks"><ListTodo />Tasks <span className="tabular-nums text-muted-foreground">{Object.keys(state.tasks).length}</span></TabsTrigger>
@@ -154,7 +162,7 @@ export default function LiveRunPage() {
               <TabsTrigger value="report" disabled={!terminal}><FileText />Report</TabsTrigger>
             </TabsList>
             {tab === "feed" && (
-              <div className="ml-auto">
+              <div className="ml-auto shrink-0">
                 <Select ariaLabel="Feed filter" value={filter} onValueChange={(v) => setFilter(v as FeedFilter)} className="h-7 w-[150px] text-xs"
                   options={[{ value: "all", label: "All messages" }, { value: "user", label: "User-facing only" }, { value: "internal", label: "Internal only" }]} />
               </div>
@@ -169,11 +177,12 @@ export default function LiveRunPage() {
             {terminal && state.summary && cursor === null && (
               <div className="border-t border-border bg-success/5 px-4 py-3 text-sm"><span className="font-semibold">Outcome: </span>{state.summary}</div>
             )}
-            {cursor === null && <InterjectBox agents={agentsList} awaiting={liveState.awaiting} finished={terminal}
-              onSend={(content, to) => send({ type: "interject", content, to_agent_id: to })} />}
+            {cursor === null && <InterjectBox agents={agentsList} awaiting={liveState.awaiting} finished={terminal} paused={status === "paused" && r.mode !== "step"}
+              onSend={(p, to) => void sendToRun(w, runId, p, to, send)} />}
           </TabsContent>
           <TabsContent value="team" className="min-h-0 flex-1 overflow-y-auto"><TeamView agents={agentsList} state={state} departments={departments} /></TabsContent>
-          <TabsContent value="tasks" className="min-h-0 flex-1 overflow-y-auto"><TaskBoard tasks={Object.values(state.tasks)} agents={agents} /></TabsContent>
+          <TabsContent value="tasks" className="min-h-0 flex-1 overflow-y-auto"><TaskBoard tasks={Object.values(state.tasks)} agents={agents} />
+            <Ledger items={Object.values(state.ledger)} agents={agents} /></TabsContent>
           <TabsContent value="browser" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><BrowserView state={state} agents={agents} w={w} runId={runId} /></TabsContent>
           <TabsContent value="tools" className="min-h-0 flex-1 overflow-y-auto"><ToolLog state={state} agents={agents} /></TabsContent>
           <TabsContent value="report" className="min-h-0 flex-1 overflow-y-auto"><ReportView w={w} runId={runId} enabled={terminal} /></TabsContent>
@@ -205,36 +214,33 @@ function AgentStrip({ agents, state, onBrowse }: { agents: AgentOut[]; state: Re
   );
 }
 
-/** Talk to the team. While live this steers the run; after it finished it continues the same run like a chat. */
-/** Talk to the team. While live this steers the run; after it finished it continues the same run like a chat. */
-function InterjectBox({ agents, awaiting, onSend, finished }: { agents: AgentOut[]; awaiting: AwaitingQuestion | null; onSend: (c: string, to?: string) => void; finished?: boolean }) {
-  const [text, setText] = React.useState("");
+/** Talk to the team with the same message box as the chat (text, files, images). While live this steers the run (and resumes
+ *  it if it was paused); after it finished it continues the same run like a chat. */
+function InterjectBox({ agents, awaiting, onSend, finished, paused }: {
+  agents: AgentOut[]; awaiting: AwaitingQuestion | null; finished?: boolean; paused?: boolean;
+  onSend: (p: ComposerPayload, to?: string) => void;
+}) {
   const [to, setTo] = React.useState<string>("all");
   const asker = awaiting ? agents.find((a) => a.id === awaiting.agent_id) : undefined;
-  const submit = () => {
-    if (!text.trim()) return;
-    onSend(text.trim(), to === "all" ? undefined : to);
-    setText("");
+  const send = (p: ComposerPayload) => {
+    onSend(p, to === "all" ? undefined : to);
     toast.success(finished ? "Continuing the run" : to === "all" ? "Sent to everyone" : `Sent to ${agents.find((a) => a.id === to)?.name}`,
-      { duration: 1500, description: finished ? "Same team, same files and history." : undefined });
+      { duration: 1500, description: finished ? "Same team, same files and history." : paused ? "The run resumes." : undefined });
   };
   return (
-    <div className="max-h-[60dvh] overflow-y-auto px-3 pb-3 pt-1">
+    <div className="max-h-[60dvh] overflow-y-auto pt-1">
       {awaiting && (
-        <div className="mb-2">
+        <div className="mb-2 px-3">
           <QuestionCard key={awaiting.question} awaiting={awaiting} agent={asker}
-            onAnswer={(answer) => { onSend(answer, awaiting.agent_id); toast.success(`Answered ${asker?.name ?? "the agent"}`, { duration: 1500 }); }} />
+            onAnswer={(answer) => { onSend({ text: answer, files: [], images: [] }, awaiting.agent_id); toast.success(`Answered ${asker?.name ?? "the agent"}`, { duration: 1500 }); }} />
         </div>
       )}
-      <div className="flex items-end gap-2">
-        <Select ariaLabel="Send to" value={to} onValueChange={setTo} className="h-9 w-[140px] text-xs"
-          options={[{ value: "all", label: finished ? "Entry agent" : "Everyone" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]} />
-        <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={1}
-          placeholder={awaiting ? "Or message the team…" : finished ? "Ask for a change or a next step: the team continues from where it stopped…" : "Interject: steer the team…"}
-          className="max-h-32 min-h-[36px] flex-1 resize-none py-2 text-sm"
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} aria-label="Interjection" />
-        <Button onClick={submit} disabled={!text.trim()} size="icon" className="h-9 w-9" aria-label="Send"><Send /></Button>
-      </div>
+      <Composer ariaLabel="Interjection" testId="interject"
+        placeholder={awaiting ? "Or message the team…" : finished ? "Ask for a change or a next step: the team continues from where it stopped…" : "Steer the team: text, files or images…"}
+        hint={paused && !finished ? <span className="text-warning">Sending resumes the run</span> : undefined}
+        onSend={send}
+        extra={<Select ariaLabel="Send to" value={to} onValueChange={setTo} className="h-7 w-[130px] text-xs"
+          options={[{ value: "all", label: finished ? "Entry agent" : "Everyone" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]} />} />
     </div>
   );
 }

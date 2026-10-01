@@ -247,7 +247,26 @@ class AgentMemory(ProjectBase):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class RunRecord(ProjectBase):
+    """The run's archive: full tool outputs and long tool arguments under a short, stable reference ("o12", "a3").
+
+    Prompts show older items as one-line pointers; agents get the exact original back with ``recall``. Messages and file
+    versions are archived in their own tables (messages, artifacts) and referenced the same way ("m7", "path@v3")."""
+
+    __tablename__ = "run_records"
+    __table_args__ = (UniqueConstraint("run_id", "ref", name="uq_run_record_ref"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    ref: Mapped[str] = mapped_column(String(16))
+    kind: Mapped[str] = mapped_column(String(16))  # output | args
+    agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    turn_no: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String(300), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 __all__ = [
     "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate",
-    "Company", "Agent", "Edge", "ChatSession", "Run", "Message", "RunEvent", "Task", "Artifact", "AgentMemory",
+    "Company", "Agent", "Edge", "ChatSession", "Run", "Message", "RunEvent", "Task", "Artifact", "AgentMemory", "RunRecord",
 ]

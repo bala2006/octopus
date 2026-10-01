@@ -39,6 +39,13 @@ DESCRIPTIONS = {
     "update_task_board": "Create tasks (omit key) or update existing ones (status, assignee, description, acceptance criteria).",
     "remember": "Save a long-term memory note that you will see in future runs.",
     "request_user_input": "Ask the user a question and pause until they answer. Offer concrete options and mark the one you recommend.",
+    "recall": "Get the exact original of anything shown as a pointer: a message (\"m12\"), a tool output (\"o7\"), long tool "
+              "arguments (\"a3\"), an image the user attached (\"i2\"), a ledger item with its history (\"L4\"), or a file version (\"src/app.py@v2\"; just the path = latest). "
+              "Long items come in pages; the result says which offset to read next.",
+    "search_history": "Search everything this run has said and produced: every message (yours and your teammates'), tool output and "
+                      "ledger item. Returns matching references with a snippet; recall a reference for the full text.",
+    "update_ledger": "Add items to the team ledger (the shared list of decisions, facts and open questions), or change existing items "
+                     "by id (new text, status resolved / superseded, a note). Items are never rewritten as a whole list; history is kept.",
     "web_search": "Search the web.",
     "calculate": "Evaluate an arithmetic expression exactly.",
     "create_agent": "Hire a new teammate into the company (you can only grant tools you have yourself).",

@@ -134,3 +134,39 @@ test("browser tab: see when an agent is browsing and what its tab shows, step by
   await expect(img).toBeVisible();
   expect(await img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBe(1280); // the real screenshot, loaded with auth
 });
+
+test("run page: the message box takes images like the chat, and the side panel is resizable and remembered", async ({ page, request }) => {
+  const { w, company } = await setup(request);
+  const run = await (await request.post(`/api/v1/w/${w}/runs`, {
+    data: { company_id: company, goal: "Restyle the header", permission_level: "danger", mode: "step", budget: { force_mock: true, max_turns: 6 } },
+  })).json();
+  await page.goto(`/w/${w}/runs/${run.id}`);
+
+  // side panel: drag the divider left by 200px → the panel is 200px wider, and stays so after a reload
+  const panel = page.getByTestId("run-side-panel");
+  const before = (await panel.boundingBox())!.width;
+  const handle = (await page.getByTestId("resize-handle").boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 200, handle.y + 200, { steps: 8 });
+  await page.mouse.up();
+  const after = (await panel.boundingBox())!.width;
+  expect(Math.abs(after - before - 200)).toBeLessThan(6);
+  await page.reload();
+  expect(Math.abs((await page.getByTestId("run-side-panel").boundingBox())!.width - after)).toBeLessThan(6);
+
+  // message box: same composer as the chat; an image is attached, sent and shown in the feed
+  await page.getByTestId("interject-image-input").setInputFiles({ name: "header.jpeg", mimeType: "image/jpeg",
+    buffer: fs.readFileSync(path.resolve("e2e/fixtures/browser-frame.jpeg")) });
+  await expect(page.getByTestId("interject-attachments").getByRole("img", { name: "header.jpeg" })).toBeVisible();
+  await page.getByLabel("Interjection").fill("Make the header look like this\nwith the same spacing");
+  await page.getByTestId("interject-attachments").locator("..").getByRole("button", { name: "Send" }).click();
+  const shown = page.getByRole("log", { name: "Run feed" }).getByTestId("message-image").first();
+  await expect(shown).toBeVisible();
+  await expect.poll(async () => shown.locator("img").evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBe(1280);
+  const msgs = await (await request.get(`/api/v1/w/${w}/runs/${run.id}/messages`)).json();
+  const m = msgs.find((x: { type: string }) => x.type === "user_interjection");
+  expect(m.content).toBe("Make the header look like this\nwith the same spacing");
+  expect(m.meta.images[0]).toMatchObject({ ref: "i1", name: "header.jpeg", media_type: "image/jpeg" });
+  await request.post(`/api/v1/w/${w}/runs/${run.id}/control/stop`);
+});

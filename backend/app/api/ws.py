@@ -5,7 +5,7 @@
                      edge_activity, tool_call, tool_result, task_updated, artifact_updated, usage_update, protocol,
                      approval_requested, approval_resolved, turn_started, run_status, error, ping,
                      thinking_stream, browser_action (screenshot: GET /api/v1/w/{w}/runs/{run}/browser/{frame})
-    client → server: interject | user_message {content, to_agent_id?}, control {action}, approve {approval_id, scope?},
+    client → server: interject | user_message {content, to_agent_id?, attachments?: [{filename, text}], images?: [{name, data_url}]}, control {action}, approve {approval_id, scope?},
                      reject {approval_id, reason?}, pong
     On connect every persisted event with seq > last_seq is replayed first, so reconnects lose nothing.
 
@@ -129,11 +129,20 @@ async def handle_client(msg: dict[str, Any], run_id: str, project: ProjectRef) -
         return
     if kind in ("interject", "user_message", "continue"):
         # live run → interjection; finished run → continue it like a chat (same run, full context)
-        content = str(msg.get("content", "")).strip()[:20000]
+        from app.services.images import ImageError, attach_text, parse_images
+
+        try:
+            images = parse_images(msg.get("images"))
+        except ImageError as exc:
+            await bus.publish(run_id, "error", {"message": f"Image not sent: {exc}", "kind": "client"}, project.sf)
+            return
+        content = attach_text(str(msg.get("content", "")).strip()[:20000], msg.get("attachments"))
+        if not content and images:
+            content = "(see the attached image" + ("s)" if len(images) > 1 else ")")
         to = msg.get("to_agent_id") or None
         if content:
             for _ in range(40):
-                if await manager.continue_run(run_id, project, content, to):
+                if await manager.continue_run(run_id, project, content, to, images):
                     return
                 await asyncio.sleep(0.1)
             await bus.publish(run_id, "error", {"message": "Run could not be continued", "kind": "client"}, project.sf)
