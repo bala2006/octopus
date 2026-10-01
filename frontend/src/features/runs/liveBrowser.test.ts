@@ -27,7 +27,7 @@ describe("pasted screenshots", () => {
   });
   it("images are sent as base64, text files as text", () => {
     expect(attachmentPayload([{ filename: "a.png", chars: 0, text: "", truncated: false, kind: "image", mime: "image/png", data: "QQ==" },
-      { filename: "b.md", chars: 2, text: "hi", truncated: false }])).toEqual([
+      { filename: "b.md", chars: 2, text: "hi", truncated: false, kind: "text", mime: "", data: "" }])).toEqual([
       { filename: "a.png", kind: "image", mime: "image/png", data: "QQ==" }, { filename: "b.md", text: "hi" }]);
   });
 });
