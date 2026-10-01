@@ -19,6 +19,17 @@ EDGE_MEANING = {
 
 MSG_TYPES = ("task, question, answer, proposal, critique, agreement, objection, decision, "
              "review_request, review_result, status_update, final_report")
+# Model-facing size limits (see docs/MODEL_QUALITY_AUDIT.md). Every cut is marked so the model knows it saw only part.
+TOOL_RESULT_CHARS = 12_000   # one tool result / notice in the prompt
+RECENT_MSG_CHARS = 1_500     # each message in the "recent conversation" window
+SUMMARY_CHARS = 6_000        # extractive summary of older messages
+
+
+def clip(text: str, limit: int, hint: str = "") -> str:
+    """Cut ``text`` to ``limit`` chars with an explicit marker (never a silent cut)."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n…[truncated: showing {limit:,} of {len(text):,} characters{'; ' + hint if hint else ''}]"
 
 
 @dataclass
@@ -117,11 +128,11 @@ def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500
         extra += f" [verdict: {meta['verdict']}]"
     if meta.get("task_id"):
         extra += f" [task {meta['task_id']}]"
-    content = m["content"] if len(m["content"]) <= limit else m["content"][:limit] + " …[truncated]"
+    content = m["content"] if len(m["content"]) <= limit else m["content"][:limit] + f" …[truncated: {limit:,} of {len(m['content']):,} chars]"
     return f"[turn {m['turn']}] {frm} → {to} ({m['type']}){extra}: {content}"
 
 
-def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str, max_chars: int = 3000) -> str:
+def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str, max_chars: int = SUMMARY_CHARS) -> str:
     """Extractive summary of older turns (first sentence of each message), newest kept when over budget."""
     lines = []
     for m in older:
@@ -134,7 +145,7 @@ def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str,
     for ln in reversed(lines):
         total += len(ln) + 1
         if total > max_chars:
-            out.append(f"- … {len(lines) - len(out)} earlier messages omitted")
+            out.append(f"- … {len(lines) - len(out)} earlier messages omitted (decisions, tasks and files are on the Blackboard)")
             break
         out.append(ln)
     return "\n".join(reversed(out))
@@ -229,13 +240,14 @@ def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_
     if older:
         parts.append("# Summary of earlier conversation\n" + rolling_summary(older, names, agent.id))
     if recent:
-        parts.append("# Recent conversation\n" + "\n".join(fmt_msg(m, names, agent.id, 800) for m in recent))
+        parts.append("# Recent conversation\n" + "\n".join(fmt_msg(m, names, agent.id, RECENT_MSG_CHARS) for m in recent))
     parts.append("# NEW messages for you\n" + ("\n".join(fmt_msg(m, names, agent.id) for m in inbox) or "(none)"))
     if observations:
         obs = []
         for o in observations:
             head = f"[{o.get('tool', 'system')}{' OK' if o.get('ok') else ' FAILED' if o.get('ok') is False else ''}]"
-            obs.append(f"{head} {o.get('content', '')[:6000]}")
+            hint = "read_file with a larger offset for the rest" if o.get("tool") == "read_file" else ""
+            obs.append(f"{head} {clip(str(o.get('content', '')), TOOL_RESULT_CHARS, hint)}")
         parts.append("# Tool results & system notices\n" + "\n".join(obs))
     parts.append("Decide your next actions now. Respond with the JSON object only.")
     return "\n\n".join(parts)

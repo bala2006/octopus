@@ -24,8 +24,14 @@ from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usa
 ApiStyle = str  # "responses" | "chat"
 _PROTECTED = {"model", "input", "messages", "stream"}
 # Reasoning deployments (gpt-6-luna reasons at "medium" effort by default) spend output tokens on thinking before they
-# answer; max_output_tokens covers both, so the agent's answer budget gets this much extra room.
-REASONING_HEADROOM = 4096
+# answer; max_output_tokens covers both, so the agent's answer budget gets extra room. A fixed allowance meant that raising
+# the effort silently shrank the space left for the answer, so the headroom scales with the requested effort.
+REASONING_HEADROOM = 4096  # default effort ("medium" / unspecified)
+HEADROOM_BY_EFFORT = {"none": 0, "minimal": 1024, "low": 2048, "medium": 4096, "high": 8192, "xhigh": 16384, "max": 24576}
+
+
+def reasoning_headroom(req: LLMRequest) -> int:
+    return HEADROOM_BY_EFFORT.get(str(req.extra.get("reasoning_effort") or "").lower(), REASONING_HEADROOM)
 # (base, deployment) → parameters the deployment rejected once; never sent again in this process
 _dropped: dict[tuple[str, str], set[str]] = {}
 
@@ -67,14 +73,14 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
     reasoning = bool(req.extra.get("reasoning_model"))
     if style == "responses":
         body: dict[str, Any] = {
-            "model": req.model, "stream": True, "max_output_tokens": req.max_tokens + REASONING_HEADROOM, "store": False,
+            "model": req.model, "stream": True, "max_output_tokens": req.max_tokens + reasoning_headroom(req), "store": False,
             "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages],
         }
         if req.json_mode:
             body["text"] = {"format": {"type": "json_object"}}
     else:
         body = {
-            "model": req.model, "stream": True, "messages": req.messages, "max_completion_tokens": req.max_tokens + REASONING_HEADROOM,
+            "model": req.model, "stream": True, "messages": req.messages, "max_completion_tokens": req.max_tokens + reasoning_headroom(req),
             "stream_options": {"include_usage": True},
         }
         if req.json_mode:

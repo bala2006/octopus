@@ -88,7 +88,10 @@ class _AgentSession:
                     try:
                         res = await asyncio.wait_for(session.call_tool(tool, args), CALL_TIMEOUT_S)
                         parts = [getattr(c, "text", None) or f"[{getattr(c, 'type', 'content')}]" for c in res.content]
-                        fut.set_result((not res.isError, "\n".join(parts)[:12000]))
+                        out = "\n".join(parts)
+                        if len(out) > 12000:
+                            out = out[:12000] + f"\n…[truncated: 12,000 of {len(out):,} characters]"
+                        fut.set_result((not res.isError, out))
                     except asyncio.TimeoutError:
                         fut.set_result((False, f"Browser tool '{tool}' timed out after {CALL_TIMEOUT_S}s"))
                     except Exception as exc:  # the session may be broken; report and stop

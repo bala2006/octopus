@@ -34,7 +34,7 @@ from app.llm.router import prepare_request, stream_with_retry
 from app.models import AgentMemory, Artifact, Message, Run, Task
 from app.orchestrator import actions as A
 from app.orchestrator.bus import bus
-from app.orchestrator.context import AgentSpec, build_system_prompt, build_user_prompt
+from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, clip
 from app.orchestrator.permissions import (
     EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
 )
@@ -59,6 +59,24 @@ OPEN_TASK_STATES = {"todo", "in_progress", "in_review", "blocked"}
 MAX_SELF_TURNS = 3
 # A run and all of its follow-ups may spend at most this multiple of the run's original budget (turns, tokens, cost, time).
 FOLLOWUP_BUDGET_CEILING = 3
+READ_PAGE_CHARS = TOOL_RESULT_CHARS - 500  # one read_file page fits in a tool result with room for its header
+JUDGE_MAX_TOKENS = 16  # "YES"/"NO" plus slack; 5 often produced no answer at all (reasoning headroom is added on top)
+
+
+def judge_verdict(text: str) -> bool | None:
+    """YES → True, NO → False, anything else (empty, rambling) → None = unknown."""
+    t = re.sub(r"[^A-Z]", " ", text.upper()).split()
+    if not t:
+        return None
+    return True if t[0] == "YES" else False if t[0] == "NO" else None
+
+
+def head_tail(text: str, limit: int) -> str:
+    """Keep both ends of a long text: a malformed reply usually breaks at the end."""
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    return text[:half] + f"\n…[{len(text) - limit:,} characters omitted]…\n" + text[-half:]
 
 
 class StopRun(Exception):
@@ -545,7 +563,7 @@ class RunRuntime(TeamMixin):
 
     async def continue_with(self, content: str, to_agent_id: str | None) -> None:
         """Re-open a finished run with a follow-up. Same run, same history, files and task board; budgets get fresh headroom."""
-        self.followups.append(content[:2000])
+        self.followups.append(content)  # bounded by the API (20k); shown with a visible cut on the Blackboard
         self.finalized = False
         self.finished_summary = None
         self.loop_escalated = self.stall_escalated = False
@@ -587,7 +605,7 @@ class RunRuntime(TeamMixin):
 
     async def interject(self, content: str, to_agent_id: str | None) -> None:
         targets = [to_agent_id] if to_agent_id else list(self.agents)
-        self.user_notes.append(content[:300])
+        self.user_notes.append(clip(content, 1000))
         self.mark_progress()  # new information from the user re-opens every nudge
         for t in targets:
             if t in self.agents:
@@ -659,7 +677,7 @@ class RunRuntime(TeamMixin):
     async def bootstrap(self) -> None:
         content = self.goal
         for att in self.attachments:
-            content += f"\n\n--- Attached file: {att.get('filename', 'file')} ---\n{att.get('text', '')[:20000]}"
+            content += f"\n\n--- Attached file: {att.get('filename', 'file')} ---\n" + clip(str(att.get("text", "")), 30000)
         for aid in self.entry_agents():
             await self.post_message(sender="user", from_id=None, to_id=aid, type_="task", content=content, meta={"goal": True})
 
@@ -720,12 +738,16 @@ class RunRuntime(TeamMixin):
 
     # ------------------------------------------------------------------ a single agent turn
     def blackboard(self) -> str:
-        lines = [f"Goal: {self.goal[:1500]}"]
+        lines = [f"Goal: {clip(self.goal, 6000)}"]
         if self.followups:
+            older = len(self.followups) - 5
             lines.append("Follow-up requests from the user (newest last; the earlier work is done, build on it, don't start over):\n"
-                         + "\n".join(f"- {f[:600]}" for f in self.followups[-5:]))
+                         + (f"- ({older} earlier follow-up(s) not shown)\n" if older > 0 else "")
+                         + "\n".join(f"- {clip(f, 2000)}" for f in self.followups[-5:]))
         if self.decisions:
-            lines.append("Decisions:\n" + "\n".join(f"- {d}" for d in self.decisions[-10:]))
+            older = len(self.decisions) - 20
+            lines.append("Decisions:\n" + (f"- ({older} earlier decision(s) not shown)\n" if older > 0 else "")
+                         + "\n".join(f"- {d}" for d in self.decisions[-20:]))
         if self.debates:
             lines.append("Debates:\n" + "\n".join(
                 f"- {' ↔ '.join(self.names.get(p, p) for p in d.participants)}: {d.status} (round {d.rounds}/{d.max_rounds}) {d.topic}"
@@ -742,7 +764,9 @@ class RunRuntime(TeamMixin):
             lines.append("Workspace files:\n" + "\n".join(
                 f"- {p} v{a['version']} by {self.names.get(a['author'] or '', '?')}" for p, a in sorted(self.artifacts.items())))
         if self.user_notes:
-            lines.append("User notes:\n" + "\n".join(f"- {n}" for n in self.user_notes[-5:]))
+            older = len(self.user_notes) - 10
+            lines.append("User notes:\n" + (f"- ({older} earlier note(s) not shown)\n" if older > 0 else "")
+                         + "\n".join(f"- {n}" for n in self.user_notes[-10:]))
         idle = self.turn_no - self.progress_turn
         lines.append(f"Progress: last file / task-board change at turn {self.progress_turn}"
                      + (f" ({idle} turns ago: deliver something or update the board instead of more discussion)" if idle >= 5 else ""))
@@ -874,7 +898,7 @@ class RunRuntime(TeamMixin):
             text = await self.call_llm_escalating(agent, req)
             parsed = A.parse_envelope(text)
             if not parsed.ok and req.provider != "mock":
-                req.messages += [{"role": "assistant", "content": text[:4000]},
+                req.messages += [{"role": "assistant", "content": head_tail(text, 6000)},
                                  {"role": "user", "content": "Your reply was not valid per the response format ("
                                   + "; ".join(parsed.errors) + "). Reply again with ONLY the JSON object."}]
                 text = await self.call_llm_escalating(agent, req)
@@ -901,6 +925,9 @@ class RunRuntime(TeamMixin):
             await self.emit("thought", {"agent_id": aid, "text": parsed.thought, "turn_no": self.turn_no})
         for err in parsed.errors:
             self.notice(aid, f"Ignored invalid action: {err}", activate=False)
+        if parsed.errors:  # the agent may believe it acted: make the drop visible in the run, not just in its next prompt
+            await self.emit("error", {"message": f"{agent.name}: ignored {len(parsed.errors)} invalid action(s): {'; '.join(parsed.errors)[:400]}",
+                                      "agent_id": aid, "kind": "parse"})
         for action in parsed.actions:
             if self.stop_requested:
                 raise StopRun()
@@ -1054,11 +1081,11 @@ class RunRuntime(TeamMixin):
     async def condition_met(self, agent: AgentSpec, edge: EdgeSpec, a: A.SendMessage) -> bool:
         """Evaluate a natural-language edge condition with a tiny LLM judge call (mock: always satisfied)."""
         cond = edge.config.get("condition", "")
-        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=0, max_tokens=5,
+        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=0, max_tokens=JUDGE_MAX_TOKENS,
                          extra={"reasoning_effort": "low" if self.effort_for(agent) != "none" else "none"}, messages=[
             {"role": "system", "content": "You are a strict gatekeeper. Answer only YES or NO."},
-            {"role": "user", "content": f"Channel condition: {cond}\nBlackboard:\n{self.blackboard()[:3000]}\n\n"
-                                        f"Message ({a.type}): {a.content[:2000]}\n\nIs the condition satisfied?"}],
+            {"role": "user", "content": f"Channel condition: {cond}\nBlackboard:\n{clip(self.blackboard(), 8000)}\n\n"
+                                        f"Message ({a.type}): {clip(a.content, 6000)}\n\nIs the condition satisfied?"}],
             metadata={"kind": "chat", "mock_script": "YES"})
         try:
             if self.budget.force_mock:
@@ -1070,9 +1097,16 @@ class RunRuntime(TeamMixin):
                 out += ch.delta
                 if ch.usage:
                     self.add_usage(agent.id, ch.usage)
-            return not out.strip().upper().startswith("NO")
-        except LLMError:
-            return True  # fail open: do not block the run on a judge failure
+            verdict = judge_verdict(out)
+            if verdict is not None:
+                return verdict
+            why = f"unclear answer {out.strip()[:40]!r}" if out.strip() else "no answer"
+        except LLMError as exc:
+            why = f"judge failed: {exc}"
+        # Fail open (a broken judge must not block the run) but never silently: a non-answer is "unknown", not "yes".
+        await self.emit("error", {"message": f"Channel condition \"{cond}\" could not be evaluated ({why}); the message was delivered.",
+                                  "agent_id": agent.id, "kind": "warning"})
+        return True
 
     async def link_task(self, creator: str, assignee: str, task_key: str | None, content: str) -> str:
         if task_key and task_key in self.tasks:
@@ -1268,7 +1302,13 @@ class RunRuntime(TeamMixin):
             ok = True
         except WorkspaceError as exc:
             content, ok = str(exc), False
-        self.observe(agent.id, {"tool": "read_file", "ok": ok, "content": f"{a.path}:\n{content}"})
+        header = f"{a.path}:"
+        if ok and (a.offset or len(content) > READ_PAGE_CHARS):  # page big files explicitly instead of a silent cut
+            end = min(len(content), a.offset + READ_PAGE_CHARS)
+            more = f"; read_file with \"offset\": {end} for the next part" if end < len(content) else " (end of file)"
+            header = f"{a.path} [characters {a.offset:,}-{end:,} of {len(content):,}{more}]:"
+            content = content[a.offset:end]
+        self.observe(agent.id, {"tool": "read_file", "ok": ok, "content": f"{header}\n{content}"})
         await self._tool_result(agent, cid, "read_file", ok, content[:1000])
 
     async def act_list_files(self, agent: AgentSpec, a: A.ListFiles) -> None:

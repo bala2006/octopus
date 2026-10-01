@@ -100,14 +100,15 @@ async def test_provider(body: TestProviderIn, db: AsyncSession = Depends(get_reg
     t0 = time.monotonic()
     try:
         req, warn = await prepare_request(db, user.id, req)
-        if warn and body.provider != "mock":
+        if warn and req.provider == "mock" and body.provider != "mock":  # not connected: fell back to the demo mock
             return TestProviderOut(ok=False, detail=warn)
         if req.model in (req.extra.get("reasoning_models") or []):
             req.extra["reasoning_model"] = True
         out = ""
         async for ch in stream_with_retry(req, retries=0):
             out += ch.delta
-        return TestProviderOut(ok=True, detail=f"Model replied: {out.strip()[:80]!r}", latency_ms=int((time.monotonic() - t0) * 1000))
+        return TestProviderOut(ok=True, detail=f"Model replied: {out.strip()[:80]!r}" + (f". Note: {warn}" if warn else ""),
+                               latency_ms=int((time.monotonic() - t0) * 1000))
     except LLMError as exc:
         return TestProviderOut(ok=False, detail=str(exc)[:500], latency_ms=int((time.monotonic() - t0) * 1000))
 

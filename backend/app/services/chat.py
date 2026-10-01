@@ -16,7 +16,7 @@ from app.llm.base import LLMError, LLMRequest
 from app.llm.demo_script import role_category
 from app.llm.router import prepare_request, stream_with_retry
 from app.models import Agent, AgentMemory, ChatSession, Company, Message
-from app.orchestrator.context import render_template, rolling_summary
+from app.orchestrator.context import clip, render_template, rolling_summary
 from app.tools import basic
 
 TOOL_RE = re.compile(r"^\s*```tool\s*(\{.*?\})\s*```", re.S)
@@ -101,7 +101,7 @@ class ChatConnection:
         att_meta = [{"filename": str(a.get("filename", "file"))[:200], "chars": len(str(a.get("text", "")))} for a in attachments[:5]]
         full = content
         for a in attachments[:5]:
-            full += f"\n\n--- Attached file: {a.get('filename', 'file')} ---\n{str(a.get('text', ''))[:30000]}"
+            full += f"\n\n--- Attached file: {a.get('filename', 'file')} ---\n" + clip(str(a.get('text', '')), 30000)
         async with self.sf() as db:
             m = Message(id=new_id(), session_id=self.session_id, sender="user", to_agent_id=agent.id, type="chat", content=full,
                         meta_json={"attachments": att_meta, "display": content}, read=True, created_at=utcnow())
