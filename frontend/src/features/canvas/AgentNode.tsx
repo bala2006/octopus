@@ -1,7 +1,7 @@
 import * as React from "react";
 import { tone } from "@/lib/palette";
 import { Handle, NodeToolbar, Position, type NodeProps } from "@xyflow/react";
-import { Crown, Flag, MessageSquare, Moon, Plug, Settings2, ShieldAlert, Sparkles } from "lucide-react";
+import { Brain, Crown, Flag, MessageSquare, Moon, Plug, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
 import { MESSAGE_TYPE_LABEL, PERMISSIONS, TOOLS, statusMeta } from "@/lib/meta";
 import { cn, formatTokens } from "@/lib/utils";
@@ -10,6 +10,7 @@ import type { PermissionLevel } from "@/types";
 import { Tip } from "@/components/ui/overlays";
 import { useEditable, useLive } from "./live";
 import { NodeQuickConfig } from "./NodeQuickConfig";
+import { liveSummary } from "@/features/runs/LiveWriting";
 import { useEffectiveModel } from "./ModelPicker";
 
 const SIDES = [Position.Top, Position.Right, Position.Bottom, Position.Left];
@@ -24,6 +25,8 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
   const activity = live?.activity[id];
   const meta = statusMeta(status);
   const streaming = live?.streaming[id];
+  const thinking = live?.thinking?.[id];
+
   const last = live?.lastMessage[id];
   const tools = TOOLS.filter((t) => (data.tools as Record<string, unknown>)?.[t.key]);
   const mcpCount = ((data.tools as { mcp_servers?: string[] })?.mcp_servers ?? []).length;
@@ -33,6 +36,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
   const inactive = data.active === false;
   const runModel = useEffectiveModel(data.provider, data.model);
   const glowing = !!status && meta.live && !inactive;
+  const live_ = streaming && meta.live ? liveSummary(streaming) : null; // "Writing src/game.js" + the line being written
   const showQuick = editable && quickId === id;
   const dcolor = data.department ? tone(live?.departments?.[data.department]?.color ?? deptColor(data.department, departments)) : null;
   const hiredBy = data.created_by ? (live?.names?.[data.created_by] ?? creatorName ?? "an agent") : null;
@@ -105,10 +109,18 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
                 <StatusPill status={status} activity={activity} />
                 {!!live.tokens[id] && <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{formatTokens(live.tokens[id])} tok</span>}
               </div>
-              {streaming && meta.live ? (
+              {live_ ? (
                 <div className="flex items-start gap-1.5 rounded-md bg-muted/60 px-2 py-1.5">
                   <TypingDots color={meta.color} className="mt-1.5" />
-                  <p className="line-clamp-2 break-all font-mono text-[10px] leading-snug text-muted-foreground">{streaming.slice(-140)}</p>
+                  <div className="min-w-0 text-[10.5px] leading-snug">
+                    <div className="truncate font-medium text-foreground/80">{live_.title}</div>
+                    {live_.line && <div className="truncate whitespace-pre font-mono text-muted-foreground">{live_.line}</div>}
+                  </div>
+                </div>
+              ) : thinking && meta.live ? (
+                <div className="flex items-start gap-1.5 rounded-md bg-muted/60 px-2 py-1.5">
+                  <Brain className="mt-0.5 h-3 w-3 shrink-0 animate-pulse text-muted-foreground" />
+                  <p className="line-clamp-3 text-[10.5px] leading-snug text-muted-foreground">{thinking.replace(/\*\*/g, "").slice(-220)}</p>
                 </div>
               ) : last ? (
                 <div className="flex items-start gap-1.5 rounded-md bg-muted/40 px-2 py-1.5 animate-fade-up" key={last.text.slice(0, 30)}>

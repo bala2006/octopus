@@ -98,6 +98,11 @@ def personality(behavior: dict[str, Any]) -> str:
             f"Debate style: {style.replace('_', ' ')}: {style_text}")
 
 
+def team_status(agents: dict[str, AgentSpec], status: dict[str, str]) -> str:
+    """Who is doing what right now. Changes every turn, so it goes in the turn's message, not the (cached) system prompt."""
+    return ", ".join(f"{a.name}: {status.get(a.id, 'idle')}" for a in agents.values() if a.active)
+
+
 def team_roster(agents: dict[str, AgentSpec], status: dict[str, str] | None = None) -> str:
     lines = []
     for a in agents.values():
@@ -125,6 +130,8 @@ def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500
     to = "everyone" if m["to"] is None else ("you" if m["to"] == me else names.get(m["to"], "?"))
     extra = ""
     meta = m.get("meta") or {}
+    if meta.get("broadcast") and m["to"] == me:  # one message to the whole team; each teammate got the same copy
+        to = f"everyone ({meta.get('recipients', '?')} agents, you included)"
     if meta.get("verdict"):
         extra += f" [verdict: {meta['verdict']}]"
     if meta.get("task_id"):
@@ -197,8 +204,8 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 ## Personality
 {personality(agent.behavior)}
 
-## Team roster (live status)
-{team_roster(agents, status)}
+## Team roster (current status of each teammate: "# Team status" in each turn's message)
+{team_roster(agents)}
 
 ## Your communication channels (you may ONLY message these agents)
 {channels}
@@ -241,11 +248,14 @@ def response_format(agent: AgentSpec, native: bool) -> str:
 
 
 def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_ids: set[str], observations: list[dict[str, Any]],
-                      blackboard: str, names: dict[str, str], recent_n: int, native: bool = False, digest: str = "") -> str:
+                      blackboard: str, names: dict[str, str], recent_n: int, native: bool = False, digest: str = "",
+                      team_status: str = "") -> str:
     mine = [m for m in history if m["id"] not in inbox_ids and (m["from"] == agent.id or m["to"] == agent.id or (m["to"] is None and m["from"] is None))]
     older, recent = mine[:-recent_n] if len(mine) > recent_n else [], mine[-recent_n:]
     inbox = [m for m in history if m["id"] in inbox_ids]
     parts = [f"# Blackboard\n{blackboard}"]
+    if team_status:
+        parts.append("# Team status\n" + team_status)
     if digest:
         parts.append("# Team activity since your last turn\n" + digest)
     if older:

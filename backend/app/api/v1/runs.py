@@ -133,6 +133,9 @@ async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: Use
         raise HTTPException(409, "Stop the run before deleting it")
     await db.delete(run)
     await db.commit()
+    from app.services import browser_frames
+
+    browser_frames.delete_run(run_id)
 
 
 async def _runtime(run_id: str, db: AsyncSession, user: User, ctx: ProjectCtx) -> RunRuntime:
@@ -200,7 +203,18 @@ async def events(run_id: str, after: int = 0, limit: int = Query(5000, le=20000)
 @router.get("/{run_id}/messages", response_model=list[MessageOut])
 async def messages(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[Message]:
     await owned_run(run_id, db, user)
-    return list((await db.execute(select(Message).where(Message.run_id == run_id).order_by(Message.created_at))).scalars().all())
+    out: list[Message] = []
+    seen: set[str] = set()
+    for m in (await db.execute(select(Message).where(Message.run_id == run_id).order_by(Message.created_at))).scalars().all():
+        group = (m.meta_json or {}).get("broadcast")
+        if group:  # a message to everyone is stored once per recipient (their inboxes) but listed once, to everyone
+            if group in seen:
+                continue
+            seen.add(group)
+            db.expunge(m)
+            m.to_agent_id = None
+        out.append(m)
+    return out
 
 
 @router.get("/{run_id}/tasks", response_model=list[TaskOut])
@@ -326,6 +340,19 @@ async def download_zip(run_id: str, db: AsyncSession = Depends(get_pdb), user: U
             zf.writestr("RUN_REPORT.md", run.report_md)
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="octopus-run-{run_id[:8]}.zip"'})
+
+
+@router.get("/{run_id}/browser/{name}")
+async def browser_frame(run_id: str, name: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> Response:
+    """One screenshot of an agent's browser tab (named by a browser_action event)."""
+    from app.services import browser_frames
+
+    await owned_run(run_id, db, user)
+    p = browser_frames.path(run_id, name)
+    if p is None:
+        raise HTTPException(404, "Frame not found (frames beyond the most recent ones are not kept)")
+    return Response(p.read_bytes(), media_type="image/png" if name.endswith(".png") else "image/jpeg",
+                    headers={"Cache-Control": "private, max-age=86400, immutable", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/{run_id}/preview/{path:path}")

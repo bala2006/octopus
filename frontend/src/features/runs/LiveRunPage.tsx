@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, Pause, Play, Send, Wrench, History,
-  MessagesSquare, UsersRound,
+  MessagesSquare, UsersRound, Globe,
 } from "lucide-react";
 import { fetchRaw } from "@/lib/api";
 import { RUN_STATUS } from "@/lib/meta";
@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Badge, Textarea } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 import { ApprovalCard } from "./ApprovalCard";
+import { BrowserView } from "./BrowserView";
+import { isBrowsing } from "./browserSteps";
 import { RunFeed, ToolLog, type FeedFilter } from "./RunFeed";
 import { RunGraph } from "./RunGraph";
 import { QuestionCard, type AwaitingQuestion } from "./QuestionCard";
@@ -58,11 +60,12 @@ export default function LiveRunPage() {
   const status = liveState.status;
   const terminal = TERMINAL.has(status);
   const isLive = !terminal;
+  const browsing = Object.values(state.activity).some(isBrowsing);
 
   React.useEffect(() => { if (liveState.pendingApproval && cursor !== null) setCursor(null); }, [liveState.pendingApproval]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const overlay = React.useMemo(() => ({
-    status: state.agentStatus, activity: state.activity, lastMessage: state.lastMessage, streaming: state.streaming,
+    status: state.agentStatus, activity: state.activity, lastMessage: state.lastMessage, streaming: state.streaming, thinking: state.thinking,
     activeEdges: state.activeEdges, tokens: state.usage.per_agent ?? {}, pendingApprovalAgent: state.pendingApproval?.agent_id ?? null,
     departments, names: Object.fromEntries(agentsList.map((a) => [a.id, a.name])),
     fresh: Object.fromEntries(Object.entries(state.fresh).filter(([, t]) => Date.now() - t < 3000).map(([k]) => [k, true])),
@@ -128,7 +131,7 @@ export default function LiveRunPage() {
       {/* body */}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(380px,40%)]">
         <div className="relative flex min-h-0 flex-col border-r border-border">
-          <AgentStrip agents={agentsList} state={state} />
+          <AgentStrip agents={agentsList} state={state} onBrowse={() => setTab("browser")} />
           <div className="relative min-h-0 flex-1">
           {agentsList.length ? <RunGraph agents={agentsList} edges={edgesList} overlay={overlay} departments={departments} /> : null}
           {cursor !== null && (
@@ -145,6 +148,8 @@ export default function LiveRunPage() {
               <TabsTrigger value="feed"><MessagesSquare />Feed</TabsTrigger>
               <TabsTrigger value="team" data-testid="tab-team"><UsersRound />Team <span className="tabular-nums text-muted-foreground">{agentsList.filter((a) => a.active !== false).length}</span></TabsTrigger>
               <TabsTrigger value="tasks"><ListTodo />Tasks <span className="tabular-nums text-muted-foreground">{Object.keys(state.tasks).length}</span></TabsTrigger>
+              <TabsTrigger value="browser" data-testid="tab-browser"><Globe className={cn(browsing && "animate-pulse text-success")} />Browser
+                {!!state.browser.length && <span className="tabular-nums text-muted-foreground">{state.browser.length}</span>}</TabsTrigger>
               <TabsTrigger value="tools"><Wrench />Tools</TabsTrigger>
               <TabsTrigger value="report" disabled={!terminal}><FileText />Report</TabsTrigger>
             </TabsList>
@@ -169,6 +174,7 @@ export default function LiveRunPage() {
           </TabsContent>
           <TabsContent value="team" className="min-h-0 flex-1 overflow-y-auto"><TeamView agents={agentsList} state={state} departments={departments} /></TabsContent>
           <TabsContent value="tasks" className="min-h-0 flex-1 overflow-y-auto"><TaskBoard tasks={Object.values(state.tasks)} agents={agents} /></TabsContent>
+          <TabsContent value="browser" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><BrowserView state={state} agents={agents} w={w} runId={runId} /></TabsContent>
           <TabsContent value="tools" className="min-h-0 flex-1 overflow-y-auto"><ToolLog state={state} agents={agents} /></TabsContent>
           <TabsContent value="report" className="min-h-0 flex-1 overflow-y-auto"><ReportView w={w} runId={runId} enabled={terminal} /></TabsContent>
         </Tabs>
@@ -181,13 +187,17 @@ export default function LiveRunPage() {
   );
 }
 
-function AgentStrip({ agents, state }: { agents: AgentOut[]; state: ReturnType<typeof replayTo> }) {
+function AgentStrip({ agents, state, onBrowse }: { agents: AgentOut[]; state: ReturnType<typeof replayTo>; onBrowse: () => void }) {
   return (
     <div className="flex flex-wrap gap-1.5 border-b border-border/60 bg-surface/40 px-3 py-2">
       {agents.map((a) => (
         <Tip key={a.id} content={state.activity[a.id] || state.agentStatus[a.id] || "idle"}>
           <div className="flex items-center gap-1.5 rounded-full border border-border bg-elevated/90 py-0.5 pl-0.5 pr-2 text-[11px] shadow-sm transition-colors">
             <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} status={state.agentStatus[a.id] ?? "idle"} size={20} />{a.name}
+            {isBrowsing(state.activity[a.id]) && (
+              <button onClick={onBrowse} aria-label={`Watch ${a.name}'s browser`} data-testid="agent-browsing"
+                className="flex items-center gap-0.5 text-success hover:underline"><Globe className="h-3 w-3 animate-pulse" />browsing</button>
+            )}
           </div>
         </Tip>
       ))}

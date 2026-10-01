@@ -1,6 +1,6 @@
 import * as React from "react";
 import { tone } from "@/lib/palette";
-import { ArrowRight, Ban, Brain, ChevronDown, CircleCheck, CircleX, FileCode2, Gavel, Settings2, Sparkles, Terminal, User } from "lucide-react";
+import { ArrowRight, Ban, ChevronDown, CircleCheck, CircleX, FileCode2, Gavel, Settings2, Sparkles, Terminal, User } from "lucide-react";
 import { MESSAGE_TYPE_LABEL, statusMeta } from "@/lib/meta";
 import { clockTime, cn } from "@/lib/utils";
 import type { AgentOut, MessageOut } from "@/types";
@@ -8,6 +8,8 @@ import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/primitives";
 import type { OrgEvent, RunLive } from "./runState";
+import { LiveWriting, ThinkingView } from "./LiveWriting";
+import { humanizeStream } from "./streamView";
 
 export type FeedFilter = "all" | "user" | "internal";
 
@@ -70,13 +72,12 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
             <div key={`live-${aid}`} className="flex gap-2.5 rounded-lg px-2 py-2 animate-fade-up">
               <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} status={st} size={28} />
               <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{a.name}</span><StatusPill status={st} activity={state.activity[aid]} /></div>
-                {showThoughts && state.thoughts[aid] && <p className="flex items-start gap-1 text-[11px] italic text-muted-foreground"><Brain className="mt-0.5 h-3 w-3 shrink-0" />{state.thoughts[aid]}</p>}
-                {state.streaming[aid] ? (
-                  <pre className="max-h-24 overflow-hidden whitespace-pre-wrap break-all rounded-md bg-muted/50 p-2 font-mono text-[10.5px] leading-snug text-muted-foreground [mask-image:linear-gradient(to_bottom,transparent,black_30%)]">
-                    {state.streaming[aid].slice(-600)}
-                  </pre>
-                ) : <TypingDots color={statusMeta(st).color} />}
+                <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{a.name}</span><StatusPill status={st} activity={state.activity[aid]} />
+                  {state.live && state.turnStart[aid] ? <Elapsed since={state.turnStart[aid]} /> : null}</div>
+                {showThoughts && (state.thinking[aid] ? <ThinkingView text={state.thinking[aid]} live />
+                  : state.thoughts[aid] ? <ThinkingView text={state.thoughts[aid]} /> : null)}
+                {state.streaming[aid] && humanizeStream(state.streaming[aid]).length ? <LiveWriting raw={state.streaming[aid]} />
+                  : !state.thinking[aid] && <TypingDots color={statusMeta(st).color} />}
               </div>
             </div>
           );
@@ -110,7 +111,7 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="font-semibold" style={from ? { color: from.color } : undefined}>{from?.name ?? "You"}</span>
             <ArrowRight className="h-3 w-3 text-muted-foreground" />
-            <span className="font-medium text-muted-foreground">{to?.name ?? (m.type === "final_report" || m.type === "question" ? "You" : "Everyone")}</span>
+            <span className="font-medium text-muted-foreground">{to?.name ?? (m.type === "final_report" || m.type === "question" ? "You" : "Everyone")}{!to && meta.recipients ? ` (${meta.recipients} agents)` : ""}</span>
             <span className={cn("rounded border px-1.5 py-px text-[10px] font-medium", TYPE_TONE[m.type] ?? "text-muted-foreground border-border")}>{MESSAGE_TYPE_LABEL[m.type] ?? m.type}</span>
             {verdict && (verdict === "approve" ? <Badge variant="success"><CircleCheck className="h-3 w-3" />approved</Badge> : <Badge variant="warning"><CircleX className="h-3 w-3" />changes requested</Badge>)}
             {meta.debate && <Badge variant="outline"><Gavel className="h-3 w-3" />round {meta.debate.round}/{meta.debate.max_rounds}{meta.debate.status !== "open" ? ` · ${meta.debate.status}` : ""}</Badge>}
@@ -208,4 +209,13 @@ export function ToolLog({ state, agents }: { state: RunLive; agents: Record<stri
       ))}
     </div>
   );
+}
+
+/** "· 1m 05s" since the agent's turn started: tells a long reasoning call apart from a run that is stuck. */
+function Elapsed({ since }: { since: number }) {
+  const [, tick] = React.useReducer((x: number) => x + 1, 0);
+  React.useEffect(() => { const t = window.setInterval(tick, 1000); return () => window.clearInterval(t); }, []);
+  const s = Math.max(0, Math.round((Date.now() - since) / 1000));
+  return <span className="tabular-nums text-[11px] text-muted-foreground" data-testid="turn-elapsed" title="Time since this turn started">
+    {s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`}</span>;
 }

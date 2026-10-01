@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import json
 import re
 import time
 from collections import Counter
@@ -36,7 +37,7 @@ from app.models import AgentMemory, Artifact, Message, Run, Task
 from app.orchestrator import actions as A
 from app.orchestrator import tools as T
 from app.orchestrator.bus import bus
-from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, clip
+from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, clip, team_status
 from app.orchestrator.permissions import (
     EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
 )
@@ -68,8 +69,12 @@ DELEGATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextV
 IN_TOOL_LOOP: contextvars.ContextVar[bool] = contextvars.ContextVar("octopus_in_tool_loop", default=False)
 MAX_DELEGATION_DEPTH = 3  # delegator → worker → worker's report → … (cycles are refused)
 JOURNAL_MAX = 400
+MAX_REDELIVERIES = 2  # a message whose turn failed is shown again at most this many times
 DIGEST_LINES = 40
 READ_PAGE_CHARS = TOOL_RESULT_CHARS - 500  # one read_file page fits in a tool result with room for its header
+# A model call is only treated as hung after this long with *no* output (reasoning summaries, text or tool arguments).
+# There is no fixed cap on a call that keeps streaming: xhigh reasoning with a 128k output budget can take many minutes.
+LLM_IDLE_TIMEOUT_S = 300.0
 JUDGE_MAX_TOKENS = 16  # "YES"/"NO" plus slack; 5 often produced no answer at all (reasoning headroom is added on top)
 
 
@@ -115,6 +120,48 @@ def head_tail(text: str, limit: int) -> str:
         return text
     half = limit // 2
     return text[:half] + f"\n…[{len(text) - limit:,} characters omitted]…\n" + text[-half:]
+
+
+KEEP_FULL_ROUNDS = 3  # the latest tool rounds are replayed verbatim; older ones are shortened
+OLD_ROUND_CHARS = 1500
+COMPACT_MARK = "; re-read the file or re-run the tool if you need it again]"
+
+
+def _shorten(text: str, limit: int, what: str) -> str:
+    if len(text) <= limit or text.endswith(COMPACT_MARK):
+        return text
+    return f"{text[:limit]}\n…[{what} shortened: {len(text):,} chars, shown in full in an earlier round{COMPACT_MARK}"
+
+
+
+def compact_rounds(items: list[dict[str, Any]], rounds: list[int]) -> list[dict[str, Any]]:
+    """Keep a long tool loop from re-sending everything every round.
+
+    Each round replays the whole turn so far (up to max_tool_rounds rounds; one read_file result can be 60k characters,
+    one write_file call carries the whole file). Rounds older than the last KEEP_FULL_ROUNDS keep their structure,
+    reasoning items and call ids, but long tool outputs and long string arguments are shortened. Shortening is idempotent."""
+    if len(rounds) <= KEEP_FULL_ROUNDS:
+        return items
+    cut = rounds[-KEEP_FULL_ROUNDS]
+    out = []
+    for i, item in enumerate(items):
+        if i >= cut:
+            out.append(item)
+        elif item.get("type") == "function_call_output" and isinstance(item.get("output"), str):
+            out.append({**item, "output": _shorten(item["output"], OLD_ROUND_CHARS, "tool output")})
+        elif item.get("type") == "function_call" and len(item.get("arguments") or "") > OLD_ROUND_CHARS:
+            try:
+                args = json.loads(item["arguments"])
+            except (TypeError, ValueError):
+                out.append(item)
+                continue
+            if isinstance(args, dict):
+                args = {k: _shorten(v, OLD_ROUND_CHARS, k) if isinstance(v, str) else v for k, v in args.items()}
+                item = {**item, "arguments": json.dumps(args, ensure_ascii=False)}
+            out.append(item)
+        else:
+            out.append(item)
+    return out
 
 
 class StopRun(Exception):
@@ -216,6 +263,8 @@ class RunRuntime(TeamMixin):
         self.followups: list[str] = []  # messages sent after the run finished (the run continues like a chat)
         self.mock_state: dict[str, dict[str, Any]] = {}
         self.warned: set[str] = set()
+        self.redeliveries: Counter[str] = Counter()  # message id -> times re-delivered after a failed turn
+        self.browser_pages: dict[str, tuple[str, str]] = {}  # agent id -> (url, title) of its browser tab, for the Browser view
         self.rejections = 0
         # scheduling health: consecutive self-activated turns per agent, the last turn that moved the run forward,
         # and which open tasks were already nudged since then (task key -> progress_turn at nudge time)
@@ -437,7 +486,8 @@ class RunRuntime(TeamMixin):
         self.observe(aid, {"tool": "system", "content": text}, activate=activate)
 
     async def post_message(self, *, sender: str, from_id: str | None, to_id: str | None, type_: str, content: str,
-                           edge_id: str | None = None, meta: dict[str, Any] | None = None, deliver: bool = True) -> dict[str, Any]:
+                           edge_id: str | None = None, meta: dict[str, Any] | None = None, deliver: bool = True,
+                           announce: bool = True) -> dict[str, Any]:
         m = Message(id=new_id(), run_id=self.run_id, session_id=self.session_id, sender=sender, from_agent_id=from_id,
                     to_agent_id=to_id, edge_id=edge_id, type=type_, content=content, meta_json=meta or {},
                     turn_no=self.turn_no, read=not (deliver and to_id in self.agents), created_at=utcnow())
@@ -452,11 +502,30 @@ class RunRuntime(TeamMixin):
                 self.done_agents.discard(to_id)
             if self.status.get(to_id) in ("idle", "done"):
                 await self.set_agent_status(to_id, "waiting")
-        await self.emit("message_created", {"message": {
-            "id": m.id, "run_id": m.run_id, "session_id": m.session_id, "sender": sender, "from_agent_id": from_id,
-            "to_agent_id": to_id, "edge_id": edge_id, "type": type_, "content": content, "meta": m.meta_json,
-            "turn_no": m.turn_no, "created_at": m.created_at.isoformat()}})
+        if announce:
+            await self.announce_message(rec, m.created_at.isoformat())
         return rec
+
+    async def announce_message(self, m: dict[str, Any], created_at: str, *, to_everyone: bool = False) -> None:
+        """Show a message in the run (feed, timeline, canvas). A broadcast's per-agent copies are announced once, to everyone."""
+        await self.emit("message_created", {"message": {
+            "id": m["id"], "run_id": self.run_id, "session_id": self.session_id, "sender": m["sender"], "from_agent_id": m["from"],
+            "to_agent_id": None if to_everyone else m["to"], "edge_id": m["edge_id"], "type": m["type"], "content": m["content"],
+            "meta": m["meta"], "turn_no": m["turn"], "created_at": created_at}})
+
+    async def requeue(self, aid: str, inbox_ids: list[str]) -> bool:
+        """A turn failed before the agent could act on its messages: deliver them again, so they stay NEW instead of silently
+        sliding into history (the agent then lost track of what it was asked and re-asked or looped). Bounded per message."""
+        again = [mid for mid in inbox_ids if self.redeliveries[mid] < MAX_REDELIVERIES]
+        if not again:
+            return False
+        for mid in again:
+            self.redeliveries[mid] += 1
+            self.deliver(aid, mid)
+        async with self.db() as db:
+            await db.execute(update(Message).where(Message.id.in_(again)).values(read=False))
+            await db.commit()
+        return True
 
     def next_runnable(self) -> str | None:
         """FIFO over queued messages and activating observations. An agent that has already taken MAX_SELF_TURNS turns in a
@@ -712,14 +781,25 @@ class RunRuntime(TeamMixin):
         self.wake.set()
 
     async def interject(self, content: str, to_agent_id: str | None) -> None:
-        targets = [to_agent_id] if to_agent_id else list(self.agents)
+        targets = [t for t in ([to_agent_id] if to_agent_id else self.agents) if t in self.agents and self.agents[t].active]
         self.user_notes.append(clip(content, 1000))
         self.mark_progress()  # new information from the user re-opens every nudge
+        # A message to everyone is one message: each agent gets its own copy in its inbox, but the run shows it once
+        # (it used to appear once per agent in the feed and timeline).
+        group = new_id() if len(targets) > 1 else None
+        first: dict[str, Any] | None = None
         for t in targets:
-            if t in self.agents:
-                await self.post_message(sender="user", from_id=None, to_id=t, type_="user_interjection", content=content)
-        if self.awaiting and (to_agent_id is None or to_agent_id == self.awaiting.get("agent_id")):
-            self.awaiting = None
+            meta = {"broadcast": group, "recipients": len(targets)} if group else {}
+            rec = await self.post_message(sender="user", from_id=None, to_id=t, type_="user_interjection", content=content,
+                                          meta=meta, announce=not group)
+            first = first or rec
+        if group and first:
+            await self.announce_message(first, utcnow().isoformat(), to_everyone=True)
+        # The user is talking to the team: that answers a pending question and resumes a paused run (a paused run used to
+        # stay paused after "continue" until Resume was pressed). Pause again any time with Pause / Space.
+        self.awaiting = None
+        if self.paused:  # step mode still waits for Next turn
+            self.resume()
         self.wake.set()
 
     def resolve_approval(self, approval_id: str, approved: bool, reason: str, scope: str = "once") -> bool:
@@ -929,18 +1009,44 @@ class RunRuntime(TeamMixin):
         buf, last = "", time.monotonic()
         speaking = False
         tool_buf = ""  # '"action":"<tool>", <streamed arguments>' so live_activity can describe a native call as it streams
+        think: list[str] = []
+        think_buf, think_last = "", time.monotonic()
+        fresh_call = False
         remaining = max(5.0, self.budget.timeout_s - self.active_seconds)
 
-        async def consume() -> None:
-            nonlocal buf, last, speaking, tool_buf
+        idle: asyncio.Timeout | None = None
+        t_start = time.monotonic()
+
+        async def _consume() -> None:
+            nonlocal buf, last, speaking, tool_buf, think_buf, think_last, fresh_call
             async for chunk in stream_with_retry(req):
+                if idle is not None:  # output is flowing: push the inactivity deadline out (never past the run's budget)
+                    left = remaining - (time.monotonic() - t_start)
+                    if left <= 0:
+                        raise asyncio.TimeoutError("the run's active-time budget ran out during a model call")
+                    idle.reschedule(asyncio.get_running_loop().time() + min(LLM_IDLE_TIMEOUT_S, left))
+                if chunk.thinking:  # reasoning summary: streamed live as the agent's "thinking"
+                    think.append(chunk.thinking)
+                    think_buf += chunk.thinking
+                    if len(think_buf) >= 60 or time.monotonic() - think_last > 0.15:
+                        await self.emit("thinking_stream", {"agent_id": agent.id, "delta": think_buf, "turn_no": self.turn_no})
+                        think_buf, think_last = "", time.monotonic()
+                    if not speaking:
+                        await self.set_agent_status(agent.id, "thinking", "Thinking…")
                 if chunk.tool_started:
                     tool_buf = f'"action":"{chunk.tool_started}",'
+                    # mark where a new call starts in the live stream, in the same shape as the JSON envelope, so the UI can
+                    # show "Writing index.html" + the content instead of raw arguments
+                    buf += f'\n{{"action":"{chunk.tool_started}",'
+                    fresh_call = True
                     status, activity = live_activity(tool_buf)
                     await self.set_agent_status(agent.id, status, activity)
                 if chunk.tool_delta:
                     tool_buf += chunk.tool_delta
-                    buf += chunk.tool_delta
+                    d = chunk.tool_delta
+                    if fresh_call:  # the arguments object's own "{" is already written by the marker above
+                        d, fresh_call = d.lstrip().removeprefix("{"), False
+                    buf += d
                     if len(buf) >= 120 or time.monotonic() - last > 0.1:
                         status, activity = live_activity(tool_buf[:2000])
                         await self.set_agent_status(agent.id, status, activity)
@@ -964,8 +1070,24 @@ class RunRuntime(TeamMixin):
             if buf:
                 await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
 
-        await asyncio.wait_for(consume(), timeout=min(remaining, 300))
+        # No fixed cap per call: a long reasoning call (xhigh effort, up to 128k output tokens) can legitimately run for many
+        # minutes. What counts is silence: if nothing arrives for LLM_IDLE_TIMEOUT_S the call is treated as hung. The run's
+        # active-time budget still bounds the whole call.
+        try:
+            async with asyncio.timeout(min(remaining, LLM_IDLE_TIMEOUT_S)) as idle:
+                await _consume()
+        except TimeoutError as exc:
+            if idle is not None and idle.expired() and not str(exc):
+                out_of_budget = time.monotonic() - t_start >= remaining
+                raise TimeoutError("the run's active-time budget ran out during a model call" if out_of_budget else
+                                   f"no output from the model for {LLM_IDLE_TIMEOUT_S:.0f}s") from exc
+            raise
+        if think_buf:
+            await self.emit("thinking_stream", {"agent_id": agent.id, "delta": think_buf, "turn_no": self.turn_no})
         result.text = "".join(parts)
+        result.thinking = "".join(think).strip()
+        if result.thinking:  # persisted, so replays and the timeline show what the agent was thinking
+            await self.emit("thought", {"agent_id": agent.id, "text": result.thinking[:6000], "turn_no": self.turn_no, "kind": "reasoning"})
         return result
 
     async def call_llm_escalating(self, agent: AgentSpec, req: LLMRequest) -> str:
@@ -1046,15 +1168,19 @@ class RunRuntime(TeamMixin):
                                       "agent_id": aid, "kind": "llm"})
             self.notice(aid, f"Your previous reply was cut off at the output limit ({req.max_tokens:,} tokens, reasoning included) and "
                              "nothing in it was applied. write_file with \"mode\":\"append\" can build a file across turns.", activate=True)
+            await self.requeue(aid, inbox_ids)
             return
         except (LLMError, asyncio.TimeoutError) as exc:
             await self.set_agent_status(aid, "error")
             await self.emit("error", {"message": f"{agent.name}: LLM call failed: {exc}", "agent_id": aid, "kind": "llm"})
-            self.notice(aid, f"Your previous turn failed due to a model error ({exc}). Try again concisely.", activate=bool(inbox_ids))
+            back = await self.requeue(aid, inbox_ids)
+            self.notice(aid, f"Your previous turn failed due to a model error ({exc})."
+                             + (" The messages from that turn are shown again under NEW messages." if back else ""), activate=bool(inbox_ids))
             return
         if not parsed.ok:
             await self.set_agent_status(aid, "error")
             await self.emit("error", {"message": f"{agent.name} produced an invalid response: {'; '.join(parsed.errors)}", "agent_id": aid, "kind": "parse"})
+            await self.requeue(aid, inbox_ids)
             self.notice(aid, "Your last reply could not be parsed: " + "; ".join(parsed.errors) + ". Reply with the JSON object only.", activate=True)
             return
         if parsed.thought:
@@ -1079,7 +1205,8 @@ class RunRuntime(TeamMixin):
         inbox = [m for m in self.history if m["id"] in inbox_ids]
         req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
                          extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {}, messages=[], json_mode=True,
-                         metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs)})
+                         metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs),
+                                   "cache_key": f"octopus-{self.run_id[:18]}-{agent.id}"[:64]})
         if self.budget.force_mock:
             req.provider, req.model = "mock", "mock/demo"
         async with registry_factory()() as rdb:
@@ -1092,7 +1219,8 @@ class RunRuntime(TeamMixin):
                                      status=self.status, preview_url=self.preview_url(), native=native,
                                      project_memory=PM.render(self.memory, exclude_run=self.run_id))
         user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
-                                 names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid))
+                                 names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
+                                 team_status=team_status(self.agents, self.status))
         if extra:
             user += "\n\n" + extra
         req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -1124,6 +1252,7 @@ class RunRuntime(TeamMixin):
     async def _tool_loop(self, agent: AgentSpec, req: LLMRequest, mcp_map: dict[str, tuple[str, str]]) -> str:
         aid = agent.id
         last_text = ""
+        rounds: list[int] = []  # where each round's items start in req.continuation
         for rnd in range(self.budget.max_tool_rounds):
             if self.stop_requested:
                 raise StopRun()
@@ -1160,7 +1289,8 @@ class RunRuntime(TeamMixin):
                 outputs.append({"type": "function_call_output", "call_id": call.id, "output": out})
             # replay the response (encrypted reasoning included) and answer every call, as the Responses API expects
             replay = [i for i in res.items if not (i.get("type") == "reasoning" and not i.get("encrypted_content"))]
-            req.continuation = [*req.continuation, *replay, *outputs]
+            rounds.append(len(req.continuation))
+            req.continuation = compact_rounds([*req.continuation, *replay, *outputs], rounds)
             if ended:
                 break
         else:
@@ -1793,6 +1923,29 @@ class RunRuntime(TeamMixin):
             if A.tool_enabled(a.tools, "browser") and get_settings().browser_enabled:
                 a.mcp.append({"id": SERVER_ID, "name": SERVER_NAME, "tools": browser.tool_list(), "builtin": True})
 
+    async def _browser_action(self, agent: AgentSpec, cid: str, a: A.McpCall, ok: bool, out: str) -> None:
+        """Record what the agent did in its browser tab and what the tab showed afterwards (the run's Browser view)."""
+        from app.services import browser_frames
+        from app.services.browser import browser, page_info
+
+        url, title = page_info(out)
+        if url:
+            self.browser_pages[agent.id] = (url, title)
+        else:
+            url, title = self.browser_pages.get(agent.id, ("", ""))
+        frame = None
+        if ok and get_settings().browser_live_frames:
+            data = await browser.frame(self.run_id, agent.id, a.tool)
+            if data:
+                try:
+                    frame = browser_frames.save(self.run_id, data)
+                except (OSError, ValueError) as exc:
+                    log.warning("browser_frame_not_saved", error=str(exc))
+        args = {k: (v[:300] if isinstance(v, str) else v) for k, v in (a.arguments or {}).items()}
+        await self.emit("browser_action", {"agent_id": agent.id, "call_id": cid, "tool": a.tool, "args": args, "ok": ok,
+                                           "url": url, "title": title[:200], "frame": frame,
+                                           "note": "" if ok else out[:500], "turn_no": self.turn_no})
+
     async def act_mcp_call(self, agent: AgentSpec, a: A.McpCall) -> None:
         from app.tools.mcp_client import call_tool
 
@@ -1818,6 +1971,7 @@ class RunRuntime(TeamMixin):
                         f"'it works in the browser' is unverified. {browser.error.splitlines()[0] if browser.error else ''}")})
             self.observe(agent.id, {"tool": f"browser/{a.tool}", "ok": ok, "content": out})
             await self._tool_result(agent, cid, "mcp_call", ok, out)
+            await self._browser_action(agent, cid, a, ok, out)
             return
         cfg = self.mcp_configs.get(sid) if sid else None
         if cfg is None:

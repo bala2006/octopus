@@ -82,6 +82,7 @@ class ToolCall:
 class LLMChunk:
     delta: str = ""
     usage: Usage | None = None  # set on the final chunk
+    thinking: str = ""  # streamed reasoning summary (what the model is thinking about), shown live in the UI
     tool_started: str = ""  # a function call began (its name): for live status
     tool_delta: str = ""  # streamed function-call arguments: for live status only, not part of the answer text
     tool_calls: list[ToolCall] | None = None  # final chunk of a tool-enabled call
@@ -91,6 +92,7 @@ class LLMChunk:
 @dataclass
 class LLMResult:
     text: str = ""
+    thinking: str = ""  # reasoning summary of this call
     tool_calls: list[ToolCall] = field(default_factory=list)
     items: list[dict[str, Any]] = field(default_factory=list)
 
