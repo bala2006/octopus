@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap, with_images
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap, with_images, chat_continuation, chat_tools, ChatToolAccumulator
 
 ApiStyle = str  # "responses" | "chat"
 _PROTECTED = {"model", "input", "messages", "stream", "tools", "tool_choice"}  # never auto-dropped
@@ -89,10 +89,15 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
             body["text"] = {"format": {"type": "json_object"}}
     else:
         body = {
-            "model": req.model, "stream": True, "messages": with_images(req.messages, req.images, "chat"), "max_completion_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)),
+            "model": req.model, "stream": True, "messages": with_images(req.messages, req.images, "chat") + chat_continuation(req.continuation),
+            "max_completion_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)),
             "stream_options": {"include_usage": True},
         }
-        if req.json_mode:
+        if req.tools:  # native function calling on Chat Completions too: no JSON envelope to parse or repair
+            body["tools"] = chat_tools(req.tools)
+            body["tool_choice"] = "auto"
+            body["parallel_tool_calls"] = True
+        elif req.json_mode:
             body["response_format"] = {"type": "json_object"}
     effort = req.extra.get("reasoning_effort")
     if style == "responses" and (effort or reasoning) and effort != "none" and "reasoning.summary" not in drop:
@@ -201,6 +206,7 @@ class AzureV1Provider:
         cache_key = (base, req.model)
         text_parts: list[str] = []
         out_items: dict[int, dict[str, Any]] = {}  # output_index -> finished output item (responses API)
+        chat_calls = ChatToolAccumulator()  # chat completions: streamed tool_call fragments
         usage: Usage | None = None
         truncated: LLMOutputTruncated | None = None
         timeout = httpx.Timeout(connect=20, read=360, write=60, pool=20)  # the engine's idle timeout (300s) fires first, with a clearer message
@@ -218,7 +224,7 @@ class AzureV1Provider:
                             s = resp.status_code
                             raise LLMError(_error_message(s, text), retryable=s in (408, 409, 429) or s >= 500)
                         try:
-                            async for chunk in self._events(resp, style, text_parts, out_items):
+                            async for chunk in self._events(resp, style, text_parts, out_items, chat_calls):
                                 if chunk.usage is not None:
                                     usage = chunk.usage
                                 else:
@@ -237,7 +243,10 @@ class AzureV1Provider:
 
         apply(usage, req.model, req.extra)  # exact Azure usage × deployment rates (Settings → Model → Pricing)
         yield LLMChunk(usage=usage)
-        if req.tools:
+        if req.tools and style == "chat":
+            calls, items = chat_calls.result("".join(text_parts))
+            yield LLMChunk(tool_calls=calls, items=items)
+        elif req.tools:
             items = [out_items[i] for i in sorted(out_items)]
             calls = [ToolCall(id=it.get("call_id") or it.get("id") or "", name=it.get("name", ""), arguments=it.get("arguments") or "{}")
                      for it in items if it.get("type") == "function_call"]
@@ -246,7 +255,8 @@ class AzureV1Provider:
             raise truncated
 
     async def _events(self, resp: httpx.Response, style: ApiStyle, text_parts: list[str],
-                      out_items: dict[int, dict[str, Any]] | None = None) -> AsyncIterator[LLMChunk]:
+                      out_items: dict[int, dict[str, Any]] | None = None,
+                      chat_calls: ChatToolAccumulator | None = None) -> AsyncIterator[LLMChunk]:
         skip_items: set[str] = set()  # output items that aren't the final answer (phase = "commentary")
         length_cut = False  # chat completions: finish_reason == "length"
         async for line in resp.aiter_lines():
@@ -265,6 +275,13 @@ class AzureV1Provider:
                     if content:
                         text_parts.append(content)
                         yield LLMChunk(delta=content)
+                    frags = (ch.get("delta") or {}).get("tool_calls")
+                    if frags and chat_calls is not None:
+                        for name in chat_calls.add(frags):
+                            yield LLMChunk(tool_started=name)
+                        args = "".join(((f.get("function") or {}).get("arguments") or "") for f in frags)
+                        if args:
+                            yield LLMChunk(tool_delta=args)
                     if ch.get("finish_reason") == "length":
                         length_cut = True
                 u = ev.get("usage")
@@ -324,7 +341,12 @@ class AzureV1Provider:
 
 
 def supports_native_tools(req: LLMRequest) -> bool:
-    """Native function calling is used on the Responses API (the default for v1 endpoints). Chat Completions only allows
-    function calling with reasoning disabled on gpt-6 models, so it keeps the JSON envelope."""
+    """Native function calling: always on the Responses API (the default for v1 endpoints). Chat Completions only allows
+    function calling with reasoning disabled on gpt-6 models, so there it is used whenever reasoning is off; only a
+    reasoning deployment on a chat-only endpoint keeps the JSON envelope."""
     target = azure_v1_target(req.base_url, req.extra)
-    return bool(target and target[1] == "responses")
+    if not target:
+        return False
+    if target[1] == "responses":
+        return True
+    return not req.extra.get("reasoning_model") and req.extra.get("reasoning_effort") in (None, "", "none")

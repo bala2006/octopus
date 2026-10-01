@@ -201,7 +201,42 @@ async def test_azure_sends_tools_and_collects_function_calls() -> None:
     assert "text" not in sent, "no json_object response format when tools are used"
 
 
-def test_chat_completions_keeps_the_envelope() -> None:
-    req = LLMRequest(provider="azure", model="gpt-6-luna", messages=[], base_url="https://res.openai.azure.com/openai/v1/chat/completions")
-    assert not supports_native_tools(req)
-    assert "tools" not in _body(req, "chat", set())
+def test_chat_completions_uses_native_tools_unless_reasoning_is_on() -> None:
+    url = "https://res.openai.azure.com/openai/v1/chat/completions"
+    req = LLMRequest(provider="azure", model="gpt-6-luna", messages=[], base_url=url)
+    assert supports_native_tools(req)
+    assert not supports_native_tools(LLMRequest(provider="azure", model="m", messages=[], base_url=url, extra={"reasoning_effort": "high"}))
+    assert "tools" not in _body(req, "chat", set())  # no tools requested: nothing sent
+
+
+async def test_chat_completions_tool_loop_round_trip() -> None:
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        body = _sse(
+            {"choices": [{"index": 0, "delta": {"content": "Reading."}}]},
+            {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_9", "type": "function",
+                                                                 "function": {"name": "read_file", "arguments": "{\"pa"}}]}}]},
+            {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "th\":\"a.py\"}"}}]}}]},
+            {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 1, "id": "call_10", "function": {"name": "list_files", "arguments": "{}"}}]},
+                          "finish_reason": "tool_calls"}]},
+            {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    specs, _ = tool_specs({})
+    req = LLMRequest(provider="azure", model="gpt-6-luna", messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}],
+                     api_key="k", base_url="https://res.openai.azure.com/openai/v1/chat/completions", tools=specs,
+                     continuation=[{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Looking."}]},
+                                   {"type": "function_call", "call_id": "call_1", "name": "list_files", "arguments": "{}"},
+                                   {"type": "function_call_output", "call_id": "call_1", "output": "a.py"}])
+    chunks = [c async for c in AzureV1Provider(httpx.MockTransport(handler)).stream(req)]
+    final = chunks[-1]
+    assert [(c.id, c.name, c.arguments) for c in final.tool_calls] == [("call_9", "read_file", '{"path":"a.py"}'), ("call_10", "list_files", "{}")]
+    assert [i["type"] for i in final.items] == ["message", "function_call", "function_call"]
+    assert "read_file" in [c.tool_started for c in chunks]
+    sent = seen[0]
+    assert sent["tools"][0]["type"] == "function" and "name" in sent["tools"][0]["function"] and "response_format" not in sent
+    assert sent["messages"][2:] == [
+        {"role": "assistant", "content": "Looking.", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "list_files", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "call_1", "content": "a.py"}]

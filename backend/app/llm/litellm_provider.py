@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap, with_images
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap, with_images, chat_continuation, chat_tools, ChatToolAccumulator
 from app.llm.azure_v1 import legacy_api_base
 
 PREFIX = {
@@ -36,7 +36,8 @@ def entra_token_provider():  # type: ignore[no-untyped-def]
 def build_kwargs(req: LLMRequest) -> dict[str, Any]:
     model = litellm_model_name(req.provider, req.model)
     kwargs: dict[str, Any] = {
-        "model": model, "messages": with_images(req.messages, req.images, "chat"), "temperature": req.temperature,
+        "model": model, "messages": with_images(req.messages, req.images, "chat") + chat_continuation(req.continuation),
+        "temperature": req.temperature,
         "max_tokens": output_cap(req.model, req.max_tokens), "stream": True, "stream_options": {"include_usage": True},
     }
     if req.base_url:
@@ -59,7 +60,10 @@ def build_kwargs(req: LLMRequest) -> dict[str, Any]:
         kwargs["api_key"] = req.api_key
     if req.extra.get("reasoning_effort"):
         kwargs["reasoning_effort"] = req.extra["reasoning_effort"]
-    if req.json_mode and req.provider in {"openai", "azure", "groq", "mistral", "openrouter"}:
+    if req.tools:  # native function calling (the engine's tool loop), instead of a JSON envelope
+        kwargs["tools"] = chat_tools(req.tools)
+        kwargs["tool_choice"] = "auto"
+    elif req.json_mode and req.provider in {"openai", "azure", "groq", "mistral", "openrouter"}:
         kwargs["response_format"] = {"type": "json_object"}
     return kwargs
 
@@ -77,6 +81,11 @@ def compute_cost(model: str, prompt_tokens: int, completion_tokens: int) -> floa
 class LiteLLMProvider:
     name = "litellm"
 
+    @staticmethod
+    def supports_native_tools(req: LLMRequest) -> bool:
+        """Chat Completions function calling; reasoning deployments on these legacy endpoints keep the JSON envelope."""
+        return req.provider != "mock" and not req.extra.get("reasoning_model")
+
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
         try:
             import litellm
@@ -87,6 +96,7 @@ class LiteLLMProvider:
         text_parts: list[str] = []
         usage: Usage | None = None
         length_cut = False
+        calls = ChatToolAccumulator()
         try:
             response = await litellm.acompletion(**kwargs)
             async for chunk in response:  # type: ignore[union-attr]
@@ -97,6 +107,10 @@ class LiteLLMProvider:
                     if content:
                         text_parts.append(content)
                         yield LLMChunk(delta=content)
+                    frags = getattr(delta, "tool_calls", None) if delta else None
+                    if frags:
+                        for name in calls.add(list(frags)):
+                            yield LLMChunk(tool_started=name)
                     if getattr(choices[0], "finish_reason", None) == "length":
                         length_cut = True
                 u = getattr(chunk, "usage", None)
@@ -121,6 +135,9 @@ class LiteLLMProvider:
         else:
             usage.cost_usd = compute_cost(req.extra.get("pricing_model") or kwargs["model"], usage.prompt_tokens, usage.completion_tokens)
         yield LLMChunk(usage=usage)
+        if req.tools:
+            tool_calls, items = calls.result("".join(text_parts))
+            yield LLMChunk(tool_calls=tool_calls, items=items)
         if length_cut:
             raise LLMOutputTruncated(f"The model stopped at the output limit (finish_reason=length) after {len(''.join(text_parts))} characters",
                                      partial="".join(text_parts))
