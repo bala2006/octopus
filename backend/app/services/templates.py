@@ -279,6 +279,17 @@ TEMPLATES: dict[str, CompanyTemplate] = {
         ),
         links=(Link("sup", "hop", "consult", True, "Bug escalation"), Link("tw", "pm", "consult", True, "Product facts")),
     ),
+    "bug_squad": CompanyTemplate(
+        key="bug_squad", name="Bug Squad",
+        description="Fix bugs in an existing codebase: a triage lead reproduces and assigns, a debugging engineer fixes the root cause "
+                    "with a regression test, and QA re-tests around it.",
+        head="lead",
+        departments=(
+            Department("Maintenance", M("lead", "eng_manager", name="Ines", role="Triage Lead", entry=True),
+                       (M("dbg", "developer", name="Theo", role="Debugging Engineer"), M("qa", "qa_engineer", name="Mira", role="Regression QA"))),
+        ),
+        links=(Link("qa", "dbg", "review", True, "Regression check", {"max_revisions": 3}),),
+    ),
     "blank": CompanyTemplate(key="blank", name="Blank Canvas", description="Start from scratch.", departments=()),
 }
 
@@ -418,4 +429,14 @@ def template_summary(t: CompanyTemplate) -> dict[str, Any]:
                       "members": [m.name or roles[m.role_key].default_name for m in d.members]})
     agents, edges, _ = build_from_template(t)
     return {"key": t.key, "name": t.name, "description": t.description, "agent_count": len(agents), "edge_count": len(edges),
-            "source": "builtin", "departments": depts}
+            "source": "builtin", "departments": depts, "workflow": workflow_ready(agents)}
+
+
+def workflow_ready(agents: list[dict[str, Any]]) -> bool:
+    """Can this team run the defined workflow (a head, a builder, and someone else to test or review)?"""
+    from app.orchestrator.context import AgentSpec
+    from app.orchestrator.workflow import can_staff
+
+    specs = [AgentSpec.from_dict({**a, "id": a.get("id") or str(i)}, "generic") for i, a in enumerate(agents)]
+    heads = [a for a in specs if a.is_entry]
+    return len(heads) == 1 and can_staff(specs, heads[0])

@@ -10,7 +10,7 @@ from app.core.deps import current_user
 from app.db.session import get_registry_db
 from app.models import User, UserTemplate
 from app.schemas import CanvasExport, DepartmentSummary, RoleTemplateOut, TemplateOut, UserTemplateIn
-from app.services.templates import TEMPLATES, build_from_template, summarize_departments, template_summary
+from app.services.templates import TEMPLATES, build_from_template, summarize_departments, template_summary, workflow_ready
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 USER_PREFIX = "user:"
@@ -21,7 +21,8 @@ def user_template_out(t: UserTemplate) -> TemplateOut:
     agents = [a.model_dump() for a in spec.agents]
     meta = {k: v.model_dump() for k, v in spec.departments.items()}
     return TemplateOut(key=USER_PREFIX + t.id, name=t.name, description=t.description, agent_count=len(spec.agents), edge_count=len(spec.edges),
-                       source="user", departments=[DepartmentSummary(**d) for d in summarize_departments(agents, meta)], updated_at=t.updated_at)
+                       source="user", departments=[DepartmentSummary(**d) for d in summarize_departments(agents, meta)], updated_at=t.updated_at,
+                       workflow=workflow_ready(agents))
 
 
 def builtin_spec(key: str) -> CanvasExport:

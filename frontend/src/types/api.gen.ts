@@ -2639,6 +2639,12 @@ export interface components {
              */
             verify_before_finish: boolean;
             /**
+             * Workflow
+             * @default auto
+             * @enum {string}
+             */
+            workflow: "auto" | "on" | "off";
+            /**
              * Context Recent
              * @default 30
              */
@@ -2993,6 +2999,11 @@ export interface components {
             departments?: components["schemas"]["DepartmentSummary"][];
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Workflow
+             * @default false
+             */
+            workflow: boolean;
         };
         /** TestProviderIn */
         TestProviderIn: {

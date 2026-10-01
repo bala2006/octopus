@@ -74,7 +74,7 @@ PHASES: dict[str, Phase] = {p.key: p for p in [
           done_when="Every acceptance criterion is met with evidence; finish the run with what shipped and how it was verified."),
 ]}
 TRACKS: dict[str, list[str]] = {
-    "quick": ["intake", "build", "test", "accept"],
+    "quick": ["intake", "build", "test", "review", "accept"],  # review only when nobody can test
     "standard": ["intake", "research", "spec", "design", "build", "test", "review", "accept"],
     "large": ["intake", "research", "spec", "design", "build", "test", "review", "accept"],
 }
@@ -201,6 +201,11 @@ class WorkflowMixin:
             if k == "build":
                 builder = owner_id
             phases.append({"key": k, "owner": owner_id, "status": "pending" if owner_id else "skipped", "bounces": 0, "loops": 0, "summary": ""})
+        if a.track == "quick":  # one independent check is enough for a quick goal: a tester, else a reviewer
+            test = next(p for p in phases if p["key"] == "test")
+            review = next(p for p in phases if p["key"] == "review")
+            if test["status"] != "skipped" and review["status"] != "skipped":
+                review.update({"status": "skipped", "owner": None})
         self.wf.update({"track": a.track, "phases": phases, "index": 0, "reason": a.reason[:500]})
         ph = phases[0]
         ph["summary"] = a.reason[:500]

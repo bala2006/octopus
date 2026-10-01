@@ -59,7 +59,7 @@ async def test_quick_track_with_a_failed_test_loops_back_to_the_builder(client, 
     assert (Path(workspace["path"]) / "app.py").read_text() == "print('ok')\n"
     wf = (await events(client, workspace, run["id"], "workflow_updated"))[-1]["payload"]["workflow"]
     assert wf["track"] == "quick" and [(p["key"], p["status"]) for p in wf["phases"]] == [
-        ("intake", "done"), ("build", "done"), ("test", "done"), ("accept", "done")]
+        ("intake", "done"), ("build", "done"), ("test", "done"), ("review", "skipped"), ("accept", "done")]
     assert next(p for p in wf["phases"] if p["key"] == "build")["loops"] == 1
     briefs = [m for m in await run_messages(client, workspace, run["id"]) if (m.get("meta") or {}).get("workflow_phase")]
     assert [m["meta"]["workflow_phase"] for m in briefs] == ["build", "test", "build", "test", "accept"]
@@ -100,3 +100,23 @@ async def test_off_and_demo_runs_stay_free_form(client, workspace) -> None:  # t
     await wait_status(client, workspace, run["id"])
     assert not await events(client, workspace, run["id"], "workflow_updated")
     assert "set_track" not in {t["name"] for t in provider.requests[0].tools}
+
+
+async def test_quick_track_without_a_tester_is_checked_by_a_reviewer(client, workspace) -> None:  # type: ignore[no-untyped-def]
+    team = [TEAM[0], TEAM[1], role("r", "Riya", "techlead", "Tech Lead / Reviewer")]
+    provider = NativeScriptedProvider({"Ava": [[("set_track", {"track": "quick"})]]})
+    set_provider_override(provider)
+    cid = await make_company(client, workspace, team, [])
+    run = await start_run(client, workspace, cid, budget={**ON, "max_turns": 2})
+    await wait_status(client, workspace, run["id"])
+    wf = (await events(client, workspace, run["id"], "workflow_updated"))[-1]["payload"]["workflow"]
+    assert {p["key"]: (p["status"], p["owner"]) for p in wf["phases"]}["review"] == ("pending", "r")
+    assert {p["key"]: p["status"] for p in wf["phases"]}["test"] == "skipped"
+
+
+def test_templates_say_which_teams_run_the_workflow() -> None:
+    from app.services.templates import TEMPLATES, template_summary
+
+    flags = {k: template_summary(t)["workflow"] for k, t in TEMPLATES.items()}
+    assert flags["software_startup"] and flags["game_studio"] and flags["web_app_studio"] and flags["bug_squad"]
+    assert not flags["solo_engineer"] and not flags["blank"]

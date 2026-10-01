@@ -255,6 +255,7 @@ class TemplateOut(BaseModel):
     source: Literal["builtin", "user"] = "builtin"
     departments: list[DepartmentSummary] = Field(default_factory=list)
     updated_at: datetime | None = None
+    workflow: bool = False  # the team can run the defined workflow (head + builder + an independent tester/reviewer)
 
 
 class UserTemplateIn(BaseModel):
