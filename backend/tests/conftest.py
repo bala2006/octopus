@@ -65,6 +65,52 @@ class ScriptedProvider:
         yield LLMChunk(usage=Usage(self.tokens, self.tokens, 0.001))
 
 
+class NativeScriptedProvider:
+    """Speaks native function calling (like the Azure Responses API): each scripted round is a list of (tool, args) calls,
+    or a callable(ctx, outputs) returning one, where ``outputs`` are the tool results the engine sent back so far."""
+
+    name = "native-scripted"
+
+    def __init__(self, scripts: dict[str, list[Any]] | None = None, tokens: int = 50) -> None:
+        self.scripts: dict[str, list[Any]] = defaultdict(list, {k: list(v) for k, v in (scripts or {}).items()})
+        self.tokens = tokens
+        self.requests: list[LLMRequest] = []
+
+    @staticmethod
+    def supports_native_tools(req: LLMRequest) -> bool:
+        return True
+
+    async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
+        from app.llm.base import ToolCall
+
+        ctx = req.metadata.get("mock_context")
+        if ctx is None:
+            yield LLMChunk(delta=req.metadata.get("mock_script", "YES"))
+            yield LLMChunk(usage=Usage(1, 1, 0.0))
+            return
+        self.requests.append(LLMRequest(**{**req.__dict__, "continuation": list(req.continuation)}))
+        queue = self.scripts[ctx["agent"]["name"]]
+        rnd = queue.pop(0) if queue else [("wait", {})]
+        outputs = [i["output"] for i in req.continuation if i.get("type") == "function_call_output"]
+        if callable(rnd):
+            rnd = rnd(ctx, outputs)
+        if isinstance(rnd, str):  # plain text answer, no tool calls
+            yield LLMChunk(delta=rnd)
+            rnd = []
+        n = len(self.requests)
+        items: list[dict[str, Any]] = [{"type": "reasoning", "id": f"rs_{n}", "encrypted_content": f"enc-{n}", "summary": []}]
+        calls = []
+        for i, (tool, args) in enumerate(rnd):
+            cid = f"call_{n}_{i}"
+            yield LLMChunk(tool_started=tool)
+            arguments = args if isinstance(args, str) else json.dumps(args)
+            yield LLMChunk(tool_delta=arguments)
+            items.append({"type": "function_call", "id": f"fc_{n}_{i}", "call_id": cid, "name": tool, "arguments": arguments})
+            calls.append(ToolCall(id=cid, name=tool, arguments=arguments))
+        yield LLMChunk(usage=Usage(self.tokens, self.tokens, 0.001))
+        yield LLMChunk(tool_calls=calls, items=items)
+
+
 def env(*actions: dict[str, Any]) -> dict[str, Any]:
     return {"thought": "scripted", "actions": list(actions)}
 

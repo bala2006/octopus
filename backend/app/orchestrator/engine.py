@@ -28,11 +28,12 @@ from app.core.config import PROJECT_DIRNAME, get_settings
 from app.core.logging import get_logger
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
-from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest
+from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest, LLMResult, ToolCall
 from app.llm.demo_script import role_category
-from app.llm.router import prepare_request, stream_with_retry
+from app.llm.router import get_provider, prepare_request, stream_with_retry
 from app.models import AgentMemory, Artifact, Message, Run, Task
 from app.orchestrator import actions as A
+from app.orchestrator import tools as T
 from app.orchestrator.bus import bus
 from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, clip
 from app.orchestrator.permissions import (
@@ -69,6 +70,34 @@ def judge_verdict(text: str) -> bool | None:
     if not t:
         return None
     return True if t[0] == "YES" else False if t[0] == "NO" else None
+
+
+def apply_edits(text: str, edits: list[A.Edit]) -> tuple[str, int]:
+    """Apply exact-text edits in order. Returns (new text, 1-based line of the first change). Raises ValueError (nothing
+    applied) when an old_string is missing or ambiguous, with enough detail for the model to fix its call."""
+    first: int | None = None
+    for i, e in enumerate(edits, 1):
+        n = text.count(e.old_string)
+        label = f"edit {i}" if len(edits) > 1 else "old_string"
+        if n == 0:
+            stripped = e.old_string.strip()
+            hint = (" (it does appear with different surrounding whitespace or indentation)" if stripped and stripped in text
+                    else " (read_file to get the exact current text)")
+            raise ValueError(f"{label}: old_string not found{hint}")
+        if n > 1 and not e.replace_all:
+            raise ValueError(f"{label}: old_string occurs {n} times; include more surrounding lines to make it unique, "
+                             "or set replace_all")
+        pos = text.index(e.old_string)
+        line = text.count("\n", 0, pos) + 1
+        first = line if first is None else min(first, line)
+        text = text.replace(e.old_string, e.new_string) if e.replace_all else text.replace(e.old_string, e.new_string, 1)
+    return text, first or 1
+
+
+def numbered_excerpt(text: str, line: int, before: int = 3, after: int = 12) -> str:
+    lines = text.split("\n")
+    lo, hi = max(1, line - before), min(len(lines), line + after)
+    return "\n".join(f"{n:>5}  {lines[n - 1]}" for n in range(lo, hi + 1))
 
 
 def head_tail(text: str, limit: int) -> str:
@@ -108,8 +137,8 @@ def live_activity(text: str) -> tuple[str, str]:
     if act == "send_message":
         to, typ = get("to"), get("type").replace("_", " ")
         return ("speaking", f"Drafting {typ or 'message'}{' to ' + to if to else ''}…")
-    if act == "write_file":
-        return ("writing", f"Writing {get('path') or 'a file'}…")
+    if act in ("write_file", "edit_file"):
+        return ("writing", f"{'Editing' if act == 'edit_file' else 'Writing'} {get('path') or 'a file'}…")
     if act in ("read_file", "list_files"):
         return ("reading", f"Reading {get('path') or 'the project'}…")
     if act == "run_code":
@@ -485,10 +514,11 @@ class RunRuntime(TeamMixin):
         return None
 
     # ------------------------------------------------------------------ limits & control
-    def limit_reason(self) -> str | None:
+    def limit_reason(self, *, turns: bool = True) -> str | None:
+        """``turns=False`` inside a turn's tool loop: the turn is already counted, only spend and time can run out."""
         b = self.budget
         reason = None
-        if self.turn_no >= b.max_turns:
+        if turns and self.turn_no >= b.max_turns:
             reason = f"Budget: max turns reached ({b.max_turns})"
         elif self.tokens >= b.max_tokens:
             reason = f"Budget: token budget exhausted ({self.tokens}/{b.max_tokens})"
@@ -805,14 +835,36 @@ class RunRuntime(TeamMixin):
         return None if e in ("default", "") else e
 
     async def call_llm(self, agent: AgentSpec, req: LLMRequest) -> str:
+        return (await self.call_llm_result(agent, req)).text
+
+    async def call_llm_result(self, agent: AgentSpec, req: LLMRequest) -> LLMResult:
+        """Stream one model call: live status + token_stream events, usage accounting, text and (native) tool calls."""
         parts: list[str] = []
+        result = LLMResult()
         buf, last = "", time.monotonic()
         speaking = False
+        tool_buf = ""  # '"action":"<tool>", <streamed arguments>' so live_activity can describe a native call as it streams
         remaining = max(5.0, self.budget.timeout_s - self.active_seconds)
 
         async def consume() -> None:
-            nonlocal buf, last, speaking
+            nonlocal buf, last, speaking, tool_buf
             async for chunk in stream_with_retry(req):
+                if chunk.tool_started:
+                    tool_buf = f'"action":"{chunk.tool_started}",'
+                    status, activity = live_activity(tool_buf)
+                    await self.set_agent_status(agent.id, status, activity)
+                if chunk.tool_delta:
+                    tool_buf += chunk.tool_delta
+                    buf += chunk.tool_delta
+                    if len(buf) >= 120 or time.monotonic() - last > 0.1:
+                        status, activity = live_activity(tool_buf[:2000])
+                        await self.set_agent_status(agent.id, status, activity)
+                        await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
+                        buf, last = "", time.monotonic()
+                if chunk.tool_calls is not None:
+                    result.tool_calls = list(chunk.tool_calls)
+                if chunk.items is not None:
+                    result.items = list(chunk.items)
                 if chunk.delta:
                     parts.append(chunk.delta)
                     buf += chunk.delta
@@ -828,12 +880,16 @@ class RunRuntime(TeamMixin):
                 await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
 
         await asyncio.wait_for(consume(), timeout=min(remaining, 300))
-        return "".join(parts)
+        result.text = "".join(parts)
+        return result
 
     async def call_llm_escalating(self, agent: AgentSpec, req: LLMRequest) -> str:
+        return (await self.call_llm_escalating_result(agent, req)).text
+
+    async def call_llm_escalating_result(self, agent: AgentSpec, req: LLMRequest) -> LLMResult:
         """Call the model; if the reply hits the output limit, raise the agent's budget (and remember it) and retry once."""
         try:
-            return await self.call_llm(agent, req)
+            return await self.call_llm_result(agent, req)
         except LLMOutputTruncated as exc:
             old = req.max_tokens
             new = min(MAX_AGENT_MAX_TOKENS, max(old * 2, CODE_AGENT_MAX_TOKENS))
@@ -841,10 +897,13 @@ class RunRuntime(TeamMixin):
                 raise
             await self.raise_output_budget(agent, new, str(exc))
             req.max_tokens = new
-            req.messages = [*req.messages, {"role": "user", "content": (
-                f"Note: your previous attempt at this reply was cut off at the output limit ({old:,} tokens) and nothing in it was "
-                f"applied. The limit is now {new:,} tokens.")}]
-            return await self.call_llm(agent, req)
+            note = {"role": "user", "content": (f"Note: your previous attempt at this reply was cut off at the output limit ({old:,} "
+                                                f"tokens) and nothing in it was applied. The limit is now {new:,} tokens.")}
+            if req.continuation:  # inside a tool loop the note belongs after the replayed items
+                req.continuation = [*req.continuation, note]
+            else:
+                req.messages = [*req.messages, note]
+            return await self.call_llm_result(agent, req)
 
     async def raise_output_budget(self, agent: AgentSpec, new: int, why: str) -> None:
         old = agent.max_tokens
@@ -881,13 +940,8 @@ class RunRuntime(TeamMixin):
         await self.set_agent_status(aid, "thinking", f"Reading {len(inbox_ids)} new message(s)…" if inbox_ids else "Reviewing results…")
         inbox_set = set(inbox_ids)
         inbox = [m for m in self.history if m["id"] in inbox_set]
-        system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
-                                     status=self.status, preview_url=self.preview_url())
-        user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_set, observations=obs,
-                                 blackboard=self.blackboard(), names=self.names, recent_n=self.budget.context_recent)
         req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
-                         extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {},
-                         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], json_mode=True,
+                         extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {}, messages=[], json_mode=True,
                          metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs)})
         if self.budget.force_mock:
             req.provider, req.model = "mock", "mock/demo"
@@ -897,6 +951,16 @@ class RunRuntime(TeamMixin):
             if warn and aid not in self.warned:
                 self.warned.add(aid)
                 await self.emit("error", {"message": f"{agent.name}: {warn}", "agent_id": aid, "kind": "warning"})
+            native = self.native_tools_for(req)
+            system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
+                                         status=self.status, preview_url=self.preview_url(), native=native)
+            user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_set, observations=obs,
+                                     blackboard=self.blackboard(), names=self.names, recent_n=self.budget.context_recent, native=native)
+            req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+            if native:
+                await self.native_turn(agent, req)
+                await self.end_turn(aid)
+                return
             text = await self.call_llm_escalating(agent, req)
             parsed = A.parse_envelope(text)
             if not parsed.ok and req.provider != "mock":
@@ -935,6 +999,90 @@ class RunRuntime(TeamMixin):
             await self.execute(agent, action)
             if self.finished_summary is not None:
                 break
+        await self.end_turn(aid)
+
+    # ------------------------------------------------------------------ native function calling
+    def native_tools_for(self, req: LLMRequest) -> bool:
+        """Use the model's own function calling when the provider supports it (Azure Responses API); otherwise the JSON envelope."""
+        if not get_settings().native_tools:
+            return False
+        check = getattr(get_provider(req.provider, req), "supports_native_tools", None)
+        return bool(check and check(req))
+
+    async def native_turn(self, agent: AgentSpec, req: LLMRequest) -> None:
+        """One turn as a tool loop: the model calls tools, gets each result back, and keeps going until it stops calling tools
+        (or ends the turn with wait / finish / a question for the user). Errors are returned to the model as tool results."""
+        aid = agent.id
+        req.tools, mcp_map = T.tool_specs(agent.tools, agent.mcp)
+        req.json_mode = False
+        req.continuation = []
+        for rnd in range(self.budget.max_tool_rounds):
+            if self.stop_requested:
+                raise StopRun()
+            if rnd and (self.paused or self.limit_reason(turns=False)):
+                break  # pause / budget are honoured between rounds too; the turn ends cleanly
+            res = await self.call_llm_escalating_result(agent, req)
+            if res.text.strip():
+                await self.emit("thought", {"agent_id": aid, "text": res.text.strip()[:4000], "turn_no": self.turn_no})
+            if not res.tool_calls:
+                legacy = A.parse_envelope(res.text) if res.text.lstrip().startswith(("{", "```")) else None
+                if legacy and legacy.ok and legacy.actions:  # the model answered with an old-style envelope: honour it
+                    for action in legacy.actions:
+                        await self.execute(agent, action)
+                        if self.finished_summary is not None:
+                            break
+                break
+            outputs: list[dict[str, Any]] = []
+            ended = False
+            for call in res.tool_calls:
+                if ended:
+                    out = "Not run: an earlier call in this reply ended your turn."
+                else:
+                    out, ended = await self.run_tool_call(agent, call, mcp_map)
+                outputs.append({"type": "function_call_output", "call_id": call.id, "output": out})
+            # replay the response (encrypted reasoning included) and answer every call, as the Responses API expects
+            replay = [i for i in res.items if not (i.get("type") == "reasoning" and not i.get("encrypted_content"))]
+            req.continuation = [*req.continuation, *replay, *outputs]
+            if ended:
+                break
+        else:
+            await self.emit("error", {"kind": "warning", "agent_id": aid,
+                                      "message": f"{agent.name} used all {self.budget.max_tool_rounds} tool rounds of this turn"})
+
+    async def run_tool_call(self, agent: AgentSpec, call: ToolCall, mcp_map: dict[str, tuple[str, str]]) -> tuple[str, bool]:
+        """Run one function call through the normal action executor. Returns (result text for the model, turn ended?).
+
+        The executors report back through notices/observations (the envelope path shows those in the next prompt); here
+        they are taken out and returned as the call's output instead, so the agent sees them immediately."""
+        aid = agent.id
+        action, err = T.parse_tool_call(call.name, call.arguments, mcp_map)
+        if action is None:
+            await self.emit("error", {"message": f"{agent.name}: {call.name}: {err}", "agent_id": aid, "kind": "parse"})
+            return f"Error: {err}. Nothing was done; call the tool again with corrected arguments.", False
+        before = len(self.observations.get(aid, []))
+        await self.execute(agent, action)
+        produced = self.observations.get(aid, [])[before:]
+        if produced:
+            del self.observations[aid][before:]
+            if not self.observations[aid]:
+                self.observations.pop(aid)
+        lines = []
+        for o in (o for _, o in produced):
+            tag = "" if o.get("tool") == "system" else f"[{o.get('tool')}{' OK' if o.get('ok') else ' FAILED' if o.get('ok') is False else ''}] "
+            lines.append(tag + str(o.get("content", "")))
+        name = action.action
+        if not lines:
+            if name == "update_task_board":
+                lines.append("Task board:\n" + "\n".join(f"- {self.task_line(t)}" for t in self.tasks.values()))
+            elif name == "send_message":
+                lines.append(f"Sent to {action.to}.")
+            else:
+                lines.append("Done.")
+        ended = (name in T.TERMINAL_ACTIONS or self.finished_summary is not None or aid in self.done_agents
+                 or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
+        return clip("\n".join(lines), TOOL_RESULT_CHARS), ended
+
+    async def end_turn(self, aid: str) -> None:
         if self.progress_turn == self.turn_no:  # productive turn: the agent may keep working on its own results
             self.self_turns[aid] = 0
         if aid in self.done_agents:
@@ -1189,22 +1337,48 @@ class RunRuntime(TeamMixin):
             return
         appending = a.mode == "append"
         content = (old or "") + a.content if appending else a.content
+        await self.commit_file(agent, cid, "write_file", rel, old, content, a.note, appending=appending, partial=a.partial)
+
+    async def act_edit_file(self, agent: AgentSpec, a: A.EditFile) -> None:
+        """Targeted change: each edit replaces exact existing text. All edits apply, or none do."""
+        cid = await self._tool_event(agent, "edit_file", {"path": a.path, "edits": len(a.edits), "note": a.note})
+        fs = self.fs_for(agent.id)
+        try:
+            rel, _ = fs.resolve(a.path)
+            old = fs.current(rel)
+        except WorkspaceError as exc:
+            await self.deny(agent, cid, "edit_file", f"edit_file failed: {exc}")
+            return
+        if old is None:
+            await self.deny(agent, cid, "edit_file", f"edit_file failed: {rel} does not exist (create it with write_file)")
+            return
+        try:
+            content, first_line = apply_edits(old, a.edits)
+        except ValueError as exc:
+            await self.deny(agent, cid, "edit_file", f"edit_file failed on {rel}: {exc}. The file was not changed.")
+            return
+        await self.commit_file(agent, cid, "edit_file", rel, old, content, a.note, context_line=first_line)
+
+    async def commit_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
+                          appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
+        """Permission gate, write, version history, events and the agent's confirmation, shared by write_file / edit_file."""
+        fs = self.fs_for(agent.id)
         if old == content:
             self.notice(agent.id, f"{rel} unchanged ({'nothing to append' if appending else 'identical content'}).")
-            await self._tool_result(agent, cid, "write_file", True, "unchanged")
+            await self._tool_result(agent, cid, tool, True, "unchanged")
             return
         planned = fs.shadow is not None
-        action = "append to" if appending and old is not None else ("create" if old is None else "modify")
+        action = "edit" if tool == "edit_file" else "append to" if appending and old is not None else ("create" if old is None else "modify")
         ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to {action} {rel}",
-                                      content, {"path": rel, "old": (old or "")[:20000], "new": content[:20000], "note": a.note})
+                                      content, {"path": rel, "old": (old or "")[:20000], "new": content[:20000], "note": note})
         if not ok:
-            await self.deny(agent, cid, "write_file", reason)
+            await self.deny(agent, cid, tool, reason)
             return
-        await self.set_agent_status(agent.id, "writing", f"{'Appending to' if appending else 'Saving'} {rel}…")
+        await self.set_agent_status(agent.id, "writing", f"{'Editing' if tool == 'edit_file' else 'Appending to' if appending else 'Saving'} {rel}…")
         try:
             fs.write(rel, content)
         except WorkspaceError as exc:
-            await self.deny(agent, cid, "write_file", f"write_file failed: {exc}")
+            await self.deny(agent, cid, tool, f"{tool} failed: {exc}")
             return
         self.mark_progress()
         prev = self.artifacts.get(rel)
@@ -1215,28 +1389,30 @@ class RunRuntime(TeamMixin):
                 "The original is kept: revert it from Artifacts → Run changes.")})
         version = (prev or {}).get("version", 0) + 1
         art = Artifact(id=new_id(), run_id=self.run_id, path=rel, content=content, version=version, author_agent_id=agent.id,
-                       change_note=a.note[:1000], planned=planned, created_at=utcnow(),
+                       change_note=note[:1000], planned=planned, created_at=utcnow(),
                        previous_content=(fs.original(rel) if planned else old) if prev is None else None)
         async with self.db() as db:
             db.add(art)
             await db.commit()
         added = content.count("\n") + 1
         removed = (old or "").count("\n") + 1 if old else 0
-        self.artifacts[rel] = {"version": version, "author": agent.id, "note": a.note}
+        self.artifacts[rel] = {"version": version, "author": agent.id, "note": note}
         await self.emit("artifact_updated", {"artifact": {"id": art.id, "run_id": self.run_id, "path": rel, "version": version,
-                                                          "author_agent_id": agent.id, "change_note": a.note, "size": len(content),
+                                                          "author_agent_id": agent.id, "change_note": note, "size": len(content),
                                                           "planned": planned, "created": old is None, "appended": appending,
-                                                          "lines": added, "previous_lines": removed,
+                                                          "edited": tool == "edit_file", "lines": added, "previous_lines": removed,
                                                           "created_at": art.created_at.isoformat()}})
-        verb = "Planned" if planned else ("Created" if old is None else "Appended to" if appending else "Updated")
+        verb = "Planned" if planned else ("Created" if old is None else "Edited" if tool == "edit_file" else "Appended to" if appending else "Updated")
         await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
-                                content=f"{verb} `{rel}` (v{version})" + (f": {a.note}" if a.note else ""),
+                                content=f"{verb} `{rel}` (v{version})" + (f": {note}" if note else ""),
                                 meta={"path": rel, "version": version, "artifact_id": art.id, "planned": planned}, deliver=False)
-        size_note = (f" It now has {added} lines; append the next part now (mode \"append\")." if a.partial
+        size_note = (f" It now has {added} lines; append the next part now (mode \"append\")." if partial
                      else f" It now has {added} lines." if appending else "")
+        if context_line is not None:  # show the edited region so the agent can check the result without re-reading the file
+            size_note = f" Lines around the change:\n{numbered_excerpt(content, context_line)}"
         self.notice(agent.id, f"{verb} {rel} (v{version}).{size_note}"
-                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""), activate=a.partial)
-        await self._tool_result(agent, cid, "write_file", True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
+                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else ""), activate=partial)
+        await self._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
 
     async def written_by_octopus(self, rel: str) -> bool:
         """Did any run in this project ever write ``rel``? (Otherwise it is the user's own file.)"""

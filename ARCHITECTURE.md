@@ -25,15 +25,23 @@ flowchart TD
   N -- none --> Q[finalize: completed (quiescent)]
   N -- agent --> P[build prompt:<br/>system prompt + meta rules + roster + channels<br/>+ blackboard + rolling summary + recent + inbox + tool results]
   P --> S[stream LLM → token_stream + live activity detection]
-  S --> X[parse JSON envelope → validated actions<br/>one repair retry]
+  S --> T{native function calls?<br/>Azure Responses API}
+  T -- yes --> E2[run each call → function_call_output<br/>replay items, call the model again<br/>until it stops calling tools]
+  T -- no --> X[parse JSON envelope → validated actions<br/>one repair retry]
   X --> E[execute actions<br/>permissions · protocols · approvals]
+  E2 --> R
   E --> R[route messages → mailboxes<br/>persist + publish events]
   R --> D{entry agent finished?}
   D -- yes --> C[finalize: completed + report]
   D -- no --> L
 ```
 
-**Action schema** (`orchestrator/actions.py`). Every reply is `{"thought": "...", "actions": [...]}` with actions `send_message`, `write_file`, `read_file`, `list_files`, `run_code`, `mcp_call`, `update_task_board`, `remember`, `request_user_input`, `web_search`, `calculate`, `finish` and `wait`. The schema text injected into the prompt lists only the actions the agent's tools allow. JSON-in-text works the same for every provider (Azure, Foundry, Ollama, …).
+**Actions** (`orchestrator/actions.py`) are Pydantic models: `send_message`, `write_file`, `edit_file`, `read_file`, `list_files`, `run_code`, `mcp_call`, `update_task_board`, `remember`, `request_user_input`, `web_search`, `calculate`, team actions, `finish` and `wait`. Agents only get the actions their tools allow. They reach the model in one of two ways:
+
+- **Native function calling** (`orchestrator/tools.py`, used on the Azure Responses API). Each action is a function tool whose JSON schema is generated from its model; each MCP tool is its own function (`mcp__<server>__<tool>`). A turn is a tool loop: the model's `function_call` items are validated and executed, their results go back as `function_call_output` items together with the replayed output items (encrypted reasoning included, since requests are stateless with `store: false`), and the model continues until it stops calling tools, calls `wait`/`finish`, or asks the user (`budget.max_tool_rounds` calls per turn). Invalid arguments come back to the model as a tool error instead of failing the turn. `NATIVE_TOOLS=false` turns this off.
+- **JSON envelope** (everything else: the offline demo mock, Chat Completions, legacy endpoints). The reply is `{"thought": "...", "actions": [...]}`, described in the prompt, with one repair retry.
+
+**Editing files.** `edit_file` replaces exact existing text (`edits: [{old_string, new_string, replace_all?}]`). Each `old_string` must match exactly once unless `replace_all`; edits apply in order and all succeed or none do. The result shows the changed lines with line numbers. It goes through the same permission gate, version history and events as `write_file`.
 
 **Routing** (`orchestrator/permissions.py`). `find_channel(edges, src, dst, type)` picks the edge a message travels on, preferring the edge type that matches the message type (`proposal`→debate, `review_*`→review, `task`→delegate, `status_update`→report…). It respects direction; debate edges only carry debate-protocol types. If no channel exists, the message is **rejected server-side**: it is never delivered, and the sender gets an activating notice explaining why (`no channel`, `one-way`, `wrong type`).
 

@@ -34,7 +34,7 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
   const anyConfigured = settings.data?.providers.some((p) => p.provider !== "mock" && p.configured) ?? false;
   const [demo, setDemo] = React.useState(!anyConfigured);
   const [adv, setAdv] = React.useState(false);
-  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, stall_turns: 30, context_recent: 30, max_agents: 24, persist_team: true, reasoning_effort: "default" as Effort });
+  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, stall_turns: 30, max_tool_rounds: 40, context_recent: 30, max_agents: 24, persist_team: true, reasoning_effort: "default" as Effort });
   const att = useAttachments();
   React.useEffect(() => { if (open) { setGoal(initialGoal); setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask"); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => setDemo(!anyConfigured), [anyConfigured]);
@@ -101,8 +101,9 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
                 <Field label="Cost cap ($)"><Input type="number" step="0.5" value={budget.max_cost_usd} onChange={(e) => setBudget({ ...budget, max_cost_usd: +e.target.value || 0 })} className="h-8" /></Field>
                 <Field label="Active time (s)" hint="Seconds of agent work; paused or waiting-for-you time doesn't count"><Input type="number" value={budget.timeout_s} onChange={(e) => setBudget({ ...budget, timeout_s: +e.target.value || 60 })} className="h-8" /></Field>
                 <Field label="Pause if stalled" hint="Turns without a file change or task update before the run pauses for you (0 = off)"><Input type="number" min={0} value={budget.stall_turns} onChange={(e) => setBudget({ ...budget, stall_turns: Math.max(0, +e.target.value || 0) })} className="h-8" /></Field>
+                <Field label="Tool calls per turn" hint="How many tool rounds an agent may run in one turn (native tool calling)"><Input type="number" min={1} max={200} value={budget.max_tool_rounds} onChange={(e) => setBudget({ ...budget, max_tool_rounds: Math.min(200, Math.max(1, +e.target.value || 1)) })} className="h-8" /></Field>
                 <Field label="Max team size" hint="Includes agents hired during the run"><Input type="number" min={1} max={100} value={budget.max_agents} onChange={(e) => setBudget({ ...budget, max_agents: Math.max(1, +e.target.value || 1) })} className="h-8" /></Field>
-                <label className="col-span-2 flex items-center gap-2 self-end pb-1 text-xs">
+                <label className="col-span-1 flex items-center gap-2 self-end pb-1 text-xs">
                   <Switch checked={budget.persist_team} onCheckedChange={(v) => setBudget({ ...budget, persist_team: v })} aria-label="Save team changes" />
                   Save agents hired or edited during the run to the company (read-only and plan runs never save)
                 </label>

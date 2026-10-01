@@ -19,10 +19,10 @@ from typing import Any
 
 import httpx
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap
+from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap
 
 ApiStyle = str  # "responses" | "chat"
-_PROTECTED = {"model", "input", "messages", "stream"}
+_PROTECTED = {"model", "input", "messages", "stream", "tools", "tool_choice"}  # never auto-dropped
 # Reasoning deployments (gpt-6-luna reasons at "medium" effort by default) spend output tokens on thinking before they
 # answer; max_output_tokens covers both, so the agent's answer budget gets extra room. A fixed allowance meant that raising
 # the effort silently shrank the space left for the answer, so the headroom scales with the requested effort.
@@ -74,9 +74,17 @@ def _body(req: LLMRequest, style: ApiStyle, drop: set[str]) -> dict[str, Any]:
     if style == "responses":
         body: dict[str, Any] = {
             "model": req.model, "stream": True, "max_output_tokens": output_cap(req.model, req.max_tokens + reasoning_headroom(req)), "store": False,
-            "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages],
+            "input": [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages] + list(req.continuation),
         }
-        if req.json_mode:
+        if req.tools:  # native function calling: the model emits function_call items instead of a JSON envelope
+            body["tools"] = [{"type": "function", "name": t["name"], "description": t.get("description", ""), "parameters": t["parameters"]}
+                             for t in req.tools]
+            body["tool_choice"] = "auto"
+            body["parallel_tool_calls"] = True
+            if reasoning or req.extra.get("reasoning_effort"):
+                # stateless (store=false): encrypted reasoning comes back so it can be replayed between tool calls
+                body["include"] = ["reasoning.encrypted_content"]
+        elif req.json_mode:
             body["text"] = {"format": {"type": "json_object"}}
     else:
         body = {
@@ -165,6 +173,10 @@ def usage_from_responses(u: dict[str, Any]) -> Usage:
 class AzureV1Provider:
     name = "azure_v1"
 
+    @staticmethod
+    def supports_native_tools(req: LLMRequest) -> bool:
+        return supports_native_tools(req)
+
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport  # tests inject httpx.MockTransport
 
@@ -177,6 +189,7 @@ class AzureV1Provider:
         headers = {**(await _auth_headers(req)), "Content-Type": "application/json", "Accept": "text/event-stream"}
         cache_key = (base, req.model)
         text_parts: list[str] = []
+        out_items: dict[int, dict[str, Any]] = {}  # output_index -> finished output item (responses API)
         usage: Usage | None = None
         truncated: LLMOutputTruncated | None = None
         timeout = httpx.Timeout(connect=20, read=300, write=60, pool=20)
@@ -194,7 +207,7 @@ class AzureV1Provider:
                             s = resp.status_code
                             raise LLMError(_error_message(s, text), retryable=s in (408, 409, 429) or s >= 500)
                         try:
-                            async for chunk in self._events(resp, style, text_parts):
+                            async for chunk in self._events(resp, style, text_parts, out_items):
                                 if chunk.usage is not None:
                                     usage = chunk.usage
                                 else:
@@ -213,10 +226,16 @@ class AzureV1Provider:
 
         apply(usage, req.model, req.extra)  # exact Azure usage × deployment rates (Settings → Model → Pricing)
         yield LLMChunk(usage=usage)
+        if req.tools:
+            items = [out_items[i] for i in sorted(out_items)]
+            calls = [ToolCall(id=it.get("call_id") or it.get("id") or "", name=it.get("name", ""), arguments=it.get("arguments") or "{}")
+                     for it in items if it.get("type") == "function_call"]
+            yield LLMChunk(tool_calls=calls, items=items)
         if truncated is not None:
             raise truncated
 
-    async def _events(self, resp: httpx.Response, style: ApiStyle, text_parts: list[str]) -> AsyncIterator[LLMChunk]:
+    async def _events(self, resp: httpx.Response, style: ApiStyle, text_parts: list[str],
+                      out_items: dict[int, dict[str, Any]] | None = None) -> AsyncIterator[LLMChunk]:
         skip_items: set[str] = set()  # output items that aren't the final answer (phase = "commentary")
         length_cut = False  # chat completions: finish_reason == "length"
         async for line in resp.aiter_lines():
@@ -249,6 +268,14 @@ class AzureV1Provider:
                 item = ev.get("item") or {}
                 if item.get("phase") == "commentary" and item.get("id"):
                     skip_items.add(item["id"])
+                if item.get("type") == "function_call":
+                    yield LLMChunk(tool_started=item.get("name", ""))
+            elif kind == "response.function_call_arguments.delta":
+                if ev.get("delta"):
+                    yield LLMChunk(tool_delta=ev["delta"])
+            elif kind == "response.output_item.done":
+                if out_items is not None and ev.get("item"):
+                    out_items[int(ev.get("output_index", len(out_items)))] = ev["item"]
             elif kind == "response.output_text.delta":
                 if ev.get("item_id") in skip_items:
                     continue
@@ -278,3 +305,10 @@ class AzureV1Provider:
         if length_cut:
             raise LLMOutputTruncated(f"Azure OpenAI stopped at the output limit (finish_reason=length) after "
                                      f"{len(''.join(text_parts))} characters", partial="".join(text_parts))
+
+
+def supports_native_tools(req: LLMRequest) -> bool:
+    """Native function calling is used on the Responses API (the default for v1 endpoints). Chat Completions only allows
+    function calling with reasoning disabled on gpt-6 models, so it keeps the JSON envelope."""
+    target = azure_v1_target(req.base_url, req.extra)
+    return bool(target and target[1] == "responses")

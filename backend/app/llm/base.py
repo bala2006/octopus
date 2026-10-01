@@ -65,12 +65,34 @@ class LLMRequest:
     json_mode: bool = False
     extra: dict[str, Any] = field(default_factory=dict)  # provider options, e.g. Azure api_version / Entra auth
     metadata: dict[str, Any] = field(default_factory=dict)  # consumed by the mock provider only
+    # Native function calling: tool definitions ({name, description, parameters: JSON schema}) and, for the follow-up calls
+    # of a tool loop, the provider-native items to append after `messages` (previous output items + tool outputs).
+    tools: list[dict[str, Any]] = field(default_factory=list)
+    continuation: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class ToolCall:
+    id: str  # call id to answer with a tool output
+    name: str
+    arguments: str  # JSON text
 
 
 @dataclass
 class LLMChunk:
     delta: str = ""
     usage: Usage | None = None  # set on the final chunk
+    tool_started: str = ""  # a function call began (its name): for live status
+    tool_delta: str = ""  # streamed function-call arguments: for live status only, not part of the answer text
+    tool_calls: list[ToolCall] | None = None  # final chunk of a tool-enabled call
+    items: list[dict[str, Any]] | None = None  # the response's output items, to replay in the next call of the loop
+
+
+@dataclass
+class LLMResult:
+    text: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    items: list[dict[str, Any]] = field(default_factory=list)
 
 
 class LLMError(Exception):
