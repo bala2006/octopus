@@ -76,7 +76,7 @@ export function WelcomePage() {
                       {w.name}
                       {!w.exists && <Tip content="The directory no longer exists"><AlertTriangle className="h-3.5 w-3.5 text-destructive" /></Tip>}
                     </div>
-                    <div className="truncate font-mono text-[11px] text-muted-foreground">{w.path}</div>
+                    <div className="truncate font-mono text-[11px] text-muted-foreground">{w.display_path || w.path}</div>
                   </div>
                   <PermissionBadge level={w.default_permission as PermissionLevel} />
                   <span className="hidden w-20 text-right text-[11px] text-muted-foreground sm:block">{timeAgo(w.last_opened_at)}</span>

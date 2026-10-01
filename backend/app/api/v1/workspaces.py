@@ -16,7 +16,8 @@ from app.schemas import (
     BrowseOut, DirEntryOut, FileContentOut, FileNode, MkdirIn, NativeDialogOut, NativeOpenIn, NativeOpenOut, ProjectTreeOut, WorkspaceIn,
     WorkspaceOut, WorkspacePatch,
 )
-from app.services import native_dialog
+from app.core.config import get_settings
+from app.services import hostpaths, native_dialog
 from app.services.projects import ProjectPathError, allowed_roots, browse, init_project, make_dir, rename_project, validate_project_dir
 from app.tools.workspace import ProjectFS, WorkspaceError
 
@@ -25,26 +26,29 @@ router = APIRouter(tags=["workspaces"])
 
 def ws_out(w: Workspace, existing: bool = False) -> WorkspaceOut:
     return WorkspaceOut(id=w.id, name=w.name, path=w.path, default_permission=w.default_permission, created_at=w.created_at,
-                        last_opened_at=w.last_opened_at, exists=Path(w.path).is_dir(), existing_project=existing)
+                        last_opened_at=w.last_opened_at, exists=Path(w.path).is_dir(), existing_project=existing,
+                        display_path=hostpaths.to_host(w.path))
 
 
 @router.get("/fs/browse", response_model=BrowseOut)
 async def browse_dirs(path: str | None = None, show_hidden: bool = False, user: User = Depends(current_user)) -> BrowseOut:
     try:
-        cur, parent, entries = browse(path, show_hidden)
+        cur, parent, entries = browse(hostpaths.to_container(path) if path else path, show_hidden)
     except ProjectPathError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        raise HTTPException(400, hostpaths.outside_shared_folder(path or "") or str(exc)) from exc
+    roots = [str(r) for r in allowed_roots()]
     return BrowseOut(path=str(cur) if cur else None, parent=str(parent) if parent else None,
-                     entries=[DirEntryOut(**e.__dict__) for e in entries], roots=[str(r) for r in allowed_roots()])
+                     entries=[DirEntryOut(**e.__dict__, display_path=hostpaths.to_host(e.path)) for e in entries], roots=roots,
+                     display_path=hostpaths.to_host(str(cur)) if cur else "", root_labels={r: hostpaths.to_host(r) for r in roots})
 
 
 @router.post("/fs/mkdir", response_model=DirEntryOut, status_code=201)
 async def mkdir(body: MkdirIn, user: User = Depends(current_user)) -> DirEntryOut:
     try:
-        p = make_dir(body.parent, body.name)
+        p = make_dir(hostpaths.to_container(body.parent), body.name)
     except ProjectPathError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return DirEntryOut(name=p.name, path=str(p), is_project=False, is_git=False)
+    return DirEntryOut(name=p.name, path=str(p), is_project=False, is_git=False, display_path=hostpaths.to_host(str(p)))
 
 
 @router.get("/workspaces", response_model=list[WorkspaceOut])
@@ -61,10 +65,13 @@ def _is_local(request: Request) -> bool:
 @router.get("/fs/native", response_model=NativeDialogOut)
 async def native_status(request: Request, user: User = Depends(current_user)) -> NativeDialogOut:
     """Can this backend show the OS folder dialog? (Only for browsers on the same machine.)"""
+    s = get_settings()
+    extra = {"bridge_url": s.folder_bridge_url if s.native_dialogs else "", "host_dir": s.host_dir}
     if not _is_local(request):
-        return NativeDialogOut(available=False, reason="The folder dialog opens on the machine running Octopus; use the browser below")
+        return NativeDialogOut(available=False, reason="Octopus runs in a container or on another machine, so it can't open your "
+                                                       "laptop's folder dialog itself", **extra)
     av = native_dialog.availability()
-    return NativeDialogOut(available=av.available, method=av.method, reason=av.reason)
+    return NativeDialogOut(available=av.available, method=av.method, reason=av.reason, **extra)
 
 
 @router.post("/workspaces/native", response_model=NativeOpenOut)
@@ -88,11 +95,14 @@ async def open_native(body: NativeOpenIn, request: Request, db: AsyncSession = D
 
 @router.post("/workspaces", response_model=WorkspaceOut, status_code=201)
 async def create_workspace(body: WorkspaceIn, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> WorkspaceOut:
-    """Select a directory as a project. Creates ``<dir>/.octopus`` (or re-opens an existing one with all its data)."""
+    """Select a directory as a project. Creates ``<dir>/.octopus`` (or re-opens an existing one with all its data).
+
+    In Docker ``path`` may be a laptop path (e.g. picked with the laptop's own folder dialog); it is translated to the
+    shared folder inside the container."""
     try:
-        root = validate_project_dir(body.path)
+        root = validate_project_dir(hostpaths.to_container(body.path))
     except ProjectPathError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        raise HTTPException(400, hostpaths.outside_shared_folder(body.path) or str(exc)) from exc
     return await _register(root, body.name, body.default_permission, db, user)
 
 

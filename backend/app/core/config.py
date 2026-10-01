@@ -63,6 +63,12 @@ class Settings(BaseSettings):
 
     # Open the operating system's folder dialog from the local backend (off for shared / remote deployments)
     native_dialogs: bool = True
+    # Docker: the laptop folder shared into the container (HOST_DIR, e.g. C:\Users\me or /Users/me) and where it is
+    # mounted (HOST_DIR_MOUNT, e.g. /host). Paths are shown and accepted as laptop paths and translated both ways.
+    host_dir: str = ""
+    host_dir_mount: str = ""
+    # The laptop-side folder-picker helper (scripts/folder_bridge.py) the browser calls when the backend has no desktop.
+    folder_bridge_url: str = "http://127.0.0.1:8765"
 
     # Built-in browser for agents: Playwright MCP, started and managed by Octopus on 127.0.0.1
     browser_enabled: bool = True

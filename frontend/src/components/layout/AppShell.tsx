@@ -144,7 +144,7 @@ function ProjectSwitcher() {
           {list?.map((p) => (
             <DropdownMenuItem key={p.id} onSelect={() => nav(`/w/${p.id}/canvas`)} disabled={!p.exists}>
               <FolderOpen />
-              <div className="min-w-0 flex-1"><div className="truncate">{p.name}</div><div className="truncate font-mono text-[10px] text-muted-foreground">{p.path}</div></div>
+              <div className="min-w-0 flex-1"><div className="truncate">{p.name}</div><div className="truncate font-mono text-[10px] text-muted-foreground">{p.display_path || p.path}</div></div>
               {p.id === w && <Check className="!text-primary" />}
             </DropdownMenuItem>
           ))}

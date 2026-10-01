@@ -100,10 +100,24 @@ Octopus starts `@playwright/mcp` on `127.0.0.1` the first time an agent needs a 
 ### Docker (optional, still local)
 
 ```bash
-OCTOPUS_PROJECTS=~/code docker compose up --build   # UI http://localhost:8080
+./start.sh        # macOS / Linux      UI: http://localhost:8080
+start.bat         # Windows
 ```
 
-Containers have no desktop, so the in-app folder browser is used there.
+A container can't open your laptop's folder dialog and can only see folders shared with it. The start scripts handle
+both:
+
+- **Your laptop folders.** `OCTOPUS_HOST_DIR` (default: your home folder) is shared with the container at `/host`, so
+  any folder inside it can be opened as a project. Paths are shown, and can be pasted, as laptop paths
+  (`C:\Users\me\code\game`). To share less, set e.g. `OCTOPUS_HOST_DIR=C:\Users\me\code` before starting.
+  Whatever you share is reachable from inside the container, so share only what Octopus should see.
+- **Your system folder dialog.** They also start `scripts/folder_bridge.py` on the laptop (Python 3.9+, standard library
+  only). "Open project folder" asks it to show the native dialog, and the folder you pick opens through the shared
+  folder. It listens on `127.0.0.1:8765` and only answers the Octopus UI. Without Python you get the in-app browser,
+  which browses the shared folder.
+
+Plain `docker compose up --build` works too; you just get the in-app browser instead of the system dialog. Running
+natively (`make setup && make start`) needs neither: the backend opens the dialog itself.
 
 ## How it works
 
