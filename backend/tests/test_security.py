@@ -245,3 +245,24 @@ async def test_workspace_creation_and_browse(client, tmp_root) -> None:
     assert names["brand-new"]["is_project"] is True
     assert (await client.post("/api/v1/workspaces", json={"path": "/etc"})).status_code == 400
     assert (await client.get("/api/v1/fs/browse", params={"path": "/"})).status_code == 400
+
+
+async def test_concurrent_first_requests_share_the_single_user(tmp_path) -> None:
+    """Regression: two first requests both inserted the single local user (UNIQUE constraint failed: users.email)."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.deps import get_or_create_single_user
+    from app.db.migrate import upgrade_registry
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'registry.db'}"
+    upgrade_registry(url)
+    sf = async_sessionmaker(create_async_engine(url), expire_on_commit=False)
+
+    async def one():  # type: ignore[no-untyped-def]
+        async with sf() as db:
+            return (await get_or_create_single_user(db)).id
+
+    ids = await asyncio.gather(*(one() for _ in range(8)))
+    assert len(set(ids)) == 1
