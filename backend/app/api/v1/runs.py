@@ -108,6 +108,9 @@ async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(ge
         if rt is not None:  # live counters are fresher than the row
             o.status, o.turns, o.tokens_used, o.cost_usd = rt.run_status, rt.turn_no, rt.tokens, round(rt.cost, 6)
         o.outcome = outcomes[r.id]
+        m = rt.efficiency() if rt is not None else ((r.state_json or {}).get("metrics") or {})
+        o.outcome.agent_turns, o.outcome.work_turns = int(m.get("turns", 0)), int(m.get("work_turns", 0))
+        o.outcome.first_deliverable_turn, o.outcome.delegations = m.get("first_deliverable_turn"), int(m.get("delegations", 0))
         result.append(o)
     return result
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import fnmatch
 import io
 import os
+import re
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -160,6 +161,33 @@ class ProjectFS:
                     if len(out) >= MAX_LIST:
                         return sorted(out)
         return sorted(out)
+
+    def search(self, query: str, *, regex: bool = False, prefix: str = "", max_results: int = 80) -> tuple[list[str], int, int]:
+        """``path:line: text`` matches across text files (project + working docs). Returns (matches, total, files searched).
+
+        Literal queries are case-insensitive unless they contain an uppercase letter ("smart case")."""
+        flags = 0 if regex or any(c.isupper() for c in query) else re.IGNORECASE
+        try:
+            pat = re.compile(query if regex else re.escape(query), flags)
+        except re.error as exc:
+            raise WorkspaceError(f"Invalid regex: {exc}") from exc
+        prefix = prefix.strip().strip("/")
+        files = self.list(prefix) + ([] if prefix else self.list_work())
+        out: list[str] = []
+        total = 0
+        for rel in files:
+            try:
+                content = self.current(rel)
+            except WorkspaceError:
+                continue
+            if content is None or len(content) > 2 * MAX_FILE_BYTES or "\x00" in content[:4096]:
+                continue  # binary or huge
+            for i, line in enumerate(content.splitlines(), 1):
+                if pat.search(line):
+                    total += 1
+                    if len(out) < max_results:
+                        out.append(f"{rel}:{i}: {line.strip()[:240]}")
+        return out, total, len(files)
 
     def list_work(self) -> list[str]:
         """The agents' working documents (``.octopus/work/``), as project-relative paths."""

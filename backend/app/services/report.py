@@ -40,6 +40,13 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
         out += [f"> Halt reason: {run.halt_reason}", ""]
     if run.summary:
         out += ["## Outcome", "", run.summary, ""]
+    m = state.get("metrics") or {}
+    if m.get("turns"):
+        out += ["## Efficiency", "",
+                f"- Turns that changed a deliverable or ran something: {m.get('work_turns', 0)} of {m['turns']} "
+                f"({round(100 * (1 - m.get('overhead_share', 0)))}%); the rest was coordination",
+                f"- First deliverable file at turn: {m.get('first_deliverable_turn') or 'none'}",
+                f"- Delegations: {m.get('delegations', 0)} ({m.get('parallel_delegations', 0)} run in parallel)", ""]
 
     out += ["## Team", "", "| Agent | Role | Department | Model | Turns | Tokens |", "|---|---|---|---|---|---|"]
     turns = state.get("agent_turns", {})

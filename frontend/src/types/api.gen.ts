@@ -2593,6 +2593,23 @@ export interface components {
              * @default false
              */
             final_report: boolean;
+            /**
+             * Agent Turns
+             * @default 0
+             */
+            agent_turns: number;
+            /**
+             * Work Turns
+             * @default 0
+             */
+            work_turns: number;
+            /** First Deliverable Turn */
+            first_deliverable_turn?: number | null;
+            /**
+             * Delegations
+             * @default 0
+             */
+            delegations: number;
         };
         /** SessionIn */
         SessionIn: {
