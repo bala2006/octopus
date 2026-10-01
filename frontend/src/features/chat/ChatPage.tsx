@@ -83,6 +83,11 @@ export default function ChatPage() {
   );
 }
 
+/** One section rhythm for both sidebar headings (they used to differ: pt-2 vs mt-3). */
+function SidebarHeading({ id, children }: { id: string; children: React.ReactNode }) {
+  return <div id={id} className="shrink-0 px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</div>;
+}
+
 function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
   agents: AgentOut[]; sessions: SessionOut[]; activeId?: string; onAgent: (id: string) => void; onCompany: () => void;
 }) {
@@ -107,33 +112,36 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-surface" aria-label="Chats">
-      <div className="p-2">
+    // Bounded flex column: Agents takes its natural height up to 45% and scrolls beyond that; History gets the rest and
+    // scrolls too. (Agents used to be unbounded, so with ~8+ agents History collapsed to zero height and never scrolled.)
+    <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r border-border bg-surface" aria-label="Chats">
+      <div className="shrink-0 p-2">
         <button onClick={onCompany} className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium transition hover:bg-accent", active?.mode === "company" && "bg-accent")}>
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
           Company Channel
         </button>
       </div>
-      <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Agents</div>
-      <div className="space-y-0.5 px-2">
+      <SidebarHeading id="chat-agents-heading">Agents</SidebarHeading>
+      <div className="max-h-[45%] min-h-0 shrink-0 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-agents-heading" data-testid="chat-agents-list">
         {agents.map((a) => (
-          <button key={a.id} onClick={() => onAgent(a.id)} data-testid={`chat-agent-${a.name}`}
+          <button key={a.id} onClick={() => onAgent(a.id)} data-testid={`chat-agent-${a.name}`} role="listitem"
             className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-accent", active?.agent_id === a.id && "bg-accent")}>
             <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} size={24} />
             <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{a.name}</span><span className="block truncate text-[10.5px] text-muted-foreground">{a.role}</span></span>
           </button>
         ))}
       </div>
-      <div className="mt-3 flex items-center justify-between px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">History</div>
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+      <SidebarHeading id="chat-history-heading">History</SidebarHeading>
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-history-heading" data-testid="chat-history-list">
+        {!sessions.length && <p className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet.</p>}
         {sessions.map((s) => (
-          <div key={s.id} className={cn("group flex items-center gap-1 rounded-md pr-1 transition hover:bg-accent/60", s.id === activeId && "bg-accent")}>
+          <div key={s.id} role="listitem" className={cn("group flex items-center gap-1 rounded-lg pr-1 transition hover:bg-accent/60", s.id === activeId && "bg-accent")}>
             <button onClick={() => nav(`/w/${w}/chat/${s.id}`)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left">
-              {s.mode === "company" ? <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center">{s.mode === "company" ? <Hash className="h-3.5 w-3.5 text-muted-foreground" /> : <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}</span>
               <span className="min-w-0 flex-1"><span className="block truncate text-xs">{s.title}</span><span className="text-[10px] text-muted-foreground">{timeAgo(s.created_at)}</span></span>
             </button>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild><button className="rounded p-1 opacity-0 transition hover:bg-background group-hover:opacity-100" aria-label="Chat options"><MoreHorizontal className="h-3.5 w-3.5" /></button></DropdownMenuTrigger>
+              <DropdownMenuTrigger asChild><button className="rounded p-1 opacity-0 transition hover:bg-background focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100" aria-label="Chat options"><MoreHorizontal className="h-3.5 w-3.5" /></button></DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={() => { setTitle(s.title); setRenaming(s); }}><Pencil />Rename</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void exportAs(s, "md")}><Download />Export Markdown</DropdownMenuItem>
