@@ -2336,6 +2336,11 @@ export interface components {
              */
             max_loop_strikes: number;
             /**
+             * Stall Turns
+             * @default 30
+             */
+            stall_turns: number;
+            /**
              * Context Recent
              * @default 10
              */

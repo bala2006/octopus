@@ -195,7 +195,9 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 {memory}{browser_note(agent, preview_url)}
 
 ## Rules
-1. Be concise. Do not repeat what others already said; reference it.
+1. Be concise. Do not repeat what others already said; reference it. The Blackboard (task board, workspace files) is always
+   current: check it instead of asking a teammate whether something exists or is done, and never re-send a request they
+   already have (repeats are blocked as loops). If you are waiting on someone, `wait`.
 2. Challenge weak ideas politely with concrete reasons; converge instead of arguing in circles.
 3. Never fabricate tool results, test output or file contents; use tools and report what they return.
 4. Files must end up COMPLETE (no placeholders). Paths are relative to the project workspace. Your reply has an output limit

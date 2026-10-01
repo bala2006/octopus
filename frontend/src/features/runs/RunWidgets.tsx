@@ -1,6 +1,6 @@
 import * as React from "react";
 import { tone } from "@/lib/palette";
-import { Coins, Cpu, Gauge, Radio, Timer } from "lucide-react";
+import { Coins, Cpu, Gauge, Hourglass, Radio, Timer } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { useMoney } from "@/lib/money";
 import type { AgentOut } from "@/types";
@@ -34,6 +34,13 @@ export function UsageMeter({ usage }: { usage: RunLive["usage"] }) {
         </button>
       </UsageBreakdown>
       {usage.timeout_s ? <Meter icon={Timer} label="Active time" value={Math.round(usage.active_seconds ?? 0)} max={usage.timeout_s} fmt={(n) => `${n}s`} /> : null}
+      {(usage.turns_since_progress ?? 0) >= 5 ? (
+        <Tip content={`No file changed and no task moved since turn ${usage.progress_turn}`} side="bottom">
+          <span className="flex items-center gap-1 rounded-md bg-warning/10 px-1.5 py-0.5 text-[11px] tabular-nums text-warning" aria-label="Turns since last progress">
+            <Hourglass className="h-3 w-3" />{usage.turns_since_progress} turns without progress
+          </span>
+        </Tip>
+      ) : null}
     </div>
   );
 }

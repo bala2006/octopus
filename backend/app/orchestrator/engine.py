@@ -8,8 +8,9 @@ One ``RunRuntime`` per run executes as an asyncio task:
       → parse structured actions → execute (permissions, protocols, limits enforced here)
       → route messages to mailboxes → persist + publish events → repeat
 
-Bounded by: global max turns, per-edge max turns, token + cost budget, active wall-clock timeout,
-per-agent max autonomous turns, loop detector (auto-pause on repeated strikes), human pause and kill switch.
+Bounded by: global max turns, per-edge max turns, token + cost budget, active-time budget (time spent working, not paused or
+waiting for the user), per-agent max autonomous turns, a lifetime ceiling across follow-ups, the loop detector and the stall
+watchdog (both auto-pause for a human), human pause and kill switch.
 """
 from __future__ import annotations
 
@@ -56,6 +57,8 @@ OPEN_TASK_STATES = {"todo", "in_progress", "in_review", "blocked"}
 # How many turns in a row an agent may take only because of its own tool results / notices (no new message). Reading a
 # file and acting on it needs one; an agent that keeps re-reading without producing anything is spinning.
 MAX_SELF_TURNS = 3
+# A run and all of its follow-ups may spend at most this multiple of the run's original budget (turns, tokens, cost, time).
+FOLLOWUP_BUDGET_CEILING = 3
 
 
 class StopRun(Exception):
@@ -147,6 +150,8 @@ class RunRuntime(TeamMixin):
         self.reviews: dict[str, ReviewState] = {}
         self.loop = LoopDetector(threshold=self.budget.loop_threshold, max_strikes=self.budget.max_loop_strikes)
         self.loop_escalated = False
+        self.stall_escalated = False
+        self.stall_ack = run.turns or 0  # turn at which a human last resumed a stalled run
         self.tasks: dict[str, dict[str, Any]] = {}
         self.task_counter = 0
         self.artifacts: dict[str, dict[str, Any]] = {}
@@ -219,6 +224,7 @@ class RunRuntime(TeamMixin):
             "auto_approve": sorted(self.auto_approve), "levels": self.levels, "activity": self.activity,
             "budget_base": self.budget_base,
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
+            "stall_ack": self.stall_ack,
         }
 
     async def save(self) -> None:
@@ -256,6 +262,7 @@ class RunRuntime(TeamMixin):
         self.self_turns = Counter(st.get("self_turns", {}))
         self.progress_turn = int(st.get("progress_turn", self.turn_no))
         self.nudged = dict(st.get("nudged", {}))
+        self.stall_ack = int(st.get("stall_ack", self.turn_no))
         async with self.db() as db:
             msgs = (await db.execute(select(Message).where(Message.run_id == self.run_id).order_by(Message.created_at))).scalars().all()
             for m in msgs:
@@ -321,6 +328,7 @@ class RunRuntime(TeamMixin):
             "reasoning_tokens": self.usage_totals["reasoning"], "llm_calls": self.llm_calls,
             "estimated_calls": self.usage_totals["estimated_calls"],
             "cost_breakdown": {k: round(v, 6) for k, v in self.cost_totals.items()},
+            "progress_turn": self.progress_turn, "turns_since_progress": self.turn_no - self.progress_turn,
         })
 
     def add_usage(self, agent_id: str | None, u: Any) -> None:
@@ -461,15 +469,31 @@ class RunRuntime(TeamMixin):
     # ------------------------------------------------------------------ limits & control
     def limit_reason(self) -> str | None:
         b = self.budget
+        reason = None
         if self.turn_no >= b.max_turns:
-            return f"Budget: max turns reached ({b.max_turns})"
-        if self.tokens >= b.max_tokens:
-            return f"Budget: token budget exhausted ({self.tokens}/{b.max_tokens})"
-        if b.max_cost_usd > 0 and self.cost >= b.max_cost_usd:
-            return f"Budget: cost budget exhausted (${self.cost:.4f}/${b.max_cost_usd:.2f})"
-        if self.active_seconds >= b.timeout_s:
-            return f"Budget: wall-clock timeout ({b.timeout_s}s)"
-        return None
+            reason = f"Budget: max turns reached ({b.max_turns})"
+        elif self.tokens >= b.max_tokens:
+            reason = f"Budget: token budget exhausted ({self.tokens}/{b.max_tokens})"
+        elif b.max_cost_usd > 0 and self.cost >= b.max_cost_usd:
+            reason = f"Budget: cost budget exhausted (${self.cost:.4f}/${b.max_cost_usd:.2f})"
+        elif self.active_seconds >= b.timeout_s:  # time spent working; paused / waiting-for-you time is not counted
+            reason = f"Budget: active-time limit reached ({b.timeout_s}s of agent work)"
+        if reason and self.followups:
+            reason += f"; follow-ups share a lifetime ceiling of {FOLLOWUP_BUDGET_CEILING}x the run budget, start a new run to go further"
+        return reason
+
+    async def check_stall(self) -> None:
+        """Progress watchdog: no file changed and no task moved for ``stall_turns`` turns → pause and show the human the board."""
+        n = self.budget.stall_turns
+        if not n or self.stall_escalated or self.turn_no - max(self.progress_turn, self.stall_ack) < n:
+            return
+        self.stall_escalated = True
+        self.paused = True
+        open_ = self.open_tasks()
+        board = "; ".join(f"{t['key']} {t['status']}" for t in open_[:8]) or "no open tasks"
+        await self.emit("error", {"kind": "stall", "message": (
+            f"No progress for {self.turn_no - self.progress_turn} turns: no file changed and no task moved since turn {self.progress_turn} "
+            f"(board: {board}). Run paused; interject to steer, then resume, or stop it.")})
 
     async def gate(self) -> None:
         while True:
@@ -495,8 +519,12 @@ class RunRuntime(TeamMixin):
 
     def resume(self) -> None:
         self.paused = False
-        self.loop.strikes = {}
+        if self.loop_escalated:  # keep the evidence; the next repeat pauses again instead of needing max_strikes more
+            self.loop.acknowledge(hot=True)
         self.loop_escalated = False
+        if self.stall_escalated:
+            self.stall_ack = self.turn_no
+        self.stall_escalated = False
         if self.mode == "step":
             self.step_credits = max(self.step_credits, 1)
         self.wake.set()
@@ -520,17 +548,22 @@ class RunRuntime(TeamMixin):
         self.followups.append(content[:2000])
         self.finalized = False
         self.finished_summary = None
-        self.loop_escalated = False
+        self.loop_escalated = self.stall_escalated = False
+        self.loop.acknowledge(hot=False)
+        self.stall_ack = self.turn_no
         self.paused = False
         self.stop_requested = False
         self.awaiting = None
         self.agent_turns = Counter()  # per-agent autonomy limits apply per request
+        # Each follow-up gets fresh headroom of one base budget, but never beyond FOLLOWUP_BUDGET_CEILING x the base over
+        # the run's lifetime: N follow-ups must not mean N x the spend the user agreed to.
         base = RunBudget(**(self.budget_base or self.budget.model_dump()))
-        self.budget.max_turns = min(2000, self.turn_no + base.max_turns)
-        self.budget.max_tokens = self.tokens + base.max_tokens
+        ceil = FOLLOWUP_BUDGET_CEILING
+        self.budget.max_turns = min(2000, self.turn_no + base.max_turns, base.max_turns * ceil)
+        self.budget.max_tokens = min(self.tokens + base.max_tokens, base.max_tokens * ceil)
         if base.max_cost_usd > 0:
-            self.budget.max_cost_usd = round(self.cost + base.max_cost_usd, 6)
-        self.budget.timeout_s = min(86400, int(self.active_seconds) + base.timeout_s)
+            self.budget.max_cost_usd = round(min(self.cost + base.max_cost_usd, base.max_cost_usd * ceil), 6)
+        self.budget.timeout_s = min(86400, int(self.active_seconds) + base.timeout_s, base.timeout_s * ceil)
         async with self.db() as db:
             await db.execute(update(Run).where(Run.id == self.run_id).values(ended_at=None, halt_reason="", budget_json=self.budget.model_dump()))
             await db.commit()
@@ -676,8 +709,9 @@ class RunRuntime(TeamMixin):
                 if self.loop.escalate() and not self.loop_escalated:
                     self.loop_escalated = True
                     self.paused = True
-                    await self.emit("error", {"message": "Loop detected: agents keep sending near-identical messages. "
+                    await self.emit("error", {"message": f"Loop detected: agents keep repeating themselves ({self.loop.last_reason or 'repeated messages'}). "
                                                          "Run paused for human review; interject to steer, then resume.", "kind": "loop"})
+                await self.check_stall()
         except (StopRun, asyncio.CancelledError):
             await asyncio.shield(self.finalize("cancelled", "Stopped by user (kill switch)"))
         except Exception as exc:  # pragma: no cover - defensive
@@ -709,6 +743,9 @@ class RunRuntime(TeamMixin):
                 f"- {p} v{a['version']} by {self.names.get(a['author'] or '', '?')}" for p, a in sorted(self.artifacts.items())))
         if self.user_notes:
             lines.append("User notes:\n" + "\n".join(f"- {n}" for n in self.user_notes[-5:]))
+        idle = self.turn_no - self.progress_turn
+        lines.append(f"Progress: last file / task-board change at turn {self.progress_turn}"
+                     + (f" ({idle} turns ago: deliver something or update the board instead of more discussion)" if idle >= 5 else ""))
         lines.append(f"Budget: turn {self.turn_no}/{self.budget.max_turns}, tokens {self.tokens}/{self.budget.max_tokens}")
         return "\n".join(lines)
 
@@ -800,19 +837,20 @@ class RunRuntime(TeamMixin):
         inbox_ids = [mid for _, mid in self.mailbox.pop(aid, [])]
         obs = [o for _, o in self.observations.pop(aid, [])]
         self.self_turns[aid] = 0 if inbox_ids else self.self_turns[aid] + 1
-        self.turn_no += 1
-        self.agent_turns[aid] += 1
         if inbox_ids:
             async with self.db() as db:
                 await db.execute(update(Message).where(Message.id.in_(inbox_ids)).values(read=True))
                 await db.commit()
         max_auto = int(agent.behavior.get("max_autonomous_turns", 12))
-        if self.agent_turns[aid] > max_auto:
+        if self.agent_turns[aid] >= max_auto:  # checked BEFORE counting: a skipped turn costs no budget and is visible
+            await self.emit("turn_skipped", {"agent_id": aid, "inbox": inbox_ids, "reason": "max_autonomous_turns", "limit": max_auto})
             await self.emit("error", {"message": f"{agent.name} exceeded max autonomous turns ({max_auto}); its pending work was dropped.",
                                       "agent_id": aid, "kind": "limit"})
             self.done_agents.add(aid)
             await self.set_agent_status(aid, "done")
             return
+        self.turn_no += 1
+        self.agent_turns[aid] += 1
         await self.emit("turn_started", {"agent_id": aid, "turn_no": self.turn_no, "inbox": inbox_ids})
         await self.set_agent_status(aid, "thinking", f"Reading {len(inbox_ids)} new message(s)…" if inbox_ids else "Reviewing results…")
         inbox_set = set(inbox_ids)
@@ -904,9 +942,11 @@ class RunRuntime(TeamMixin):
     async def _tool_result(self, agent: AgentSpec, cid: str, tool: str, ok: bool, output: str) -> None:
         await self.emit("tool_result", {"call_id": cid, "agent_id": agent.id, "tool": tool, "ok": ok, "output": output[:4000]})
 
-    async def reject(self, agent: AgentSpec, to_id: str | None, a: A.SendMessage, reason: str) -> None:
+    async def reject(self, agent: AgentSpec, to_id: str | None, a: A.SendMessage, reason: str, *, retry: bool = True) -> None:
+        """``retry=False`` for loop / channel-limit rejections: the agent sees the notice next time it is woken, but the
+        rejection itself does not buy it another turn (that just turned a loop into a spin)."""
         self.rejections += 1
-        self.notice(agent.id, f"Message to {self.names.get(to_id or '', a.to)} was REJECTED: {reason}", activate=True)
+        self.notice(agent.id, f"Message to {self.names.get(to_id or '', a.to)} was REJECTED: {reason}", activate=retry)
         await self.emit("message_rejected", {"from_agent_id": agent.id, "to_agent_id": to_id, "to": a.to, "type": a.type,
                                              "reason": reason, "content": a.content[:300]})
 
@@ -939,11 +979,15 @@ class RunRuntime(TeamMixin):
         cfg = edge.config or {}
         max_turns = int(cfg.get("max_turns", 20))
         if self.edge_counts[edge.id] >= max_turns:
-            await self.reject(agent, tid, a, f"Channel turn limit reached (max_turns={max_turns}). Wrap up or escalate via another channel.")
+            await self.reject(agent, tid, a, f"Channel turn limit reached (max_turns={max_turns}). Wrap up or escalate via another channel.",
+                              retry=False)
             return
         if self.loop.check(agent.id, tid, a.type, a.content):
-            await self.reject(agent, tid, a, "Loop detected: this is near-identical to a recent message. Summarize progress and move forward, escalate, or finish.")
-            await self.emit("error", {"message": f"Loop detector: {agent.name} → {self.names[tid]} repeated a message", "agent_id": agent.id, "kind": "loop"})
+            await self.reject(agent, tid, a, f"Loop detected: {self.loop.last_reason}. {self.names[tid]} already has it. Don't ask again: "
+                                             "check the Blackboard (task board, workspace files), do the work yourself, escalate, or finish.",
+                              retry=False)
+            await self.emit("error", {"message": f"Loop detector: {agent.name} → {self.names[tid]}: {self.loop.last_reason}",
+                                      "agent_id": agent.id, "kind": "loop"})
             return
         content, meta = a.content, {}
         notices: dict[str, str] = {}

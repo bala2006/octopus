@@ -337,9 +337,11 @@ class RunBudget(BaseModel):
     max_turns: int = Field(60, ge=1, le=2000)
     max_tokens: int = Field(400_000, ge=1000)
     max_cost_usd: float = Field(2.0, ge=0)
-    timeout_s: int = Field(900, ge=10, le=86400)
+    timeout_s: int = Field(900, ge=10, le=86400)  # active time: seconds spent working (paused / waiting for you is not counted)
     loop_threshold: float = Field(0.92, ge=0.5, le=1.0)
     max_loop_strikes: int = Field(3, ge=1, le=20)
+    # pause for a human after this many turns without a file change / task-board move (0 = off)
+    stall_turns: int = Field(30, ge=0, le=2000)
     context_recent: int = Field(10, ge=2, le=100)
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
