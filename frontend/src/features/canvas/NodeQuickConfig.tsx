@@ -1,22 +1,26 @@
 import * as React from "react";
 import { useStore } from "@xyflow/react";
 import { Link, useNavigate } from "react-router-dom";
-import { Braces, Crown, Flag, Maximize2, MessageSquare, Plug, Plus, Power, Trash2, X } from "lucide-react";
-import { useMcpServers, useWorkspaceId } from "@/hooks/queries";
+import { toast } from "sonner";
+import { BookOpenCheck, Crown, Flag, Maximize2, MessageSquare, PenLine, Plug, Power, Trash2, X } from "lucide-react";
+import { useMcpServers, useRoleTemplates, useSettings, useWorkspaceId } from "@/hooks/queries";
 import { PERMISSIONS, TOOLS } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useCanvas, type AgentData } from "@/stores/canvas";
 import type { AgentPermission, AgentTools } from "@/types";
 import { AgentAvatar } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
+import { Field, Input, Switch } from "@/components/ui/primitives";
 import { Select, Tip } from "@/components/ui/overlays";
-import { ModelPicker } from "./ModelPicker";
-import { EffortPicker, type Effort } from "./EffortPicker";
+import { Combobox } from "@/components/ui/combobox";
+import { EFFORTS } from "./EffortPicker";
+import { applyRole, EFFORT_OPTIONS, isLinked, presetOf, roleOptions, TOOL_PRESETS } from "./roleHelpers";
 
-const VARS = ["{{company_name}}", "{{goal}}", "{{team}}", "{{agent_name}}", "{{role}}", "{{department}}", "{{manager}}", "{{reports}}"];
-
-/** Mini configuration window rendered to the right of a clicked agent node. */
+/**
+ * Mini configuration window next to a clicked agent node. Everything except the name is picked from a list (role,
+ * department, model, thinking, permission, tool preset); the role brings the prompt, which is edited in Settings → Roles
+ * (or, for one agent, under All settings → Prompt).
+ */
 export function NodeQuickConfig({ id, data, onClose }: { id: string; data: AgentData; onClose: () => void }) {
   // The panel hangs next to its node, so it can start low on screen: fit it into the space left below its top edge.
   const panelRef = React.useRef<HTMLDivElement>(null);
@@ -51,19 +55,31 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
     return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", fit); mo?.disconnect(); };
   }, [transform]);
   const update = useCanvas((s) => s.updateAgent);
+  const undo = useCanvas((s) => s.undo);
   const setInspector = useCanvas((s) => s.setInspector);
   const deleteNodes = useCanvas((s) => s.deleteNodes);
   const { data: mcp } = useMcpServers();
+  const { data: roles = [] } = useRoleTemplates();
+  const { data: settings } = useSettings();
   const w = useWorkspaceId();
   const nav = useNavigate();
-  const promptRef = React.useRef<HTMLTextAreaElement>(null);
+  const [customTools, setCustomTools] = React.useState(false);
   const tools = (data.tools ?? {}) as AgentTools;
   const setTool = (key: string, v: boolean | string[]) => update(id, { tools: { ...tools, [key]: v } as AgentTools });
   const mcpIds = tools.mcp_servers ?? [];
   const nodes = useCanvas((s) => s.nodes);
   const deptList = React.useMemo(() => [...new Set(nodes.map((n) => n.data.department).filter(Boolean) as string[])].sort(), [nodes]);
   const managers = nodes.filter((n) => n.id !== id && (n.data.is_manager || n.data.is_entry));
-  const deptId = React.useId();
+  const behavior = (data.behavior ?? {}) as NonNullable<AgentData["behavior"]>;
+  const roleKey = behavior.template_key ?? "";
+  const role = roles.find((r) => r.key === roleKey);
+  const linkedPrompt = isLinked(data, roles);
+  const preset = presetOf(tools, role);
+  const modelOptions = React.useMemo(() => (settings?.providers ?? []).flatMap((p) => p.models.map((m) => ({
+    value: `${p.provider}::${m}`, label: m, group: p.label, hint: p.configured || p.provider === "mock" ? undefined : "not connected yet" }))), [settings]);
+  const effProvider = data.provider === "mock" ? "mock" : "azure";
+  const effModels = settings?.providers.find((p) => p.provider === effProvider)?.models ?? [];
+  const modelValue = `${effProvider}::${effModels.includes(data.model ?? "") ? data.model : effModels[0] ?? data.model}`;
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -71,40 +87,57 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const insertVar = (v: string) => {
-    const el = promptRef.current;
-    const text = data.system_prompt ?? "";
-    const start = el?.selectionStart ?? text.length;
-    const end = el?.selectionEnd ?? text.length;
-    update(id, { system_prompt: text.slice(0, start) + v + text.slice(end) });
-    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + v.length, start + v.length); });
+  const pickRole = (key: string) => {
+    const r = roles.find((x) => x.key === key);
+    if (!r || key === roleKey) return;
+    update(id, applyRole(data, r), { history: true });
+    toast.success(`${data.name || "Agent"} is now ${r.role}`, { description: "Its prompt, look and tools come from the role.", action: { label: "Undo", onClick: undo } });
+  };
+  const pickPreset = (v: string) => {
+    if (v === "custom") { setCustomTools(true); return; }
+    const base = v === "role" && role ? role.tools : TOOL_PRESETS.find((p) => p.value === v)?.tools;
+    if (base) update(id, { tools: { ...tools, ...base, mcp_servers: mcpIds, manage_team: !!tools.manage_team } as AgentTools }, { history: true });
   };
 
   return (
     // `nopan`/`nodrag`/`nowheel`: React Flow's pan/zoom filter ignores gestures that start inside the panel (a pan starts on
-    // pointerdown, so stopping `click` alone was too late). select-text: the canvas sets user-select: none, but labels and
-    // the system prompt must be selectable. (No React-level pointerdown stopPropagation: in React 18 that also stops the
-    // native event at the root, which breaks Radix's outside-click handling for the selects in this panel.)
-    <div ref={panelRef} className="nodrag nopan nowheel flex max-h-[calc(100dvh-5rem)] w-[340px] cursor-auto select-text flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl animate-in fade-in-0 slide-in-from-left-2 zoom-in-95 duration-150"
+    // pointerdown, so stopping `click` alone was too late). select-text: the canvas sets user-select: none, but labels must
+    // stay selectable. (No React-level pointerdown stopPropagation: in React 18 that also stops the native event at the root,
+    // which breaks Radix's outside-click handling for the selects in this panel.)
+    <div ref={panelRef} className="nodrag nopan nowheel flex max-h-[calc(100dvh-5rem)] w-[320px] cursor-auto select-text flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl animate-in fade-in-0 slide-in-from-left-2 zoom-in-95 duration-150"
       role="dialog" aria-label={`Configure ${data.name}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <AgentAvatar name={data.name} color={data.color} avatar={data.avatar} size={24} />
         <span className="flex-1 truncate text-sm font-semibold">{data.name || "Agent"}</span>
-        <Tip content="Open full inspector"><Button variant="ghost" size="icon-sm" onClick={() => setInspector(id)} aria-label="Open full inspector"><Maximize2 /></Button></Tip>
+        <Tip content="All settings"><Button variant="ghost" size="icon-sm" onClick={() => setInspector(id)} aria-label="Open full inspector"><Maximize2 /></Button></Tip>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close"><X /></Button>
       </div>
 
       <div data-qc-body className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3">
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Agent name"><Input value={data.name} onChange={(e) => update(id, { name: e.target.value })} className="h-8" autoFocus /></Field>
-          <Field label="Agent role"><Input value={data.role ?? ""} onChange={(e) => update(id, { role: e.target.value })} className="h-8" placeholder="e.g. QA Engineer" /></Field>
+        <Field label="Name"><Input value={data.name} onChange={(e) => update(id, { name: e.target.value })} className="h-8" autoFocus aria-label="Agent name" /></Field>
+
+        <div className="space-y-1">
+          <Field label="Role">
+            <Combobox value={roleKey} options={roleOptions(roles)} onChange={pickRole} ariaLabel="Role" testId="role-picker"
+              placeholder={data.role ? `${data.role} (pick a role)` : "Pick a role"} />
+          </Field>
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            {linkedPrompt ? (
+              <><BookOpenCheck className="h-3 w-3 text-success" />Prompt from the role ·
+                <Link to={`/w/${w}/settings#roles`} className="text-primary hover:underline">edit in Settings → Roles</Link></>
+            ) : (
+              <><PenLine className="h-3 w-3 text-warning" />Own prompt (All settings → Prompt)
+                {role && <button className="ml-auto text-primary hover:underline" onClick={() => update(id, applyRole(data, role), { history: true })}>Use role prompt</button>}</>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-[1fr_auto] items-end gap-2">
           <Field label="Department">
-            <Input list={deptId} value={(data.department as string) ?? ""} onChange={(e) => update(id, { department: e.target.value })} className="h-8" placeholder="e.g. Engineering" />
+            <Combobox value={(data.department as string) ?? ""} ariaLabel="Department" placeholder="No department"
+              options={[{ value: "", label: "No department" }, ...deptList.map((d) => ({ value: d, label: d }))]}
+              onChange={(v) => update(id, { department: v }, { history: true })} onCreate={(v) => update(id, { department: v }, { history: true })} createLabel="New department" />
           </Field>
-          <datalist id={deptId}>{deptList.map((d) => <option key={d} value={d} />)}</datalist>
           <Tip content="Managers lead a department: they delegate, review, and (with Manage team) hire">
             <button role="switch" aria-checked={!!data.is_manager} aria-label="Department manager"
               onClick={() => update(id, { is_manager: !data.is_manager, tools: { ...tools, manage_team: !data.is_manager ? true : tools.manage_team } as AgentTools }, { history: true })}
@@ -127,58 +160,16 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
           </Tip>
         </div>
 
-        <Field label="System prompt">
-          <Textarea ref={promptRef} value={data.system_prompt ?? ""} onChange={(e) => update(id, { system_prompt: e.target.value })}
-            className="min-h-[110px] resize-y font-mono text-[11px] leading-relaxed" placeholder="You are … Your responsibilities are …" />
-          <div className="flex flex-wrap items-center gap-1 pt-1">
-            <Braces className="h-3 w-3 text-muted-foreground" />
-            {VARS.map((v) => (
-              <button key={v} onClick={() => insertVar(v)} className="rounded border border-border px-1.5 py-px font-mono text-[10px] text-muted-foreground transition hover:border-primary/50 hover:text-primary">{v}</button>
-            ))}
-          </div>
-        </Field>
-
-        <div className="space-y-1.5">
-          <div className="text-xs font-medium text-muted-foreground">Tools</div>
-          <div className="grid grid-cols-2 gap-1">
-            {TOOLS.map((t) => {
-              const on = !!(tools as Record<string, unknown>)[t.key];
-              return (
-                <Tip key={t.key} content={t.hint}>
-                  <button role="switch" aria-checked={on} onClick={() => setTool(t.key, !on)}
-                    className={cn("flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-left text-xs transition-all active:scale-[0.97]",
-                      on ? "border-primary/50 bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-accent/50")}>
-                    <t.icon className={cn("h-3.5 w-3.5", on && (t.danger ? "text-warning" : "text-primary"))} />
-                    <span className="flex-1 truncate">{t.label}</span>
-                    <span className={cn("h-1.5 w-1.5 rounded-full transition-colors", on ? "bg-primary" : "bg-muted-foreground/30")} />
-                  </button>
-                </Tip>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-            <span className="flex items-center gap-1"><Plug className="h-3 w-3" />MCP servers</span>
-            <Link to={`/w/${w}/settings#mcp`} className="flex items-center gap-0.5 text-[11px] text-primary hover:underline"><Plus className="h-3 w-3" />Manage</Link>
-          </div>
-          {!mcp?.length ? (
-            <p className="rounded-md border border-dashed border-border p-2 text-[11px] text-muted-foreground">No MCP servers registered yet. Add one in Settings to grant this agent external tools.</p>
-          ) : (
-            <div className="space-y-1">
-              {mcp.map((s) => {
-                const on = mcpIds.includes(s.id);
-                return (
-                  <label key={s.id} className={cn("flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-xs transition", on ? "border-olive/40 bg-olive/5" : "border-border hover:bg-accent/40", !s.enabled && "opacity-50")}>
-                    <Switch checked={on} disabled={!s.enabled} onCheckedChange={(v) => setTool("mcp_servers", v ? [...mcpIds, s.id] : mcpIds.filter((x) => x !== s.id))} aria-label={`Grant ${s.name}`} />
-                    <span className="flex-1 truncate font-medium">{s.name}</span>
-                    <span className={cn("text-[10px]", s.last_error ? "text-destructive" : "text-muted-foreground")}>{s.last_error ? "error" : `${(s.tools ?? []).length} tools`}</span>
-                  </label>
-                );
-              })}
-            </div>
-          )}
+        <div className="grid grid-cols-[1fr_108px] gap-2">
+          <Field label="Model">
+            <Combobox value={modelValue} options={modelOptions} ariaLabel="Model" className="font-mono text-xs"
+              onChange={(v) => { const [p, m] = v.split("::"); update(id, { provider: p, model: m }, { history: true }); }} />
+          </Field>
+          <Field label="Thinking">
+            <Select ariaLabel="Reasoning effort" value={(behavior.reasoning_effort ?? "default") as string} className="h-8 text-xs"
+              onValueChange={(v) => update(id, { behavior: { ...behavior, reasoning_effort: v } as AgentData["behavior"] }, { history: true })}
+              options={EFFORT_OPTIONS.map((e) => ({ value: e.value, label: e.label, hint: EFFORTS.find((x) => x.value === e.value)?.hint }))} />
+          </Field>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -186,18 +177,60 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
             <Select value={(data.permission_level as string) ?? "inherit"} onValueChange={(v) => update(id, { permission_level: v as AgentPermission }, { history: true })}
               options={[{ value: "inherit", label: "Inherit from run" }, ...Object.entries(PERMISSIONS).map(([k, p]) => ({ value: k, label: p.label }))]} className="h-8 text-xs" />
           </Field>
-          <Field label="Entry agent">
+          <Field label="Receives the goal">
             <label className="flex h-8 items-center gap-2 rounded-md border border-border px-2 text-xs">
               <Switch checked={!!data.is_entry} onCheckedChange={(v) => update(id, { is_entry: v }, { history: true })} aria-label="Entry agent" />
-              <Flag className="h-3 w-3 text-primary" />Receives goal
+              <Flag className="h-3 w-3 shrink-0 text-primary" /><span className="truncate">Entry</span>
             </label>
           </Field>
         </div>
-        <Field label="Model"><ModelPicker provider={data.provider ?? "mock"} model={data.model ?? ""} onChange={(p, m) => update(id, { provider: p, model: m })} compact /></Field>
-        <Field label="Reasoning effort" hint="Higher = deeper thinking, more tokens and time">
-          <EffortPicker compact value={((data.behavior as { reasoning_effort?: Effort } | undefined)?.reasoning_effort ?? "default") as Effort}
-            onChange={(v) => update(id, { behavior: { ...(data.behavior ?? {}), reasoning_effort: v } as AgentData["behavior"] })} />
-        </Field>
+
+        <div className="space-y-1.5">
+          <Field label="Tools">
+            <Select ariaLabel="Tool preset" value={customTools ? "custom" : preset} onValueChange={pickPreset} className="h-8 text-xs"
+              options={[...(role ? [{ value: "role", label: `Role default (${role.role})` }] : []),
+                ...TOOL_PRESETS.map((p) => ({ value: p.value, label: p.label, hint: p.hint })), { value: "custom", label: "Custom…" }]} />
+          </Field>
+          <div className="flex flex-wrap items-center gap-1">
+            {TOOLS.filter((t) => (tools as Record<string, unknown>)[t.key]).map((t) => (
+              <span key={t.key} className="flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-px text-[10.5px] text-muted-foreground"><t.icon className="h-3 w-3" />{t.label}</span>
+            ))}
+            <button className="ml-auto text-[11px] text-primary hover:underline" onClick={() => setCustomTools(!customTools)} aria-expanded={customTools}>{customTools ? "Done" : "Customize"}</button>
+          </div>
+          {customTools && (
+            <div className="grid grid-cols-2 gap-1 animate-fade-up">
+              {TOOLS.map((t) => {
+                const on = !!(tools as Record<string, unknown>)[t.key];
+                return (
+                  <Tip key={t.key} content={t.hint}>
+                    <button role="switch" aria-checked={on} onClick={() => setTool(t.key, !on)}
+                      className={cn("flex items-center gap-1.5 rounded-md border px-2 py-1 text-left text-xs transition-all active:scale-[0.97]",
+                        on ? "border-primary/50 bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-accent/50")}>
+                      <t.icon className={cn("h-3.5 w-3.5", on && (t.danger ? "text-warning" : "text-primary"))} />
+                      <span className="flex-1 truncate">{t.label}</span>
+                    </button>
+                  </Tip>
+                );
+              })}
+            </div>
+          )}
+          {!!mcp?.length && (
+            <div className="flex flex-wrap items-center gap-1 pt-0.5">
+              <Plug className="h-3 w-3 text-muted-foreground" />
+              {mcp.map((srv) => {
+                const on = mcpIds.includes(srv.id);
+                return (
+                  <button key={srv.id} role="switch" aria-checked={on} aria-label={`Grant ${srv.name}`} disabled={!srv.enabled}
+                    onClick={() => setTool("mcp_servers", on ? mcpIds.filter((x) => x !== srv.id) : [...mcpIds, srv.id])}
+                    className={cn("rounded-full border px-2 py-px text-[10.5px] transition", on ? "border-olive/50 bg-olive/10 text-olive" : "border-border text-muted-foreground hover:bg-accent/50", !srv.enabled && "opacity-50")}>
+                    {srv.name}
+                  </button>
+                );
+              })}
+              <Link to={`/w/${w}/settings#mcp`} className="ml-auto text-[11px] text-primary hover:underline">Manage</Link>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-1 border-t border-border bg-surface px-2 py-1.5">

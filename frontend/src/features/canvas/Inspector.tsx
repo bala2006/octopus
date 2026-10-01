@@ -5,7 +5,10 @@ import { Activity, Brain, Cpu, Flag, Plug, Save, SlidersHorizontal, Trash2, User
 import { api, unwrap } from "@/lib/api";
 import { AGENT_COLORS, AVATARS, AVATAR_KEYS, MESSAGE_TYPE_LABEL, PERMISSIONS, TOOLS } from "@/lib/meta";
 import { cn, timeAgo } from "@/lib/utils";
-import { qk, useCompanyId, useMcpServers, useRuns, useWorkspaceId } from "@/hooks/queries";
+import { qk, useCompanyId, useMcpServers, useRoleTemplates, useRuns, useWorkspaceId } from "@/hooks/queries";
+import { Link } from "react-router-dom";
+import { Combobox } from "@/components/ui/combobox";
+import { applyRole, isLinked, roleOptions } from "./roleHelpers";
 import { useCanvas } from "@/stores/canvas";
 import type { AgentBehavior, AgentPermission, AgentTools } from "@/types";
 import { AgentAvatar, EmptyState } from "@/components/common";
@@ -19,12 +22,16 @@ export function Inspector() {
   const id = useCanvas((s) => s.inspectorId);
   const node = useCanvas((s) => s.nodes.find((n) => n.id === s.inspectorId));
   const update = useCanvas((s) => s.updateAgent);
+  const { data: roles = [] } = useRoleTemplates();
+  const w = useWorkspaceId();
   const close = () => useCanvas.getState().setInspector(null);
   if (!id || !node) return null;
   const d = node.data;
   const set = (p: Partial<typeof d>) => update(id, p);
   const tools = (d.tools ?? {}) as AgentTools;
   const behavior = (d.behavior ?? {}) as AgentBehavior;
+  const role = roles.find((r) => r.key === behavior.template_key);
+  const linked = isLinked(d, roles);
 
   return (
     <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-border bg-surface animate-in slide-in-from-right-4 duration-200" aria-label="Agent inspector">
@@ -50,7 +57,11 @@ export function Inspector() {
             <TabsContent value="profile" className="space-y-4">
               <Heading>Profile</Heading>
               <Field label="Name"><Input value={d.name} onChange={(e) => set({ name: e.target.value })} /></Field>
-              <Field label="Role / title"><Input value={d.role ?? ""} onChange={(e) => set({ role: e.target.value })} /></Field>
+              <Field label="Role" hint="Brings the prompt, look and default tools (edit roles in Settings → Roles).">
+                <Combobox value={behavior.template_key ?? ""} options={roleOptions(roles)} ariaLabel="Role" placeholder="Pick a role"
+                  onChange={(k) => { const r = roles.find((x) => x.key === k); if (r) update(id, applyRole(d, r), { history: true }); }} />
+              </Field>
+              <Field label="Title" hint="How teammates see this agent; defaults to the role's name."><Input value={d.role ?? ""} onChange={(e) => set({ role: e.target.value })} /></Field>
               <Field label="Description"><Textarea value={d.description ?? ""} onChange={(e) => set({ description: e.target.value })} className="min-h-[60px]" /></Field>
               <Field label="Color">
                 <div className="flex flex-wrap gap-1.5">
@@ -79,9 +90,28 @@ export function Inspector() {
 
             <TabsContent value="prompt" className="space-y-3">
               <Heading>System prompt</Heading>
-              <p className="text-xs text-muted-foreground">Variables: <code>{"{{company_name}}"}</code> <code>{"{{goal}}"}</code> <code>{"{{team}}"}</code> <code>{"{{agent_name}}"}</code> <code>{"{{role}}"}</code>. The runtime appends the team roster, channels, blackboard and action schema automatically.</p>
-              <Textarea value={d.system_prompt ?? ""} onChange={(e) => set({ system_prompt: e.target.value })} className="min-h-[420px] font-mono text-[11.5px] leading-relaxed" spellCheck={false} />
-              <div className="text-right text-[11px] text-muted-foreground">{(d.system_prompt ?? "").length.toLocaleString()} chars</div>
+              {linked && role ? (
+                <>
+                  <p className="text-xs text-muted-foreground">This agent uses the <b>{role.role}</b> role's prompt, so changes to the role in{" "}
+                    <Link className="text-primary hover:underline" to={`/w/${w}/settings#roles`}>Settings → Roles</Link> apply here too.</p>
+                  <pre className="max-h-[300px] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground" data-testid="role-prompt-preview">{role.system_prompt}</pre>
+                  <Button size="sm" variant="outline" onClick={() => update(id, { system_prompt: role.system_prompt, behavior: { ...behavior, prompt_linked: false } }, { history: true })}>
+                    Use a prompt of its own instead
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">This agent has a prompt of its own. Variables: <code>{"{{agent_name}}"}</code> <code>{"{{role}}"}</code> <code>{"{{company_name}}"}</code> <code>{"{{goal}}"}</code> <code>{"{{department}}"}</code> <code>{"{{manager}}"}</code> <code>{"{{reports}}"}</code> <code>{"{{team}}"}</code>. The runtime adds the team roster, channels, blackboard and tools.</p>
+                  <Textarea value={d.system_prompt ?? ""} onChange={(e) => set({ system_prompt: e.target.value, behavior: { ...behavior, prompt_linked: false } })} className="min-h-[340px] font-mono text-[11.5px] leading-relaxed" spellCheck={false} aria-label="System prompt" />
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    {role ? <button className="text-primary hover:underline" onClick={() => update(id, applyRole(d, role), { history: true })}>Use the {role.role} role prompt</button> : <span />}
+                    <span>{(d.system_prompt ?? "").length.toLocaleString()} chars</span>
+                  </div>
+                </>
+              )}
+              <Field label="Additional instructions" hint="Added after the prompt, for this agent only (e.g. “Use pytest”, “You own the frontend”).">
+                <Textarea value={behavior.extra_instructions ?? ""} onChange={(e) => set({ behavior: { ...behavior, extra_instructions: e.target.value } })} className="min-h-[90px] text-xs" aria-label="Additional instructions" />
+              </Field>
             </TabsContent>
 
             <TabsContent value="model" className="space-y-4">
