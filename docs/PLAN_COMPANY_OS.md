@@ -159,8 +159,17 @@ Defaults are set by these numbers.
 | S5 | Templates rebuilt on S1-S4, old keys aliased |
 | S6 | Benchmark runs, then tuning of prompts, skills and defaults from the results |
 
-## Decisions needed
+## Status
 
-1. Editing a role updates every agent using it (live link, recommended), or only new agents?
-2. Should Octopus also read skills from `.claude/skills` and `.agents/skills` in projects (recommended, for interop)?
-3. Replace the current 17 templates with the 8-10 above (old keys kept as aliases), or keep both lists for now?
+Decisions taken (the recommended options): editing a role updates every agent linked to it; project skills are also
+read from `.claude/skills` and `.agents/skills`; template keys stay stable, and every template reports whether its team
+can run the workflow.
+
+| Stage | Status |
+|---|---|
+| S1 Roles foundation | Shipped: `user_roles`, `/api/v1/roles`, Settings → Roles, linked prompts in runs and chat |
+| S2 Mini window | Shipped: everything except the name is picked from a list; the prompt lives in the role |
+| S3 Skills | Shipped: 18 built-in skills, `use_skill`, Settings → Skills, project skill folders |
+| S4 Workflow engine | Shipped: `set_track`, phase owners, briefs, gates, test/review → build fix loop, workflow bar, report section |
+| S5 Templates | Shipped: workflow readiness per template, Bug Squad, quick-track review fallback |
+| S6 Benchmark | Ready to run: `python scripts/bench.py --projects-root <dir> --workflow on\|off` (adds a Three.js shooter task); needs a real model |
