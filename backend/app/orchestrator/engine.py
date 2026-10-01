@@ -189,7 +189,9 @@ def head_tail(text: str, limit: int) -> str:
     return text[:half] + f"\n…[{len(text) - limit:,} characters omitted]…\n" + text[-half:]
 
 
-ROUND_WARNINGS = {5, 1}  # tool rounds left in a turn at which the agent is told to wrap up
+ROUND_WARNINGS = {5, 1}
+# code an agent can run or open: finishing with changes to these that nothing exercised is sent back once to verify
+VERIFIABLE_EXT = {"py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "html", "htm", "go", "rs", "java", "rb", "php", "sh"}  # tool rounds left in a turn at which the agent is told to wrap up
 KEEP_FULL_ROUNDS = 3  # the latest tool rounds are replayed verbatim; older ones are shortened
 OLD_ROUND_CHARS = 1500
 COMPACT_MARK = "; re-read the file or re-run the tool if you need it again]"
@@ -360,6 +362,10 @@ class RunRuntime(TeamMixin):
         self.cost = run.cost_usd or 0.0
         self.active_seconds = 0.0
         self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
+        # verify-before-finish: code changed since anything was last run / opened in the browser
+        self.unverified: dict[str, int] = {}  # deliverable path → turn it last changed without being exercised since
+        self.finish_bounces: set[str] = set()  # "agent|files" already sent back once (never twice for the same state)
+        self._bounced_finish: str | None = None
         self.turn_t0: float | None = None  # monotonic start of the top-level turn in progress (counted live by the time limit)
         self.run_status = run.status
 
@@ -1442,8 +1448,11 @@ class RunRuntime(TeamMixin):
                 lines.append(f"Sent to {action.to}.")
             else:
                 lines.append("Done.")
-        ended = (name in T.TERMINAL_ACTIONS or self.finished_summary is not None or aid in self.done_agents
-                 or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
+        bounced = name == "finish" and self._bounced_finish == aid  # sent back to verify: the turn goes on
+        if bounced:
+            self._bounced_finish = None
+        ended = not bounced and (name in T.TERMINAL_ACTIONS or self.finished_summary is not None or aid in self.done_agents
+                                 or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
         return clip("\n".join(lines), TOOL_RESULT_CHARS), ended
 
     # ------------------------------------------------------------------ delegation (orchestrator → worker)
@@ -1896,6 +1905,8 @@ class RunRuntime(TeamMixin):
         self.mark_progress()
         if not rel.startswith(PROJECT_DIRNAME + "/"):  # a deliverable (not a working doc)
             self.mark_work(agent.id)
+            if rel.rsplit(".", 1)[-1].lower() in VERIFIABLE_EXT and not planned:
+                self.unverified[rel] = self.turn_no
             if self.first_deliverable_turn is None:
                 self.first_deliverable_turn = self.turn_no
         prev = self.artifacts.get(rel)
@@ -2109,6 +2120,8 @@ class RunRuntime(TeamMixin):
             await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
             self.mark_work(agent.id)
             ok, out = await browser.call(self.run_id, agent.id, a.tool, a.arguments)
+            if ok:
+                self.unverified.clear()
             if not ok and not browser.available():
                 out += ("\nThe browser can't run in this environment: don't retry it. Verify by reading the code instead, and say in "
                         "your report that nothing was tested in a real browser.")
@@ -2154,6 +2167,7 @@ class RunRuntime(TeamMixin):
             await self.deny(agent, cid, "run_code", reason)
             return
         await self.set_agent_status(agent.id, "running", f"$ {a.command[:70]}")
+        self.unverified.clear()  # the code was exercised (whatever the outcome, the agent now sees real output)
         try:
             res = await run_command(a.command, self.root, danger=level == "danger")
             ok = res.ok
@@ -2210,7 +2224,42 @@ class RunRuntime(TeamMixin):
         self.awaiting = {"agent_id": agent.id, "question": a.question, "message_id": rec["id"], "options": options, "allow_other": True}
         await self.set_agent_status(agent.id, "waiting")
 
+    def finish_refusal(self, agent: AgentSpec) -> str | None:
+        """Verify before done (MAST: missing/incomplete verification is a top cause of multi-agent failure). An agent that
+        can run code or open a browser, finishing the run or a delegated task while code changed unexercised or a file
+        fails its automatic check, is sent back once with what to check. Asking again finishes (it may be unverifiable)."""
+        frame = DELEGATION.get()
+        if self.budget.force_mock or not self.budget.verify_before_finish or not (agent.is_entry or (frame is not None and frame["worker"] == agent.id)):
+            return None
+        can_run = A.tool_enabled(agent.tools, "terminal")
+        can_browse = any(m.get("builtin") for m in agent.mcp)
+        if not (can_run or can_browse) or not (self.unverified or self.broken_files):
+            return None
+        key = f"{agent.id}|{sorted(self.unverified)}|{sorted(self.broken_files)}"
+        if key in self.finish_bounces:
+            return None
+        self.finish_bounces.add(key)
+        parts = []
+        if self.broken_files:
+            parts.append("these files fail their automatic check: " + "; ".join(
+                f"{p} ({m.splitlines()[0][:160]})" for p, m in sorted(self.broken_files.items())))
+        if self.unverified:
+            files = ", ".join(sorted(self.unverified)[:8])
+            how = []
+            if can_browse and any(p.endswith((".html", ".htm")) for p in self.unverified):
+                how.append(f"open it in your browser ({self.preview_url()}<path>), check browser_console_messages for errors and try it")
+            if can_run:
+                how.append("run it or its tests with run_code")
+            parts.append(f"{files} changed and nothing has run or opened it since; " + " or ".join(how or ["exercise it"]))
+        return ("Not finished yet: verify first. " + "; ".join(parts) + ". Fix what you find, then call `finish` again with "
+                "what you checked and what you saw. (If it really can't be verified here, call `finish` again and say so.)")
+
     async def act_finish(self, agent: AgentSpec, a: A.Finish) -> None:
+        self._bounced_finish = None
+        if (why := self.finish_refusal(agent)):
+            self._bounced_finish = agent.id
+            self.notice(agent.id, why, activate=True)
+            return
         frame = DELEGATION.get()
         if frame is not None and frame["worker"] == agent.id:  # a delegated sub-turn: hand the result back to the delegator
             frame["summary"] = a.summary or "Done."

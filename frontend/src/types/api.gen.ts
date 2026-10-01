@@ -2451,6 +2451,11 @@ export interface components {
              */
             max_tool_rounds: number;
             /**
+             * Verify Before Finish
+             * @default true
+             */
+            verify_before_finish: boolean;
+            /**
              * Context Recent
              * @default 30
              */
