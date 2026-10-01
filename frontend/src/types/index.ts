@@ -37,7 +37,7 @@ export type ParsedFileOut = S["ParsedFileOut"];
 export type EdgeType = EdgeOut["type"];
 export type PermissionLevel = "read_only" | "plan" | "ask" | "danger";
 export type AgentPermission = "inherit" | PermissionLevel;
-export type RunStatus = "queued" | "running" | "paused" | "awaiting_user" | "completed" | "failed" | "cancelled";
+export type RunStatus = "queued" | "running" | "paused" | "awaiting_user" | "completed" | "incomplete" | "failed" | "cancelled";
 export type AgentStatus =
   | "idle" | "thinking" | "speaking" | "writing" | "reading" | "running" | "tool" | "waiting" | "awaiting_approval" | "error" | "done";
 

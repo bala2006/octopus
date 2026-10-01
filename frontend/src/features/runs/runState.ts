@@ -172,4 +172,4 @@ export function replayTo(events: RunEvent[], cursor: number, names: Record<strin
   return s;
 }
 
-export const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+export const TERMINAL = new Set(["completed", "incomplete", "failed", "cancelled"]);

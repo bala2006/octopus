@@ -51,6 +51,11 @@ log = get_logger("orchestrator")
 
 DEBATE_PROTOCOL_TYPES = {"proposal", "critique", "objection", "agreement", "decision"}
 ACTIVE_STATES = {"queued", "running", "paused", "awaiting_user"}
+TERMINAL_STATES = {"completed", "incomplete", "failed", "cancelled"}
+OPEN_TASK_STATES = {"todo", "in_progress", "in_review", "blocked"}
+# How many turns in a row an agent may take only because of its own tool results / notices (no new message). Reading a
+# file and acting on it needs one; an agent that keeps re-reading without producing anything is spinning.
+MAX_SELF_TURNS = 3
 
 
 class StopRun(Exception):
@@ -151,6 +156,11 @@ class RunRuntime(TeamMixin):
         self.mock_state: dict[str, dict[str, Any]] = {}
         self.warned: set[str] = set()
         self.rejections = 0
+        # scheduling health: consecutive self-activated turns per agent, the last turn that moved the run forward,
+        # and which open tasks were already nudged since then (task key -> progress_turn at nudge time)
+        self.self_turns: Counter[str] = Counter()
+        self.progress_turn = run.turns or 0
+        self.nudged: dict[str, int] = {}
 
         self.seq = 0
         self.turn_no = run.turns or 0
@@ -208,6 +218,7 @@ class RunRuntime(TeamMixin):
             "pending_approval": self.pending_approval, "rejections": self.rejections,
             "auto_approve": sorted(self.auto_approve), "levels": self.levels, "activity": self.activity,
             "budget_base": self.budget_base,
+            "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
         }
 
     async def save(self) -> None:
@@ -242,6 +253,9 @@ class RunRuntime(TeamMixin):
         self.awaiting = st.get("awaiting")
         self.rejections = st.get("rejections", 0)
         self.auto_approve = set(st.get("auto_approve", []))
+        self.self_turns = Counter(st.get("self_turns", {}))
+        self.progress_turn = int(st.get("progress_turn", self.turn_no))
+        self.nudged = dict(st.get("nudged", {}))
         async with self.db() as db:
             msgs = (await db.execute(select(Message).where(Message.run_id == self.run_id).order_by(Message.created_at))).scalars().all()
             for m in msgs:
@@ -359,16 +373,77 @@ class RunRuntime(TeamMixin):
         return rec
 
     def next_runnable(self) -> str | None:
+        """FIFO over queued messages and activating observations. An agent that has already taken MAX_SELF_TURNS turns in a
+        row on its own observations (no new message, no progress) is only woken by a message again."""
         best: tuple[int, str] | None = None
         for aid in self.agents:
             if not self.agents[aid].active:
                 continue
-            seqs = [s for s, _ in self.mailbox.get(aid, [])] + [s for s, o in self.observations.get(aid, []) if o.get("activate")]
+            seqs = [s for s, _ in self.mailbox.get(aid, [])]
+            if self.self_turns[aid] < MAX_SELF_TURNS:
+                seqs += [s for s, o in self.observations.get(aid, []) if o.get("activate")]
             if seqs:
                 s = min(seqs)
                 if best is None or s < best[0]:
                     best = (s, aid)
         return best[1] if best else None
+
+    # ------------------------------------------------------------------ task board awareness
+    def mark_progress(self) -> None:
+        """Something moved the run forward (a file changed, a task changed status, a verdict, a finish, user input)."""
+        self.progress_turn = self.turn_no
+
+    def open_tasks(self) -> list[dict[str, Any]]:
+        return [t for t in self.tasks.values() if t["status"] in OPEN_TASK_STATES]
+
+    def task_line(self, t: dict[str, Any]) -> str:
+        return f"{t['key']} [{t['status']}] {t['title']} (assignee: {self.names.get(t['assignee'] or '', 'unassigned')})"
+
+    def open_task_owners(self) -> list[str]:
+        owners: list[str] = []
+        for t in self.open_tasks():
+            a = t["assignee"]
+            if a in self.agents and self.agents[a].active and a not in owners:
+                owners.append(a)
+        return owners
+
+    async def nudge_open_tasks(self) -> bool:
+        """Nobody has a queued message but the board still has open tasks: wake whoever can move them.
+
+        Owners of actionable tasks are woken; tasks that are blocked, unassigned or owned by an inactive agent go to the
+        entry agent (when *every* open task is blocked the board is deadlocked and the entry agent must resolve it). Each
+        task is nudged at most once until the run makes progress again, so a stuck board ends instead of spinning."""
+        open_ = self.open_tasks()
+        if not open_:
+            return False
+        deadlocked = all(t["status"] == "blocked" for t in open_)
+        entry = (self.entry_agents() or [None])[0]
+        targets: dict[str, list[dict[str, Any]]] = {}
+        for t in open_:
+            if self.nudged.get(t["key"]) == self.progress_turn:
+                continue
+            owner = t["assignee"]
+            if deadlocked or t["status"] == "blocked" or owner not in self.agents or not self.agents[owner].active:
+                owner = entry
+            if owner is None:
+                continue
+            self.nudged[t["key"]] = self.progress_turn
+            targets.setdefault(owner, []).append(t)
+        for aid, ts in targets.items():
+            lines = "\n".join(f"- {self.task_line(t)}" for t in ts)
+            if deadlocked:
+                body = (f"Every open task on the board is blocked, so nobody can move:\n{lines}\n\nResolve the blocker (do the missing "
+                        "work yourself or assign it to someone who can), re-plan the tasks, or ask the user. Update the task board.")
+            else:
+                body = (f"These tasks are still open and nobody is working on them:\n{lines}\n\nContinue them now, or update the task "
+                        "board (done / blocked with the reason) and tell whoever is waiting on you.")
+            await self.post_message(sender="system", from_id=None, to_id=aid, type_="task", content="[Octopus scheduler] " + body,
+                                    meta={"nudge": True, "tasks": [t["key"] for t in ts]})
+        if targets:
+            await self.emit("error", {"kind": "warning", "message": ("Task board deadlock: every open task is blocked; asked "
+                                                                     if deadlocked else "Run went idle with open tasks; woke ")
+                                      + ", ".join(self.names.get(a, a) for a in targets)})
+        return bool(targets)
 
     def resolve_agent(self, name: str) -> str | None:
         n = name.strip().lower().lstrip("@")
@@ -459,18 +534,28 @@ class RunRuntime(TeamMixin):
         async with self.db() as db:
             await db.execute(update(Run).where(Run.id == self.run_id).values(ended_at=None, halt_reason="", budget_json=self.budget.model_dump()))
             await db.commit()
+        self.self_turns = Counter()
+        self.nudged = {}
+        self.mark_progress()
         await self.set_run_status("running")
         await self.emit("run_continued", {"content": content, "to_agent_id": to_agent_id, "followup": len(self.followups)})
-        targets = [to_agent_id] if to_agent_id in self.agents else self.entry_agents()
+        if to_agent_id in self.agents:
+            targets = [to_agent_id]
+        else:  # "entry agent": the entry agent plus everyone who still owns an open task (they'd never be woken otherwise)
+            targets = list(dict.fromkeys(self.entry_agents() + self.open_task_owners()))
         for t in targets:
+            mine = [x for x in self.open_tasks() if x["assignee"] == t]
+            owned = ("\n\nYou still own these open tasks:\n" + "\n".join(f"- {self.task_line(x)}" for x in mine)
+                     + "\nContinue them, or update the task board.") if mine else ""
             await self.post_message(sender="user", from_id=None, to_id=t, type_="task", meta={"followup": True},
                                     content=f"Follow-up from the user: {content}\n\nThe previous work is in the project (see Workspace files). "
-                                            "Change what's needed and report back; don't start over.")
+                                            f"Change what's needed and report back; don't start over.{owned}")
         self.wake.set()
 
     async def interject(self, content: str, to_agent_id: str | None) -> None:
         targets = [to_agent_id] if to_agent_id else list(self.agents)
         self.user_notes.append(content[:300])
+        self.mark_progress()  # new information from the user re-opens every nudge
         for t in targets:
             if t in self.agents:
                 await self.post_message(sender="user", from_id=None, to_id=t, type_="user_interjection", content=content)
@@ -567,7 +652,14 @@ class RunRuntime(TeamMixin):
                 if aid is None:
                     if self.awaiting:
                         continue
-                    await self.finalize("completed", "Run went quiescent: no agent has pending work")
+                    if await self.nudge_open_tasks():
+                        continue
+                    open_ = self.open_tasks()
+                    if open_:  # never report success while the board says work is unfinished
+                        await self.finalize("incomplete", f"Stalled: {len(open_)} open task(s) and no agent can make progress ("
+                                            + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) + ")")
+                    else:
+                        await self.finalize("completed", "Run went quiescent without a final report: no open tasks, no agent has pending work")
                     return
                 t0 = time.monotonic()
                 try:
@@ -577,7 +669,9 @@ class RunRuntime(TeamMixin):
                 await self.save()
                 await self.usage_event()
                 if self.finished_summary is not None:
-                    await self.finalize("completed", "")
+                    open_ = self.open_tasks()
+                    await self.finalize("completed", f"Finished with {len(open_)} open task(s): "
+                                        + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) if open_ else "")
                     return
                 if self.loop.escalate() and not self.loop_escalated:
                     self.loop_escalated = True
@@ -705,6 +799,7 @@ class RunRuntime(TeamMixin):
         agent = self.agents[aid]
         inbox_ids = [mid for _, mid in self.mailbox.pop(aid, [])]
         obs = [o for _, o in self.observations.pop(aid, [])]
+        self.self_turns[aid] = 0 if inbox_ids else self.self_turns[aid] + 1
         self.turn_no += 1
         self.agent_turns[aid] += 1
         if inbox_ids:
@@ -774,6 +869,8 @@ class RunRuntime(TeamMixin):
             await self.execute(agent, action)
             if self.finished_summary is not None:
                 break
+        if self.progress_turn == self.turn_no:  # productive turn: the agent may keep working on its own results
+            self.self_turns[aid] = 0
         if aid in self.done_agents:
             await self.set_agent_status(aid, "done", "Finished")
         elif self.mailbox.get(aid):
@@ -902,6 +999,8 @@ class RunRuntime(TeamMixin):
                 if tid in d.participants and debate_decided_externally(d, content):
                     await self.emit("protocol", {"kind": "debate", "result": "decided", "edge_id": d.edge_id, "state": d.to_dict()})
             self.decisions.append(f"Decision by {agent.name}: {content.splitlines()[0][:240]}")
+        if a.type == "decision" or (protocol_event and protocol_event.get("result") not in (None, "requested", "round")):
+            self.mark_progress()  # verdicts, consensus and decisions move the run forward; another debate round does not
         if protocol_event:
             state = self.debates[edge.id].to_dict() if protocol_event["kind"] == "debate" else self.reviews[f"{edge.id}:{agent.id if a.type == 'review_request' else tid}"].to_dict()
             await self.emit("protocol", {**protocol_event, "edge_id": edge.id, "state": state})
@@ -981,16 +1080,20 @@ class RunRuntime(TeamMixin):
             key = (item.key or "").upper()
             if key and key in self.tasks:
                 t = self.tasks[key]
+                before = (t["status"], t["assignee"])
                 for f, v in (("title", item.title), ("description", item.description), ("status", item.status), ("acceptance_criteria", ac)):
                     if v is not None:
                         t[f] = v
                 if assignee:
                     t["assignee"] = assignee
+                if (t["status"], t["assignee"]) != before:
+                    self.mark_progress()
                 await self.save_task(t)
                 changed.append(f"{key} → {t['status']}")
             elif item.title:
                 t = await self.create_task(agent.id, {"title": item.title, "description": item.description, "assignee": assignee,
                                                       "status": item.status, "acceptance_criteria": ac})
+                self.mark_progress()
                 changed.append(f"created {t['key']}")
             else:
                 self.notice(agent.id, f"Unknown task key '{item.key}'. Existing: {', '.join(self.tasks) or 'none'}")
@@ -1024,6 +1127,7 @@ class RunRuntime(TeamMixin):
         except WorkspaceError as exc:
             await self.deny(agent, cid, "write_file", f"write_file failed: {exc}")
             return
+        self.mark_progress()
         prev = self.artifacts.get(rel)
         version = (prev or {}).get("version", 0) + 1
         art = Artifact(id=new_id(), run_id=self.run_id, path=rel, content=content, version=version, author_agent_id=agent.id,
@@ -1073,6 +1177,7 @@ class RunRuntime(TeamMixin):
             await self.deny(agent, cid, "create_folder", f"create_folder failed: {exc}")
             return
         planned = fs.shadow is not None
+        self.mark_progress()
         await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
                                 content=f"{'Planned' if planned else 'Created'} folder `{rel}/`" + (f": {a.note}" if a.note else ""),
                                 meta={"path": rel + "/", "folder": True, "planned": planned}, deliver=False)
@@ -1100,6 +1205,7 @@ class RunRuntime(TeamMixin):
         except WorkspaceError as exc:
             await self.deny(agent, cid, "move_file", f"move_file failed: {exc}")
             return
+        self.mark_progress()
         # keep the run's file list in step with the project
         for old_path in [p for p in list(self.artifacts) if p == src or p.startswith(src + "/")]:
             self.artifacts[dst + old_path[len(src):]] = self.artifacts.pop(old_path)
@@ -1262,6 +1368,7 @@ class RunRuntime(TeamMixin):
                                     content=self.finished_summary, deliver=False)
         else:
             self.done_agents.add(agent.id)
+            self.mark_progress()
             await self.emit("agent_finished", {"agent_id": agent.id, "summary": a.summary})
 
     async def act_wait(self, agent: AgentSpec, a: A.Wait) -> None:
@@ -1349,7 +1456,7 @@ class RunManager:
         """Send a message to a run. Live runs get an interjection; finished runs are re-opened and continue with full context."""
         rt = await self.ensure(run_id, project)
         if rt is not None:
-            if rt.finalized or rt.run_status in ("completed", "failed", "cancelled"):
+            if rt.finalized or rt.run_status in TERMINAL_STATES:
                 return None  # finishing right now; caller retries
             await rt.interject(content, to_agent_id)
             return rt

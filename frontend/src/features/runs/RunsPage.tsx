@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/primitives";
 import { ConfirmDialog, Tip } from "@/components/ui/overlays";
 import { RunDialog } from "./RunDialog";
+import { TERMINAL } from "./runState";
 
 export default function RunsPage() {
   const money = useMoney();
@@ -55,7 +56,7 @@ export default function RunsPage() {
                     <PermissionBadge level={r.permission_level as PermissionLevel} />
                     <div className="w-40 text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} turns · {formatTokens(r.tokens_used)} tok · {money(r.cost_usd)}</div>
                   </Link>
-                  {["completed", "failed", "cancelled"].includes(r.status) && (
+                  {TERMINAL.has(r.status) && (
                     <Tip content="Delete run">
                       <Button variant="ghost" size="icon-sm" className="absolute right-1 top-1 opacity-0 group-hover:opacity-100" onClick={() => setDel(r.id)} aria-label="Delete run"><Trash2 /></Button>
                     </Tip>

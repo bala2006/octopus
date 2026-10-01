@@ -47,6 +47,7 @@ export function useRunStream(workspaceId: string, runId: string | undefined, nam
           if (!toasted.current.has(st)) {
             toasted.current.add(st);
             if (st === "completed") toast.success("Run completed", { description: e.data.summary?.slice(0, 160) });
+            else if (st === "incomplete") toast.warning("Run stopped with unfinished tasks", { description: e.data.reason });
             else if (st === "failed") toast.error("Run halted", { description: e.data.reason });
             else toast("Run stopped");
           }

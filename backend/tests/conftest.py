@@ -34,7 +34,7 @@ from app.main import app  # noqa: E402
 
 upgrade_registry(get_settings().registry_database_url)
 
-TERMINAL = {"completed", "failed", "cancelled"}
+TERMINAL = {"completed", "incomplete", "failed", "cancelled"}
 
 
 class ScriptedProvider:

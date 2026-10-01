@@ -102,8 +102,14 @@ def team_roster(agents: dict[str, AgentSpec], status: dict[str, str] | None = No
     return "\n".join(lines)
 
 
+def sender_name(m: dict[str, Any], names: dict[str, str], me: str) -> str:
+    if m["from"] is None:
+        return "Octopus" if m.get("sender") == "system" else "User"
+    return "you" if m["from"] == me else names.get(m["from"], "?")
+
+
 def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500) -> str:
-    frm = "User" if m["from"] is None else ("you" if m["from"] == me else names.get(m["from"], "?"))
+    frm = sender_name(m, names, me)
     to = "everyone" if m["to"] is None else ("you" if m["to"] == me else names.get(m["to"], "?"))
     extra = ""
     meta = m.get("meta") or {}
@@ -120,7 +126,7 @@ def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str,
     lines = []
     for m in older:
         first = re.split(r"(?<=[.!?])\s|\n", m["content"].strip(), maxsplit=1)[0][:160]
-        frm = "User" if m["from"] is None else ("you" if m["from"] == me else names.get(m["from"], "?"))
+        frm = sender_name(m, names, me)
         to = "all" if m["to"] is None else ("you" if m["to"] == me else names.get(m["to"], "?"))
         lines.append(f"- t{m['turn']} {frm}→{to} {m['type']}: {first}")
     out: list[str] = []

@@ -70,6 +70,7 @@ export const RUN_STATUS: Record<string, { label: string; variant: "default" | "s
   paused: { label: "Paused", variant: "warning" },
   awaiting_user: { label: "Needs you", variant: "warning" },
   completed: { label: "Completed", variant: "success" },
+  incomplete: { label: "Incomplete", variant: "warning" },
   failed: { label: "Halted", variant: "destructive" },
   cancelled: { label: "Stopped", variant: "outline" },
 };

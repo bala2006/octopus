@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.llm.base import DEFAULT_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS
 
 EdgeType = Literal["delegate", "review", "debate", "report", "consult"]
-RunStatus = Literal["queued", "running", "paused", "awaiting_user", "completed", "failed", "cancelled"]
+# "incomplete": the run stopped with unfinished tasks on the board (it is never reported as "completed")
+RunStatus = Literal["queued", "running", "paused", "awaiting_user", "completed", "incomplete", "failed", "cancelled"]
 RunMode = Literal["autonomous", "step", "supervised"]
 PermissionLevel = Literal["read_only", "plan", "ask", "danger"]
 AgentPermission = Literal["inherit", "read_only", "plan", "ask", "danger"]
