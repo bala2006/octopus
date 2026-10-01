@@ -800,7 +800,9 @@ class RunRuntime(TeamMixin):
     def effort_for(self, agent: AgentSpec) -> str | None:
         """Run override wins, then the agent's setting; None = let the model use its default."""
         e = self.budget.reasoning_effort if self.budget.reasoning_effort != "default" else str(agent.behavior.get("reasoning_effort") or "default")
-        return None if e == "default" else e
+        if e == "default":
+            e = get_settings().default_reasoning_effort or "default"
+        return None if e in ("default", "") else e
 
     async def call_llm(self, agent: AgentSpec, req: LLMRequest) -> str:
         parts: list[str] = []

@@ -342,7 +342,7 @@ class RunBudget(BaseModel):
     max_loop_strikes: int = Field(3, ge=1, le=20)
     # pause for a human after this many turns without a file change / task-board move (0 = off)
     stall_turns: int = Field(30, ge=0, le=2000)
-    context_recent: int = Field(10, ge=2, le=100)
+    context_recent: int = Field(30, ge=2, le=200)  # own messages kept verbatim; older ones are summarised
     force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
     persist_team: bool = True  # save agents hired / edited during the run back to the company

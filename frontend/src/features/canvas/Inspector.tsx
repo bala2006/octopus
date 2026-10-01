@@ -93,7 +93,9 @@ export function Inspector() {
               <Field label={`Temperature: ${(d.temperature ?? 0.4).toFixed(2)}`}>
                 <Slider min={0} max={2} step={0.05} value={[d.temperature ?? 0.4]} onValueChange={([v]) => set({ temperature: v })} aria-label="Temperature" />
               </Field>
-              <Field label="Max output tokens"><Input type="number" min={64} max={64000} value={d.max_tokens ?? 8192} onChange={(e) => set({ max_tokens: Math.max(64, +e.target.value || 64) })} /></Field>
+              <Field label="Max output tokens" hint="Per reply, reasoning included. 128,000 is gpt-6-luna's maximum on Azure; you only pay for tokens actually generated.">
+                <Input type="number" min={64} max={128000} value={d.max_tokens ?? 128000} onChange={(e) => set({ max_tokens: Math.min(128000, Math.max(64, +e.target.value || 64)) })} />
+              </Field>
             </TabsContent>
 
             <TabsContent value="tools" className="space-y-4">

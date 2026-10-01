@@ -1289,7 +1289,7 @@ export interface components {
             temperature: number;
             /**
              * Max Tokens
-             * @default 8192
+             * @default 128000
              */
             max_tokens: number;
             tools?: components["schemas"]["AgentTools"];
@@ -1383,7 +1383,7 @@ export interface components {
             temperature: number;
             /**
              * Max Tokens
-             * @default 8192
+             * @default 128000
              */
             max_tokens: number;
             tools?: components["schemas"]["AgentTools"];
@@ -2364,7 +2364,7 @@ export interface components {
             stall_turns: number;
             /**
              * Context Recent
-             * @default 10
+             * @default 30
              */
             context_recent: number;
             /**

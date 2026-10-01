@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
+from app.llm.base import effective_max_tokens
 from app.orchestrator.actions import schema_doc
 from app.orchestrator.permissions import EdgeSpec, allowed_recipients
 
@@ -20,9 +20,10 @@ EDGE_MEANING = {
 MSG_TYPES = ("task, question, answer, proposal, critique, agreement, objection, decision, "
              "review_request, review_result, status_update, final_report")
 # Model-facing size limits (see docs/MODEL_QUALITY_AUDIT.md). Every cut is marked so the model knows it saw only part.
-TOOL_RESULT_CHARS = 12_000   # one tool result / notice in the prompt
-RECENT_MSG_CHARS = 1_500     # each message in the "recent conversation" window
-SUMMARY_CHARS = 6_000        # extractive summary of older messages
+# gpt-6-luna reads up to 922k input tokens, so these are generous; they only guard against pathological inputs.
+TOOL_RESULT_CHARS = 60_000   # one tool result / notice in the prompt (~15k tokens)
+RECENT_MSG_CHARS = 8_000     # each message in the "recent conversation" window
+SUMMARY_CHARS = 16_000       # extractive summary of older messages
 
 
 def clip(text: str, limit: int, hint: str = "") -> str:
@@ -62,7 +63,7 @@ class AgentSpec:
     def from_dict(cls, d: dict[str, Any], category: str) -> AgentSpec:
         return cls(id=d["id"], name=d["name"], role=d.get("role", ""), description=d.get("description", ""),
                    system_prompt=d.get("system_prompt", ""), provider=d.get("provider", "mock"), model=d.get("model", "mock/demo"),
-                   temperature=float(d.get("temperature", 0.4)), max_tokens=int(d.get("max_tokens") or DEFAULT_AGENT_MAX_TOKENS),
+                   temperature=float(d.get("temperature", 0.4)), max_tokens=effective_max_tokens(d.get("max_tokens")),
                    tools=d.get("tools") or {}, behavior=d.get("behavior") or {}, is_entry=bool(d.get("is_entry")),
                    color=d.get("color", "#6366f1"), category=category, department=d.get("department") or "",
                    is_manager=bool(d.get("is_manager")), reports_to=d.get("reports_to"), active=d.get("active", True) is not False,
@@ -215,10 +216,10 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
    README/docs). Your working material (plans, specs, PRDs, briefs, style guides, notes, reviews, test plans, QA and
    bug reports, roadmaps) goes under `.octopus/work/` (e.g. `.octopus/work/qa/test_plan.md`), never into the project tree.
    Don't overwrite files that existed before Octopus touched them unless the task requires it.
-   Files must end up COMPLETE (no placeholders). Paths are relative to the project workspace. Your reply has an output limit
-   (about {agent.max_tokens} tokens): a file longer than ~250 lines must be written in parts: write_file the first part with
-   "partial":true, then write_file with "mode":"append" for each following part (one part per turn, "partial":true until the
-   last part) until the file is whole. Never drop a part.
+   Files must end up COMPLETE and production quality: no placeholders, no TODO stubs, no "rest omitted". Paths are relative
+   to the project workspace. Your reply can be up to {agent.max_tokens:,} tokens (reasoning included), so write whole files in
+   one write_file. Only a file of many thousands of lines needs parts: write_file the first part with "partial":true, then
+   write_file with "mode":"append" for each following part until the file is whole. Never drop a part.
 5. On debate channels only use proposal / objection / agreement (a debate ends when BOTH sides send `agreement`, or on a `decision`).
 6. On review channels: author sends `review_request`; reviewer replies `review_result` with `verdict` "approve" or "request_changes" and itemized `comments`.
 7. Delegation: tasks you send become entries on the task board. Keep statuses current with update_task_board.

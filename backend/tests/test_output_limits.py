@@ -47,9 +47,9 @@ def test_write_file_mode_parsing() -> None:
         WriteFile(action="write_file", path="a", content="", mode="prepend")
 
 
-def test_code_roles_get_a_bigger_answer_budget() -> None:
-    assert agent_from_role("gameplay_programmer")["max_tokens"] >= 16384
-    assert agent_from_role("pm")["max_tokens"] >= 8192
+def test_role_templates_get_the_model_maximum() -> None:
+    assert agent_from_role("gameplay_programmer")["max_tokens"] == 128_000
+    assert agent_from_role("pm")["max_tokens"] == 128_000
 
 
 async def test_large_file_is_built_in_parts(client, workspace) -> None:
@@ -70,8 +70,34 @@ async def test_large_file_is_built_in_parts(client, workspace) -> None:
     assert [a["appended"] for a in arts] == [False, True, True]
 
 
-async def test_truncated_reply_raises_the_agent_budget_and_retries(client, workspace) -> None:
+async def test_agents_use_the_models_full_output_budget(client, workspace) -> None:
+    """Azure documents 128,000 max output tokens for gpt-6-luna; agents must not be capped below that by default."""
     cid = await make_company(client, workspace, [agent("a", "Ann", entry=True)], [])
+    provider = TruncatingProvider(0, {"Ann": [env({"action": "finish", "summary": "ok"})]})
+    set_provider_override(provider)
+    run = await start_run(client, workspace, cid)
+    await wait_status(client, workspace, run["id"])
+    assert provider.budgets == [128_000]
+    ann = next(a for a in (await canvas(client, workspace, cid))["agents"] if a["id"] == "a")
+    assert ann["max_tokens"] == 128_000
+
+
+def test_output_cap_never_exceeds_the_model_limit() -> None:
+    from app.llm.azure_v1 import _body
+    from app.llm.base import effective_max_tokens, output_cap
+
+    req = LLMRequest(provider="azure", model="gpt-6-luna", messages=[], max_tokens=128_000, extra={"reasoning_effort": "xhigh"})
+    assert _body(req, "responses", set())["max_output_tokens"] == 128_000, "headroom never pushes past the model maximum"
+    assert _body(req, "chat", set())["max_completion_tokens"] == 128_000
+    req.max_tokens = 4000
+    assert _body(req, "responses", set())["max_output_tokens"] == 4000 + 16384, "a user-chosen budget still gets reasoning room"
+    assert output_cap("some-other-deployment", 500_000) == 128_000
+    # defaults saved by older versions are upgraded; a value the user typed is kept
+    assert [effective_max_tokens(v) for v in (None, 2048, 8192, 16384, 64000, 5000)] == [128_000] * 5 + [5000]
+
+
+async def test_truncated_reply_raises_the_agent_budget_and_retries(client, workspace) -> None:
+    cid = await make_company(client, workspace, [agent("a", "Ann", entry=True, max_tokens=4000)], [])
     provider = TruncatingProvider(16000, {"Ann": [
         env({"action": "write_file", "path": "index.html", "content": "<html>full game</html>"}),
         env({"action": "finish", "summary": "done"})]})
@@ -80,11 +106,11 @@ async def test_truncated_reply_raises_the_agent_budget_and_retries(client, works
     done = await wait_status(client, workspace, run["id"])
     assert done["status"] == "completed", done["halt_reason"]
     assert (Path(workspace["path"]) / "index.html").read_text() == "<html>full game</html>"
-    assert provider.budgets[:2] == [8192, 16384], "first call at the default, retried once with a doubled budget"
+    assert provider.budgets[:2] == [4000, 128_000], "a user-set budget that is too small is raised to the model maximum once"
     warn = [e["payload"] for e in await events(client, workspace, run["id"], "error") if e["payload"].get("kind") == "warning"]
     assert any("output limit" in w["message"] for w in warn)
     ann = next(a for a in (await canvas(client, workspace, cid))["agents"] if a["id"] == "a")
-    assert ann["max_tokens"] == 16384, "the higher limit is remembered on the agent"
+    assert ann["max_tokens"] == 128_000, "the higher limit is remembered on the agent"
 
 
 async def test_reply_still_truncated_after_escalation_is_reported_not_applied(client, workspace) -> None:
@@ -155,3 +181,29 @@ async def test_azure_complete_reply_is_not_flagged() -> None:
     provider = AzureV1Provider(httpx.MockTransport(lambda r: httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})))
     text, usages = await _collect(provider, _req("https://res.openai.azure.com"))
     assert text == "hello" and usages[0].completion_tokens == 1
+
+
+def test_migration_upgrades_saved_default_budgets(tmp_path) -> None:
+    """Projects created by earlier versions have agents saved with 2048 / 8192 / 16384: upgrade those, keep custom values."""
+    import sqlite3
+
+    from alembic import command
+
+    from app.db.migrate import _config, upgrade_project
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'octopus.db'}"
+    command.upgrade(_config("project", url), "0002_project")
+    con = sqlite3.connect(tmp_path / "octopus.db")
+    def insert(table: str, **values: object) -> None:  # fill every NOT NULL column without a default generically
+        cols = con.execute(f"PRAGMA table_info({table})").fetchall()
+        row = {c[1]: ("" if "CHAR" in c[2].upper() or "TEXT" in c[2].upper() else "{}" if "JSON" in c[2].upper() else 0)
+               for c in cols if c[3] and c[4] is None and not c[5]}
+        row.update({"id": values.pop("id")}, **values)
+        con.execute(f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+
+    insert("companies", id="c", name="Co", created_at="2026-01-01", updated_at="2026-01-01")
+    for aid, mt in (("a", 2048), ("b", 8192), ("c", 5000)):
+        insert("agents", id=aid, company_id="c", name=aid, max_tokens=mt, tools_json="{}", behavior_json="{}")
+    con.commit()
+    upgrade_project(url)
+    assert dict(con.execute("SELECT id, max_tokens FROM agents").fetchall()) == {"a": 128_000, "b": 128_000, "c": 5000}

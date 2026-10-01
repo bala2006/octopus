@@ -50,7 +50,7 @@ def test_long_tool_results_and_messages_are_marked_not_silently_cut() -> None:
 
 
 async def test_read_file_returns_big_files_in_pages(client, workspace) -> None:
-    text = "".join(f"line {i:05d}\n" for i in range(3000))  # 33,000 chars
+    text = "".join(f"line {i:06d}\n" for i in range(12000))  # 144,000 chars
     (Path(workspace["path"]) / "big.txt").write_text(text)
     seen: list[str] = []
 
@@ -62,14 +62,14 @@ async def test_read_file_returns_big_files_in_pages(client, workspace) -> None:
 
     cid = await make_company(client, workspace, [agent("a", "Ann", entry=True)], [])
     set_provider_override(ScriptedProvider({"Ann": [env({"action": "read_file", "path": "big.txt"}),
-                                                    capture({"action": "read_file", "path": "big.txt", "offset": 11500}),
+                                                    capture({"action": "read_file", "path": "big.txt", "offset": 59500}),
                                                     capture({"action": "finish", "summary": "read it"})]}))
     run = await start_run(client, workspace, cid)
     await wait_status(client, workspace, run["id"])
     assert len(seen) == 2
-    assert seen[0].startswith("big.txt [characters 0-11,500 of 33,000; read_file with \"offset\": 11500 for the next part]")
-    assert seen[1].startswith("big.txt [characters 11,500-23,000 of 33,000") and "\nline 01046\n" in seen[1]
-    assert text[11500:23000] in seen[1], "the page is exactly the requested slice"
+    assert seen[0].startswith("big.txt [characters 0-59,500 of 144,000; read_file with \"offset\": 59500 for the next part]")
+    assert seen[1].startswith("big.txt [characters 59,500-119,000 of 144,000")
+    assert text[59500:119000] in seen[1], "the page is exactly the requested slice"
     assert "[truncated" not in seen[0], "a page fits in the prompt without a further silent cut"
 
 

@@ -34,7 +34,7 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
   const anyConfigured = settings.data?.providers.some((p) => p.provider !== "mock" && p.configured) ?? false;
   const [demo, setDemo] = React.useState(!anyConfigured);
   const [adv, setAdv] = React.useState(false);
-  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, stall_turns: 30, context_recent: 10, max_agents: 24, persist_team: true, reasoning_effort: "default" as Effort });
+  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, stall_turns: 30, context_recent: 30, max_agents: 24, persist_team: true, reasoning_effort: "default" as Effort });
   const att = useAttachments();
   React.useEffect(() => { if (open) { setGoal(initialGoal); setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask"); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => setDemo(!anyConfigured), [anyConfigured]);

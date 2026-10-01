@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     demo_mode: bool = True  # when true, the mock provider is used for any agent lacking a key
     default_provider: str = "azure"
     default_model: str = "gpt-6-luna"  # Azure OpenAI deployment name
+    # Reasoning effort used when an agent / run says "Auto". xhigh: Azure's recommendation for long agentic runs, and the
+    # best quality short of "max" (which is much slower). Set to "medium" (the model's own default) to trade quality for speed.
+    default_reasoning_effort: str = "xhigh"
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8080"])
     rate_limit_per_minute: int = 1200
