@@ -7,10 +7,33 @@ from pathlib import Path
 
 import pytest
 
+from app.core.security import hash_password, verify_password
 from app.llm.router import set_provider_override
 from app.tools.sandbox import SandboxError, parse_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError, normalize_path
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, start_run, wait_status
+
+
+def test_long_passwords_hash_and_verify_with_bcrypt5() -> None:
+    """bcrypt>=5 raises on >72-byte passwords; the API accepts up to 200 chars, so hashing must truncate like bcrypt<5 did."""
+    import bcrypt
+
+    long_pw = "correct horse battery staple " * 6  # ~174 bytes
+    h = hash_password(long_pw)
+    assert verify_password(long_pw, h)
+    assert not verify_password("x" + long_pw[1:], h)
+    # a hash created by bcrypt<5 (which silently used the first 72 bytes) still verifies
+    legacy = bcrypt.hashpw(long_pw.encode()[:72], bcrypt.gensalt()).decode()
+    assert verify_password(long_pw, legacy)
+    assert not verify_password("short-but-wrong", h)
+
+
+async def test_register_and_login_with_long_password(client) -> None:
+    pw = "p" * 150
+    r = await client.post("/api/v1/auth/register", json={"email": "long-pw@example.com", "password": pw})
+    assert r.status_code in (200, 201), r.text
+    r = await client.post("/api/v1/auth/login", json={"email": "long-pw@example.com", "password": pw})
+    assert r.status_code == 200, r.text
 
 
 @pytest.mark.parametrize("bad", ["../x", "a/../../x", "/etc/passwd", "~/x", "C:/win", ".octopus/octopus.db", ".git/config", "a\x00b"])
