@@ -98,6 +98,7 @@
     @apply animate-shimmer;
   }
   .caret::after { content: "▍"; @apply ml-0.5 animate-blink text-primary; }
+  details[open] > summary .folder-chevron { transform: rotate(90deg); }
 }
 
 /* Light / dark palette: "soft on the eyes" warm neutrals, terracotta accent, olive + steel-blue status accents. */

@@ -52,9 +52,10 @@ def to_host(path: str) -> str:
     if not m or not path:
         return path
     host, mount = m
-    if path != mount and not path.startswith(mount.rstrip("/") + "/"):
+    comparable_path, comparable_mount = _norm(path), _norm(mount)
+    if comparable_path != comparable_mount and not comparable_path.startswith(comparable_mount + "/"):
         return path
-    rest = path[len(mount):].strip("/")
+    rest = path.replace("\\", "/")[len(mount.replace("\\", "/").rstrip("/")):].strip("/")
     if not rest:
         return host
     sep = "\\" if _is_windows(host) else "/"

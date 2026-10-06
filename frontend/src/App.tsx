@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/common";
 import { AppShell } from "@/components/layout/AppShell";
 import { WelcomePage } from "@/features/workspaces/WelcomePage";
 import { useApp } from "@/stores/app";
+import { useEditorStore } from "@/features/editor/editorStore";
 
 const CanvasPage = React.lazy(() => import("@/features/canvas/CanvasPage"));
 const ChatPage = React.lazy(() => import("@/features/chat/ChatPage"));
@@ -14,6 +15,7 @@ const LiveRunPage = React.lazy(() => import("@/features/runs/LiveRunPage"));
 const ArtifactsPage = React.lazy(() => import("@/features/artifacts/ArtifactsPage"));
 const SettingsPage = React.lazy(() => import("@/features/settings/SettingsPage"));
 const GuidePage = React.lazy(() => import("@/features/guide/GuidePage"));
+const WorkspacePage = React.lazy(() => import("@/features/editor/WorkspacePage"));
 
 function PageFallback() {
   return (
@@ -25,6 +27,15 @@ function PageFallback() {
 
 export function App() {
   const theme = useApp((s) => s.theme);
+  React.useEffect(() => {
+    const guard = (e: BeforeUnloadEvent) => {
+      if (Object.values(useEditorStore.getState().projects).some((p) => p.tabs.some((t) => t.draft !== t.content))) {
+        e.preventDefault(); e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", guard);
+    return () => window.removeEventListener("beforeunload", guard);
+  }, []);
   return (
     <TooltipProvider delayDuration={300}>
       <BrowserRouter>
@@ -35,6 +46,7 @@ export function App() {
               <Route path="/w/:wid" element={<AppShell />}>
                 <Route index element={<Navigate to="canvas" replace />} />
                 <Route path="canvas" element={<CanvasPage />} />
+                <Route path="workspace" element={<WorkspacePage />} />
                 <Route path="chat" element={<ChatPage />} />
                 <Route path="chat/:sessionId" element={<ChatPage />} />
                 <Route path="runs" element={<RunsPage />} />

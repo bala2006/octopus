@@ -265,6 +265,17 @@ function Shortcuts() {
 // ------------------------------------------------------------------ content
 const SECTIONS: Section[] = [
   {
+    id: "workspace", title: "Edit and preview your project", icon: FileCode2,
+    body: <>
+      <p>Open <b>Workspace</b> to edit your files alongside a preview. Select a file in the explorer, make changes, and press <b>Ctrl+S</b> or <b>Command+S</b> to save. Unsaved tabs keep your edits while you navigate within Octopus.</p>
+      <p>Use <b>New file</b> or <b>New folder</b> to add files and folders. The selected text file can be renamed, moved, or deleted after saving. Deletion offers <b>Undo</b>. If another editor or agent changes a file, saving opens a comparison before you choose which version to keep.</p>
+      <p><b>Ctrl+K</b> opens files and pages. <b>Ctrl+Shift+F</b> searches saved file contents and jumps to a matching line. On macOS, use Command instead of Ctrl.</p>
+      <p><b>Preview</b> shows HTML, Markdown, images, and PDFs. In <b>Commands → Dev server</b>, start your app's server, read its live output, and open its preview. Servers stay active when you navigate away. The header indicator returns you to the controls.</p>
+      <p><b>Git changes</b> shows file patches with working and staged views. Stage or unstage individual files after review. Use <b>Commands</b> for builds, tests, and Git commands, subject to project permissions and a timeout of up to 60 seconds. Use a system terminal for interactive tools.</p>
+      <p>Open tabs and unfinished edits recover from the browser's local storage after a reload. If recovery storage is unavailable, Octopus shows a warning so you can save your files.</p>
+    </>,
+  },
+  {
     id: "overview", title: "The big picture", icon: Sparkles,
     body: <>
       <p>Everything in Octopus follows the same four steps. Once you know them, you know the app.</p>

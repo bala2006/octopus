@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import tempfile
 from collections import defaultdict
 from collections.abc import AsyncIterator
@@ -134,7 +135,8 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
 
 @pytest_asyncio.fixture
 async def workspace(client: httpx.AsyncClient, tmp_root: Path, request: pytest.FixtureRequest) -> dict[str, Any]:
-    d = tmp_root / f"proj-{request.node.name[:40]}-{os.urandom(3).hex()}"
+    name = re.sub(r"[^a-zA-Z0-9_-]", "_", request.node.name[:40])
+    d = tmp_root / f"proj-{name}-{os.urandom(3).hex()}"
     d.mkdir()
     r = await client.post("/api/v1/workspaces", json={"path": str(d), "default_permission": "danger"})
     assert r.status_code == 201, r.text

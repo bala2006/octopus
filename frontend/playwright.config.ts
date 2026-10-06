@@ -23,7 +23,7 @@ export default defineConfig({
   use: { baseURL: `http://127.0.0.1:${PORT}`, viewport: { width: 1440, height: 900 }, colorScheme: "dark", trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
   webServer: {
-    command: `../backend/.venv/bin/python -m uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port ${PORT}`,
+    command: `"${process.env.OCTOPUS_PYTHON ?? (process.platform === "win32" ? "../backend/.venv/Scripts/python.exe" : "../backend/.venv/bin/python")}" -m uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port ${PORT}`,
     url: `http://127.0.0.1:${PORT}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
@@ -32,6 +32,7 @@ export default defineConfig({
       WORKSPACE_ALLOWED_ROOTS: JSON.stringify([path.join(root, "projects")]),
       MOCK_STREAM_DELAY: process.env.MOCK_STREAM_DELAY ?? "0.004",
       DEMO_MODE: "true",
+      NATIVE_DIALOGS: "false",
       LOG_LEVEL: "WARNING",
     },
   },

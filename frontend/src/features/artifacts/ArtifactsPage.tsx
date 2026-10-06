@@ -183,6 +183,7 @@ export default function ArtifactsPage() {
             <>
               <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
                 <span className="truncate font-mono text-xs">{selected}</span>
+                <Button size="sm" variant="ghost" onClick={() => nav(`/w/${w}/workspace?file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
                 {planned && <Badge>planned</Badge>}
                 {source === "run" && shownVersion !== null && <Badge variant="outline">v{shownVersion}{latest && shownVersion !== latest.version ? ` of ${latest.version}` : ""}</Badge>}
                 <div className="ml-auto flex items-center gap-1">

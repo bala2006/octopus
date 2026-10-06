@@ -82,9 +82,19 @@ def test_command_sandbox_rejects(cmd: str) -> None:
         parse_command(cmd)
 
 
+@pytest.mark.parametrize("argument", ['"C:\\Users\\other\\script.py"', '".octopus\\private.py"', '"src\\.git\\config"', '--file=C:/outside.py'])
+def test_command_paths_cannot_bypass_checks_with_windows_separators(argument: str) -> None:
+    with pytest.raises(SandboxError):
+        parse_command(f"python {argument}")
+
+
 def test_danger_allows_more_and_shell_ops_via_sh() -> None:
     assert parse_command("bash -c ls".replace("-c ls", "--version"), danger=True)[0] == "bash"
-    assert parse_command("ls && rm x", danger=True) == ["sh", "-c", "ls && rm x"]
+    if os.name == "posix":
+        assert parse_command("ls && rm x", danger=True) == ["sh", "-c", "ls && rm x"]
+    else:
+        with pytest.raises(SandboxError, match="not supported on this platform"):
+            parse_command("ls && rm x", danger=True)
     with pytest.raises(SandboxError):  # the path checks still apply to every word
         parse_command("ls && cat /etc/passwd", danger=True)
     with pytest.raises(SandboxError):
@@ -109,8 +119,9 @@ def test_unquoted_operators_detected() -> None:
 
 async def test_danger_shell_command_runs(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("one\ntwo\n")
-    res = await run_command("cat a.txt | wc -l && echo done", tmp_path, danger=True)
-    assert res.ok and "2" in res.output and "done" in res.output
+    if os.name == "posix":
+        res = await run_command("cat a.txt | wc -l && echo done", tmp_path, danger=True)
+        assert res.ok and "2" in res.output and "done" in res.output
     res = await run_command('node -e "const f = (a) => a > 1 && a < 3; console.log(f(2))"', tmp_path, danger=True)
     assert res.ok and "true" in res.output
 
@@ -125,6 +136,30 @@ async def test_sandbox_runs_in_project(tmp_path: Path) -> None:
     (tmp_path / "hi.py").write_text("import os\nprint('cwd=' + os.getcwd())\n")
     res = await run_command("python hi.py", tmp_path)
     assert res.ok and f"cwd={tmp_path.resolve()}" in res.output
+
+
+async def test_command_output_is_bounded_and_keeps_start_and_end(tmp_path: Path) -> None:
+    from app.tools.sandbox import MAX_OUTPUT
+    (tmp_path / "noisy.py").write_text("import sys\nsys.stdout.write('START\\n' + '\\u00e9' * 2000000 + '\\nEND')\n", encoding="utf-8")
+    result = await run_command("python noisy.py", tmp_path)
+    assert result.ok
+    assert result.output.replace("\r\n", "\n").startswith("START\n") and result.output.replace("\r\n", "\n").endswith("\nEND")
+    assert "[truncated]" in result.output
+    assert len(result.output) <= MAX_OUTPUT + 30
+    assert "\ufffd" not in result.output
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows batch launcher behavior")
+async def test_windows_sdk_launcher_resolves_and_preserves_quoted_arguments(tmp_path: Path, monkeypatch) -> None:
+    launcher = tmp_path / "sdk-probe.cmd"
+    launcher.write_text('@echo off\necho ARG=%~1\n')
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
+    result = await run_command('sdk-probe "hello world"', tmp_path, danger=True)
+    assert result.ok and "ARG=hello world" in result.output
+    with pytest.raises(SandboxError, match="batch launchers"):
+        await run_command('sdk-probe "hello&unexpected"', tmp_path, danger=True)
+    with pytest.raises(SandboxError, match="batch launchers"):
+        await run_command('sdk-probe "%USERPROFILE%"', tmp_path, danger=True)
 
 
 def _writer_company() -> tuple[list, list]:

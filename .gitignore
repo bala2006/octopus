@@ -10,6 +10,7 @@ venv/
 
 # Node
 node_modules/
+npm-cache/
 dist/
 coverage/
 playwright-report/
@@ -38,3 +39,4 @@ frontend/openapi.json
 
 # demo video recording scratch
 .demo-video/
+.tmp/

@@ -16,6 +16,7 @@ import fnmatch
 import io
 import os
 import re
+import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -24,7 +25,8 @@ from app.core.config import PROJECT_DIRNAME
 MAX_FILE_BYTES = 1_000_000
 MAX_LIST = 3000
 IGNORED_DIRS = {".git", PROJECT_DIRNAME, "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
-                ".ruff_cache", "dist", "build", ".next", ".turbo", ".idea", ".vscode", ".DS_Store"}
+                ".ruff_cache", ".tmp", "dist", "build", ".next", ".turbo", ".idea", ".vscode", ".ds_store",
+                ".dart_tool", ".gradle", ".cxx", ".pub-cache", ".npm", "coverage"}
 PROTECTED_TOP = {PROJECT_DIRNAME, ".git"}
 WORK_DIR = f"{PROJECT_DIRNAME}/work"  # the only agent-accessible subtree of .octopus/
 SECRET_PATTERNS = [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", ".npmrc", ".pypirc",
@@ -49,7 +51,11 @@ def normalize_path(path: str) -> str:
         raise WorkspaceError("Path traversal ('..') is not allowed")
     if not parts or len(p) > 400:
         raise WorkspaceError("Invalid path")
-    if parts[0] in PROTECTED_TOP and not is_work_path(parts):
+    if any(part.lower() in PROTECTED_TOP for part in parts[1:]):
+        raise WorkspaceError("Git internals and Octopus metadata are protected inside nested folders too")
+    if any(":" in s or s.endswith((".", " ")) or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", s) for s in parts):
+        raise WorkspaceError("Invalid or reserved path component")
+    if parts[0].lower() in PROTECTED_TOP and not is_work_path(parts):
         hint = f" (working documents go in {WORK_DIR}/)" if parts[0] == PROJECT_DIRNAME else ""
         raise WorkspaceError(f"'{parts[0]}/' is protected and cannot be accessed by agents{hint}")
     return "/".join(parts)
@@ -60,7 +66,7 @@ def is_work_path(parts: tuple[str, ...] | list[str]) -> bool:
 
 
 def is_secret(rel: str) -> bool:
-    name = rel.rsplit("/", 1)[-1]
+    name = rel.rsplit("/", 1)[-1].lower()
     if name in SECRET_ALLOW:
         return False
     return any(fnmatch.fnmatch(name, pat) for pat in SECRET_PATTERNS)
@@ -93,7 +99,13 @@ class ProjectFS:
         rel = normalize_path(path)
         if not self.allow_secrets and is_secret(rel):
             raise WorkspaceError(f"'{rel}' looks like a secrets file; access requires danger mode")
-        return rel, self._inside(self.root, rel)
+        full = self._inside(self.root, rel)
+        # A link inside the project must not expose protected metadata or secrets.
+        actual = full.resolve().relative_to(self.root).as_posix()
+        normalize_path(actual)
+        if not self.allow_secrets and is_secret(actual):
+            raise WorkspaceError("Symlink points to a secrets file")
+        return rel, full
 
     def target_for_write(self, path: str) -> tuple[str, Path]:
         rel, real = self.resolve(path)
@@ -131,9 +143,16 @@ class ProjectFS:
         if target.exists() and target.is_dir():
             raise WorkspaceError(f"'{rel}' is a directory")
         target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(f".{target.name}.octopus-tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, target)  # atomic
+        fd, name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".octopus-tmp", dir=target.parent)
+        tmp = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+            if target.exists():
+                os.chmod(tmp, target.stat().st_mode)
+            os.replace(tmp, target)
+        finally:
+            tmp.unlink(missing_ok=True)
         return rel
 
     def read(self, path: str) -> str:
@@ -152,7 +171,7 @@ class ProjectFS:
                 if not start.is_dir():
                     continue
             for dirpath, dirnames, filenames in os.walk(start):
-                dirnames[:] = [d for d in dirnames if d not in IGNORED_DIRS and not os.path.islink(os.path.join(dirpath, d))]
+                dirnames[:] = [d for d in dirnames if d.lower() not in IGNORED_DIRS and not os.path.islink(os.path.join(dirpath, d))]
                 for f in filenames:
                     rel = os.path.relpath(os.path.join(dirpath, f), base).replace("\\", "/")
                     if f.endswith((".pyc", ".octopus-tmp")) or (not self.allow_secrets and is_secret(rel)):
@@ -235,11 +254,11 @@ class ProjectFS:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for rel in paths if paths is not None else self.list():
                 try:
-                    content = self.current(rel)
+                    current = self.current_file(rel)
                 except WorkspaceError:
                     continue
-                if content is not None:
-                    zf.writestr(rel, content)
+                if current is not None:
+                    zf.write(current[1], arcname=rel)
             for name, content in (extra or {}).items():
                 zf.writestr(name, content)
         return buf.getvalue()

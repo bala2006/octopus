@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",
     "e2e": "playwright test",
-    "gen:api": "cd ../backend && .venv/bin/python -m app.export_openapi ../frontend/openapi.json && cd ../frontend && openapi-typescript openapi.json -o src/types/api.gen.ts"
+    "gen:api": "node scripts/generate-api.mjs",
+    "format:workspace": "prettier --write src/features/editor src/components/layout/CommandPalette.tsx src/components/layout/ProcessIndicator.tsx scripts e2e/workspace.spec.ts",
+    "format:workspace:check": "prettier --check src/features/editor src/components/layout/CommandPalette.tsx src/components/layout/ProcessIndicator.tsx scripts e2e/workspace.spec.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
@@ -66,10 +68,14 @@
     "jsdom": "^30.1.1",
     "openapi-typescript": "^7.13.0",
     "postcss": "^8.5.28",
+    "prettier": "3.6.2",
     "tailwindcss": "^3.4.19",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.9.3",
     "vite": "^5.4.21",
     "vitest": "^2.1.9"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   }
 }

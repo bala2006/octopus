@@ -149,6 +149,11 @@ async def forget_workspace(workspace_id: str, db: AsyncSession = Depends(get_reg
         raise HTTPException(404, "Workspace not found")
     if manager.active_for(Path(w.path)):
         raise HTTPException(409, "Stop this project's active runs first")
+    from app.services.processes import commands, servers
+    if servers.status(str(Path(w.path)))["status"] == "running":
+        raise HTTPException(409, "Stop this project's development server before removing it from the list")
+    if commands.status(str(Path(w.path)))["status"] == "running":
+        raise HTTPException(409, "Stop this project's command before removing it from the list")
     await close_project(str(Path(w.path)))
     await db.delete(w)
     await db.commit()

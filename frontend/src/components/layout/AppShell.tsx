@@ -20,9 +20,12 @@ import {
 import { ErrorBoundary, PermissionBadge } from "@/components/common";
 import { useOpenFolder } from "@/features/workspaces/useOpenFolder";
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
+import { CommandPalette } from "./CommandPalette";
+import { ProcessIndicator } from "./ProcessIndicator";
 
-/** The four places you work in, in the order you usually need them. Settings and the Guide live on the right. */
+/** Primary project views. Settings and the guide stay beside quick open. */
 const NAV = [
+  { to: "workspace", label: "Workspace", hint: "Edit files, search code, and preview your app", icon: FolderOpen, shortcut: "7" },
   { to: "canvas", label: "Canvas", hint: "Design your team of agents", icon: Network, shortcut: "1" },
   { to: "chat", label: "Chat", hint: "Talk to one agent directly", icon: MessagesSquare, shortcut: "2" },
   { to: "runs", label: "Runs", hint: "Watch the team work on a goal", icon: History, shortcut: "3" },
@@ -40,6 +43,7 @@ export function AppShell() {
   const nav = useNavigate();
   const loc = useLocation();
   const { theme, toggleTheme } = useApp();
+
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -62,22 +66,23 @@ export function AppShell() {
   }
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3">
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background px-3 py-1.5">
         <Link to="/" className="flex items-center gap-2 rounded-md px-1 py-1 transition hover:bg-accent" aria-label="All projects">
           <img src="/octopus.svg" alt="" className="h-6 w-6" />
           <span className="hidden text-sm font-semibold tracking-tight lg:inline">Octopus</span>
         </Link>
         <span className="text-muted-foreground/50">/</span>
         <ProjectSwitcher />
-        <span className="text-muted-foreground/50">/</span>
-        <CompanySwitcher />
-        <nav className="ml-3 flex items-center gap-0.5 rounded-full bg-surface-2 p-0.5" aria-label="Main">
+        <nav className="order-last flex w-full items-center gap-0.5 overflow-x-auto rounded-lg bg-surface-2 p-0.5" aria-label="Main">
           {NAV.map((item) => <NavItem key={item.to} {...item} active={loc.pathname.includes(`/${item.to}`)} />)}
+          <div className="ml-auto shrink-0 border-l pl-2"><CompanySwitcher /></div>
         </nav>
         <div className="ml-auto flex items-center gap-1.5">
+          <CommandPalette />
           <LiveRunsIndicator />
+          <ProcessIndicator />
           <ModelStatus />
-          {ws.data && <PermissionBadge level={ws.data.default_permission as PermissionLevel} />}
+          {ws.data && <span className="hidden 2xl:inline"><PermissionBadge level={ws.data.default_permission as PermissionLevel} /></span>}
           <span className="mx-1 h-5 w-px bg-border" />
           {SIDE_NAV.map((item) => <NavItem key={item.to} {...item} active={loc.pathname.includes(`/${item.to}`)} compact />)}
           <Tip content={theme === "dark" ? "Light theme" : "Dark theme"} side="bottom">
@@ -101,7 +106,7 @@ function NavItem({ to, label, hint, icon: Icon, shortcut, active, compact }: { t
         "relative flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground",
         compact && "px-2.5",
         active ? "bg-card text-foreground shadow-sm" : "hover:bg-accent")}>
-        <Icon className="h-4 w-4" /><span className={cn("hidden", compact ? "xl:inline" : "md:inline")}>{label}</span>
+        <Icon className="h-4 w-4 shrink-0" /><span className={cn(compact ? "hidden xl:inline" : "inline")}>{label}</span>
       </NavLink>
     </Tip>
   );

@@ -70,6 +70,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
+      - name: Workspace formatting
+        run: npm run format:workspace:check
       - name: Unit tests
         run: npm test
       - name: Build

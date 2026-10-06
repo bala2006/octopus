@@ -25,6 +25,8 @@
 
 ## What you can do
 
+**New: [Workspace](docs/workspace.md)** provides editable file tabs with draft recovery, conflict-aware saves, file and folder management, asset upload/download, persistent Trash, project-wide search, a browser preview, and Git review and staging. Build/test commands stream output, accept line input, preserve output across navigation, and can be stopped. Managed development servers have separate start/stop controls. Resize the panels to suit your project, and press **Ctrl+K** or **Command+K** to find files and pages.
+
 | | |
 |---|---|
 | **Open any folder** | *Open project folder* shows your system's own folder window (Finder, Explorer, zenity/kdialog), where you can also create a new folder. Octopus creates and maintains `.octopus/`: a SQLite DB, the agents' working docs (`work/`), plans, exports, browser output, a README, and `.gitignore = *`. Re-opening the folder brings everything back. |
@@ -44,7 +46,20 @@
 
 ## Quick start
 
-Requirements: **Python 3.11+** and **Node 20+** (Node also powers the agents' browser).
+Requirements: **Python 3.11+** and **Node 24.15+** (also supported: Node 22.22.2+ and 26+). Node also powers the agents' browser.
+
+On **Windows**, use PowerShell from this folder:
+
+```powershell
+.\octopus.ps1 setup       # create the Python venv and install locked frontend dependencies
+.\octopus.ps1 start       # build and serve http://127.0.0.1:8000; Ctrl+C stops it
+.\octopus.ps1 check       # inspect installed prerequisites without installing anything
+.\octopus.ps1 test        # backend and frontend checks
+```
+
+If PowerShell blocks a downloaded script, run it with `powershell -ExecutionPolicy Bypass -File .\octopus.ps1 setup`. To use a particular Python installation, add `-Python C:\path\to\python.exe`. Subsequent starts can use `-SkipBuild` until you change frontend code. Use `-Port 8001` when port 8000 is already occupied.
+
+On **macOS or Linux**:
 
 ```bash
 cp .env.example .env        # optional: Azure endpoint and key
@@ -218,7 +233,8 @@ The doodle octopus lives in [`docs/brand/`](docs/brand): `logo.svg` (full), `log
 ## Security
 
 - **File access.** Agents only see the project folder. Absolute paths, `..` and symlinks that escape the folder are rejected on real paths. `.octopus/` and `.git/` are off-limits except `.octopus/work/`, where agents keep their working documents (specs, plans, briefs, QA notes) so your folder only gets the deliverables. Secrets (`.env`, keys) are blocked outside danger mode.
-- **Commands.** They run without a shell, with a scrubbed environment and rlimits (CPU, memory, file size, processes) plus a timeout, and without network (`unshare -n`) where available. An allowlist applies outside danger mode; `SANDBOX_MODE=docker` isolates commands in containers.
+- **Agent commands.** They run without a shell, with a scrubbed environment, bounded output, and a timeout. POSIX also applies CPU, file-size, and process limits. Address-space limits apply to compatible runtimes; Node, Go, Java, Dart, and Flutter are exempt because their large virtual reservations prevent startup under that limit. Network is disabled with `unshare -n` where available. An allowlist applies outside danger mode; `SANDBOX_MODE=docker` supplies container isolation and memory limits.
+- **Workspace commands and servers.** These start only from explicit user actions and run as local processes. They keep your user home and SDK path settings so Git identity, package configuration, and SDK discovery work, while omitting provider keys from the environment. They retain command restrictions, bounded live output, and owned-process start/stop controls. They can access the network for package installs and development servers; these managed processes require subprocess mode.
 - **Folder dialog.** It only opens for browsers on the same machine. The backend registers the chosen folder itself, so the browser never sends a path.
 - **Preview.** Project previews run in a CSP sandbox with an opaque origin and no access to the Octopus API.
 - **Browser.** The agents' browser uses an isolated, in-memory profile, so none of your cookies or logins.
