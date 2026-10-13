@@ -1346,6 +1346,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                                      role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, self.roles),
                                      skills_text=SK.prompt_section(self.skills, str(agent.behavior.get("template_key") or ""),
                                                                    list(agent.behavior.get("skills") or [])))
+        from app.services.project_guidance import load as load_guidance
+        system += await asyncio.to_thread(load_guidance, self.project.root)
         user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
                                  names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
                                  team_status=team_status(self.agents, self.status))

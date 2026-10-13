@@ -1352,6 +1352,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/w/{workspace_id}/editor/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Tasks */
+        get: operations["project_tasks_api_v1_w__workspace_id__editor_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/w/{workspace_id}/editor/git/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Git Commit */
+        post: operations["git_commit_api_v1_w__workspace_id__editor_git_commit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/w/{workspace_id}/editor/git/stage": {
         parameters: {
             query?: never;
@@ -2298,6 +2332,11 @@ export interface components {
             output: string;
             /** Truncated */
             truncated: boolean;
+            /**
+             * Directory
+             * @default .
+             */
+            directory: string;
             /** Timed Out */
             timed_out: boolean;
         };
@@ -2611,6 +2650,19 @@ export interface components {
              */
             warning: string;
         };
+        /** GitCommit */
+        GitCommit: {
+            /** Message */
+            message: string;
+            /** Expected Index */
+            expected_index: string;
+        };
+        /** GitCommitResult */
+        GitCommitResult: {
+            /** Commit Sha */
+            commit_sha: string;
+            status: components["schemas"]["GitStatus"];
+        };
         /** GitDiff */
         GitDiff: {
             /** Patch */
@@ -2638,6 +2690,8 @@ export interface components {
             branch: string;
             /** Files */
             files: components["schemas"]["GitFile"][];
+            /** Index Revision */
+            index_revision: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2872,6 +2926,31 @@ export interface components {
              * @default
              */
             data: string;
+        };
+        /** ProjectTask */
+        ProjectTask: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Command */
+            command: string;
+            /** Directory */
+            directory: string;
+            /** Source */
+            source: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "task" | "server";
+        };
+        /** ProjectTasks */
+        ProjectTasks: {
+            /** Tasks */
+            tasks: components["schemas"]["ProjectTask"][];
+            /** Warnings */
+            warnings: string[];
         };
         /** ProjectTreeOut */
         ProjectTreeOut: {
@@ -3360,6 +3439,11 @@ export interface components {
             output: string;
             /** Truncated */
             truncated: boolean;
+            /**
+             * Directory
+             * @default .
+             */
+            directory: string;
         };
         /** SessionIn */
         SessionIn: {
@@ -3460,6 +3544,21 @@ export interface components {
              * @default 3600
              */
             timeout_seconds: number;
+            /**
+             * Directory
+             * @default .
+             */
+            directory: string;
+        };
+        /** StartServer */
+        StartServer: {
+            /** Command */
+            command: string;
+            /**
+             * Directory
+             * @default .
+             */
+            directory: string;
         };
         /** TaskOut */
         TaskOut: {
@@ -6659,6 +6758,72 @@ export interface operations {
             };
         };
     };
+    project_tasks_api_v1_w__workspace_id__editor_tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectTasks"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    git_commit_api_v1_w__workspace_id__editor_git_commit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitCommit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitCommitResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     git_stage_api_v1_w__workspace_id__editor_git_stage_post: {
         parameters: {
             query?: never;
@@ -6801,7 +6966,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CommandIn"];
+                "application/json": components["schemas"]["StartServer"];
             };
         };
         responses: {

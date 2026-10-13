@@ -10,7 +10,8 @@ import type { ParsedFileOut, PermissionLevel, RunDetail } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select } from "@/components/ui/overlays";
-import { EffortPicker, type Effort } from "@/features/canvas/EffortPicker";
+import { EffortPicker } from "@/features/canvas/EffortPicker";
+import { defaultRunBudget } from "./runDefaults";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
 import { useAttachments, AttachmentChips, attachmentPayload } from "@/features/chat/attachments";
 
@@ -36,7 +37,7 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
   const anyConfigured = settings.data?.providers.some((p) => p.provider !== "mock" && p.configured) ?? false;
   const [demo, setDemo] = React.useState(!anyConfigured);
   const [adv, setAdv] = React.useState(false);
-  const [budget, setBudget] = React.useState({ max_turns: 60, max_tokens: 400000, max_cost_usd: 2, timeout_s: 900, loop_threshold: 0.92, max_loop_strikes: 3, stall_turns: 30, max_tool_rounds: 40, context_recent: 30, max_agents: 24, persist_team: true, verify_before_finish: true, workflow: "auto" as "auto" | "on" | "off", reasoning_effort: "default" as Effort });
+  const [budget, setBudget] = React.useState(defaultRunBudget);
   const att = useAttachments({ images: true });
   React.useEffect(() => {
     if (!open) return;

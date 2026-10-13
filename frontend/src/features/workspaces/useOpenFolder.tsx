@@ -29,7 +29,7 @@ export function useOpenFolder() {
     const where = w.display_path || w.path;
     toast.success(w.existing_project ? `Re-opened ${w.name}` : `Opened ${w.name}`,
       { description: w.existing_project ? "Found its .octopus folder: everything is restored." : `Octopus created ${where}/.octopus for this project.` });
-    nav(`/w/${w.id}/canvas`);
+    nav(`/w/${w.id}/workspace`);
   };
   const pick = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/workspaces/native", { body: { default_permission: "ask" } })),

@@ -1,6 +1,6 @@
 # Work on project files
 
-Open a project, then choose **Workspace** in the navigation bar. You can edit your own files and the files your agents produce.
+Open a project to enter **Workspace**. You can edit your own files and the files your agents produce. The [developer workbench](developer-workbench.md) keeps the company agent beside the editor, while the activity rail preserves all team and canvas views.
 
 ## Find and edit a file
 
@@ -71,6 +71,6 @@ Managed servers use project command permissions and the project folder. They hav
 
 ## Review Git changes
 
-Open **Git changes** beside Files and Search. The panel shows the current branch and changed files in your repository. Open a file's review to compare **Working changes** and **Staged changes**, then use **Stage file** or **Unstage file**. These controls change individual index entries and preserve working file contents.
+Open **Git changes** beside Files and Search. The panel shows the current branch and changed files in your repository. Open a file's review to compare **Working changes** and **Staged changes**, then use **Stage file** or **Unstage file**. These controls change individual index entries and preserve working file contents. Enter a message to **Commit staged**; the commit rejects a stale review or hidden staged content. UI commits skip hooks and signing, so use Commands or your Git client for those.
 
 Use **Open file** to edit an existing changed file. Deleted files remain reviewable as patches. Untracked files have no patch until staged. Git review requires Git to be installed and the repository's root folder to be opened as the project. Use Commands or your Git client to commit and push. Explicit Workspace commands keep your user home so your Git identity and package configuration work as usual.

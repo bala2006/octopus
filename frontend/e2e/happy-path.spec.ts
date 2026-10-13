@@ -21,10 +21,11 @@ test("create project → company from template → edit agent → run in Demo Mo
   await expect(dialog.getByText(PROJECT)).toBeVisible();
   await shoot(page, "02-directory-picker");
   await dialog.getByRole("button", { name: "Use this folder" }).click();
-  await expect(page).toHaveURL(/\/w\/.+\/canvas/);
+  await expect(page).toHaveURL(/\/w\/.+\/workspace/);
   expect(fs.existsSync(path.join(PROJECT, ".octopus", "octopus.db"))).toBeTruthy();
 
   // 2. Company from the Software Startup template
+  await page.getByRole("link", { name: "Canvas", exact: true }).click();
   await page.getByTestId("new-company").click();
   await page.getByTestId("create-company").click();
   await expect(page.locator(".react-flow__node")).toHaveCount(8);

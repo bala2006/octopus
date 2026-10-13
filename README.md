@@ -25,7 +25,7 @@
 
 ## What you can do
 
-**New: [Workspace](docs/workspace.md)** provides editable file tabs with draft recovery, conflict-aware saves, file and folder management, asset upload/download, persistent Trash, project-wide search, a browser preview, and Git review and staging. Build/test commands stream output, accept line input, preserve output across navigation, and can be stopped. Managed development servers have separate start/stop controls. Resize the panels to suit your project, and press **Ctrl+K** or **Command+K** to find files and pages.
+**New: [Developer workbench](docs/developer-workbench.md)** brings the company agent conversation beside your code editor, with file and selection context, Agent/Plan/Ask modes, live approvals, run controls, and conversation history. Projects open in Workspace; the company canvas stays one click away in the activity rail. The [workspace tools](docs/workspace.md) retain recoverable drafts, conflict-aware saves, file management, browser preview, and streamed commands, and add save-all, clean-tab refresh, detected project tasks, command-output assistance, and reviewed staged Git commits. Resize the panels and use **Ctrl+K** to find files or **Ctrl+L** to ask your team.
 
 | | |
 |---|---|

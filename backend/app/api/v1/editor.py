@@ -1,6 +1,7 @@
 """Project editor endpoints. All actions here are explicit user actions, not agent tool calls."""
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -99,6 +100,7 @@ class ServerStatus(BaseModel):
     exit_code: int | None
     output: str
     truncated: bool
+    directory: str = "."
 
 
 class CommandStatus(ServerStatus):
@@ -107,6 +109,11 @@ class CommandStatus(ServerStatus):
 
 class StartCommand(CommandIn):
     timeout_seconds: int = Field(default=3600, ge=1, le=14400)
+    directory: str = Field(default=".", min_length=1, max_length=400)
+
+
+class StartServer(CommandIn):
+    directory: str = Field(default=".", min_length=1, max_length=400)
 
 
 class CommandInput(BaseModel):
@@ -122,6 +129,7 @@ class GitFile(BaseModel):
 class GitStatus(BaseModel):
     branch: str
     files: list[GitFile]
+    index_revision: str
 
 
 class GitDiff(BaseModel):
@@ -133,13 +141,59 @@ class GitStage(BaseModel):
     staged: bool
 
 
+class GitCommit(BaseModel):
+    message: str = Field(min_length=1, max_length=5000)
+    expected_index: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class GitCommitResult(BaseModel):
+    commit_sha: str
+    status: GitStatus
+
+
+class ProjectTask(BaseModel):
+    id: str
+    name: str
+    command: str
+    directory: str
+    source: str
+    kind: Literal["task", "server"]
+
+
+class ProjectTasks(BaseModel):
+    tasks: list[ProjectTask]
+    warnings: list[str]
+
+
+@router.get("/tasks", response_model=ProjectTasks)
+async def project_tasks(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    from app.services.project_tasks import discover
+    try:
+        return await asyncio.to_thread(discover, ctx.root)
+    except OSError as exc:
+        raise HTTPException(400, "Project tasks could not be read. Reopen the project folder.") from exc
+
+
+@router.post("/git/commit", response_model=GitCommitResult)
+async def git_commit(body: GitCommit, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    from app.services import git_review
+    if ctx.workspace.default_permission in ("read_only", "plan"):
+        raise HTTPException(403, "Committing changes is disabled in read-only and plan mode.")
+    try:
+        async with git_review.operation_lock(ctx.root):
+            return await git_review.commit(ctx.root, body.message, body.expected_index)
+    except (WorkspaceError, OSError, TimeoutError) as exc:
+        raise HTTPException(400, str(exc) or "Git timed out. Use the command panel for this commit.") from exc
+
+
 @router.post("/git/stage", response_model=GitStatus)
 async def git_stage(body: GitStage, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     from app.services import git_review
     if ctx.workspace.default_permission in ("read_only", "plan"):
         raise HTTPException(403, "Staging changes is disabled in read-only and plan mode.")
     try:
-        return await git_review.stage(ctx.root, body.path, body.staged)
+        async with git_review.operation_lock(ctx.root):
+            return await git_review.stage(ctx.root, body.path, body.staged)
     except (WorkspaceError, OSError, TimeoutError) as exc:
         raise HTTPException(400, str(exc) or "Git timed out. Try refreshing.") from exc
 
@@ -169,13 +223,13 @@ async def server_status(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 
 
 @router.post("/server", response_model=ServerStatus)
-async def start_server(body: CommandIn, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+async def start_server(body: StartServer, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     from app.services.processes import servers
     from app.tools.sandbox import SandboxError
     if ctx.workspace.default_permission in ("read_only", "plan"):
         raise HTTPException(403, "Development servers are disabled in read-only and plan mode.")
     try:
-        return await servers.start(ctx.key, ctx.root, body.command, danger=ctx.workspace.default_permission == "danger")
+        return await servers.start(ctx.key, ctx.root, body.command, danger=ctx.workspace.default_permission == "danger", directory=body.directory)
     except (SandboxError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -211,7 +265,7 @@ async def start_command(body: StartCommand, ctx: ProjectCtx = Depends(project_ct
     if ctx.workspace.default_permission in ("read_only", "plan"):
         raise HTTPException(403, "Commands are disabled in read-only and plan mode.")
     try:
-        return await commands.start(ctx.key, ctx.root, body.command, danger=ctx.workspace.default_permission == "danger", timeout=body.timeout_seconds)
+        return await commands.start(ctx.key, ctx.root, body.command, danger=ctx.workspace.default_permission == "danger", timeout=body.timeout_seconds, directory=body.directory)
     except (SandboxError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

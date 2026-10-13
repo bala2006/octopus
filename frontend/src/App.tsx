@@ -44,7 +44,7 @@ export function App() {
             <Routes>
               <Route path="/" element={<WelcomePage />} />
               <Route path="/w/:wid" element={<AppShell />}>
-                <Route index element={<Navigate to="canvas" replace />} />
+                <Route index element={<Navigate to="workspace" replace />} />
                 <Route path="canvas" element={<CanvasPage />} />
                 <Route path="workspace" element={<WorkspacePage />} />
                 <Route path="chat" element={<ChatPage />} />
