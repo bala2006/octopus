@@ -125,8 +125,29 @@ test("Git commit uses reviewed staged content while preserving unstaged edits", 
   await expect(
     review.getByText("+Reviewed source", { exact: true }),
   ).toBeVisible();
+  let staged!: () => void;
+  const didStage = new Promise<void>((resolve) => {
+    staged = resolve;
+  });
+  let release!: () => void;
+  const responseReleased = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/editor/git/stage", async (route) => {
+    const response = await route.fetch();
+    staged();
+    await responseReleased;
+    await route.fulfill({ response });
+  });
   await review.getByRole("button", { name: "Stage file", exact: true }).click();
-  await page.keyboard.press("Escape");
+  await didStage;
+  await review.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(review).not.toBeVisible();
+  release();
+  await expect(
+    page.getByRole("button", { name: "Commit staged (1)", exact: true }),
+  ).toBeVisible();
+  await expect(review).not.toBeVisible();
   fs.writeFileSync(path.join(root, "src/hello.txt"), "Later working edit\n");
   await page
     .getByRole("textbox", { name: "Commit message" })

@@ -24,6 +24,7 @@ export function GitPanel({
   onOpen: (path: string) => void;
 }) {
   const [file, setFile] = React.useState<GitFile | null>(null);
+  const reviewedPath = React.useRef<string | null>(null);
   const [staged, setStaged] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
@@ -68,6 +69,7 @@ export function GitPanel({
       qc.setQueryData(["git-status", workspace], result.status);
       void qc.invalidateQueries({ queryKey: ["git-diff", workspace] });
       setMessage("");
+      reviewedPath.current = null;
       setFile(null);
       toast.success(`Committed ${result.commit_sha.slice(0, 7)}`);
     },
@@ -78,17 +80,24 @@ export function GitPanel({
   });
   const setStage = async (staging: boolean) => {
     if (!file) return;
+    const path = file.path;
     setBusy(true);
     try {
       const data = await unwrap(
         api.POST("/api/v1/w/{workspace_id}/editor/git/stage", {
           params,
-          body: { path: file.path, staged: staging },
+          body: { path, staged: staging },
         }),
       );
       qc.setQueryData(["git-status", workspace], data);
-      setFile(data.files.find((f) => f.path === file.path) ?? null);
-      setStaged(staging);
+      if (reviewedPath.current === path) {
+        setFile((selected) =>
+          selected?.path === path
+            ? (data.files.find((f) => f.path === path) ?? null)
+            : selected,
+        );
+        setStaged(staging);
+      }
       void qc.invalidateQueries({ queryKey: ["git-diff", workspace] });
       toast.success(staging ? "File staged" : "File unstaged");
     } catch (e) {
@@ -177,6 +186,7 @@ export function GitPanel({
             className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs transition-colors hover:bg-accent"
             title={entry.path}
             onClick={() => {
+              reviewedPath.current = entry.path;
               setStaged(entry.status[0] !== " " && entry.status !== "??");
               setFile(entry);
             }}
@@ -201,7 +211,10 @@ export function GitPanel({
       <Dialog
         open={!!file}
         onOpenChange={(open) => {
-          if (!open) setFile(null);
+          if (!open) {
+            reviewedPath.current = null;
+            setFile(null);
+          }
         }}
       >
         <DialogContent className="flex h-[80vh] max-w-5xl flex-col overflow-hidden">
@@ -235,6 +248,7 @@ export function GitPanel({
               disabled={file?.status.includes("D")}
               onClick={() => {
                 if (file) onOpen(file.path);
+                reviewedPath.current = null;
                 setFile(null);
               }}
             >

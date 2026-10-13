@@ -72,7 +72,7 @@ export function DirectoryPicker({ open, onOpenChange, notice }: { open: boolean;
         description: `Octopus data lives in ${w.display_path || w.path}/.octopus`,
       });
       onOpenChange(false);
-      nav(`/w/${w.id}/canvas`);
+      nav(`/w/${w.id}/workspace`);
     },
     onError: (e: Error) => toast.error("Could not open project", { description: e.message }),
   });

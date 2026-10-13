@@ -100,10 +100,16 @@ test("create project → company from template → edit agent → run in Demo Mo
 });
 
 test("ask mode: approval card gates file writes", async ({ page, request }) => {
-  const ws = (await (await request.get("/api/v1/workspaces")).json())[0];
-  const companies = await (await request.get(`/api/v1/w/${ws.id}/companies`)).json();
+  const directory = path.join(os.tmpdir(), "octopus-e2e", "projects", "ask-mode");
+  fs.mkdirSync(directory, { recursive: true });
+  const opened = await request.post("/api/v1/workspaces", { data: { path: directory, default_permission: "ask" } });
+  expect(opened.ok()).toBeTruthy();
+  const ws = await opened.json();
+  const created = await request.post(`/api/v1/w/${ws.id}/companies/from-template`, { data: { template_key: "software_startup" } });
+  expect(created.ok()).toBeTruthy();
+  const company = (await created.json()).company;
   const run = await (await request.post(`/api/v1/w/${ws.id}/runs`, {
-    data: { company_id: companies[0].id, goal: "Build a todo app (reviewed in ask mode)", permission_level: "ask", budget: { force_mock: true } },
+    data: { company_id: company.id, goal: "Build a todo app (reviewed in ask mode)", permission_level: "ask", budget: { force_mock: true } },
   })).json();
   await page.goto(`/w/${ws.id}/runs/${run.id}`);
   const card = page.getByRole("alertdialog", { name: "Approval required" });

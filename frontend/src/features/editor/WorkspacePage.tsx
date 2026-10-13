@@ -90,6 +90,13 @@ export default function WorkspacePage() {
   const [agentsOpen, setAgentsOpen] = React.useState(
     () => window.innerWidth >= 1100,
   );
+  React.useEffect(() => {
+    const responsive = () => {
+      if (window.innerWidth < 1100) setAgentsOpen(false);
+    };
+    window.addEventListener("resize", responsive);
+    return () => window.removeEventListener("resize", responsive);
+  }, []);
   const [agentFocus, setAgentFocus] = React.useState(0);
   const [selectionRequest, setSelectionRequest] = React.useState(0);
   const [selection, setSelection] = React.useState<CodeContext>();
