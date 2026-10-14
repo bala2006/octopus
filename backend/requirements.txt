@@ -1,9 +1,9 @@
-fastapi>=0.141.1,<0.142
+fastapi>=0.143.0,<0.144
 uvicorn[standard]>=0.54.0,<0.55
 sqlalchemy[asyncio]>=2.0.36,<2.1
 aiosqlite>=0.20,<0.22
 alembic>=1.20.0,<1.21
-pydantic>=2.13.5,<2.14
+pydantic>=2.14.1,<2.15
 pydantic-settings>=2.15.0,<2.16
 PyJWT>=2.10,<3
 bcrypt>=5.0.0,<6
