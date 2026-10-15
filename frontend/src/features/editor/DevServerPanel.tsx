@@ -9,9 +9,13 @@ import { parsePreviewAddress } from "./previewAddress";
 export function DevServerPanel({
   workspace,
   onPreview,
+  initialCommand = "",
+  initialDirectory = ".",
 }: {
   workspace: string;
   onPreview: (url: string) => void;
+  initialCommand?: string;
+  initialDirectory?: string;
 }) {
   const key = ["dev-server", workspace];
   const qc = useQueryClient();
@@ -26,6 +30,11 @@ export function DevServerPanel({
     refetchInterval: 1000,
   });
   const [command, setCommand] = React.useState("");
+  const [directory, setDirectory] = React.useState(initialDirectory);
+  React.useEffect(() => setDirectory(initialDirectory), [initialDirectory]);
+  React.useEffect(() => {
+    if (initialCommand) setCommand(initialCommand);
+  }, [initialCommand]);
   const [address, setAddress] = React.useState("localhost:3000");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -46,7 +55,7 @@ export function DevServerPanel({
         : await unwrap(
             api.POST("/api/v1/w/{workspace_id}/editor/server", {
               params,
-              body: { command: command.trim() },
+              body: { command: command.trim(), directory },
             }),
           );
       qc.setQueryData(key, data);
@@ -65,6 +74,15 @@ export function DevServerPanel({
           void change(false);
         }}
       >
+        <Input
+          aria-label="Development server working directory"
+          title="Working directory relative to the project root"
+          value={running ? (query.data?.directory ?? directory) : directory}
+          onChange={(e) => setDirectory(e.target.value)}
+          disabled={running || busy}
+          maxLength={400}
+          className="h-8 w-24 shrink-0 font-mono text-xs"
+        />
         <Input
           aria-label="Development server command"
           className="h-8 min-w-40 flex-1 font-mono text-xs"

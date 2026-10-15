@@ -10,6 +10,7 @@ from typing import Literal
 
 from app.core.config import get_settings
 from app.tools.sandbox import SandboxError, _resolve_exe, command_environment, parse_command, stop_process
+from app.tools.workspace import ProjectFS, WorkspaceError
 
 MAX_LOG_CHARS = 24_000
 MAX_SERVERS = 8
@@ -24,10 +25,12 @@ class ManagedProcess:
     truncated: bool = False
     deadline: asyncio.Task | None = None
     timed_out: bool = False
+    directory: str = "."
 
     def snapshot(self) -> dict:
         return {"command": self.command, "status": "running" if self.process.returncode is None else "exited",
-                "exit_code": self.process.returncode, "output": self.output, "truncated": self.truncated, "timed_out": self.timed_out}
+                "exit_code": self.process.returncode, "output": self.output, "truncated": self.truncated, "timed_out": self.timed_out,
+                "directory": self.directory}
 
 
 class ManagedProcesses:
@@ -39,11 +42,22 @@ class ManagedProcesses:
 
     def status(self, key: str) -> dict:
         record = self.records.get(key)
-        return record.snapshot() if record else {"command": "", "status": "idle", "exit_code": None, "output": "", "truncated": False, "timed_out": False}
+        return record.snapshot() if record else {"command": "", "status": "idle", "exit_code": None, "output": "", "truncated": False, "timed_out": False, "directory": "."}
 
-    async def start(self, key: str, root: Path, command: str, *, danger: bool, timeout: int = 3600) -> dict:
+    async def start(self, key: str, root: Path, command: str, *, danger: bool, timeout: int = 3600, directory: str = ".") -> dict:
+        try:
+            if directory == ".":
+                cwd, relative = root, "."
+            else:
+                relative, cwd = ProjectFS(root).resolve(directory)
+                if not cwd.is_dir():
+                    raise WorkspaceError("Select an existing project folder as the command working directory.")
+        except WorkspaceError as exc:
+            raise SandboxError(str(exc)) from exc
         async with self._locks.setdefault(key, asyncio.Lock()):
-            return await self._start(key, root, command, danger=danger, timeout=timeout)
+            result = await self._start(key, cwd, command, danger=danger, timeout=timeout)
+            self.records[key].directory = relative
+            return {**result, "directory": relative}
 
     async def _start(self, key: str, root: Path, command: str, *, danger: bool, timeout: int) -> dict:
         if get_settings().sandbox_mode == "docker":

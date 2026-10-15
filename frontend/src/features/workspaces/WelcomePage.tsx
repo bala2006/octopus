@@ -135,7 +135,7 @@ export function WelcomePage() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-sm font-medium">
-                        {w.exists ? <Link to={`/w/${w.id}/canvas`} className="truncate after:absolute after:inset-0 hover:underline">{w.name}</Link> : <span className="truncate">{w.name}</span>}
+                        {w.exists ? <Link to={`/w/${w.id}/workspace`} className="truncate after:absolute after:inset-0 hover:underline">{w.name}</Link> : <span className="truncate">{w.name}</span>}
                         {!w.exists && <Tip content="The directory no longer exists"><AlertTriangle className="h-3.5 w-3.5 text-destructive" /></Tip>}
                       </div>
                       <div className="truncate font-mono text-[11px] text-muted-foreground">{w.display_path || w.path}</div>

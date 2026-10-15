@@ -2,18 +2,32 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 from pathlib import Path
 
 from app.tools.sandbox import command_environment
-from app.tools.workspace import ProjectFS, WorkspaceError
+from app.tools.workspace import IGNORED_DIRS, ProjectFS, WorkspaceError
 
 MAX_GIT_BYTES = 250_000
+_operation_locks: dict[str, asyncio.Lock] = {}
 
 
-async def git(root: Path, *args: str) -> str:
-    env = {**command_environment(root), "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0",
-           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+def operation_lock(root: Path) -> asyncio.Lock:
+    return _operation_locks.setdefault(str(root.resolve()), asyncio.Lock())
+
+
+def visible_path(fs: ProjectFS, path: str) -> None:
+    rel, _ = fs.resolve(path)
+    if any(part.lower() in IGNORED_DIRS for part in Path(rel).parts):
+        raise WorkspaceError("This path is hidden from Git review. Use your Git client to inspect and commit it explicitly.")
+
+
+async def git(root: Path, *args: str, developer: bool = False) -> str:
+    env = {**command_environment(root, developer=developer), "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0",
+           "GIT_CONFIG_NOSYSTEM": "1"}
+    if not developer:
+        env["GIT_CONFIG_GLOBAL"] = os.devnull
     proc = await asyncio.create_subprocess_exec(
         "git", "--no-pager", "-c", "core.fsmonitor=false", *args, cwd=root, env=env,
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -59,13 +73,15 @@ async def status(root: Path) -> dict:
         code, path = entry[:2], entry[3:]
         original = next(parts, "") if "R" in code or "C" in code else None
         try:
-            fs.resolve(path)
+            visible_path(fs, path)
             if original:
-                fs.resolve(original)
+                visible_path(fs, original)
         except WorkspaceError:
             continue
         files.append({"path": path, "status": code, "original_path": original})
-    return {"branch": branch or "Detached HEAD", "files": files}
+    index = await git(root, "diff", "--cached", "--raw", "--no-abbrev", "-z", "--no-ext-diff", "--no-textconv")
+    return {"branch": branch or "Detached HEAD", "files": files,
+            "index_revision": hashlib.sha256(index.encode("utf-8")).hexdigest()}
 
 
 async def diff(root: Path, path: str, staged: bool) -> str:
@@ -100,3 +116,24 @@ async def stage(root: Path, path: str, staged: bool) -> dict:
         else:
             await git(root, "reset", "--no-refresh", "HEAD", "--", *paths)
     return await status(root)
+
+
+async def commit(root: Path, message: str, expected_index: str) -> dict:
+    """Commit explicitly staged files, rejecting a stale review or hidden staged content."""
+    message = message.strip()
+    if not message or "\x00" in message:
+        raise WorkspaceError("Enter a nonempty commit message without NUL characters.")
+    current = await status(root)
+    if current["index_revision"] != expected_index:
+        raise WorkspaceError("Staged changes changed since your review. Refresh and review them before committing.")
+    paths = (await git(root, "diff", "--cached", "--name-only", "-z", "--no-renames")).split("\x00")
+    if not any(paths):
+        raise WorkspaceError("Stage at least one file before committing.")
+    fs = ProjectFS(root)
+    for path in filter(None, paths):
+        visible_path(fs, path)
+    # A UI commit does not run arbitrary repository hooks or invoke a signing prompt.
+    # Developers who need hooks or signing can commit through the command panel.
+    await git(root, "-c", f"core.hooksPath={os.devnull}", "commit", "--no-gpg-sign", "-m", message, developer=True)
+    sha = (await git(root, "rev-parse", "HEAD")).strip()
+    return {"commit_sha": sha, "status": await status(root)}

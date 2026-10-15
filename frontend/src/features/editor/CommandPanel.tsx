@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, Send, Square, Terminal, Trash2, X } from "lucide-react";
+import { Bot, Play, Send, Square, Terminal, Trash2, X } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
@@ -15,6 +15,7 @@ export function CommandPanel({
   initialMode = "commands",
   height = 256,
   visible = true,
+  onExplain,
 }: {
   workspace: string;
   onClose: () => void;
@@ -23,12 +24,27 @@ export function CommandPanel({
   initialMode?: "commands" | "server";
   height?: number;
   visible?: boolean;
+  onExplain?: (command: string, output: string) => void;
 }) {
   const [mode, setMode] = React.useState<"commands" | "server">(initialMode);
   React.useEffect(() => {
     setMode(initialMode);
   }, [initialMode]);
   const [command, setCommand] = React.useState("");
+  const [serverCommand, setServerCommand] = React.useState("");
+  const [directory, setDirectory] = React.useState(".");
+  const [serverDirectory, setServerDirectory] = React.useState(".");
+  const tasks = useQuery({
+    queryKey: ["project-tasks", workspace],
+    enabled: visible,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/v1/w/{workspace_id}/editor/tasks", {
+          params: { path: { workspace_id: workspace } },
+        }),
+      ),
+    staleTime: 10000,
+  });
   const [stdin, setStdin] = React.useState("");
   const [history, setHistory] = React.useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = React.useState(-1);
@@ -54,7 +70,7 @@ export function CommandPanel({
       unwrap(
         api.POST("/api/v1/w/{workspace_id}/editor/commands/current", {
           params,
-          body: { command: text, timeout_seconds: 3600 },
+          body: { command: text, timeout_seconds: 3600, directory },
         }),
       ),
     onMutate: async () => {
@@ -167,6 +183,24 @@ export function CommandPanel({
           Live output · project folder
         </span>
         <div className="ml-auto flex">
+          {onExplain && current.data?.output && (
+            <Button
+              size="xs"
+              variant="ghost"
+              aria-label="Ask agent about command output"
+              onClick={() =>
+                onExplain(
+                  current.data!.directory && current.data!.directory !== "."
+                    ? `(${current.data!.directory}) ${current.data!.command}`
+                    : current.data!.command,
+                  current.data!.output,
+                )
+              }
+            >
+              <Bot />
+              Explain output
+            </Button>
+          )}
           <Button
             size="icon"
             variant="ghost"
@@ -186,6 +220,41 @@ export function CommandPanel({
           </Button>
         </div>
       </div>
+      {!!tasks.data?.tasks.length && (
+        <div
+          className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-1"
+          aria-label="Detected project tasks"
+        >
+          <span className="shrink-0 text-[10px] text-muted-foreground">
+            Tasks
+          </span>
+          {tasks.data.tasks.map((task) => (
+            <button
+              key={task.id}
+              title={task.command}
+              className="shrink-0 rounded border bg-surface/30 px-2 py-1 text-[10px] hover:border-primary/50 hover:text-primary"
+              aria-label={`Prepare ${task.directory === "." ? "" : task.directory + " "}${task.name} task`}
+              onClick={() => {
+                if (task.kind === "server") {
+                  setServerCommand(task.command);
+                  setServerDirectory(task.directory);
+                  setMode("server");
+                } else {
+                  setCommand(task.command);
+                  setDirectory(task.directory);
+                  setMode("commands");
+                  input.current?.focus();
+                }
+              }}
+            >
+              {task.directory !== "." && (
+                <span className="text-muted-foreground">{task.directory}/</span>
+              )}
+              {task.name}
+            </button>
+          ))}
+        </div>
+      )}
       <div
         className={cn(
           "min-h-0 flex-1 flex-col",
@@ -215,6 +284,7 @@ export function CommandPanel({
           }}
           className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs"
           role="log"
+          aria-label="Project command output"
           aria-live="polite"
           aria-relevant="additions text"
         >
@@ -226,7 +296,13 @@ export function CommandPanel({
             </p>
           ) : (
             <>
-              <p className="mb-1 font-semibold">› {current.data.command}</p>
+              <p className="mb-1 font-semibold">
+                ›{" "}
+                {current.data.directory && current.data.directory !== "."
+                  ? `[${current.data.directory}] `
+                  : ""}
+                {current.data.command}
+              </p>
               <pre
                 className={cn(
                   "whitespace-pre-wrap break-words text-[11px]",
@@ -307,6 +383,7 @@ export function CommandPanel({
         >
           <Input
             ref={input}
+            aria-describedby="command-working-directory"
             autoFocus
             aria-label="Project command"
             placeholder="npm run build, python -m pytest, git status…"
@@ -332,6 +409,16 @@ export function CommandPanel({
               }
             }}
           />
+          <Input
+            id="command-working-directory"
+            aria-label="Command working directory"
+            title="Working directory relative to the project root"
+            value={directory}
+            onChange={(e) => setDirectory(e.target.value)}
+            disabled={busy}
+            maxLength={400}
+            className="h-8 w-24 shrink-0 font-mono text-xs"
+          />
           <Button
             type="submit"
             size="sm"
@@ -344,7 +431,12 @@ export function CommandPanel({
         </form>
       </div>
       {mode === "server" && (
-        <DevServerPanel workspace={workspace} onPreview={onPreview} />
+        <DevServerPanel
+          workspace={workspace}
+          onPreview={onPreview}
+          initialCommand={serverCommand}
+          initialDirectory={serverDirectory}
+        />
       )}
     </section>
   );

@@ -48,12 +48,20 @@ test("canvas quick-config: dragging inside the panel selects text and doesn't pa
   await expect(panel).toBeVisible();
   await expect(minimap).toBeVisible(); // it used to unmount while a quick-config panel was open
 
-  const before = await transformOf(page);
   const name = panel.getByText("Marcus", { exact: true }).first();
-  const box = (await name.boundingBox())!;
-  await page.mouse.move(box.x + 2, box.y + box.height / 2);
+  await page.evaluate(() => document.fonts.ready);
+  await panel.evaluate(async (el) => { await Promise.all(el.getAnimations().map((a) => a.finished.catch(() => {}))); });
+  await name.click(); // Playwright waits for the popup's layout and position to settle.
+  const before = await transformOf(page);
+  const box = await name.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const rect = range.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  });
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(box.x + 160, box.y + box.height / 2 + 40, { steps: 8 });
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 8 });
   await page.mouse.up();
   expect(await transformOf(page)).toBe(before);
   expect((await page.evaluate(() => getSelection()?.toString() ?? "")).length).toBeGreaterThan(0);
