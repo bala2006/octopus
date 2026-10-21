@@ -8,6 +8,7 @@
 <p align="center">
   <a href="https://github.com/bala2006/octopus/actions/workflows/ci.yml"><img src="https://github.com/bala2006/octopus/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/bala2006/octopus/actions/workflows/cd.yml"><img src="https://github.com/bala2006/octopus/actions/workflows/cd.yml/badge.svg" alt="CD"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2f855a" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/runs-locally-6B8440" alt="Runs locally">
   <img src="https://img.shields.io/badge/model-Azure%20OpenAI%20gpt--6--luna-66839A" alt="Azure OpenAI gpt-6-luna">
 </p>
@@ -240,3 +241,14 @@ The doodle octopus lives in [`docs/brand/`](docs/brand): `logo.svg` (full), `log
 - **Browser.** The agents' browser uses an isolated, in-memory profile, so none of your cookies or logins.
 - **MCP.** stdio MCP servers run commands **you** configure (`MCP_ALLOW_STDIO=false` disables them).
 - **API.** It binds to `127.0.0.1`, with rate limiting, strict CORS and Pydantic validation. Single-user mode is on by default; set `SINGLE_USER_MODE=false` for JWT login.
+
+
+## Open source and community
+
+Octopus is released under the [MIT License](LICENSE). You may use, modify, and redistribute the project's original code subject to the license conditions. Third-party libraries, services, bundled assets, and other third-party materials retain their respective licenses and terms.
+
+- **Contribute:** Read [CONTRIBUTING.md](CONTRIBUTING.md) and use the [pull request template](.github/PULL_REQUEST_TEMPLATE.md).
+- **Report a bug or request a feature:** Use the [GitHub issue templates](https://github.com/bala2006/octopus/issues/new/choose).
+- **Community standards:** Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- **Security disclosures:** Follow [SECURITY.md](SECURITY.md); do not share vulnerability details in public issues.
+- **Support:** See [SUPPORT.md](SUPPORT.md).

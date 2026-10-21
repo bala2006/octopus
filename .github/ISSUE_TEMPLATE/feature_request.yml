@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a new feature or improvement for Octopus.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the users and workflow that would benefit.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe what a useful implementation would do.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and trade-offs (optional)
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)
+      description: Add examples or mockups, avoiding private information.
