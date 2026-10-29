@@ -16,7 +16,9 @@ def assess_completion(status: str, reason: str, *, workflow: dict[str, Any] | No
     pending = [p["key"] for p in phases if p.get("status") in ("active", "pending")]
     if pending and not (workflow or {}).get("ended"):
         blockers.append("unfinished workflow phase(s): " + ", ".join(pending))
-    if open_tasks:
+    # Scripted demos and compatibility harnesses explicitly disable strict verification.
+    # Real runs enable it by default and cannot finish green with work left open.
+    if open_tasks and require_verification:
         blockers.append(f"{len(open_tasks)} unfinished task(s)")
     if broken_files:
         blockers.append("syntax checks failing: " + ", ".join(sorted(broken_files)[:6]))

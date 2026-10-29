@@ -32,7 +32,7 @@ def profile_goal(goal: str) -> GoalProfile:
     text = goal.lower()[:20000]
     checks = tuple(key for key, pattern in SIGNALS.items() if re.search(pattern, text))
     large = bool(re.search(r"\b(entire|whole|complete|full|from scratch|multi.service|multi.module|end.to.end system)\b", text)
-                 and re.search(r"\b(build|create|implement|develop|rebuild|architect|migrat\w*)\b", text))
+                 and re.search(r"\b(build|create|implement|develop|rebuild|redesign|architect|migrat\w*)\b", text))
     standard = bool(re.search(r"\b(feature|refactor|implement|redesign|migrat\w*|onboarding|integrat\w*|application|app|system)\b", text))
     track = "large" if large else "standard" if standard else "quick"
     reason = ("Several coordinated deliverables" if large else "Feature or cross-cutting change" if standard

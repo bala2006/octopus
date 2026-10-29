@@ -134,7 +134,10 @@ export default function WorkspacePage() {
     setSelection(undefined);
   }, [current?.path]);
   React.useEffect(() => {
-    if (tool === "git") { setSidebar(true); setPanel("git"); }
+    if (tool === "git") {
+      setSidebar(true);
+      setPanel("git");
+    }
     if (tool === "server" || tool === "commands") {
       setCommands(true);
       setCommandsMounted(true);

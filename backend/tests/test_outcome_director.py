@@ -25,7 +25,7 @@ def test_specialist_tie_breakers_are_goal_specific():
 
 def test_failed_phase_and_open_tasks_cannot_complete():
     status, reason = assess_completion("completed", "", workflow={"ended": True, "phases": [{"key": "test", "status": "failed"}]},
-                                       open_tasks=[{"key": "T1"}], broken_files={}, unverified={}, require_verification=False)
+                                       open_tasks=[{"key": "T1"}], broken_files={}, unverified={}, require_verification=True)
     assert status == "incomplete" and "failed workflow" in reason and "unfinished task" in reason
 
 
