@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -17,6 +18,7 @@ import { qk, useMcpServers, useSettings, useWorkspace, useWorkspaceId } from "@/
 import { useApp } from "@/stores/app";
 import type { McpServerOut, PermissionLevel, ProviderInfo, ProviderKeyOut } from "@/types";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/surfaces";
 import { Badge, Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select, Tip } from "@/components/ui/overlays";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
@@ -27,31 +29,29 @@ export const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", P
 export const sectionFromHash = (hash: string): string => { const h = hash.replace(/^#/, ""); return SECTIONS.some(([k]) => k === h) ? h : SECTIONS[0][0]; };
 
 export default function SettingsPage() {
-  const [section, setSection] = React.useState<string>(() => sectionFromHash(location.hash));
-  React.useEffect(() => { history.replaceState(null, "", `#${section}`); }, [section]);
-  React.useEffect(() => { // in-app links like settings#providers while Settings is already open
-    const onHash = () => { const h = location.hash.slice(1); if (h && SECTIONS.some(([k]) => k === h)) setSection(h); };
-    addEventListener("hashchange", onHash);
-    return () => removeEventListener("hashchange", onHash);
-  }, []);
+  const workspaceId = useWorkspaceId();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const section = sectionFromHash(location.hash);
+  const setSection = (value: string) => navigate({ hash: `#${value}` }, { replace: true });
   return (
-    <div className="flex h-full">
-      <nav className="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-border bg-surface p-3" aria-label="Settings sections">
-        {SECTIONS.map(([k, label, Icon]) => (
+    <div className="settings-layout flex h-full min-h-0">
+      <nav className="section-navigation" aria-label="Settings sections">
+        {SECTIONS.filter(([key]) => key !== "project" || workspaceId).map(([k, label, Icon]) => (
           <button key={k} onClick={() => setSection(k)} title={label} aria-current={section === k ? "page" : undefined}
-            className={cn("flex h-8 w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 text-sm transition hover:bg-accent", section === k && "bg-accent font-medium")}>
+            className={cn("section-navigation-item", section === k && "is-active")}>
             <Icon className="h-4 w-4 shrink-0 text-muted-foreground" /><span className="min-w-0 truncate">{label}</span>
           </button>
         ))}
       </nav>
       <div className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl space-y-6 p-6 animate-fade-up" key={section}>
+        <div className="settings-content animate-fade-up" key={section}>
           {section === "providers" && <Providers />}
           {section === "mcp" && <McpServers />}
           {section === "roles" && <RolesSection />}
           {section === "skills" && <SkillsSection />}
           {section === "templates" && <TemplatesSection />}
-          {section === "project" && <ProjectSettings />}
+          {section === "project" && (workspaceId ? <ProjectSettings /> : <p className="text-sm text-muted-foreground">Open a project to edit its settings.</p>)}
           {section === "appearance" && <Appearance />}
         </div>
       </div>
@@ -62,7 +62,7 @@ export default function SettingsPage() {
 function Section({ title, description, children }: { title: string; description?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="space-y-3">
-      <div><h2 className="text-base font-semibold">{title}</h2>{description && <p className="text-sm text-muted-foreground">{description}</p>}</div>
+      <PageHeader heading="h2" title={title} description={description} />
       {children}
     </section>
   );
@@ -106,6 +106,7 @@ function TestButton({ provider, model, disabled }: { provider: string; model: st
   const test = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/settings/providers/test", { body: { provider, model } })),
     onMutate: () => setRes(null), onSuccess: setRes,
+    onError: (error: Error) => setRes({ ok: false, detail: error.message }),
   });
   return (
     <div className="flex min-w-0 items-center gap-2">

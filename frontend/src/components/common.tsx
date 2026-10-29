@@ -76,13 +76,13 @@ export function EmptyState({ icon: Icon, title, description, action, className }
   icon: LucideIcon; title: string; description?: React.ReactNode; action?: React.ReactNode; className?: string;
 }) {
   return (
-    <div className={cn("flex h-full flex-col items-center justify-center gap-3 p-8 text-center animate-fade-up", className)}>
+    <div className={cn("empty-state flex h-full flex-col items-center justify-center gap-4 p-8 text-center animate-fade-up", className)}>
       <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-muted/40 text-muted-foreground">
         <Icon className="h-6 w-6" />
       </div>
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {description && <p className="max-w-sm text-sm text-muted-foreground">{description}</p>}
+        <h3 className="text-base font-medium tracking-tight">{title}</h3>
+        {description && <p className="max-w-sm text-[13px] leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       {action}
     </div>

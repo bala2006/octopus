@@ -19,6 +19,40 @@ def tiny_png() -> bytes:
             + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
+async def test_followup_uploads_reach_the_model_without_overwriting_original_images(client, workspace):
+    seen = []
+    provider = ScriptedProvider(default={"actions": [{"action": "finish", "summary": "Done"}]})
+    original_stream = provider.stream
+
+    async def record(request):
+        seen.append(request)
+        async for chunk in original_stream(request):
+            yield chunk
+
+    provider.stream = record
+    set_provider_override(provider)
+    company = await make_company(client, workspace, [agent("a", "Ann", entry=True)], [])
+    attachment = {"filename": "mockup.png", "kind": "image", "data": base64.b64encode(tiny_png()).decode()}
+    run = await start_run(client, workspace, company, attachments=[attachment])
+    saved = await wait_status(client, workspace, run["id"])
+    original_name = saved["state"]["attachments"][0]["name"]
+    base = f"/api/v1/w/{workspace['id']}/runs/{run['id']}"
+    response = await client.post(f"{base}/interject", json={"content": "Use this revision", "attachments": [
+        attachment, {"filename": "notes.txt", "text": "Make the button blue"}]})
+    assert response.status_code == 202
+    saved = await wait_status(client, workspace, run["id"])
+    images = [item for item in saved["state"]["attachments"] if item.get("kind") == "image"]
+    assert len(images) == 2 and images[0]["name"] != images[1]["name"]
+    assert len(seen[-1].images) == 2
+    assert "Make the button blue" in str(seen[-1].messages)
+    followup = next(message for message in await run_messages(client, workspace, run["id"]) if message.get("meta", {}).get("followup"))
+    assert followup["meta"]["display_content"] == "Use this revision"
+    assert followup["meta"]["files"] == ["notes.txt"]
+    assert followup["meta"]["images"][0]["filename"] == "mockup.png"
+    original = await client.get(f"{base}/attachments/{original_name}")
+    assert original.status_code == 200 and original.content == tiny_png()
+
+
 async def test_upload_returns_an_image_attachment_for_png_and_pasted_files(client) -> None:  # type: ignore[no-untyped-def]
     png = tiny_png()
     for name in ("shot.png", "image"):  # a clipboard paste may come without an extension

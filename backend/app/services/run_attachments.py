@@ -6,6 +6,7 @@ import base64
 import binascii
 import re
 import shutil
+from uuid import uuid4
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,7 @@ def is_image(a: dict[str, Any]) -> bool:
     return a.get("kind") == "image" or bool(a.get("data"))
 
 
-def store(root: Path, run_id: str, attachments: list[dict[str, str]]) -> list[dict[str, Any]]:
+def store(root: Path, run_id: str, attachments: list[dict[str, str]], *, unique: bool = False) -> list[dict[str, Any]]:
     """Validate and keep a run's attachments; returns what goes into ``Run.state_json["attachments"]``."""
     out: list[dict[str, Any]] = []
     images = 0
@@ -55,7 +56,8 @@ def store(root: Path, run_id: str, attachments: list[dict[str, str]]) -> list[di
         if len(data) > MAX_IMAGE_BYTES:
             raise AttachmentError(f"{filename} is too large (max {MAX_IMAGE_BYTES // (1024 * 1024)}MB)")
         stem = re.sub(r"[^\w.-]", "_", filename.rsplit(".", 1)[0])[:60] or "image"
-        name = f"{i + 1:02d}-{stem}.{EXT[mime]}"
+        suffix = f"-{uuid4().hex[:8]}" if unique else ""
+        name = f"{i + 1:02d}-{stem}{suffix}.{EXT[mime]}"
         d = run_dir(root, run_id)
         d.mkdir(parents=True, exist_ok=True)
         (d / name).write_bytes(data)

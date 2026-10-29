@@ -1,31 +1,17 @@
 import * as React from "react";
-import {
-  Link,
-  NavLink,
-  Outlet,
-  useLocation,
-  useNavigate,
-} from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Building2,
   ChevronsUpDown,
-  FileCode2,
   FolderOpen,
-  History,
   Home,
-  MessagesSquare,
-  Moon,
-  Network,
   Pencil,
   Plus,
-  Settings,
-  Sun,
   Trash2,
   Check,
   Radio,
-  BookOpen,
   Sparkles,
   CircleCheck,
 } from "lucide-react";
@@ -35,14 +21,11 @@ import {
   useRuns,
   useSettings,
   useWorkspace,
-  useWorkspaces,
   useWorkspaceId,
   qk,
 } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useApp } from "@/stores/app";
-import type { PermissionLevel } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
 import {
@@ -59,79 +42,33 @@ import {
   DropdownMenuTrigger,
   Tip,
 } from "@/components/ui/overlays";
-import { ErrorBoundary, PermissionBadge } from "@/components/common";
-import { useOpenFolder } from "@/features/workspaces/useOpenFolder";
+import { ErrorBoundary } from "@/components/common";
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
 import { CommandPalette } from "./CommandPalette";
 import { ProcessIndicator } from "./ProcessIndicator";
+import { DesktopLayout } from "./DesktopLayout";
 
-/** Primary project views. Settings and the guide stay beside quick open. */
-const NAV = [
-  {
-    to: "workspace",
-    label: "Workspace",
-    hint: "Edit files, search code, and preview your app",
-    icon: FolderOpen,
-    shortcut: "7",
-  },
-  {
-    to: "canvas",
-    label: "Canvas",
-    hint: "Design your team of agents",
-    icon: Network,
-    shortcut: "1",
-  },
-  {
-    to: "chat",
-    label: "Chat",
-    hint: "Talk to one agent directly",
-    icon: MessagesSquare,
-    shortcut: "2",
-  },
-  {
-    to: "runs",
-    label: "Runs",
-    hint: "Watch the team work on a goal",
-    icon: History,
-    shortcut: "3",
-  },
-  {
-    to: "artifacts",
-    label: "Artifacts",
-    hint: "Files and code the team produced",
-    icon: FileCode2,
-    shortcut: "4",
-  },
+const VIEWS = [
+  { to: "agent", label: "Conversation", shortcut: "0" },
+  { to: "workspace", label: "Workspace", shortcut: "7" },
+  { to: "canvas", label: "Team canvas", shortcut: "1" },
+  { to: "chat", label: "Agent chats", shortcut: "2" },
+  { to: "runs", label: "Activity", shortcut: "3" },
+  { to: "artifacts", label: "Changes", shortcut: "4" },
+  { to: "settings", label: "Settings", shortcut: "5" },
+  { to: "guide", label: "Guide", shortcut: "6" },
 ];
-const SIDE_NAV = [
-  {
-    to: "guide",
-    label: "Guide",
-    hint: "How everything works",
-    icon: BookOpen,
-    shortcut: "6",
-  },
-  {
-    to: "settings",
-    label: "Settings",
-    hint: "Models, MCP, templates, project",
-    icon: Settings,
-    shortcut: "5",
-  },
-];
-const ALL_NAV = [...NAV, ...SIDE_NAV];
 
 export function AppShell() {
   const w = useWorkspaceId();
   const ws = useWorkspace(w);
   const nav = useNavigate();
   const loc = useLocation();
-  const { theme, toggleTheme } = useApp();
-
+  const view = VIEWS.find((item) => loc.pathname.split("/")[3] === item.to);
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey) return;
-      const item = ALL_NAV.find((n) => n.shortcut === e.key);
+      const item = VIEWS.find((n) => n.shortcut === e.key);
       if (item) {
         e.preventDefault();
         nav(`/w/${w}/${item.to}`);
@@ -140,146 +77,53 @@ export function AppShell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [nav, w]);
-
-  if (ws.isError) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <p className="text-sm font-medium">This project could not be opened</p>
-        <p className="max-w-md text-sm text-muted-foreground">
-          {(ws.error as Error).message}
-        </p>
-        <Button asChild variant="outline">
-          <Link to="/">
-            <Home />
-            All projects
-          </Link>
-        </Button>
-      </div>
-    );
-  }
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface/70 px-3 py-1">
-        <Link
-          to="/"
-          className="flex items-center gap-2 rounded-md px-1 py-1 transition hover:bg-accent"
-          aria-label="All projects"
-        >
-          <img src="/octopus.svg" alt="" className="h-6 w-6" />
-          <span className="hidden text-sm font-semibold tracking-tight lg:inline">
-            Octopus
-          </span>
-        </Link>
-        <span className="text-muted-foreground/50">/</span>
-        <ProjectSwitcher />
-        <div className="min-w-0 flex-1 md:flex md:justify-center">
-          <CommandPalette />
-        </div>
-        <div className="ml-auto flex items-center gap-1.5">
+    <DesktopLayout
+      header={
+        <>
+          <FolderOpen className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block" />
+          <div className="min-w-0 flex-1 truncate text-[13px] font-medium">
+            {ws.data?.name ?? "Opening project"}
+            <span className="mx-2 text-muted-foreground/40">/</span>
+            <span className="text-muted-foreground">
+              {view?.label ?? "Project"}
+            </span>
+          </div>
           <div className="hidden sm:block">
             <CompanySwitcher />
           </div>
           <LiveRunsIndicator />
           <ProcessIndicator />
-          <ModelStatus />
-          {ws.data && (
-            <span className="hidden 2xl:inline">
-              <PermissionBadge
-                level={ws.data.default_permission as PermissionLevel}
-              />
-            </span>
-          )}
-          <span className="mx-1 h-5 w-px bg-border" />
-          <Tip
-            content={theme === "dark" ? "Light theme" : "Dark theme"}
-            side="bottom"
-          >
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              aria-label="Toggle theme"
-            >
-              {theme === "dark" ? <Sun /> : <Moon />}
-            </Button>
-          </Tip>
-        </div>
-      </header>
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <nav
-          aria-label="Main"
-          className="flex shrink-0 gap-1 overflow-x-auto border-b bg-surface/40 p-1 md:w-14 md:flex-col md:items-center md:overflow-visible md:border-b-0 md:border-r md:py-2"
-        >
-          {NAV.map((item) => (
-            <NavItem
-              key={item.to}
-              {...item}
-              active={loc.pathname.includes(`/${item.to}`)}
-            />
-          ))}
-          <div className="hidden flex-1 md:block" />
-          {SIDE_NAV.map((item) => (
-            <NavItem
-              key={item.to}
-              {...item}
-              active={loc.pathname.includes(`/${item.to}`)}
-            />
-          ))}
-        </nav>
-        <main className="min-h-0 min-w-0 flex-1">
-          <ErrorBoundary label="This view crashed">
-            <Outlet />
-          </ErrorBoundary>
-        </main>
-      </div>
-    </div>
-  );
-}
-
-function NavItem({
-  to,
-  label,
-  hint,
-  icon: Icon,
-  shortcut,
-  active,
-  compact,
-}: {
-  to: string;
-  label: string;
-  hint: string;
-  icon: typeof Network;
-  shortcut: string;
-  active: boolean;
-  compact?: boolean;
-}) {
-  return (
-    <Tip
-      content={
-        <span>
-          {hint} <kbd className="kbd ml-1">Alt+{shortcut}</kbd>
-        </span>
+          <div className="hidden lg:block">
+            <ModelStatus />
+          </div>
+          <CommandPalette />
+        </>
       }
-      side="bottom"
     >
-      <NavLink
-        to={to}
-        aria-label={label}
-        className={cn(
-          "relative flex h-8 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground md:h-11 md:w-11 md:justify-center md:px-0",
-          compact && "px-2.5",
-          active
-            ? "bg-primary/10 text-primary md:before:absolute md:before:-left-1.5 md:before:h-6 md:before:w-0.5 md:before:rounded-full md:before:bg-primary"
-            : "hover:bg-accent",
-        )}
-      >
-        <Icon className="h-4 w-4 shrink-0 md:h-5 md:w-5" />
-        <span className="md:sr-only">{label}</span>
-      </NavLink>
-    </Tip>
+      {ws.isError ? (
+        <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+          <p className="text-sm font-medium">
+            This project could not be opened
+          </p>
+          <p className="max-w-md text-sm text-muted-foreground">
+            {ws.error.message}
+          </p>
+          <Button asChild variant="outline">
+            <Link to="/">
+              <Home />
+              All projects
+            </Link>
+          </Button>
+        </div>
+      ) : (
+        <ErrorBoundary label="This view crashed">
+          <Outlet />
+        </ErrorBoundary>
+      )}
+    </DesktopLayout>
   );
 }
-
 /** One glance: are agents using a real model, or the offline demo? Click → Settings → Model. */
 function ModelStatus() {
   const { data } = useSettings();
@@ -320,61 +164,6 @@ function ModelStatus() {
         )}
       </Link>
     </Tip>
-  );
-}
-
-function ProjectSwitcher() {
-  const w = useWorkspaceId();
-  const { data: list } = useWorkspaces();
-  const { data: ws } = useWorkspace(w);
-  const nav = useNavigate();
-  const folder = useOpenFolder();
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            className="flex max-w-[200px] items-center gap-1.5 rounded-md px-2 py-1 text-sm transition hover:bg-accent"
-            aria-label="Switch project"
-          >
-            <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-            <span className="truncate font-medium">
-              {ws?.name ?? <span className="skeleton inline-block h-3 w-20" />}
-            </span>
-            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-72">
-          <DropdownMenuLabel>Projects</DropdownMenuLabel>
-          {list?.map((p) => (
-            <DropdownMenuItem
-              key={p.id}
-              onSelect={() => nav(`/w/${p.id}/workspace`)}
-              disabled={!p.exists}
-            >
-              <FolderOpen />
-              <div className="min-w-0 flex-1">
-                <div className="truncate">{p.name}</div>
-                <div className="truncate font-mono text-[10px] text-muted-foreground">
-                  {p.display_path || p.path}
-                </div>
-              </div>
-              {p.id === w && <Check className="!text-primary" />}
-            </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={folder.open}>
-            <Plus />
-            Open another folder…
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => nav("/")}>
-            <Home />
-            All projects
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {folder.element}
-    </>
   );
 }
 

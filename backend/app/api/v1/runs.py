@@ -37,6 +37,16 @@ async def owned_run(run_id: str, db: AsyncSession, user: User) -> Run:
 @router.post("", response_model=RunDetail, status_code=201)
 async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                      ctx: ProjectCtx = Depends(project_ctx)) -> Run:
+    if body.budget.model is not None and body.budget.model.provider == "azure" and not body.budget.force_mock:
+        from app.db.session import registry_factory
+        from app.llm.router import allowed_models, is_configured, resolve_credentials
+
+        async with registry_factory()() as registry:
+            key, base, options = await resolve_credentials(registry, user.id, "azure")
+        if not is_configured("azure", key, base, options):
+            raise HTTPException(422, "Connect Azure in Model settings before using this model. Your message has not been sent.")
+        if body.budget.model.model not in allowed_models(options):
+            raise HTTPException(422, "This deployment is no longer configured. Choose a model again in Model settings.")
     company = await owned_company(body.company_id, db, user)
     if not company.agents:
         raise HTTPException(422, "Add at least one agent to the company before running it")
@@ -186,8 +196,11 @@ async def _send(run_id: str, body: InterjectIn, db: AsyncSession, user: User, ct
     if body.to_agent_id and body.to_agent_id not in agent_ids and not (manager.get(run_id) and body.to_agent_id in manager.get(run_id).agents):
         raise HTTPException(422, "Unknown agent")
     for _ in range(40):  # a run that is finalizing right now can be continued a moment later
-        if await manager.continue_run(run_id, ref(ctx), body.content, body.to_agent_id):
-            return {"ok": True}
+        try:
+            if await manager.continue_run(run_id, ref(ctx), body.content, body.to_agent_id, body.attachments):
+                return {"ok": True}
+        except (run_attachments.AttachmentError, OSError) as exc:
+            raise HTTPException(422, f"Attachment rejected: {exc}") from exc
         await asyncio.sleep(0.1)
     raise HTTPException(409, "Run could not be continued")
 

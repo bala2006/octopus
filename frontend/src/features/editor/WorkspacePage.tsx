@@ -88,11 +88,11 @@ export default function WorkspacePage() {
   const [commands, setCommands] = React.useState(false);
   const [commandsMounted, setCommandsMounted] = React.useState(false);
   const [agentsOpen, setAgentsOpen] = React.useState(
-    () => window.innerWidth >= 1100,
+    () => window.innerWidth >= 1500,
   );
   React.useEffect(() => {
     const responsive = () => {
-      if (window.innerWidth < 1100) setAgentsOpen(false);
+      if (window.innerWidth < 1500) setAgentsOpen(false);
     };
     window.addEventListener("resize", responsive);
     return () => window.removeEventListener("resize", responsive);
@@ -134,6 +134,7 @@ export default function WorkspacePage() {
     setSelection(undefined);
   }, [current?.path]);
   React.useEffect(() => {
+    if (tool === "git") { setSidebar(true); setPanel("git"); }
     if (tool === "server" || tool === "commands") {
       setCommands(true);
       setCommandsMounted(true);
@@ -422,7 +423,7 @@ export default function WorkspacePage() {
       )}
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b bg-surface/40 px-3 py-1">
+          <div className="view-toolbar">
             <Button
               variant="ghost"
               size="icon"

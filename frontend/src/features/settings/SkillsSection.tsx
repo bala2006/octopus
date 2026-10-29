@@ -53,10 +53,10 @@ export function SkillsSection() {
 
   return (
     <section className="space-y-3" data-testid="skills-section">
-      <div className="flex flex-wrap items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold">Skills</h2>
-          <p className="text-sm text-muted-foreground">Step-by-step playbooks for a kind of work. Agents see each skill's name and description and load the full steps when they need them. Projects can add their own in <code>.octopus/skills</code>, <code>.agents/skills</code> or <code>.claude/skills</code>.</p>
+      <div className="library-header">
+        <div className="library-heading">
+          <h2 className="page-title">Skills</h2>
+          <p className="page-description">Step-by-step playbooks for a kind of work. Agents see each skill's name and description and load the full steps when they need them. Projects can add their own in <code>.octopus/skills</code>, <code>.agents/skills</code> or <code>.claude/skills</code>.</p>
         </div>
         <Button size="sm" variant="outline" data-testid="new-skill" onClick={() => {
           setIsNew(true); setSel(null);
@@ -65,8 +65,8 @@ export function SkillsSection() {
         <Button size="sm" variant="ghost" disabled={!edited} onClick={() => setConfirm("restore-all")}><RotateCcw />Restore all defaults</Button>
       </div>
 
-      <div className="flex h-[min(680px,calc(100dvh-14rem))] min-h-[440px] overflow-hidden rounded-xl border border-border bg-card">
-        <div className="flex w-60 shrink-0 flex-col border-r border-border">
+      <div className="settings-library ui-surface flex h-[min(680px,calc(100dvh-14rem))] min-h-[440px] overflow-hidden">
+        <div className="settings-library-list flex w-60 shrink-0 flex-col border-r border-border">
           <label className="flex items-center gap-2 border-b border-border px-2.5 py-2 text-xs">
             <Search className="h-3.5 w-3.5 text-muted-foreground" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search skills" aria-label="Search skills" className="w-full bg-transparent outline-none" />
@@ -85,7 +85,7 @@ export function SkillsSection() {
         </div>
 
         {draft ? (
-          <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+          <div className="settings-library-editor flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
             <div className="flex items-center gap-2">
               <BookOpenCheck className="h-4 w-4 text-muted-foreground" />
               {isNew ? <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: slug(e.target.value) })} className="h-8 font-mono" aria-label="Skill name" />

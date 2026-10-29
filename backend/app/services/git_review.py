@@ -29,7 +29,7 @@ async def git(root: Path, *args: str, developer: bool = False) -> str:
     if not developer:
         env["GIT_CONFIG_GLOBAL"] = os.devnull
     proc = await asyncio.create_subprocess_exec(
-        "git", "--no-pager", "-c", "core.fsmonitor=false", *args, cwd=root, env=env,
+        "git", "--no-pager", "-c", "core.fsmonitor=false", "-c", f"safe.directory={root.resolve().as_posix()}", *args, cwd=root, env=env,
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     async def read(stream: asyncio.StreamReader | None) -> bytes:
@@ -55,6 +55,8 @@ async def git(root: Path, *args: str, developer: bool = False) -> str:
 
 
 async def require_root(root: Path) -> None:
+    if not (root / ".git").exists():
+        raise WorkspaceError("This folder is not a Git repository root. Open the repository's root folder to review its changes.")
     actual = (await git(root, "rev-parse", "--show-toplevel")).strip()
     if Path(actual).resolve() != root.resolve():
         raise WorkspaceError("Open the Git repository's root folder to review its changes.")

@@ -1,9 +1,10 @@
 import * as React from "react";
+import { PromptComposer } from "@/components/ui/surfaces";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, Pause, Play, Send, Wrench, History,
+  ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, Pause, Play, ArrowUp, Wrench, History,
   MessagesSquare, UsersRound, Globe,
 } from "lucide-react";
 import { fetchRaw } from "@/lib/api";
@@ -93,7 +94,7 @@ export default function LiveRunPage() {
   return (
     <div className="flex h-full flex-col">
       {/* header */}
-      <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2">
+      <div className="view-toolbar">
         <Button asChild variant="ghost" size="icon-sm" aria-label="Back to runs"><Link to={`/w/${w}/runs`}><ArrowLeft /></Link></Button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -228,15 +229,13 @@ function InterjectBox({ agents, awaiting, onSend, finished }: { agents: AgentOut
             onAnswer={(answer) => { onSend(answer, awaiting.agent_id); toast.success(`Answered ${asker?.name ?? "the agent"}`, { duration: 1500 }); }} />
         </div>
       )}
-      <div className="flex items-end gap-2">
-        <Select ariaLabel="Send to" value={to} onValueChange={setTo} className="h-9 w-[140px] text-xs"
-          options={[{ value: "all", label: finished ? "Entry agent" : "Everyone" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]} />
+      <PromptComposer caption={<><span>{finished ? "Continue with the same team and project" : "Send direction to your team"}</span><span className="ml-auto hidden sm:inline">Enter to send</span></>}
+        controls={<><Select ariaLabel="Send to" value={to} onValueChange={setTo} variant="ghost" className="w-auto max-w-48" options={[{ value: "all", label: finished ? "Entry agent" : "Everyone" }, ...agents.map((agent) => ({ value: agent.id, label: agent.name }))]} /><Button onClick={submit} disabled={!text.trim()} size="icon" className="composer-send ml-auto" aria-label="Send"><ArrowUp /></Button></>}>
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={1}
           placeholder={awaiting ? "Or message the team…" : finished ? "Ask for a change or a next step: the team continues from where it stopped…" : "Interject: steer the team…"}
-          className="max-h-32 min-h-[36px] flex-1 resize-none py-2 text-sm"
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} aria-label="Interjection" />
-        <Button onClick={submit} disabled={!text.trim()} size="icon" className="h-9 w-9" aria-label="Send"><Send /></Button>
-      </div>
+          className="max-h-32"
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} aria-label="Interjection" />
+      </PromptComposer>
     </div>
   );
 }

@@ -109,19 +109,20 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
   const from = m.from_agent_id ? agents[m.from_agent_id] : null;
   const to = m.to_agent_id ? agents[m.to_agent_id] : null;
   const meta = (m.meta ?? {}) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const content = m.sender === "user" && typeof meta.display_content === "string" ? meta.display_content : m.content;
   const delegated = isDelegationMessage(meta);
-  const [open, setOpen] = React.useState(!delegated && (m.content.length < 700 || m.type === "final_report"));
-  const expandable = delegated ? m.content.trim().length > 0 : m.content.length >= 700 && m.type !== "final_report";
+  const [open, setOpen] = React.useState(!delegated && (content.length < 700 || m.type === "final_report"));
+  const expandable = delegated ? content.trim().length > 0 : content.length >= 700 && m.type !== "final_report";
   const isUser = m.sender === "user";
   const verdict = meta.verdict as string | undefined;
   return (
-    <article className={cn("group rounded-lg px-2 py-2 transition-colors animate-fade-up hover:bg-accent/30", m.type === "final_report" && "border border-primary/30 bg-primary/5",
+    <article data-sender={isUser ? "user" : "agent"} className={cn("feed-message group rounded-lg px-2 py-2 transition-colors animate-fade-up hover:bg-accent/30", m.type === "final_report" && "border border-primary/30 bg-primary/5",
       isUser && "bg-primary/[0.04]")} aria-label={`${from?.name ?? "You"} to ${to?.name ?? "you"}`}>
       <div className="flex gap-2.5">
         {from ? <AgentAvatar name={from.name} color={from.color} avatar={from.avatar} size={28} /> :
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary"><User className="h-3.5 w-3.5" /></div>}
+          <div className="feed-user-avatar flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary"><User className="h-3.5 w-3.5" /></div>}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <div className="feed-message-meta flex flex-wrap items-center gap-1.5 text-xs">
             <span className="font-semibold" style={from ? { color: from.color } : undefined}>{from?.name ?? "You"}</span>
             <ArrowRight className="h-3 w-3 text-muted-foreground" />
             <span className="font-medium text-muted-foreground">{to?.name ?? (m.type === "final_report" || m.type === "question" ? "You" : "Everyone")}{!to && meta.recipients ? ` (${meta.recipients} agents)` : ""}</span>
@@ -136,14 +137,15 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
           {delegated && !open ? (
             <button onClick={() => setOpen(true)} data-testid="delegation-collapsed" title="Show the full text"
               className="mt-0.5 block w-full truncate text-left text-[12px] text-muted-foreground hover:text-foreground">
-              {meta.delegation_result ? "Result: " : ""}{firstLine(m.content) || "(empty)"}
+              {meta.delegation_result ? "Result: " : ""}{firstLine(content) || "(empty)"}
             </button>
           ) : (
             <div className={cn("relative mt-1 text-[13px]", !open && "max-h-28 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}>
-              <Markdown>{m.content}</Markdown>
+              <Markdown>{content}</Markdown>
             </div>
           )}
           {Array.isArray(meta.images) && meta.images.length > 0 && <GoalImages runId={m.run_id ?? ""} images={meta.images} />}
+          {Array.isArray(meta.files) && <div className="mt-2 flex flex-wrap gap-1.5">{meta.files.filter((file: unknown): file is string => typeof file === "string").map((file: string) => <span key={file} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px]"><FileCode2 className="h-3 w-3" />{file}</span>)}</div>}
           {Array.isArray(meta.options) && meta.options.length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Offered answers">
               {(meta.options as { label: string; recommended?: boolean }[]).map((o, i) => (

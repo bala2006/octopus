@@ -14,6 +14,8 @@ import {
   Settings2,
   ShieldCheck,
   X,
+  Check,
+  Paperclip,
 } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -27,13 +29,32 @@ import {
   useWorkspace,
   qk,
 } from "@/hooks/queries";
-import type { AgentOut, PermissionLevel } from "@/types";
+import type { AgentOut, PermissionLevel, CompanyOut, CanvasOut } from "@/types";
+import { useApp } from "@/stores/app";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/primitives";
-import { Select, Tip } from "@/components/ui/overlays";
+import {
+  ConfirmDialog,
+  Select,
+  Tip,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuItem,
+} from "@/components/ui/overlays";
+import { PromptComposer } from "@/components/ui/surfaces";
 import { ConnectionDot } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
+import {
+  useAttachments,
+  AttachmentChips,
+  attachmentPayload,
+} from "@/features/chat/attachments";
 import { RunDialog } from "@/features/runs/RunDialog";
 import { defaultRunBudget } from "@/features/runs/runDefaults";
 import { RunFeed } from "@/features/runs/RunFeed";
@@ -48,7 +69,13 @@ import {
   type AgentMode,
   type CodeContext,
 } from "./agentContext";
-import { threadKey, useWorkbenchStore } from "./workbenchStore";
+import {
+  defaultComposerSettings,
+  recordedComposerSettings,
+  threadKey,
+  useWorkbenchStore,
+} from "./workbenchStore";
+import { ModelPicker } from "./ModelPicker";
 
 export function AgentPanel({
   workspace,
@@ -60,6 +87,7 @@ export function AgentPanel({
   onOpen,
   onClose,
   focusToken = 0,
+  presentation = "panel",
 }: {
   workspace: string;
   current?: CodeContext;
@@ -70,6 +98,7 @@ export function AgentPanel({
   focusToken?: number;
   selectionToken?: number;
   onSelectionConsumed?: () => void;
+  presentation?: "panel" | "conversation";
 }) {
   const { companyId } = useCompanyId();
   return (
@@ -85,6 +114,7 @@ export function AgentPanel({
       onOpen={onOpen}
       onClose={onClose}
       focusToken={focusToken}
+      presentation={presentation}
     />
   );
 }
@@ -100,6 +130,7 @@ function CompanyAgentPanel({
   onOpen,
   onClose,
   focusToken,
+  presentation,
 }: {
   workspace: string;
   companyId: string;
@@ -111,9 +142,11 @@ function CompanyAgentPanel({
   focusToken: number;
   selectionToken: number;
   onSelectionConsumed?: () => void;
+  presentation: "panel" | "conversation";
 }) {
   const qc = useQueryClient();
-  const { data: companies } = useCompanies(w);
+  const companiesQuery = useCompanies(w);
+  const { data: companies } = companiesQuery;
   const { setCompanyId } = useCompanyId();
   const canvas = useCanvas(w, companyId);
   const ws = useWorkspace(w);
@@ -121,6 +154,9 @@ function CompanyAgentPanel({
   const runs = useRuns(w, companyId, true);
   const key = threadKey(w, companyId);
   const store = useWorkbenchStore();
+  const preferences =
+    store.preferences[w] ?? store.preferences.home ?? defaultComposerSettings;
+  const attachments = useAttachments({ images: true });
   const selected = store.threads[key];
   const runId = companyId
     ? selected === undefined
@@ -147,6 +183,8 @@ function CompanyAgentPanel({
     state.replayDone || state.live ? state.status : run.data?.status;
   const active = !!runId && !!status && !TERMINAL.has(status);
   const text = store.drafts[key] ?? "";
+  const pendingPrompt = store.pendingPrompts[w];
+  const conversation = presentation === "conversation";
   const [mode, setMode] = React.useState<AgentMode>("agent");
   const [contexts, setContexts] = React.useState<CodeContext[]>([]);
   const [adding, setAdding] = React.useState(false);
@@ -157,9 +195,11 @@ function CompanyAgentPanel({
   const [internal, setInternal] = React.useState(false);
   const [error, setError] = React.useState("");
   const input = React.useRef<HTMLTextAreaElement>(null);
+  const preparedCompany = React.useRef<CanvasOut | null>(null);
   const configured = !!settings.data?.providers.some(
     (p) => p.provider !== "mock" && p.configured,
   );
+  const recordedBudget = recordedComposerSettings(run.data?.budget);
   const permission = modePermission(
     mode,
     (ws.data?.default_permission ?? "ask") as PermissionLevel,
@@ -167,6 +207,21 @@ function CompanyAgentPanel({
   React.useEffect(() => {
     if (focusToken) input.current?.focus();
   }, [focusToken]);
+  React.useEffect(() => {
+    if (companyId && pendingPrompt && !text.trim())
+      store.importPrompt(w, companyId);
+  }, [companyId, pendingPrompt, text, w, store.importPrompt]);
+  React.useEffect(() => {
+    if (!conversation) return;
+    const focus = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        input.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", focus);
+    return () => window.removeEventListener("keydown", focus);
+  }, [conversation]);
   const add = (item: CodeContext) => {
     setContexts((items) =>
       [
@@ -213,42 +268,72 @@ function CompanyAgentPanel({
         await unwrap(
           api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/interject", {
             params: { path: { workspace_id: w, run_id: runId } },
-            body: { content: goal },
+            body: {
+              content: goal,
+              attachments: attachmentPayload(attachments.files),
+            },
           }),
         );
-        return runId;
+        return { id: runId, company: undefined };
       }
+      const company = companyId
+        ? undefined
+        : (preparedCompany.current ??
+          (await unwrap(
+            api.POST("/api/v1/w/{workspace_id}/companies/from-template", {
+              params: { path: { workspace_id: w } },
+              body: { template_key: "solo_engineer", name: "Coding agent" },
+            }),
+          )));
+      if (company) preparedCompany.current = company;
+      const targetCompany = companyId || company?.company.id || "";
       const result = await unwrap(
         api.POST("/api/v1/w/{workspace_id}/runs", {
           params: { path: { workspace_id: w } },
           body: {
-            company_id: companyId,
+            company_id: targetCompany,
             goal,
             mode: "autonomous",
             permission_level: permission,
+            attachments: attachmentPayload(attachments.files),
             budget: {
               ...defaultRunBudget(),
-              force_mock: !configured,
+              ...preferences,
+              force_mock:
+                preferences.model?.provider === "mock" ||
+                (!preferences.model && !configured),
               workflow: mode === "ask" ? "off" : "auto",
             },
           },
         }),
       );
-      return result.id;
+      return { id: result.id, company };
     },
     onMutate: () => setError(""),
-    onSuccess: (id, submitted) => {
-      store.selectThread(key, id);
+    onSuccess: ({ id, company }, submitted) => {
+      const targetKey = company ? threadKey(w, company.company.id) : key;
+      store.selectThread(targetKey, id);
+      if (company) {
+        if (useWorkbenchStore.getState().pendingPrompts[w] === submitted)
+          store.discardPrompt(w);
+        qc.setQueryData(qk.canvas(w, company.company.id), company);
+        qc.setQueryData<CompanyOut[]>(qk.companies(w), (old) => [
+          company.company,
+          ...(old ?? []).filter((item) => item.id !== company.company.id),
+        ]);
+        useApp.getState().setCompany(w, company.company.id);
+      }
       if (useWorkbenchStore.getState().drafts[key] === submitted)
         store.draft(key, "");
       setContexts([]);
+      attachments.clear();
       void qc.invalidateQueries({ queryKey: qk.runs(w) });
       void qc.invalidateQueries({ queryKey: qk.run(w, id) });
     },
     onError: (e: Error) => setError(e.message),
   });
   const control = useMutation({
-    mutationFn: (action: "pause" | "resume" | "stop") =>
+    mutationFn: (action: "pause" | "resume" | "step" | "stop") =>
       unwrap(
         api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/control/{action}", {
           params: { path: { workspace_id: w, run_id: runId!, action } },
@@ -279,43 +364,68 @@ function CompanyAgentPanel({
     onError: (e: Error) => setError(e.message),
   });
   const canSubmit =
-    !!companyId &&
-    !!text.trim() &&
+    !!(companyId ? text : (pendingPrompt ?? text)).trim() &&
     !submit.isPending &&
+    !attachments.uploading &&
+    !settings.isPending &&
+    !settings.isError &&
+    !companiesQuery.isPending &&
+    !companiesQuery.isError &&
+    !(companyId && canvas.data?.agents.length === 0) &&
     !run.isLoading &&
     (!runId || !!run.data);
   const send = () => {
-    if (canSubmit) submit.mutate(text);
+    if (canSubmit) submit.mutate(companyId ? text : (pendingPrompt ?? text));
   };
   const newThread = () => {
     store.selectThread(key, null);
     setHistory(false);
     setContexts([]);
+    attachments.clear();
     setError("");
     input.current?.focus();
   };
   return (
     <section
-      className="flex h-full min-h-0 flex-col bg-surface/30"
+      className={cn(
+        "agent-workbench flex h-full min-h-0 flex-col",
+        conversation ? "conversation-workbench" : "bg-surface/30",
+      )}
       aria-label="Agent workbench"
       data-testid="agent-workbench"
     >
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
-        <Bot className="h-4 w-4 text-primary" />
-        <span className="text-xs font-semibold">Octopus</span>
-        <select
-          aria-label="Agent company"
-          value={companyId}
-          onChange={(e) => setCompanyId(e.target.value)}
-          className="min-w-0 max-w-44 flex-1 truncate bg-transparent text-[11px] text-muted-foreground"
+      <header
+        className={cn(
+          "agent-panel-header flex h-11 shrink-0 items-center gap-2 border-b px-3",
+          conversation && "conversation-toolbar",
+        )}
+      >
+        {!conversation && <Bot className="h-4 w-4 text-primary" />}
+        <span
+          className={cn(
+            "font-semibold",
+            conversation ? "min-w-0 truncate text-sm" : "text-xs",
+          )}
         >
-          {!companyId && <option value="">Your team</option>}
-          {companies?.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+          {conversation
+            ? (run.data?.goal.split("\n")[0] ?? "New conversation")
+            : "Octopus"}
+        </span>
+        {!conversation && (
+          <select
+            aria-label="Agent company"
+            value={companyId}
+            onChange={(e) => setCompanyId(e.target.value)}
+            className="min-w-0 max-w-44 flex-1 truncate bg-transparent text-[11px] text-muted-foreground"
+          >
+            {!companyId && <option value="">Your team</option>}
+            {companies?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="ml-auto flex gap-0.5">
           <Tip content="Conversation history">
             <Button
@@ -342,10 +452,10 @@ function CompanyAgentPanel({
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label="Hide agent panel"
+            aria-label={conversation ? "Open code editor" : "Hide agent panel"}
             onClick={onClose}
           >
-            <X />
+            {conversation ? <FileCode2 /> : <X />}
           </Button>
         </div>
       </header>
@@ -392,7 +502,15 @@ function CompanyAgentPanel({
           <span
             className={cn(
               "h-1.5 w-1.5 rounded-full",
-              active ? "bg-primary" : "bg-success",
+              active
+                ? "bg-primary"
+                : status === "failed"
+                  ? "bg-destructive"
+                  : status === "incomplete"
+                    ? "bg-warning"
+                    : status === "completed"
+                      ? "bg-success"
+                      : "bg-muted-foreground",
             )}
           />
           <span className="capitalize">{status?.replace("_", " ")}</span>
@@ -405,19 +523,32 @@ function CompanyAgentPanel({
           </Link>
           {active && (
             <>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={
-                  status === "paused" ? "Resume agent run" : "Pause agent run"
-                }
-                disabled={control.isPending}
-                onClick={() =>
-                  control.mutate(status === "paused" ? "resume" : "pause")
-                }
-              >
-                {status === "paused" ? <Play /> : <Pause />}
-              </Button>
+              {run.data.mode === "step" ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label="Next agent turn"
+                  disabled={control.isPending}
+                  onClick={() => control.mutate("step")}
+                >
+                  <Play />
+                  Next turn
+                </Button>
+              ) : (
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={
+                    status === "paused" ? "Resume agent run" : "Pause agent run"
+                  }
+                  disabled={control.isPending}
+                  onClick={() =>
+                    control.mutate(status === "paused" ? "resume" : "pause")
+                  }
+                >
+                  {status === "paused" ? <Play /> : <Pause />}
+                </Button>
+              )}
               <Button
                 size="icon-sm"
                 variant="ghost"
@@ -431,10 +562,24 @@ function CompanyAgentPanel({
           )}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {run.isError ? (
+      <div className="agent-message-area min-h-0 flex-1 overflow-hidden">
+        {runId && run.isLoading ? (
+          <p
+            role="status"
+            className="p-6 text-center text-sm text-muted-foreground"
+          >
+            Loading conversation…
+          </p>
+        ) : run.isError ? (
           <div role="alert" className="space-y-3 p-4 text-xs">
             <p>{run.error.message}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void run.refetch()}
+            >
+              Try again
+            </Button>
             <Button size="sm" variant="outline" onClick={newThread}>
               Start a new conversation
             </Button>
@@ -473,33 +618,63 @@ function CompanyAgentPanel({
             )}
           </div>
         ) : (
-          <div className="flex h-full flex-col justify-center px-5 py-6">
-            <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10">
-              <Bot className="h-5 w-5 text-primary" />
+          <div
+            className={cn(
+              "agent-empty flex h-full flex-col justify-center px-5 py-6",
+              conversation && "conversation-empty",
+            )}
+          >
+            <div
+              className={cn(
+                "mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10",
+                conversation && "conversation-mark",
+              )}
+            >
+              <img src="/octopus.svg" alt="" className="h-7 w-7" />
             </div>
-            <h2 className="text-base font-semibold">Build with your team.</h2>
-            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Describe a change, attach the relevant code, and let your company
-              plan, implement, and verify it alongside your editor.
+            <h2
+              className={
+                conversation
+                  ? "text-3xl font-medium tracking-tight"
+                  : "text-base font-semibold"
+              }
+            >
+              What are we building?
+            </h2>
+            <p
+              className={cn(
+                "mt-2 leading-relaxed text-muted-foreground",
+                conversation ? "text-sm" : "text-xs",
+              )}
+            >
+              Give your team a goal. Build something new, improve your project,
+              or work through an idea.
             </p>
-            <div className="mt-5 space-y-2">
-              {[
-                "Explain this project's architecture",
-                "Find and fix a bug with a regression test",
-                "Review my changes before I commit",
-              ].map((prompt) => (
-                <button
-                  key={prompt}
-                  className="w-full rounded-lg border bg-background/50 px-3 py-2.5 text-left text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                  onClick={() => {
-                    store.draft(key, prompt);
-                    input.current?.focus();
-                  }}
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
+            {(!conversation || !!companyId) && (
+              <div
+                className={cn(
+                  "mt-5",
+                  conversation ? "conversation-suggestions" : "space-y-2",
+                )}
+              >
+                {[
+                  "Explain this project's architecture",
+                  "Find and fix a bug in this project",
+                  "Review my changes before I commit",
+                ].map((prompt) => (
+                  <button
+                    key={prompt}
+                    className="w-full rounded-lg border bg-background/50 px-3 py-2.5 text-left text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                    onClick={() => {
+                      store.draft(key, prompt);
+                      input.current?.focus();
+                    }}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            )}
             {!companyId && (
               <Button
                 className="mt-4"
@@ -507,16 +682,18 @@ function CompanyAgentPanel({
                 onClick={() => setCreating(true)}
               >
                 <Plus />
-                Create a company
+                Choose a custom team
               </Button>
             )}
-            <Link
-              to={`/w/${w}/canvas`}
-              className="mt-5 flex items-center gap-2 text-xs text-primary"
-            >
-              <Network className="h-3.5 w-3.5" />
-              Design your team on the canvas
-            </Link>
+            {!conversation && (
+              <Link
+                to={`/w/${w}/canvas`}
+                className="mt-5 flex items-center gap-2 text-xs text-primary"
+              >
+                <Network className="h-3.5 w-3.5" />
+                Design your team on the canvas
+              </Link>
+            )}
           </div>
         )}
       </div>
@@ -548,76 +725,156 @@ function CompanyAgentPanel({
           />
         </div>
       )}
-      <div className="shrink-0 border-t p-3">
-        {error && (
-          <p role="alert" className="mb-2 text-xs text-destructive">
-            {error}
-          </p>
+      <PromptComposer
+        className={cn(
+          "agent-composer",
+          conversation && "conversation-composer",
         )}
-        <div className="rounded-xl border bg-background p-2.5 shadow-sm focus-within:border-primary/60">
-          {!!contexts.length && (
-            <div
-              className="mb-2 flex flex-wrap gap-1"
-              aria-label="Attached code context"
-            >
-              {contexts.map((c, i) => (
-                <span
-                  key={`${c.path}:${c.startLine}`}
-                  className="flex max-w-full items-center gap-1 rounded-md border bg-surface px-1.5 py-1 text-[10px]"
+        notice={
+          <>
+            {error && (
+              <p role="alert" className="mb-2 text-xs text-destructive">
+                {error}
+              </p>
+            )}
+            {(settings.isError || companiesQuery.isError) && (
+              <p role="alert" className="mb-2 text-xs text-destructive">
+                Conversation settings could not be loaded.{" "}
+                <button
+                  className="underline"
+                  onClick={() => {
+                    void settings.refetch();
+                    void companiesQuery.refetch();
+                  }}
                 >
-                  <FileCode2 className="h-3 w-3 shrink-0" />
-                  <span className="truncate">
-                    {c.path}
-                    {c.startLine ? `:${c.startLine}-${c.endLine}` : ""}
-                  </span>
-                  <button
-                    aria-label={`Remove context ${c.path}`}
-                    onClick={() =>
-                      setContexts((items) => items.filter((_, n) => i !== n))
-                    }
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          <Textarea
-            ref={input}
-            aria-label="Message your company"
-            placeholder={
-              active
-                ? "Give the team direction…"
-                : runId
-                  ? "Continue this conversation…"
-                  : "Ask Octopus to build, fix, or explain…"
-            }
-            value={text}
-            maxLength={8000}
-            rows={3}
-            className="min-h-[72px] resize-none border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
-            onChange={(e) => store.draft(key, e.target.value)}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                send();
-              }
-            }}
-          />
-          <div className="mt-2 flex items-center gap-1">
-            <Button
-              size="xs"
-              variant="ghost"
-              aria-label="Attach project file"
-              aria-expanded={adding}
-              onClick={() => setAdding(!adding)}
-            >
-              @ Files
-            </Button>
+                  Try again
+                </button>
+              </p>
+            )}
+            {companyId && canvas.data?.agents.length === 0 && (
+              <p className="mb-2 text-xs text-muted-foreground">
+                This team has no agents.{" "}
+                <Link className="underline" to={`/w/${w}/canvas`}>
+                  Add an agent
+                </Link>{" "}
+                or choose another team.
+              </p>
+            )}
+          </>
+        }
+        caption={
+          <>
+            <ShieldCheck className="h-3 w-3 shrink-0" />
+            <span>
+              {(run.data?.permission_level ?? permission) === "read_only"
+                ? "Read only. No edits or commands."
+                : (run.data?.permission_level ?? permission) === "plan"
+                  ? "Plan only. Review proposed changes."
+                  : (run.data?.permission_level ?? permission) === "danger"
+                    ? "Full access. No approval required."
+                    : "Edits and commands need your approval."}
+            </span>
+            <span className="ml-auto hidden shrink-0 sm:inline">
+              Enter to send
+            </span>
+          </>
+        }
+        controls={
+          <>
+            <Popover open={adding} onOpenChange={setAdding}>
+              <PopoverTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Attach project file"
+                  disabled={submit.isPending || attachments.uploading}
+                >
+                  <Plus />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent side="top" align="start" className="w-80 p-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    attachments.pick();
+                    setAdding(false);
+                  }}
+                >
+                  <Paperclip />
+                  Upload files or images
+                </Button>
+                <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">
+                  Attach a project file
+                </p>
+                <input
+                  aria-label="Find context file"
+                  placeholder="Find a file…"
+                  value={fileSearch}
+                  onChange={(e) => setFileSearch(e.target.value)}
+                  className="menu-search"
+                />
+                <div className="mt-1 max-h-52 overflow-auto">
+                  {files
+                    .filter((file) =>
+                      file.toLowerCase().includes(fileSearch.toLowerCase()),
+                    )
+                    .slice(0, 40)
+                    .map((file) => (
+                      <button
+                        key={file}
+                        onClick={() => add({ path: file })}
+                        className="menu-file"
+                      >
+                        <FileCode2 className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{file}</span>
+                      </button>
+                    ))}
+                  {!files.some((file) =>
+                    file.toLowerCase().includes(fileSearch.toLowerCase()),
+                  ) && (
+                    <p className="px-2 py-4 text-xs text-muted-foreground">
+                      No matching project files.
+                    </p>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+            {!runId ? (
+              <Select
+                ariaLabel="Agent mode"
+                variant="ghost"
+                className="w-auto"
+                value={mode}
+                onValueChange={(value) => {
+                  if (value === "agent" || value === "plan" || value === "ask")
+                    setMode(value);
+                }}
+                options={[
+                  {
+                    value: "agent",
+                    label: "Agent",
+                    hint: "Implement and verify changes",
+                  },
+                  {
+                    value: "plan",
+                    label: "Plan",
+                    hint: "Propose changes for review",
+                  },
+                  {
+                    value: "ask",
+                    label: "Ask",
+                    hint: "Read and explain your project",
+                  },
+                ]}
+              />
+            ) : (
+              <span className="composer-pill">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                {run.data?.permission_level?.replace("_", " ") ?? "Loading"}
+              </span>
+            )}
             {current && (
               <Button
                 size="xs"
@@ -639,9 +896,54 @@ function CompanyAgentPanel({
                 Selection
               </Button>
             )}
+            <span className="flex-1" />
+            <ModelPicker
+              workspace={w}
+              value={runId ? recordedBudget : preferences}
+              locked={!!runId}
+              onChange={(value) => store.configure(w, value)}
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Conversation options"
+                >
+                  <Settings2 />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top" className="w-64">
+                <DropdownMenuLabel>Conversation options</DropdownMenuLabel>
+                <DropdownMenuItem onSelect={newThread}>
+                  <Plus />
+                  New conversation
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link
+                    to={`/w/${w}/${companyId ? "canvas" : "settings#providers"}`}
+                  >
+                    <Settings2 />
+                    {companyId ? "Configure team models" : "Model settings"}
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={!companyId}
+                  onSelect={() => setAdvanced(true)}
+                >
+                  <Settings2 />
+                  New run with limits
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setInternal(!internal)}>
+                  <History />
+                  {internal ? "Show replies only" : "Show team activity"}
+                  {internal && <Check className="ml-auto" />}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
-              size="icon-sm"
-              className="ml-auto"
+              size="icon"
+              className="composer-send"
               aria-label={
                 active ? "Send direction to agents" : "Send agent message"
               }
@@ -651,109 +953,104 @@ function CompanyAgentPanel({
             >
               <ArrowUp />
             </Button>
-          </div>
-          {adding && (
-            <div className="mt-2 rounded-md border p-1.5">
-              <input
-                aria-label="Find context file"
-                autoFocus
-                placeholder="Find a file…"
-                value={fileSearch}
-                onChange={(e) => setFileSearch(e.target.value)}
-                className="w-full border-b bg-transparent px-1 pb-1.5 text-xs outline-none"
-              />
-              <div className="max-h-32 overflow-auto">
-                {files
-                  .filter((f) =>
-                    f.toLowerCase().includes(fileSearch.toLowerCase()),
-                  )
-                  .slice(0, 40)
-                  .map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => add({ path: f })}
-                      className="block w-full truncate rounded px-1 py-1.5 text-left text-[11px] hover:bg-accent"
-                    >
-                      {f}
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground">
-          {runId ? (
-            <span className="flex items-center gap-1">
-              <ShieldCheck className="h-3 w-3" />
-              {run.data?.permission_level?.replace("_", " ") ?? "Loading"}
-            </span>
-          ) : (
-            <div className="w-24">
-              <Select
-                ariaLabel="Agent mode"
-                value={mode}
-                onValueChange={(v) => setMode(v as AgentMode)}
-                options={[
-                  {
-                    value: "agent",
-                    label: "Agent",
-                    hint: "Implement and verify changes",
-                  },
-                  {
-                    value: "plan",
-                    label: "Plan",
-                    hint: "Propose changes without writing your files",
-                  },
-                  {
-                    value: "ask",
-                    label: "Ask",
-                    hint: "Read and explain, without edits or commands",
-                  },
-                ]}
-              />
-            </div>
-          )}
-          <span className="truncate">
-            {configured ? "Connected model" : "Offline demo"}
-          </span>
-          <button
-            className="ml-auto hover:text-foreground"
-            onClick={() => setInternal(!internal)}
-            aria-pressed={internal}
-          >
-            {internal ? "Team feed" : "Replies"}
-          </button>
-          <Tip content="Run settings and limits">
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Agent run settings"
-              disabled={!companyId}
-              onClick={() => setAdvanced(true)}
-            >
-              <Settings2 />
-            </Button>
-          </Tip>
-        </div>
-        {!runId && (
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {permission === "read_only"
-              ? "Read only · no edits or commands"
-              : permission === "plan"
-                ? "Plan only · project files stay unchanged"
-                : permission === "danger"
-                  ? "Full access · commands and edits run without approval"
-                  : "Edits and commands require your approval"}{" "}
-            · Enter to send
+          </>
+        }
+      >
+        {attachments.input}
+        <AttachmentChips
+          files={attachments.files}
+          onRemove={submit.isPending ? undefined : attachments.remove}
+        />
+        {attachments.uploading && (
+          <p role="status" className="text-xs text-muted-foreground">
+            Attaching files…
           </p>
         )}
-      </div>
+        {!companyId && (
+          <p className="mb-2 text-xs text-muted-foreground">
+            Your first message creates a coding agent. You can add a team later.
+          </p>
+        )}
+        {!!contexts.length && (
+          <div
+            className="composer-attachments"
+            aria-label="Attached code context"
+          >
+            {contexts.map((context, index) => (
+              <span
+                key={`${context.path}:${context.startLine}`}
+                className="composer-attachment"
+              >
+                <FileCode2 className="h-3 w-3 shrink-0" />
+                <span className="truncate">
+                  {context.path}
+                  {context.startLine
+                    ? `:${context.startLine}-${context.endLine}`
+                    : ""}
+                </span>
+                <button
+                  aria-label={`Remove context ${context.path}`}
+                  onClick={() =>
+                    setContexts((items) =>
+                      items.filter((_, position) => position !== index),
+                    )
+                  }
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <Textarea
+          ref={input}
+          aria-label="Message your company"
+          placeholder={
+            active
+              ? "Give the team direction…"
+              : runId
+                ? "Continue this conversation…"
+                : "Ask Octopus to build, fix, or explore…"
+          }
+          value={companyId ? text : (pendingPrompt ?? text)}
+          maxLength={8000}
+          rows={2}
+          onChange={(event) =>
+            companyId
+              ? store.draft(key, event.target.value)
+              : store.stagePrompt(w, event.target.value)
+          }
+          onPaste={submit.isPending ? undefined : attachments.onPaste}
+          {...(submit.isPending ? {} : attachments.drop)}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault();
+              send();
+            }
+          }}
+        />
+      </PromptComposer>
+      <ConfirmDialog
+        open={!!companyId && !!pendingPrompt && !!text.trim()}
+        onOpenChange={(open) => {
+          if (!open) store.discardPrompt(w);
+        }}
+        title="Replace the existing draft?"
+        description="This project already has a message draft. Use the new prompt from Home, or cancel to keep your current draft."
+        confirmLabel="Use new prompt"
+        onConfirm={() => store.importPrompt(w, companyId, true)}
+      />
       <NewCompanyDialog open={creating} onOpenChange={setCreating} />
       <RunDialog
         open={advanced}
         onOpenChange={setAdvanced}
         companyId={companyId}
         initialGoal={text}
+        initialSettings={preferences}
         onStarted={(r) => {
           store.selectThread(key, r.id);
           store.draft(key, "");

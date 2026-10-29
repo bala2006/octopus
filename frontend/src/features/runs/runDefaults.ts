@@ -17,4 +17,5 @@ export const defaultRunBudget = (): RunBudget => ({
   workflow: "auto",
   force_mock: false,
   reasoning_effort: "default",
+  model: null,
 });

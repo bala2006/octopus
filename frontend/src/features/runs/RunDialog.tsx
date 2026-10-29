@@ -2,29 +2,81 @@ import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ChevronDown, Footprints, Paperclip, Play, ShieldCheck, Sparkles, X, Zap } from "lucide-react";
+import {
+  ChevronDown,
+  Footprints,
+  Paperclip,
+  Play,
+  ShieldCheck,
+  Sparkles,
+  X,
+  Zap,
+} from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { qk, useSettings, useWorkspace, useWorkspaceId } from "@/hooks/queries";
 import type { ParsedFileOut, PermissionLevel, RunDetail } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select } from "@/components/ui/overlays";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  Select,
+} from "@/components/ui/overlays";
 import { EffortPicker } from "@/features/canvas/EffortPicker";
 import { defaultRunBudget } from "./runDefaults";
 import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
-import { useAttachments, AttachmentChips, attachmentPayload } from "@/features/chat/attachments";
+import {
+  useAttachments,
+  AttachmentChips,
+  attachmentPayload,
+} from "@/features/chat/attachments";
+import { ModelPicker } from "@/features/editor/ModelPicker";
+import type { ComposerSettings } from "@/features/editor/workbenchStore";
 
 const MODES = [
-  { v: "autonomous", label: "Autonomous", icon: Zap, d: "Runs until finished or a limit is hit" },
-  { v: "step", label: "Step", icon: Footprints, d: "You click Next turn for every agent turn" },
-  { v: "supervised", label: "Supervised", icon: ShieldCheck, d: "Pauses for approval at file writes and finish" },
+  {
+    v: "autonomous",
+    label: "Autonomous",
+    icon: Zap,
+    d: "Runs until finished or a limit is hit",
+  },
+  {
+    v: "step",
+    label: "Step",
+    icon: Footprints,
+    d: "You click Next turn for every agent turn",
+  },
+  {
+    v: "supervised",
+    label: "Supervised",
+    icon: ShieldCheck,
+    d: "Pauses for approval at file writes and finish",
+  },
 ] as const;
 
-export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoal = "", initialAttachments, onStarted }: {
-  open: boolean; onOpenChange: (o: boolean) => void; companyId: string; sessionId?: string; initialGoal?: string;
+export function RunDialog({
+  open,
+  onOpenChange,
+  companyId,
+  sessionId,
+  initialGoal = "",
+  initialAttachments,
+  initialSettings,
+  onStarted,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  companyId: string;
+  sessionId?: string;
+  initialGoal?: string;
   /** e.g. files and screenshots already attached in the channel composer */
-  initialAttachments?: ParsedFileOut[]; onStarted?: (r: RunDetail) => void;
+  initialAttachments?: ParsedFileOut[];
+  onStarted?: (r: RunDetail) => void;
+  initialSettings?: ComposerSettings;
 }) {
   const w = useWorkspaceId();
   const ws = useWorkspace(w);
@@ -32,113 +84,383 @@ export function RunDialog({ open, onOpenChange, companyId, sessionId, initialGoa
   const nav = useNavigate();
   const qc = useQueryClient();
   const [goal, setGoal] = React.useState(initialGoal);
-  const [mode, setMode] = React.useState<(typeof MODES)[number]["v"]>("autonomous");
-  const [perm, setPerm] = React.useState<PermissionLevel>((ws.data?.default_permission as PermissionLevel) ?? "ask");
-  const anyConfigured = settings.data?.providers.some((p) => p.provider !== "mock" && p.configured) ?? false;
-  const [demo, setDemo] = React.useState(!anyConfigured);
+  const [mode, setMode] =
+    React.useState<(typeof MODES)[number]["v"]>("autonomous");
+  const [perm, setPerm] = React.useState<PermissionLevel>(
+    (ws.data?.default_permission as PermissionLevel) ?? "ask",
+  );
+  const anyConfigured =
+    settings.data?.providers.some(
+      (p) => p.provider !== "mock" && p.configured,
+    ) ?? false;
   const [adv, setAdv] = React.useState(false);
   const [budget, setBudget] = React.useState(defaultRunBudget);
+  const demo =
+    budget.model?.provider === "mock" || (!budget.model && !anyConfigured);
+  const setDemo = (value: boolean) =>
+    setBudget((current) => ({
+      ...current,
+      model: value ? { provider: "mock", model: "mock/demo" } : null,
+    }));
   const att = useAttachments({ images: true });
   React.useEffect(() => {
     if (!open) return;
     setGoal(initialGoal);
+    if (initialSettings)
+      setBudget((current) => ({ ...current, ...initialSettings }));
     setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask");
     if (initialAttachments?.length) att.setFiles(initialAttachments);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  React.useEffect(() => setDemo(!anyConfigured), [anyConfigured]);
 
   const start = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/v1/w/{workspace_id}/runs", {
-      params: { path: { workspace_id: w } },
-      body: { company_id: companyId, goal: goal.trim(), session_id: sessionId, mode, permission_level: perm,
-              budget: { ...budget, force_mock: demo }, attachments: attachmentPayload(att.files) },
-    })),
+    mutationFn: () =>
+      unwrap(
+        api.POST("/api/v1/w/{workspace_id}/runs", {
+          params: { path: { workspace_id: w } },
+          body: {
+            company_id: companyId,
+            goal: goal.trim(),
+            session_id: sessionId,
+            mode,
+            permission_level: perm,
+            budget: { ...budget, force_mock: demo },
+            attachments: attachmentPayload(att.files),
+          },
+        }),
+      ),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: qk.runs(w) });
       onOpenChange(false);
       att.clear();
-      toast.success("Run started", { description: demo ? "Demo Mode: scripted, offline, free" : `${perm.replace("_", " ")} permissions` });
-      if (onStarted) onStarted(r); else nav(`/w/${w}/runs/${r.id}`);
+      toast.success("Run started", {
+        description: demo
+          ? "Demo Mode: scripted, offline, free"
+          : `${perm.replace("_", " ")} permissions`,
+      });
+      if (onStarted) onStarted(r);
+      else nav(`/w/${w}/runs/${r.id}`);
     },
-    onError: (e: Error) => toast.error("Could not start run", { description: e.message }),
+    onError: (e: Error) =>
+      toast.error("Could not start run", { description: e.message }),
   });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Play className="h-4 w-4 text-primary" />Run the company</DialogTitle>
-          <DialogDescription>The goal goes to the entry agent(s), then flows along your channels.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2">
+            <Play className="h-4 w-4 text-primary" />
+            Run the company
+          </DialogTitle>
+          <DialogDescription>
+            The goal goes to the entry agent(s), then flows along your channels.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <Field label="Goal" hint="Paste screenshots (Ctrl+V) or drop images and files here; agents see images as images.">
+          <Field
+            label="Goal"
+            hint="Paste screenshots (Ctrl+V) or drop images and files here; agents see images as images."
+          >
             <div {...att.drop}>
-              <Textarea autoFocus value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="Build a todo app with auth" className="min-h-[84px]"
+              <Textarea
+                autoFocus
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                placeholder="Build a todo app with auth"
+                className="min-h-[84px]"
                 onPaste={att.onPaste}
-                onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && goal.trim()) start.mutate(); }} data-testid="run-goal" />
+                onKeyDown={(e) => {
+                  if (
+                    (e.metaKey || e.ctrlKey) &&
+                    e.key === "Enter" &&
+                    goal.trim()
+                  )
+                    start.mutate();
+                }}
+                data-testid="run-goal"
+              />
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <Button variant="ghost" size="xs" onClick={att.pick} loading={att.uploading} data-testid="attach-button"><Paperclip />Attach files or images</Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={att.pick}
+                loading={att.uploading}
+                data-testid="attach-button"
+              >
+                <Paperclip />
+                Attach files or images
+              </Button>
               <AttachmentChips files={att.files} onRemove={att.remove} />
               {att.input}
             </div>
           </Field>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Run mode">
+          <div
+            className="grid grid-cols-3 gap-2"
+            role="radiogroup"
+            aria-label="Run mode"
+          >
             {MODES.map(({ v, label, icon: I, d }) => (
-              <button key={v} role="radio" aria-checked={mode === v} onClick={() => setMode(v)}
-                className={cn("rounded-lg border p-2.5 text-left transition-all hover:border-primary/50", mode === v ? "border-primary bg-primary/5" : "border-border")}>
-                <div className="flex items-center gap-1.5 text-xs font-semibold"><I className="h-3.5 w-3.5 text-primary" />{label}</div>
-                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{d}</p>
+              <button
+                key={v}
+                role="radio"
+                aria-checked={mode === v}
+                onClick={() => setMode(v)}
+                className={cn(
+                  "rounded-lg border p-2.5 text-left transition-all hover:border-primary/50",
+                  mode === v ? "border-primary bg-primary/5" : "border-border",
+                )}
+              >
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <I className="h-3.5 w-3.5 text-primary" />
+                  {label}
+                </div>
+                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                  {d}
+                </p>
               </button>
             ))}
           </div>
           <div className="grid grid-cols-[1fr_210px] items-end gap-3">
-            <Field label="Permission level"><PermissionPicker value={perm} onChange={setPerm} compact /></Field>
+            <Field label="Permission level">
+              <PermissionPicker value={perm} onChange={setPerm} compact />
+            </Field>
             <Field label="How the team works">
-              <Select ariaLabel="How the team works" value={budget.workflow} onValueChange={(v) => setBudget({ ...budget, workflow: v as typeof budget.workflow })}
-                options={[{ value: "auto", label: "Auto (recommended)", hint: "Defined workflow when the team has a builder and a tester or reviewer" },
-                  { value: "on", label: "Defined workflow", hint: "Intake → spec → design → build → test → review → accept, each phase with its owner" },
-                  { value: "off", label: "Free-form", hint: "The head decides how to split the work" }]} />
+              <Select
+                ariaLabel="How the team works"
+                value={budget.workflow}
+                onValueChange={(v) =>
+                  setBudget({
+                    ...budget,
+                    workflow: v as typeof budget.workflow,
+                  })
+                }
+                options={[
+                  {
+                    value: "auto",
+                    label: "Auto (recommended)",
+                    hint: "Defined workflow when the team has a builder and a tester or reviewer",
+                  },
+                  {
+                    value: "on",
+                    label: "Defined workflow",
+                    hint: "Intake → spec → design → build → test → review → accept, each phase with its owner",
+                  },
+                  {
+                    value: "off",
+                    label: "Free-form",
+                    hint: "The head decides how to split the work",
+                  },
+                ]}
+              />
             </Field>
           </div>
-          <Field label="Reasoning effort" hint="Applies to every agent in this run. “Per agent” uses each agent's own setting.">
-            <EffortPicker value={budget.reasoning_effort} defaultLabel="Per agent" onChange={(v) => setBudget({ ...budget, reasoning_effort: v })} />
+          <Field
+            label="Reasoning effort"
+            hint="Applies to every agent in this run. “Per agent” uses each agent's own setting."
+          >
+            <EffortPicker
+              value={budget.reasoning_effort}
+              defaultLabel="Per agent"
+              onChange={(v) => setBudget({ ...budget, reasoning_effort: v })}
+            />
           </Field>
-          <label className={cn("flex items-center gap-3 rounded-lg border p-3 transition", demo ? "border-primary/40 bg-primary/5" : "border-border")}>
+          <div className="flex flex-wrap gap-2">
+            <ModelPicker
+              workspace={w}
+              value={budget}
+              onChange={(value) =>
+                setBudget((current) => ({ ...current, ...value }))
+              }
+            />
+          </div>
+          <label
+            className={cn(
+              "flex items-center gap-3 rounded-lg border p-3 transition",
+              demo ? "border-primary/40 bg-primary/5" : "border-border",
+            )}
+          >
             <Sparkles className="h-4 w-4 text-primary" />
-            <span className="flex-1"><span className="block text-sm font-medium">Demo Mode</span><span className="block text-xs text-muted-foreground">Scripted, deterministic, offline agents (no API cost). Great for presentations.</span></span>
-            <Switch checked={demo} onCheckedChange={setDemo} aria-label="Demo mode" />
+            <span className="flex-1">
+              <span className="block text-sm font-medium">Demo Mode</span>
+              <span className="block text-xs text-muted-foreground">
+                Scripted, deterministic, offline agents (no API cost). Great for
+                presentations.
+              </span>
+            </span>
+            <Switch
+              checked={demo}
+              onCheckedChange={setDemo}
+              disabled={!anyConfigured && demo}
+              aria-label="Demo mode"
+            />
           </label>
           <div>
-            <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onClick={() => setAdv(!adv)}>
-              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", adv && "rotate-180")} />Limits & budget
+            <button
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setAdv(!adv)}
+            >
+              <ChevronDown
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform",
+                  adv && "rotate-180",
+                )}
+              />
+              Limits & budget
             </button>
             {adv && (
               <div className="mt-2 grid grid-cols-4 gap-2 animate-fade-up">
-                <Field label="Max turns"><Input type="number" value={budget.max_turns} onChange={(e) => setBudget({ ...budget, max_turns: +e.target.value || 1 })} className="h-8" /></Field>
-                <Field label="Token budget"><Input type="number" value={budget.max_tokens} onChange={(e) => setBudget({ ...budget, max_tokens: +e.target.value || 1000 })} className="h-8" /></Field>
-                <Field label="Cost cap ($)"><Input type="number" step="0.5" value={budget.max_cost_usd} onChange={(e) => setBudget({ ...budget, max_cost_usd: +e.target.value || 0 })} className="h-8" /></Field>
-                <Field label="Active time (s)" hint="Seconds of agent work; paused or waiting-for-you time doesn't count"><Input type="number" value={budget.timeout_s} onChange={(e) => setBudget({ ...budget, timeout_s: +e.target.value || 60 })} className="h-8" /></Field>
-                <Field label="Pause if stalled" hint="Turns without a file change or task update before the run pauses for you (0 = off)"><Input type="number" min={0} value={budget.stall_turns} onChange={(e) => setBudget({ ...budget, stall_turns: Math.max(0, +e.target.value || 0) })} className="h-8" /></Field>
-                <Field label="Tool calls per turn" hint="How many tool rounds an agent may run in one turn (native tool calling)"><Input type="number" min={1} max={200} value={budget.max_tool_rounds} onChange={(e) => setBudget({ ...budget, max_tool_rounds: Math.min(200, Math.max(1, +e.target.value || 1)) })} className="h-8" /></Field>
-                <Field label="Max team size" hint="Includes agents hired during the run"><Input type="number" min={1} max={100} value={budget.max_agents} onChange={(e) => setBudget({ ...budget, max_agents: Math.max(1, +e.target.value || 1) })} className="h-8" /></Field>
+                <Field label="Max turns">
+                  <Input
+                    type="number"
+                    value={budget.max_turns}
+                    onChange={(e) =>
+                      setBudget({ ...budget, max_turns: +e.target.value || 1 })
+                    }
+                    className="h-8"
+                  />
+                </Field>
+                <Field label="Token budget">
+                  <Input
+                    type="number"
+                    value={budget.max_tokens}
+                    onChange={(e) =>
+                      setBudget({
+                        ...budget,
+                        max_tokens: +e.target.value || 1000,
+                      })
+                    }
+                    className="h-8"
+                  />
+                </Field>
+                <Field label="Cost cap ($)">
+                  <Input
+                    type="number"
+                    step="0.5"
+                    value={budget.max_cost_usd}
+                    onChange={(e) =>
+                      setBudget({
+                        ...budget,
+                        max_cost_usd: +e.target.value || 0,
+                      })
+                    }
+                    className="h-8"
+                  />
+                </Field>
+                <Field
+                  label="Active time (s)"
+                  hint="Seconds of agent work; paused or waiting-for-you time doesn't count"
+                >
+                  <Input
+                    type="number"
+                    value={budget.timeout_s}
+                    onChange={(e) =>
+                      setBudget({ ...budget, timeout_s: +e.target.value || 60 })
+                    }
+                    className="h-8"
+                  />
+                </Field>
+                <Field
+                  label="Pause if stalled"
+                  hint="Turns without a file change or task update before the run pauses for you (0 = off)"
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    value={budget.stall_turns}
+                    onChange={(e) =>
+                      setBudget({
+                        ...budget,
+                        stall_turns: Math.max(0, +e.target.value || 0),
+                      })
+                    }
+                    className="h-8"
+                  />
+                </Field>
+                <Field
+                  label="Tool calls per turn"
+                  hint="How many tool rounds an agent may run in one turn (native tool calling)"
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={budget.max_tool_rounds}
+                    onChange={(e) =>
+                      setBudget({
+                        ...budget,
+                        max_tool_rounds: Math.min(
+                          200,
+                          Math.max(1, +e.target.value || 1),
+                        ),
+                      })
+                    }
+                    className="h-8"
+                  />
+                </Field>
+                <Field
+                  label="Max team size"
+                  hint="Includes agents hired during the run"
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={budget.max_agents}
+                    onChange={(e) =>
+                      setBudget({
+                        ...budget,
+                        max_agents: Math.max(1, +e.target.value || 1),
+                      })
+                    }
+                    className="h-8"
+                  />
+                </Field>
                 <label className="col-span-2 flex items-center gap-2 self-end pb-1 text-xs">
-                  <Switch checked={budget.verify_before_finish} onCheckedChange={(v) => setBudget({ ...budget, verify_before_finish: v })} aria-label="Verify before finishing" />
-                  Verify before finishing: agents that changed code must run it or open it in the browser before they report done
+                  <Switch
+                    checked={budget.verify_before_finish}
+                    onCheckedChange={(v) =>
+                      setBudget({ ...budget, verify_before_finish: v })
+                    }
+                    aria-label="Verify before finishing"
+                  />
+                  Verify before finishing: agents that changed code must run it
+                  or open it in the browser before they report done
                 </label>
                 <label className="col-span-1 flex items-center gap-2 self-end pb-1 text-xs">
-                  <Switch checked={budget.persist_team} onCheckedChange={(v) => setBudget({ ...budget, persist_team: v })} aria-label="Save team changes" />
-                  Save agents hired or edited during the run to the company (read-only and plan runs never save)
+                  <Switch
+                    checked={budget.persist_team}
+                    onCheckedChange={(v) =>
+                      setBudget({ ...budget, persist_team: v })
+                    }
+                    aria-label="Save team changes"
+                  />
+                  Save agents hired or edited during the run to the company
+                  (read-only and plan runs never save)
                 </label>
               </div>
             )}
           </div>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-muted-foreground"><kbd className="kbd">Ctrl</kbd>+<kbd className="kbd">Enter</kbd> to start</span>
+          <span className="text-[11px] text-muted-foreground">
+            <kbd className="kbd">Ctrl</kbd>+<kbd className="kbd">Enter</kbd> to
+            start
+          </span>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}><X />Cancel</Button>
-            <Button disabled={!goal.trim() || att.uploading} loading={start.isPending} onClick={() => start.mutate()} data-testid="start-run"><Play />Start run</Button>
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              <X />
+              Cancel
+            </Button>
+            <Button
+              disabled={!goal.trim() || att.uploading}
+              loading={start.isPending}
+              onClick={() => start.mutate()}
+              data-testid="start-run"
+            >
+              <Play />
+              Start run
+            </Button>
           </div>
         </div>
       </DialogContent>

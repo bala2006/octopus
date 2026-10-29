@@ -26,7 +26,7 @@
 
 ## What you can do
 
-**New: [Developer workbench](docs/developer-workbench.md)** brings the company agent conversation beside your code editor, with file and selection context, Agent/Plan/Ask modes, live approvals, run controls, and conversation history. Projects open in Workspace; the company canvas stays one click away in the activity rail. The [workspace tools](docs/workspace.md) retain recoverable drafts, conflict-aware saves, file management, browser preview, and streamed commands, and add save-all, clean-tab refresh, detected project tasks, command-output assistance, and reviewed staged Git commits. Resize the panels and use **Ctrl+K** to find files or **Ctrl+L** to ask your team.
+**New: [Developer workbench](docs/developer-workbench.md)** brings the company agent conversation beside your code editor, with file and selection context, Agent/Plan/Ask modes, live approvals, run controls, and conversation history. Projects open in a full conversation view, with project and conversation history in the sidebar. The editor and company canvas stay one click away in the activity rail. The [workspace tools](docs/workspace.md) retain recoverable drafts, conflict-aware saves, file management, browser preview, and streamed commands, and add save-all, clean-tab refresh, detected project tasks, command-output assistance, and reviewed staged Git commits. Resize the panels and use **Ctrl+K** to find files or **Ctrl+L** to ask your team.
 
 | | |
 |---|---|

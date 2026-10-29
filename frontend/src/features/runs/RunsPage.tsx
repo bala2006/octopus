@@ -10,6 +10,7 @@ import { qk, useCompanyId, useRuns, useWorkspaceId } from "@/hooks/queries";
 import type { PermissionLevel, RunOut } from "@/types";
 import { EmptyState, LoadingRows, PermissionBadge } from "@/components/common";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/surfaces";
 import { Badge, Input } from "@/components/ui/primitives";
 import { ConfirmDialog, Tip } from "@/components/ui/overlays";
 import { RunDialog } from "./RunDialog";
@@ -57,11 +58,8 @@ export default function RunsPage() {
   const counts = React.useMemo(() => Object.fromEntries(FILTERS.map(([f]) => [f, filterRuns(data ?? [], f, "", "newest").length])), [data]);
 
   return (
-    <div className="mx-auto flex h-full max-w-5xl flex-col p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <div><h1 className="text-lg font-semibold">Runs</h1><p className="text-sm text-muted-foreground">Every execution of this company: live, paused or finished. Click to watch, replay or continue.</p></div>
-        <Button onClick={() => setOpen(true)} disabled={!companyId}><Play />New run</Button>
-      </div>
+    <div className="content-page flex h-full min-h-0 flex-col">
+      <PageHeader title="Runs" description="Watch your team's progress, revisit earlier work, or continue a conversation." actions={<Button onClick={() => setOpen(true)} disabled={!companyId}><Play />New run</Button>} />
       {!!data?.length && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div role="radiogroup" aria-label="Filter runs" className="flex items-center gap-1">
@@ -82,7 +80,7 @@ export default function RunsPage() {
         </div>
       )}
       {/* sized by its content (no flex-1): one run is one row, not a near-empty full-height panel */}
-      <div className="min-h-0 overflow-y-auto rounded-xl border border-border bg-surface" data-testid="runs-list">
+      <div className="ui-surface min-h-0 overflow-y-auto" data-testid="runs-list">
         {isLoading ? <LoadingRows rows={5} /> : !data?.length ? (
           <EmptyState icon={History} title="No runs yet" description="Give the company a goal and watch the agents collaborate." action={<Button onClick={() => setOpen(true)} disabled={!companyId}><Play />Start first run</Button>} />
         ) : !shown.length ? (

@@ -131,13 +131,13 @@ export default function ArtifactsPage() {
   const hasPlanned = (arts.data ?? []).some((a) => a.planned);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-2">
+    <div className="artifacts-layout flex h-full min-h-0 flex-col">
+      <div className="view-toolbar">
         <Tabs value={source} onValueChange={(v) => setSource(v as Source)}>
           <TabsList><TabsTrigger value="run"><History />Run changes</TabsTrigger><TabsTrigger value="project"><FolderTree />Project files</TabsTrigger></TabsList>
         </Tabs>
         {source === "run" && (
-          <Select ariaLabel="Run" value={selectedRun} onValueChange={(v) => nav(`/w/${w}/artifacts/${v}`)} className="h-8 w-[320px] text-xs"
+          <Select ariaLabel="Run" value={selectedRun} onValueChange={(v) => nav(`/w/${w}/artifacts/${v}`)} className="h-8 w-full max-w-80 text-xs"
             options={(runs.data ?? []).map((r) => ({ value: r.id, label: `${r.goal.slice(0, 48)}`, hint: `${r.status} · ${timeAgo(r.created_at)}` }))} placeholder="Select a run" />
         )}
         <div className="ml-auto flex items-center gap-1.5">
@@ -146,8 +146,8 @@ export default function ArtifactsPage() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-surface">
+      <div className="artifacts-body flex min-h-0 flex-1">
+        <aside className="artifact-sidebar flex w-60 shrink-0 flex-col border-r border-border bg-surface/40">
           {source === "project" && project.data && (
             <div className="flex items-start gap-2 border-b border-border px-3 py-2" title={project.data.root}>
               <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-primary" />

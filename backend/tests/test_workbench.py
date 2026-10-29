@@ -23,6 +23,31 @@ def repository(root: Path) -> None:
     git(root, "config", "user.email", "workbench@example.invalid")
 
 
+@pytest.mark.asyncio
+async def test_git_review_supports_mounted_repository_ownership_without_global_config(tmp_path, monkeypatch):
+    from app.services import git_review
+
+    repository(tmp_path)
+    (tmp_path / "mounted.txt").write_text("Review this mounted file")
+    environment = git_review.command_environment
+    monkeypatch.setattr(git_review, "command_environment", lambda root, developer=False: {
+        **environment(root, developer=developer), "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"})
+    reviewed = await status(tmp_path)
+    assert reviewed["files"] == [{"path": "mounted.txt", "status": "??", "original_path": None}]
+    staged = await stage(tmp_path, "mounted.txt", True)
+    assert staged["files"][0]["status"] == "A "
+
+
+@pytest.mark.asyncio
+async def test_git_review_never_reviews_an_ancestor_repository(tmp_path):
+    repository(tmp_path)
+    (tmp_path / "parent.txt").write_text("Outside the selected project")
+    project = tmp_path / "child"
+    project.mkdir()
+    with pytest.raises(WorkspaceError, match="repository root"):
+        await status(project)
+
+
 def test_discovers_monorepo_tasks_without_executing_or_reading_dependencies(tmp_path):
     frontend = tmp_path / "web app"
     frontend.mkdir()

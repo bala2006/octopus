@@ -12,7 +12,7 @@ import type { EdgeType, PermissionLevel } from "@/types";
 interface Section { id: string; title: string; icon: LucideIcon; body: React.ReactNode }
 
 /** Plain-language tour of every feature, with screenshots and small diagrams. Works inside and outside a project. */
-export default function GuidePage() {
+export default function GuidePage({ embedded = false }: { embedded?: boolean }) {
   const { wid } = useParams();
   const base = wid ? `/w/${wid}` : null;
   const [active, setActive] = React.useState(SECTIONS[0].id);
@@ -32,27 +32,26 @@ export default function GuidePage() {
 
   return (
     <div className="flex h-full flex-col">
-      {!base && (
+      {!base && !embedded && (
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface px-3">
           <Link to="/" className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"><ArrowLeft className="h-4 w-4" />Projects</Link>
         </header>
       )}
       <div className="flex min-h-0 flex-1">
-        <nav className="hidden w-60 shrink-0 overflow-y-auto border-r border-border bg-surface p-3 md:block" aria-label="Guide sections">
+        <nav className="guide-navigation section-navigation hidden md:block" aria-label="Guide sections">
           <div className="mb-2 flex items-center gap-2 px-2 pt-1 text-sm font-semibold"><BookOpen className="h-4 w-4 text-primary" />Guide</div>
           {SECTIONS.map((s, i) => (
             <button key={s.id} onClick={() => go(s.id)}
-              className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] text-muted-foreground transition hover:bg-accent hover:text-foreground",
-                active === s.id && "bg-accent font-medium text-foreground")}>
+              className={cn("section-navigation-item", active === s.id && "is-active")}>
               <span className="w-4 text-right font-mono text-[10px] opacity-60">{i + 1}</span><s.icon className="h-3.5 w-3.5 shrink-0" />{s.title}
             </button>
           ))}
         </nav>
         <div ref={scroller} className="min-w-0 flex-1 overflow-y-auto">
-          <article className="mx-auto max-w-3xl space-y-14 px-6 py-10">
+          <article className="guide-content space-y-12">
             <div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-widest text-terracotta">Octopus guide</p>
-              <h1 className="text-3xl font-semibold tracking-tight">Everything in five minutes</h1>
+              <p className="text-xs font-medium text-primary">Octopus guide</p>
+              <h1 className="page-title">Everything in five minutes</h1>
               <p className="text-[15px] leading-relaxed text-muted-foreground">
                 Octopus lets you run a small company made of AI agents. You pick a folder, choose a team, and give it a goal. The agents split the work,
                 talk to each other, and write real files in your folder, while you watch and approve the risky parts.

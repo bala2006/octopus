@@ -373,6 +373,11 @@ class ParsedFileOut(BaseModel):
 
 
 # ---------- runs ----------
+class RunModel(BaseModel):
+    provider: Literal["azure", "mock"]
+    model: str = Field(min_length=1, max_length=200)
+
+
 class RunBudget(BaseModel):
     max_turns: int = Field(60, ge=1, le=2000)
     max_tokens: int = Field(400_000, ge=1000)
@@ -393,6 +398,7 @@ class RunBudget(BaseModel):
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
     persist_team: bool = True  # save agents hired / edited during the run back to the company
     reasoning_effort: ReasoningEffort = "default"  # run-wide override; "default" = each agent's own setting
+    model: RunModel | None = None
 
 
 class RunCreate(BaseModel):
@@ -450,6 +456,7 @@ class RunDetail(RunOut):
 class InterjectIn(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
     to_agent_id: str | None = None
+    attachments: list[dict[str, str]] = Field(default_factory=list)
 
 
 class ApprovalIn(BaseModel):

@@ -4,8 +4,8 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Building2, Check, ChevronDown, Copy, Download, FileJson, Hash, MessageSquare, MoreHorizontal, Paperclip, Pencil, RefreshCw, Send, Square, Trash2, Wrench,
-  Play, Radio,
+  Building2, Check, ChevronDown, Copy, Download, FileJson, Hash, MessageSquare, MoreHorizontal, Paperclip, Pencil, RefreshCw, Square, Trash2, Wrench,
+  Play, Radio, ArrowUp,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
 import { clockTime, cn, download, formatTokens, timeAgo } from "@/lib/utils";
@@ -16,6 +16,7 @@ import type { AgentOut, MessageOut, SessionOut } from "@/types";
 import { AgentAvatar, ConnectionDot, EmptyState, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/button";
+import { PromptComposer } from "@/components/ui/surfaces";
 import { Badge, Input, Textarea } from "@/components/ui/primitives";
 import {
   ConfirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -63,10 +64,10 @@ export default function ChatPage() {
   if (!companyId) return <EmptyState icon={MessageSquare} title="Create a company first" description="Chats belong to a company of agents." />;
 
   return (
-    <div className="flex h-full">
+    <div className="chat-layout flex h-full min-h-0">
       <ChatSidebar agents={canvas.data?.agents ?? []} sessions={sessions.data ?? []} activeId={sessionId} onAgent={openAgent}
         onCompany={() => { const s = sessions.data?.find((x) => x.mode === "company"); if (s) nav(`/w/${w}/chat/${s.id}`); else createSession.mutate({ mode: "company", title: "Company channel" }); }} />
-      <div className="min-w-0 flex-1">
+      <div className="chat-main min-h-0 min-w-0 flex-1">
         {!sessionId ? (
           <EmptyState icon={MessageSquare} title="Talk to your company"
             description="Pick an agent for a direct conversation, or open the Company Channel to give the whole team a goal."
@@ -114,15 +115,15 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
   return (
     // Bounded flex column: Agents takes its natural height up to 45% and scrolls beyond that; History gets the rest and
     // scrolls too. (Agents used to be unbounded, so with ~8+ agents History collapsed to zero height and never scrolled.)
-    <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r border-border bg-surface" aria-label="Chats">
-      <div className="shrink-0 p-2">
+    <aside className="chat-sidebar flex h-full min-h-0 w-56 shrink-0 flex-col border-r border-border bg-surface/40" aria-label="Chats">
+      <div className="chat-company-link shrink-0 p-2">
         <button onClick={onCompany} className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium transition hover:bg-accent", active?.mode === "company" && "bg-accent")}>
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
           Company Channel
         </button>
       </div>
       <SidebarHeading id="chat-agents-heading">Agents</SidebarHeading>
-      <div className="max-h-[45%] min-h-0 shrink-0 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-agents-heading" data-testid="chat-agents-list">
+      <div className="chat-agents max-h-[45%] min-h-0 shrink-0 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-agents-heading" data-testid="chat-agents-list">
         {agents.map((a) => (
           <button key={a.id} onClick={() => onAgent(a.id)} data-testid={`chat-agent-${a.name}`} role="listitem"
             className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-accent", active?.agent_id === a.id && "bg-accent")}>
@@ -132,7 +133,7 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
         ))}
       </div>
       <SidebarHeading id="chat-history-heading">History</SidebarHeading>
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-history-heading" data-testid="chat-history-list">
+      <div className="chat-history min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-history-heading" data-testid="chat-history-list">
         {!sessions.length && <p className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet.</p>}
         {sessions.map((s) => (
           <div key={s.id} role="listitem" className={cn("group flex items-center gap-1 rounded-lg pr-1 transition hover:bg-accent/60", s.id === activeId && "bg-accent")}>
@@ -176,7 +177,7 @@ function DirectChat({ session, agent }: { session: SessionOut; agent?: AgentOut 
   const last = msgs.data?.[msgs.data.length - 1];
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
+      <div className="view-toolbar">
         <AgentAvatar name={agent.name} color={agent.color} avatar={agent.avatar} status={chat.streaming ? (chat.streaming.phase === "writing" ? "speaking" : chat.streaming.phase === "tool" ? "tool" : "thinking") : undefined} size={32} />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">{agent.name}</div>
@@ -302,31 +303,21 @@ function Composer({ placeholder, busy, onSend, onStop, disabled, extra, images =
     att.clear();
   };
   return (
-    <div className="px-3 pb-3 pt-1">
-      <div className={cn("mx-auto max-w-3xl rounded-xl border bg-background shadow-sm transition-colors focus-within:border-primary/50", drag ? "border-primary border-dashed" : "border-border")}
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void att.upload(e.dataTransfer.files); }}>
-        {att.files.length > 0 && <div className="px-3 pt-2"><AttachmentChips files={att.files} onRemove={att.remove} /></div>}
-        <Textarea ref={ref} value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} rows={1} disabled={disabled}
-          onPaste={att.onPaste}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
-          className="min-h-[44px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0" aria-label="Message" data-testid="composer" />
-        <div className="flex items-center gap-1 px-2 pb-2">
-          <Tip content={images ? "Attach images, txt, md, pdf or code (or paste a screenshot)" : "Attach txt, md, pdf or code"}><Button variant="ghost" size="icon-sm" onClick={att.pick} loading={att.uploading} aria-label="Attach file"><Paperclip /></Button></Tip>
-          {att.input}
-          {extra}
-          <span className="ml-auto text-[10px] text-muted-foreground"><kbd className="kbd">Enter</kbd> send · <kbd className="kbd">Shift+Enter</kbd> newline</span>
-          {busy && onStop ? (
-            <Button size="sm" variant="secondary" onClick={onStop}><Square className="fill-current" />Stop</Button>
-          ) : (
-            <Button size="sm" onClick={submit} disabled={(!text.trim() && !att.files.length) || disabled} aria-label="Send"><Send />Send</Button>
-          )}
-        </div>
-      </div>
-    </div>
+    <PromptComposer className={cn(drag && "is-dragging")}
+      onDragOver={(event) => { event.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+      onDrop={(event) => { event.preventDefault(); setDrag(false); if (event.dataTransfer.files.length) void att.upload(event.dataTransfer.files); }}
+      caption={<><span>Enter to send</span><span className="ml-auto hidden sm:inline">Shift + Enter for a new line</span></>}
+      controls={<>
+        <Tip content={images ? "Attach an image or project file" : "Attach a text, PDF, or code file"}><Button variant="ghost" size="icon" onClick={att.pick} loading={att.uploading} aria-label="Attach file"><Paperclip /></Button></Tip>
+        {att.input}{extra}<span className="flex-1" />
+        {busy && onStop ? <Button size="icon" variant="secondary" className="composer-send" onClick={onStop} aria-label="Stop response"><Square className="fill-current" /></Button> : <Button size="icon" className="composer-send" onClick={submit} disabled={busy || (!text.trim() && !att.files.length) || disabled} aria-label="Send"><ArrowUp /></Button>}
+      </>}>
+      {att.files.length > 0 && <div className="mb-2"><AttachmentChips files={att.files} onRemove={att.remove} /></div>}
+      <Textarea ref={ref} value={text} onChange={(event) => setText(event.target.value)} placeholder={placeholder} rows={2} disabled={disabled} onPaste={att.onPaste}
+        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }} aria-label="Message" data-testid="composer" />
+    </PromptComposer>
   );
 }
-
 // ---------------------------------------------------------------- company chat
 function CompanyChat({ session, agents, companyId }: { session: SessionOut; agents: Record<string, AgentOut>; companyId: string }) {
   const w = useWorkspaceId();
@@ -346,7 +337,7 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
+      <div className="view-toolbar">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">Company Channel</div>
@@ -384,7 +375,7 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
           else { setGoalFiles(files); setGoal(t); }
         }}
         extra={shownRun ? (
-          <Select ariaLabel="Send to" value={target} onValueChange={setTarget} className="h-7 w-[130px] text-xs"
+          <Select ariaLabel="Send to" value={target} onValueChange={setTarget} variant="ghost" className="w-auto max-w-40"
             options={[{ value: "all", label: live ? "Everyone" : "Entry agent" }, ...Object.values(agents).map((a) => ({ value: a.id, label: a.name }))]} />
         ) : (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Play className="h-3 w-3" />starts a run</span>
@@ -395,4 +386,5 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
     </div>
   );
 }
+
 

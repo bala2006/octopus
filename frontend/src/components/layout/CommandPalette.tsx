@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 
 const destinations = [
+  { name: "Conversation", hint: "Build with your company", to: "agent" },
   {
     name: "Workspace",
     hint: "Edit files and preview your app",

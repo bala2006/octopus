@@ -831,7 +831,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         if self.task and not self.task.done():
             self.task.cancel()
 
-    async def continue_with(self, content: str, to_agent_id: str | None) -> None:
+    async def continue_with(self, content: str, to_agent_id: str | None, *, message_meta: dict[str, Any] | None = None) -> None:
         """Re-open a finished run with a follow-up. Same run, same history, files and task board; budgets get fresh headroom."""
         self.followups.append(content)  # bounded by the API (20k); shown with a visible cut on the Blackboard
         self.finalized = False
@@ -868,12 +868,12 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             mine = [x for x in self.open_tasks() if x["assignee"] == t]
             owned = ("\n\nYou still own these open tasks:\n" + "\n".join(f"- {self.task_line(x)}" for x in mine)
                      + "\nContinue them, or update the task board.") if mine else ""
-            await self.post_message(sender="user", from_id=None, to_id=t, type_="task", meta={"followup": True},
+            await self.post_message(sender="user", from_id=None, to_id=t, type_="task", meta={"followup": True, **(message_meta or {})},
                                     content=f"Follow-up from the user: {content}\n\nThe previous work is in the project (see Workspace files). "
                                             f"Change what's needed and report back; don't start over.{owned}")
         self.wake.set()
 
-    async def interject(self, content: str, to_agent_id: str | None) -> None:
+    async def interject(self, content: str, to_agent_id: str | None, *, message_meta: dict[str, Any] | None = None) -> None:
         targets = [t for t in ([to_agent_id] if to_agent_id else self.agents) if t in self.agents and self.agents[t].active]
         self.user_notes.append(clip(content, 1000))
         self.mark_progress()  # new information from the user re-opens every nudge
@@ -883,6 +883,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         first: dict[str, Any] | None = None
         for t in targets:
             meta = {"broadcast": group, "recipients": len(targets)} if group else {}
+            meta.update(message_meta or {})
             rec = await self.post_message(sender="user", from_id=None, to_id=t, type_="user_interjection", content=content,
                                           meta=meta, announce=not group)
             first = first or rec
@@ -974,6 +975,25 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 self._goal_images = []
         return self._goal_images
 
+    def attach_followup(self, content: str, files: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
+        meta: dict[str, Any] = {"display_content": content}
+        if not files:
+            return content, meta
+        from app.services.run_attachments import MAX_IMAGES, store
+
+        stored = store(self.root, self.run_id, files, unique=True)
+        images = [item for item in [*self.attachments, *stored] if item.get("kind") == "image"][-MAX_IMAGES:]
+        self.attachments = [item for item in [*self.attachments, *stored] if item.get("kind") != "image"][-20:] + images
+        self._goal_images = None
+        for item in stored:
+            if item.get("kind") == "image":
+                content += f"\n\nAttached image: {item['filename']} (shown to the agents)."
+            else:
+                content += f"\n\n--- Attached file: {item['filename']} ---\n{item.get('text', '')}"
+        meta["images"] = [{"filename": item["filename"], "name": item["name"], "mime": item["mime"]} for item in stored if item.get("kind") == "image"]
+        meta["files"] = [item["filename"] for item in stored if item.get("kind") != "image"]
+        return content, meta
+
     async def bootstrap(self) -> None:
         content = self.goal
         images = [a for a in self.attachments if a.get("kind") == "image"]
@@ -982,7 +1002,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 content += f"\n\n--- Attached file: {att.get('filename', 'file')} ---\n" + clip(str(att.get("text", "")), 30000)
         if images:
             content += "\n\n--- Attached image(s), shown to every agent as images: " + ", ".join(str(a.get("filename")) for a in images) + " ---"
-        meta: dict[str, Any] = {"goal": True}
+        meta: dict[str, Any] = {"goal": True, "display_content": self.goal,
+                                "files": [item["filename"] for item in self.attachments if item.get("kind") != "image"]}
         if self.wf_enabled_for_run():
             self.wf_init()
             content += self.wf_intake_note()
@@ -1323,17 +1344,23 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 break
         await self.end_turn(aid)
 
+    def model_for(self, agent: AgentSpec) -> tuple[str, str]:
+        if self.budget.force_mock:
+            return "mock", "mock/demo"
+        if self.budget.model is not None:
+            return self.budget.model.provider, self.budget.model.model
+        return agent.provider, agent.model
+
     async def build_request(self, agent: AgentSpec, inbox_ids: set[str], obs: list[dict[str, Any]], *, extra: str = ""
                             ) -> tuple[LLMRequest, bool]:
         """Resolve the model, then build the prompts (native tools or JSON envelope) for one agent turn."""
         aid = agent.id
         inbox = [m for m in self.history if m["id"] in inbox_ids]
-        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=agent.temperature, max_tokens=agent.max_tokens,
+        provider, model = self.model_for(agent)
+        req = LLMRequest(provider=provider, model=model, temperature=agent.temperature, max_tokens=agent.max_tokens,
                          extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {}, messages=[], json_mode=True,
                          metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs),
                                    "cache_key": f"octopus-{self.run_id[:18]}-{agent.id}"[:64]})
-        if self.budget.force_mock:
-            req.provider, req.model = "mock", "mock/demo"
         async with registry_factory()() as rdb:
             req, warn = await prepare_request(rdb, self.user_id, req)
         if warn and aid not in self.warned:
@@ -1759,15 +1786,14 @@ class RunRuntime(TeamMixin, WorkflowMixin):
     async def condition_met(self, agent: AgentSpec, edge: EdgeSpec, a: A.SendMessage) -> bool:
         """Evaluate a natural-language edge condition with a tiny LLM judge call (mock: always satisfied)."""
         cond = edge.config.get("condition", "")
-        req = LLMRequest(provider=agent.provider, model=agent.model, temperature=0, max_tokens=JUDGE_MAX_TOKENS,
+        provider, model = self.model_for(agent)
+        req = LLMRequest(provider=provider, model=model, temperature=0, max_tokens=JUDGE_MAX_TOKENS,
                          extra={"reasoning_effort": "low" if self.effort_for(agent) != "none" else "none"}, messages=[
             {"role": "system", "content": "You are a strict gatekeeper. Answer only YES or NO."},
             {"role": "user", "content": f"Channel condition: {cond}\nBlackboard:\n{clip(self.blackboard(), 8000)}\n\n"
                                         f"Message ({a.type}): {clip(a.content, 6000)}\n\nIs the condition satisfied?"}],
             metadata={"kind": "chat", "mock_script": "YES"})
         try:
-            if self.budget.force_mock:
-                req.provider, req.model = "mock", "mock/demo"
             async with registry_factory()() as rdb:
                 req, _ = await prepare_request(rdb, self.user_id, req)
             out = ""
@@ -2443,13 +2469,15 @@ class RunManager:
         rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
         return rt
 
-    async def continue_run(self, run_id: str, project: ProjectRef, content: str, to_agent_id: str | None = None) -> RunRuntime | None:
+    async def continue_run(self, run_id: str, project: ProjectRef, content: str, to_agent_id: str | None = None,
+                           attachments: list[dict[str, str]] | None = None) -> RunRuntime | None:
         """Send a message to a run. Live runs get an interjection; finished runs are re-opened and continue with full context."""
         rt = await self.ensure(run_id, project)
         if rt is not None:
             if rt.finalized or rt.run_status in TERMINAL_STATES:
                 return None  # finishing right now; caller retries
-            await rt.interject(content, to_agent_id)
+            content, message_meta = rt.attach_followup(content, attachments or [])
+            await rt.interject(content, to_agent_id, message_meta=message_meta)
             return rt
         loaded = await self._load(run_id, project)
         if not loaded:
@@ -2458,9 +2486,10 @@ class RunManager:
         rt = RunRuntime(run, user_id, project)
         await rt.restore(run)
         rt.mailbox.clear()  # stale unread messages from the finished run are context, not new work
+        content, message_meta = rt.attach_followup(content, attachments or [])
         await rt.load_mcp()
         self.runtimes[run_id] = rt
-        await rt.continue_with(content, to_agent_id)
+        await rt.continue_with(content, to_agent_id, message_meta=message_meta)
         rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
         return rt
 

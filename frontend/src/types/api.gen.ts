@@ -2711,6 +2711,10 @@ export interface components {
             content: string;
             /** To Agent Id */
             to_agent_id?: string | null;
+            /** Attachments */
+            attachments?: {
+                [key: string]: string;
+            }[];
         };
         /** McpServerIn */
         McpServerIn: {
@@ -3206,6 +3210,7 @@ export interface components {
              * @enum {string}
              */
             reasoning_effort: "default" | "none" | "low" | "medium" | "high" | "xhigh" | "max";
+            model?: components["schemas"]["RunModel"] | null;
         };
         /** RunCreate */
         RunCreate: {
@@ -3297,6 +3302,16 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** RunModel */
+        RunModel: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "azure" | "mock";
+            /** Model */
+            model: string;
         };
         /** RunOut */
         RunOut: {

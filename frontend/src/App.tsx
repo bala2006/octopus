@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/overlays";
 import { ErrorBoundary } from "@/components/common";
 import { AppShell } from "@/components/layout/AppShell";
+import { DesktopLayout } from "@/components/layout/DesktopLayout";
 import { WelcomePage } from "@/features/workspaces/WelcomePage";
 import { useApp } from "@/stores/app";
 import { useEditorStore } from "@/features/editor/editorStore";
@@ -16,6 +17,7 @@ const ArtifactsPage = React.lazy(() => import("@/features/artifacts/ArtifactsPag
 const SettingsPage = React.lazy(() => import("@/features/settings/SettingsPage"));
 const GuidePage = React.lazy(() => import("@/features/guide/GuidePage"));
 const WorkspacePage = React.lazy(() => import("@/features/editor/WorkspacePage"));
+const AgentPage = React.lazy(() => import("@/features/editor/AgentPage"));
 
 function PageFallback() {
   return (
@@ -43,8 +45,10 @@ export function App() {
           <React.Suspense fallback={<PageFallback />}>
             <Routes>
               <Route path="/" element={<WelcomePage />} />
+              <Route path="/settings" element={<DesktopLayout header={<span className="text-[13px] font-medium">Settings</span>}><SettingsPage /></DesktopLayout>} />
               <Route path="/w/:wid" element={<AppShell />}>
-                <Route index element={<Navigate to="workspace" replace />} />
+                <Route index element={<Navigate to="agent" replace />} />
+                <Route path="agent" element={<AgentPage />} />
                 <Route path="canvas" element={<CanvasPage />} />
                 <Route path="workspace" element={<WorkspacePage />} />
                 <Route path="chat" element={<ChatPage />} />
@@ -56,7 +60,7 @@ export function App() {
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="guide" element={<GuidePage />} />
               </Route>
-              <Route path="/guide" element={<GuidePage />} />
+              <Route path="/guide" element={<DesktopLayout header={<span className="text-[13px] font-medium">Guide</span>}><GuidePage embedded /></DesktopLayout>} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </React.Suspense>
