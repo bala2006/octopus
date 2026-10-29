@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec, clip
+from app.orchestrator.director import profile_goal, quality_brief, specialist_bonus
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime
@@ -94,9 +95,15 @@ def _fits(agent: AgentSpec, phase: Phase) -> int:
     return 0
 
 
-def pick_owner(agents: list[AgentSpec], phase: Phase, *, exclude: set[str] = frozenset()) -> AgentSpec | None:  # type: ignore[assignment]
-    best = sorted(((_fits(a, phase), a) for a in agents if a.active and a.id not in exclude), key=lambda t: -t[0])
-    return best[0][1] if best and best[0][0] > 0 else None
+def pick_owner(agents: list[AgentSpec], phase: Phase, *, exclude: set[str] = frozenset(),
+               goal: str = "") -> AgentSpec | None:  # type: ignore[assignment]
+    eligible = [(a, _fits(a, phase)) for a in agents if a.active and a.id not in exclude]
+    eligible = [(a, score) for a, score in eligible if score > 0]
+    if not eligible:
+        return None
+    return max(eligible, key=lambda item: (
+        specialist_bonus(item[0].role, str(item[0].behavior.get("template_key") or ""), phase.key, goal),
+        item[1]))[0]
 
 
 def can_staff(agents: list[AgentSpec], head: AgentSpec | None) -> bool:
@@ -173,11 +180,15 @@ class WorkflowMixin:
 
     def wf_intake_note(self: RunRuntime) -> str:
         tracks = "; ".join(f"{k} = {v}" for k, v in TRACK_HELP.items())
+        profile = profile_goal(self.goal)
+        hint = (f"\nTask director suggests {profile.suggested_track} ({profile.reason}); "
+                f"specialist checks: {', '.join(profile.checks) or 'standard checks'}. "
+                "Inspect the repository before deciding; override when evidence warrants it.\n")
         return ("\n\n--- How this company works ---\nYou run the intake. Read the goal, any images and the project, then call "
                 f"`set_track` with the track ({tracks}) and whether research is needed "
                 '(JSON: {"action":"set_track","track":"quick|standard|large","research":false,"reason":"…"}). '
                 "Octopus then hands each phase (spec → design → build → test → review) to the teammate whose role fits, with this goal verbatim, and comes "
-                "back to you for acceptance. Load the `intake-and-plan` skill first. Don't delegate the phases yourself.")
+                "back to you for acceptance. Load the `intake-and-plan` skill first. Don't delegate the phases yourself. " + hint)
 
     async def act_set_track(self: RunRuntime, agent: AgentSpec, a: A.SetTrack) -> None:
         cid = await self._tool_event(agent, "set_track", {"track": a.track, "research": a.research})
@@ -195,7 +206,7 @@ class WorkflowMixin:
                 phases.append({"key": k, "owner": head.id, "status": "done" if k == "intake" else "pending", "bounces": 0, "loops": 0, "summary": ""})
                 continue
             exclude = {head.id} | ({builder} if builder and k in ("test", "review") else set())  # independent checks
-            owner_id = overrides.get(k) or (o.id if (o := pick_owner(agents, PHASES[k], exclude=exclude)) else None)
+            owner_id = overrides.get(k) or (o.id if (o := pick_owner(agents, PHASES[k], exclude=exclude, goal=self.goal)) else None)
             if k == "build" and owner_id is None:
                 owner_id = head.id  # somebody has to build it
             if k == "build":
@@ -235,6 +246,7 @@ class WorkflowMixin:
     async def wf_start(self: RunRuntime, ph: dict[str, Any], *, extra: str = "") -> None:
         ph["status"], ph["bounces"] = "active", 0
         ph["start_versions"] = {p: v["version"] for p, v in self.artifacts.items()}
+        ph["evidence_cursor"] = len(self.verification_events)
         phase = PHASES[ph["key"]]
         owner = self.agents[ph["owner"]]
         head_id = self.wf["phases"][0]["owner"]
@@ -260,6 +272,20 @@ class WorkflowMixin:
             parts.append("Documents from earlier phases (read them first):\n" + "\n".join(docs))
         if summaries:
             parts.append("What earlier phases reported:\n" + "\n".join(summaries))
+        # The authoritative product contract is shared directly, not only via paraphrased handoffs.
+        for source in (f"{WORK}/spec.md", f"{WORK}/design.md"):
+            if source == phase.doc:
+                continue
+            try:
+                contract = self.fs_for(ph["owner"]).current(source)
+            except (OSError, ValueError):
+                contract = None
+            if contract:
+                parts.append(f"Shared contract ({source}):\n" + clip(contract, 2200, "read the file for more"))
+        if self.decisions:
+            parts.append("Recorded decisions:\n" + "\n".join(f"- {d}" for d in self.decisions[-8:]))
+        if ph["key"] in ("test", "review", "accept", "design"):
+            parts.append("Relevant specialist quality checks (supply real evidence):\n" + quality_brief(self.goal))
         if phase.doc:
             parts.append(f"Your deliverable: `{phase.doc}`" + ("" if ph["key"] != "test" else " plus the tests themselves"))
         parts.append(f"First load the `{phase.skill}` skill (use_skill) and follow it.")
@@ -288,7 +314,14 @@ class WorkflowMixin:
             if not changed:
                 return "Nothing was built in this phase: no project file changed. Build the deliverable, run or open it, then finish."
         if ph["key"] in ("test", "review") and a.outcome not in ("pass", "fail"):
-            return "Finish with outcome \"pass\" or \"fail\" (with the failures listed in the summary) so the result can be routed."
+            return 'Finish with outcome "pass" or "fail" and concrete evidence.'
+        if (ph["key"] in ("test", "review") and a.outcome == "pass" and self.budget.verify_before_finish
+                and not self.budget.force_mock and not any(
+                    ev["agent_id"] == agent.id and ev["phase"] == ph["key"] and ev["ok"]
+                    for ev in self.verification_events[ph.get("evidence_cursor", 0):])):
+            return "No independent execution evidence. Run relevant tests or inspect the actual UI before passing."
+        if ph["key"] == "build" and self.budget.verify_before_finish and not self.budget.force_mock and self.unverified:
+            return "Built files remain unverified: " + ", ".join(sorted(self.unverified)[:8])
         return None
 
     async def wf_on_finish(self: RunRuntime, agent: AgentSpec, a: A.Finish) -> str | None:
@@ -296,9 +329,18 @@ class WorkflowMixin:
         ph = self.wf_phase()
         assert ph is not None
         why = self.wf_gate(agent, ph, a)
-        if why and ph["bounces"] < MAX_GATE_BOUNCES:
-            ph["bounces"] += 1
-            return f"Phase {PHASES[ph['key']].title} isn't done yet: {why}"
+        if why:
+            if ph["bounces"] < MAX_GATE_BOUNCES:
+                ph["bounces"] += 1
+                return f"Phase {PHASES[ph['key']].title} isn't done yet: {why}"
+            ph["status"] = "failed"
+            ph["summary"] = f"Unverified phase: {why}"[:2000]
+            for later in self.wf["phases"][self.wf["index"] + 1:]:
+                if later["key"] != "accept" and later["status"] == "pending":
+                    later["status"] = "skipped"
+            self.mark_progress()
+            await self.wf_advance()
+            return None
         ph["summary"] = (a.summary or "")[:2000]
         if ph["key"] in ("test", "review") and a.outcome == "fail":
             build = next((p for p in self.wf["phases"] if p["key"] == "build"), None)
@@ -314,6 +356,9 @@ class WorkflowMixin:
                                                  f"by {agent.name} FAILED ---\n{a.summary[:4000]}\nFix every point, re-verify, then finish.")
                 return None
             ph["status"] = "failed"
+            for later in self.wf["phases"][self.wf["index"] + 1:]:
+                if later["key"] != "accept" and later["status"] == "pending":
+                    later["status"] = "skipped"
         else:
             ph["status"] = "done"
         self.mark_progress()

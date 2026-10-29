@@ -282,7 +282,11 @@ function CompanyAgentPanel({
           (await unwrap(
             api.POST("/api/v1/w/{workspace_id}/companies/from-template", {
               params: { path: { workspace_id: w } },
-              body: { template_key: "solo_engineer", name: "Coding agent" },
+              body: {
+                template_key: mode === "ask" ? "solo_engineer" : "adaptive",
+                name: "Octopus",
+                goal,
+              },
             }),
           )));
       if (company) preparedCompany.current = company;

@@ -27,7 +27,7 @@ async def test_unverified_code_is_sent_back_once_then_finish_after_running_it(cl
     assert len(provider.requests) == 4, "the bounce kept the turn going instead of ending it"
 
 
-async def test_bounce_happens_once_and_a_second_finish_is_accepted(client, workspace) -> None:
+async def test_bounce_happens_once_and_an_unverified_finish_is_reported_incomplete(client, workspace) -> None:
     provider = NativeScriptedProvider({"Ann": [
         [("write_file", {"path": "app.py", "content": "print('hi')\n"})],
         [("finish", {"summary": "done"})], [("finish", {"summary": "can't verify here"})]]})
@@ -35,7 +35,8 @@ async def test_bounce_happens_once_and_a_second_finish_is_accepted(client, works
     cid = await make_company(client, workspace, [agent("a", "Ann", entry=True)], [])
     run = await start_run(client, workspace, cid, permission_level="danger", budget=ON)
     done = await wait_status(client, workspace, run["id"])
-    assert done["status"] == "completed" and "can't verify" in (done["summary"] or "")
+    assert done["status"] == "incomplete" and "can't verify" in (done["summary"] or "")
+    assert "not verified" in done["halt_reason"]
 
 
 async def test_delegated_builder_is_also_asked_to_verify(client, workspace) -> None:

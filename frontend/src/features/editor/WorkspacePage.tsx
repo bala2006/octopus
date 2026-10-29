@@ -134,7 +134,10 @@ export default function WorkspacePage() {
     setSelection(undefined);
   }, [current?.path]);
   React.useEffect(() => {
-    if (tool === "git") { setSidebar(true); setPanel("git"); }
+    if (tool === "git") {
+      setSidebar(true);
+      setPanel("git");
+    }
     if (tool === "server" || tool === "commands") {
       setCommands(true);
       setCommandsMounted(true);
@@ -928,9 +931,9 @@ export default function WorkspacePage() {
                             const range = editor.getSelection();
                             const tab = useEditorStore
                               .getState()
-                              .projects[
-                                w
-                              ]?.tabs.find((t) => t.path === current.path);
+                              .projects[w]?.tabs.find(
+                                (t) => t.path === current.path,
+                              );
                             return range && !range.isEmpty()
                               ? {
                                   path: current.path,

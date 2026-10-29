@@ -40,6 +40,19 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
         out += [f"> Halt reason: {run.halt_reason}", ""]
     if run.summary:
         out += ["## Outcome", "", run.summary, ""]
+    checks = state.get("verification_events") or []
+    if checks or state.get("unverified") or state.get("broken_files"):
+        out += ["## Verification evidence", ""]
+        for ev in checks[-25:]:
+            detail = str(ev.get("detail") or "").splitlines()
+            out.append(f"- {name(ev.get('agent_id'))}: {ev.get('tool')} "
+                       f"(phase: {ev.get('phase') or 'free-form'}; turn {ev.get('turn')})"
+                       + (f" — {detail[0][:140]}" if detail else ""))
+        if state.get("unverified"):
+            out.append("- Unverified changes: " + ", ".join(sorted(state["unverified"])))
+        if state.get("broken_files"):
+            out.append("- Failed syntax checks: " + ", ".join(sorted(state["broken_files"])))
+        out.append("")
     m = state.get("metrics") or {}
     if m.get("turns"):
         out += ["## Efficiency", "",

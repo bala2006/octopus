@@ -372,6 +372,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.wf: dict[str, Any] | None = None  # the workflow's state (orchestrator/workflow.py); None = free-form run
         # verify-before-finish: code changed since anything was last run / opened in the browser
         self.unverified: dict[str, int] = {}  # deliverable path → turn it last changed without being exercised since
+        self.verification_events: list[dict[str, Any]] = []  # successful checks attributable to phase owners
         self.finish_bounces: set[str] = set()  # "agent|files" already sent back once (never twice for the same state)
         self._bounced_finish: str | None = None
         self.turn_t0: float | None = None  # monotonic start of the top-level turn in progress (counted live by the time limit)
@@ -429,6 +430,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
             "broken_files": self.broken_files, "workflow": self.wf,
+            "unverified": self.unverified, "verification_events": self.verification_events[-200:],
             "journal": self.journal[-JOURNAL_MAX:], "journal_n": self.journal_n, "seen": self.seen, "seen_turn": self.seen_turn,
             "metrics": self.efficiency(),
         }
@@ -447,6 +449,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.status.update(st.get("status", {}))
         self.done_agents = set(st.get("done_agents", []))
         self.broken_files = dict(st.get("broken_files", {}))
+        self.unverified = dict(st.get("unverified", {}))
+        self.verification_events = list(st.get("verification_events", []))
         self.wf = st.get("workflow") or None
         self.agent_turns = Counter(st.get("agent_turns", {}))
         self.agent_tokens = Counter(st.get("agent_tokens", {}))
@@ -1653,6 +1657,14 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         return cid
 
     async def _tool_result(self, agent: AgentSpec, cid: str, tool: str, ok: bool, output: str) -> None:
+        if ok and tool == "run_code":
+            from app.orchestrator.quality import command_is_verification
+            command = output.splitlines()[0].removeprefix("$ ").strip()
+            if command_is_verification(command, list(self.artifacts)):
+                phase = self.wf_phase()
+                self.verification_events.append({"agent_id": agent.id, "phase": phase["key"] if phase and phase["owner"] == agent.id else "",
+                                                 "tool": tool, "ok": True, "turn": self.turn_no,
+                                                 "detail": output[:600]})
         await self.emit("tool_result", {"call_id": cid, "agent_id": agent.id, "tool": tool, "ok": ok, "output": output[:4000]})
 
     def delegated_message_refusal(self, agent: AgentSpec, a: A.SendMessage) -> str | None:
@@ -2148,7 +2160,14 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         from app.services import browser_frames
         from app.services.browser import browser, page_info
 
+        if ok and a.tool in ("browser_snapshot", "browser_console_messages", "browser_click", "browser_take_screenshot"):
+            phase = self.wf_phase()
+            self.verification_events.append({"agent_id": agent.id, "phase": phase["key"] if phase and phase["owner"] == agent.id else "",
+                                             "tool": a.tool, "ok": True, "turn": self.turn_no, "detail": out[:600]})
         url, title = page_info(out)
+        if (ok and a.tool in ("browser_snapshot", "browser_console_messages", "browser_click", "browser_take_screenshot")
+                and url and (url.startswith(self.preview_url()) or url.startswith(("http://localhost:", "http://127.0.0.1:")))):
+            self.unverified.clear()
         if url:
             self.browser_pages[agent.id] = (url, title)
         else:
@@ -2181,8 +2200,6 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
             self.mark_work(agent.id)
             ok, out = await browser.call(self.run_id, agent.id, a.tool, a.arguments)
-            if ok:
-                self.unverified.clear()
             if not ok and not browser.available():
                 out += ("\nThe browser can't run in this environment: don't retry it. Verify by reading the code instead, and say in "
                         "your report that nothing was tested in a real browser.")
@@ -2228,10 +2245,13 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             await self.deny(agent, cid, "run_code", reason)
             return
         await self.set_agent_status(agent.id, "running", f"$ {a.command[:70]}")
-        self.unverified.clear()  # the code was exercised (whatever the outcome, the agent now sees real output)
         try:
             res = await run_command(a.command, self.root, danger=level == "danger")
             ok = res.ok
+            if ok:
+                from app.orchestrator.quality import command_is_verification
+                if command_is_verification(a.command, list(self.artifacts)):
+                    self.unverified.clear()
             out = f"$ {a.command}\n(exit {res.exit_code}{', timed out' if res.timed_out else ''}, {res.backend})\n{res.output}"
         except SandboxError as exc:
             ok, out = False, f"Command rejected by sandbox: {exc}"
@@ -2391,6 +2411,12 @@ class RunRuntime(TeamMixin, WorkflowMixin):
     async def finalize(self, status: str, reason: str) -> None:
         if self.finalized:
             return
+        from app.orchestrator.quality import assess_completion
+        status, reason = assess_completion(
+            status, reason, workflow=self.wf, open_tasks=self.open_tasks(),
+            broken_files=self.broken_files, unverified=self.unverified,
+            require_verification=self.budget.verify_before_finish and not self.budget.force_mock,
+        )
         self.finalized = True
         for aid in self.agents:
             final = "done" if (aid in self.done_agents or (status == "completed" and self.agent_turns[aid])) else "idle"
