@@ -12,20 +12,20 @@ const shoot = async (page: Page, name: string) => {
 test("create project → company from template → edit agent → run in Demo Mode → artifacts", async ({ page }) => {
   // 1. Workspace: pick a directory
   await page.goto("/");
-  await expect(page.getByText("Create your first workspace")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What do you want to build?" })).toBeVisible();
   await shoot(page, "01-welcome");
-  await page.getByTestId("open-folder").click();
+  await page.getByRole("button", { name: "Open project folder" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("option", { name: /projects/ }).dblclick();
   await dialog.getByRole("option", { name: /todo-app/ }).click();
   await expect(dialog.getByText(PROJECT)).toBeVisible();
   await shoot(page, "02-directory-picker");
   await dialog.getByRole("button", { name: "Use this folder" }).click();
-  await expect(page).toHaveURL(/\/w\/.+\/workspace/);
+  await expect(page).toHaveURL(/\/w\/.+\/agent/);
   expect(fs.existsSync(path.join(PROJECT, ".octopus", "octopus.db"))).toBeTruthy();
 
   // 2. Company from the Software Startup template
-  await page.getByRole("link", { name: "Canvas", exact: true }).click();
+  await page.getByRole("link", { name: "Team canvas", exact: true }).click();
   await page.getByTestId("new-company").click();
   await page.getByTestId("create-company").click();
   await expect(page.locator(".react-flow__node")).toHaveCount(8);
@@ -47,7 +47,7 @@ test("create project → company from template → edit agent → run in Demo Mo
   await expect(page.getByTestId("agent-node-Marcus Lee")).toBeVisible();
 
   // 4. Direct chat with streaming
-  await page.getByRole("link", { name: "Chat" }).click();
+  await page.getByRole("link", { name: "Agent chats" }).click();
   await page.getByTestId("chat-agent-Ava").click();
   await page.getByTestId("composer").fill("Please calculate 12*7");
   await page.keyboard.press("Enter");
@@ -56,9 +56,10 @@ test("create project → company from template → edit agent → run in Demo Mo
   await shoot(page, "04-direct-chat");
 
   // 5. Run the company in Demo Mode
-  await page.getByRole("link", { name: "Canvas" }).click();
+  await page.getByRole("link", { name: "Team canvas" }).click();
   await page.getByTestId("run-company").click();
   await page.getByTestId("run-goal").fill("Build a todo app with auth");
+  await page.getByRole("button", { name: "Advanced execution settings" }).click();
   await page.getByRole("radio", { name: /Danger/ }).click();
   await expect(page.getByRole("switch", { name: "Demo mode" })).toBeChecked();
   await page.getByTestId("start-run").click();

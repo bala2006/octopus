@@ -41,6 +41,10 @@ test("agent requests carry unsaved code context, stay beside the editor, and kee
   });
   const otherCompany = (await second.json()).company.id as string;
   await page.goto(`/w/${w}/workspace?file=src%2Fhello.txt`);
+  // Workspace now starts with the agent drawer collapsed at the standard 1440px viewport.
+  // Open it as a user would; then assert the existing context and draft isolation behavior.
+  await page.getByRole("button", { name: "Toggle agent panel" }).click();
+  await expect(page.getByTestId("agent-workbench")).toBeVisible();
   await page.getByLabel("Agent company").selectOption(company);
   const editor = page.locator(".monaco-editor").first();
   await editor.click({ position: { x: 120, y: 35 } });
