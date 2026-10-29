@@ -1,0 +1,33 @@
+name: PR formatting probe
+on:
+  push:
+    branches: [feat/outcome-driven-orchestration]
+
+permissions:
+  contents: read
+
+jobs:
+  formatter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - name: Render exact Prettier output
+        working-directory: frontend
+        run: |
+          npx prettier --write src/features/editor/AgentPanel.tsx src/features/editor/WorkspacePage.tsx src/features/runs/RunDialog.tsx
+          node - <<'NODE'
+          const fs = require("fs");
+          for (const file of ["src/features/editor/AgentPanel.tsx", "src/features/editor/WorkspacePage.tsx", "src/features/runs/RunDialog.tsx"]) {
+            const b64 = Buffer.from(fs.readFileSync(file)).toString("base64");
+            console.log("__OCTO_BEGIN__" + file);
+            for (let offset = 0; offset < b64.length; offset += 1800) console.log("__OCTO_PART__" + b64.slice(offset, offset + 1800));
+            console.log("__OCTO_END__" + file);
+          }
+          NODE
