@@ -24,3 +24,17 @@ def assess_completion(status: str, reason: str, *, workflow: dict[str, Any] | No
         blockers.append("changes not verified by a successful command or browser check: "
                         + ", ".join(sorted(unverified)[:6]))
     return ("incomplete", "; ".join(blockers)[:2000]) if blockers else (status, reason)
+
+def command_is_verification(command: str, changed_paths: list[str]) -> bool:
+    """A successful unrelated command must not certify modified code."""
+    import re
+
+    command = command.strip().lower()
+    if re.search(r"\b(pytest|unittest|vitest|jest|playwright|cargo test|go test|gradle\w* test|gradlew test|mvn test|flutter test|"
+                 r"npm (?:run )?(?:test|build|lint|typecheck)|pnpm (?:run )?(?:test|build|lint|typecheck)|"
+                 r"yarn (?:test|build|lint|typecheck)|make (?:test|check|build)|"
+                 r"py_compile|compileall|tsc|ruff check|node --check)\b", command):
+        return True
+    # Explicit execution of a modified file also counts; an interpreter version check does not.
+    return any(re.search(r"(?<![\w.])" + re.escape(path.lower().split("/")[-1]) + r"(?![\w.])", command)
+               for path in changed_paths if path and path.lower().split("/")[-1] not in ("readme.md",))

@@ -195,6 +195,17 @@ export function RunDialog({
               {att.input}
             </div>
           </Field>
+          <button
+            type="button"
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setAdv(!adv)}
+            aria-expanded={adv}
+          >
+            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", adv && "rotate-180")} />
+            {adv ? "Hide advanced execution settings" : "Advanced execution settings"}
+          </button>
+          {adv && (
+            <>
           <div
             className="grid grid-cols-3 gap-2"
             role="radiogroup"
@@ -265,6 +276,8 @@ export function RunDialog({
               onChange={(v) => setBudget({ ...budget, reasoning_effort: v })}
             />
           </Field>
+            </>
+          )}
           <div className="flex flex-wrap gap-2">
             <ModelPicker
               workspace={w}
@@ -296,18 +309,6 @@ export function RunDialog({
             />
           </label>
           <div>
-            <button
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setAdv(!adv)}
-            >
-              <ChevronDown
-                className={cn(
-                  "h-3.5 w-3.5 transition-transform",
-                  adv && "rotate-180",
-                )}
-              />
-              Limits & budget
-            </button>
             {adv && (
               <div className="mt-2 grid grid-cols-4 gap-2 animate-fade-up">
                 <Field label="Max turns">
