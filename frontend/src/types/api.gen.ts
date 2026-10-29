@@ -2704,6 +2704,8 @@ export interface components {
             template_key: string;
             /** Name */
             name?: string | null;
+            /** Goal */
+            goal?: string | null;
         };
         /** InterjectIn */
         InterjectIn: {

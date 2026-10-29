@@ -43,3 +43,10 @@ def test_unrelated_successful_command_is_not_code_verification():
     assert command_is_verification("python src/app.py", ["src/app.py"])
     assert command_is_verification("pytest -q", ["src/app.py"])
     assert command_is_verification("npm run build", ["src/index.ts"])
+
+def test_adaptive_company_staffing_is_proportionate():
+    from app.orchestrator.director import default_company_template
+
+    assert default_company_template("Fix typo in README") == "solo_engineer"
+    assert default_company_template("Implement onboarding feature and API") == "small_dev_team"
+    assert default_company_template("Build full UI application from scratch") == "web_app_studio"

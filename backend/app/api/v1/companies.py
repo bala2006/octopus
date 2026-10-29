@@ -18,6 +18,7 @@ from app.db.session import get_registry_db
 from app.models import UserTemplate
 from app.services.org_generator import generate_org, spec_to_canvas
 from app.services.templates import summarize_departments
+from app.orchestrator.director import default_company_template
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
@@ -62,7 +63,8 @@ async def create_from_spec(db: AsyncSession, user: User, spec: CanvasExport, nam
 async def create_from_template(body: InstantiateTemplateIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                                rdb: AsyncSession = Depends(get_registry_db)) -> CanvasOut:
     """Instantiate a built-in (``software_startup``) or user template (``user:<id>``)."""
-    spec = await resolve_spec(body.template_key, rdb, user)
+    key = default_company_template(body.goal or "") if body.template_key == "adaptive" else body.template_key
+    spec = await resolve_spec(key, rdb, user)
     return canvas_out(await create_from_spec(db, user, spec, body.name))
 
 

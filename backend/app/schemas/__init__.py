@@ -324,6 +324,7 @@ class RoleIn(BaseModel):
 class InstantiateTemplateIn(BaseModel):
     template_key: str
     name: str | None = None
+    goal: str | None = Field(default=None, max_length=20000)  # optional adaptive company staffing
 
 
 # ---------- sessions / messages ----------

@@ -62,3 +62,16 @@ def specialist_bonus(role: str, key: str, phase: str, goal: str) -> int:
     if "integration" in focus and re.search(r"qa|integration|e2e|backend|architect", description):
         return 3
     return 0
+
+def default_company_template(goal: str) -> str:
+    """Small tasks stay solo; feature work gets an independent QA agent.
+
+    Larger visual product builds may justify a UX specialist and browser tester.
+    This is the initial team, not an instruction to activate every member on every run.
+    """
+    profile = profile_goal(goal)
+    if profile.suggested_track == "quick":
+        return "solo_engineer"
+    if profile.suggested_track == "large" and "ux" in profile.checks:
+        return "web_app_studio"
+    return "small_dev_team"
