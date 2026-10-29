@@ -14,7 +14,7 @@ test("create project → company from template → edit agent → run in Demo Mo
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "What do you want to build?" })).toBeVisible();
   await shoot(page, "01-welcome");
-  await page.getByRole("button", { name: "Open project folder" }).click();
+  await page.locator(".home-prompt-form").getByRole("button", { name: "Open project folder" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("option", { name: /projects/ }).dblclick();
   await dialog.getByRole("option", { name: /todo-app/ }).click();
@@ -47,7 +47,7 @@ test("create project → company from template → edit agent → run in Demo Mo
   await expect(page.getByTestId("agent-node-Marcus Lee")).toBeVisible();
 
   // 4. Direct chat with streaming
-  await page.getByRole("link", { name: "Agent chats" }).click();
+  await page.getByRole("link", { name: "Talk to an agent" }).click();
   await page.getByTestId("chat-agent-Ava").click();
   await page.getByTestId("composer").fill("Please calculate 12*7");
   await page.keyboard.press("Enter");
