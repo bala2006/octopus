@@ -37,6 +37,19 @@ def command_is_verification(command: str, changed_paths: list[str]) -> bool:
                  r"yarn (?:test|build|lint|typecheck)|make (?:test|check|build)|"
                  r"py_compile|compileall|tsc|ruff check|node --check)\b", command):
         return True
-    # Explicit execution of a modified file also counts; an interpreter version check does not.
-    return any(re.search(r"(?<![\w.])" + re.escape(path.lower().split("/")[-1]) + r"(?![\w.])", command)
-               for path in changed_paths if path and path.lower().split("/")[-1] not in ("readme.md",))
+    # A successful unrelated command ("echo app.py" or "ls app.py") proves nothing.
+    import shlex
+
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        return False
+    if not args or args[0].rsplit("/", 1)[-1] not in (
+            "python", "python3", "node", "bun", "deno", "ruby", "php", "bash", "sh"):
+        return False
+    if any(flag in args for flag in ("-c", "-e", "-p", "--version")):
+        return False
+    candidates = [arg.replace(chr(92), "/").removeprefix("./").lower()
+                  for arg in args[1:] if not arg.startswith("-")]
+    return any(candidate == path.lower() or candidate == path.lower().split("/")[-1]
+               for candidate in candidates for path in changed_paths if path)

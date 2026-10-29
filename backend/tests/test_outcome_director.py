@@ -50,3 +50,11 @@ def test_adaptive_company_staffing_is_proportionate():
     assert default_company_template("Fix typo in README") == "solo_engineer"
     assert default_company_template("Implement onboarding feature and API") == "small_dev_team"
     assert default_company_template("Build full UI application from scratch") == "web_app_studio"
+
+def test_an_unrelated_successful_command_cannot_certify_a_changed_file():
+    from app.orchestrator.quality import command_is_verification
+
+    assert not command_is_verification("echo src/app.py", ["src/app.py"])
+    assert not command_is_verification("ls src/app.py", ["src/app.py"])
+    assert not command_is_verification("python -c print", ["src/app.py"])
+    assert command_is_verification("python src/app.py", ["src/app.py"])
