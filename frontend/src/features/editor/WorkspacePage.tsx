@@ -931,9 +931,9 @@ export default function WorkspacePage() {
                             const range = editor.getSelection();
                             const tab = useEditorStore
                               .getState()
-                              .projects[
-                                w
-                              ]?.tabs.find((t) => t.path === current.path);
+                              .projects[w]?.tabs.find(
+                                (t) => t.path === current.path,
+                              );
                             return range && !range.isEmpty()
                               ? {
                                   path: current.path,

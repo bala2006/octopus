@@ -201,81 +201,92 @@ export function RunDialog({
             onClick={() => setAdv(!adv)}
             aria-expanded={adv}
           >
-            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", adv && "rotate-180")} />
-            {adv ? "Hide advanced execution settings" : "Advanced execution settings"}
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 transition-transform",
+                adv && "rotate-180",
+              )}
+            />
+            {adv
+              ? "Hide advanced execution settings"
+              : "Advanced execution settings"}
           </button>
           {adv && (
             <>
-          <div
-            className="grid grid-cols-3 gap-2"
-            role="radiogroup"
-            aria-label="Run mode"
-          >
-            {MODES.map(({ v, label, icon: I, d }) => (
-              <button
-                key={v}
-                role="radio"
-                aria-checked={mode === v}
-                onClick={() => setMode(v)}
-                className={cn(
-                  "rounded-lg border p-2.5 text-left transition-all hover:border-primary/50",
-                  mode === v ? "border-primary bg-primary/5" : "border-border",
-                )}
+              <div
+                className="grid grid-cols-3 gap-2"
+                role="radiogroup"
+                aria-label="Run mode"
               >
-                <div className="flex items-center gap-1.5 text-xs font-semibold">
-                  <I className="h-3.5 w-3.5 text-primary" />
-                  {label}
-                </div>
-                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                  {d}
-                </p>
-              </button>
-            ))}
-          </div>
-          <div className="grid grid-cols-[1fr_210px] items-end gap-3">
-            <Field label="Permission level">
-              <PermissionPicker value={perm} onChange={setPerm} compact />
-            </Field>
-            <Field label="How the team works">
-              <Select
-                ariaLabel="How the team works"
-                value={budget.workflow}
-                onValueChange={(v) =>
-                  setBudget({
-                    ...budget,
-                    workflow: v as typeof budget.workflow,
-                  })
-                }
-                options={[
-                  {
-                    value: "auto",
-                    label: "Auto (recommended)",
-                    hint: "Defined workflow when the team has a builder and a tester or reviewer",
-                  },
-                  {
-                    value: "on",
-                    label: "Defined workflow",
-                    hint: "Intake → spec → design → build → test → review → accept, each phase with its owner",
-                  },
-                  {
-                    value: "off",
-                    label: "Free-form",
-                    hint: "The head decides how to split the work",
-                  },
-                ]}
-              />
-            </Field>
-          </div>
-          <Field
-            label="Reasoning effort"
-            hint="Applies to every agent in this run. “Per agent” uses each agent's own setting."
-          >
-            <EffortPicker
-              value={budget.reasoning_effort}
-              defaultLabel="Per agent"
-              onChange={(v) => setBudget({ ...budget, reasoning_effort: v })}
-            />
-          </Field>
+                {MODES.map(({ v, label, icon: I, d }) => (
+                  <button
+                    key={v}
+                    role="radio"
+                    aria-checked={mode === v}
+                    onClick={() => setMode(v)}
+                    className={cn(
+                      "rounded-lg border p-2.5 text-left transition-all hover:border-primary/50",
+                      mode === v
+                        ? "border-primary bg-primary/5"
+                        : "border-border",
+                    )}
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-semibold">
+                      <I className="h-3.5 w-3.5 text-primary" />
+                      {label}
+                    </div>
+                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                      {d}
+                    </p>
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-[1fr_210px] items-end gap-3">
+                <Field label="Permission level">
+                  <PermissionPicker value={perm} onChange={setPerm} compact />
+                </Field>
+                <Field label="How the team works">
+                  <Select
+                    ariaLabel="How the team works"
+                    value={budget.workflow}
+                    onValueChange={(v) =>
+                      setBudget({
+                        ...budget,
+                        workflow: v as typeof budget.workflow,
+                      })
+                    }
+                    options={[
+                      {
+                        value: "auto",
+                        label: "Auto (recommended)",
+                        hint: "Defined workflow when the team has a builder and a tester or reviewer",
+                      },
+                      {
+                        value: "on",
+                        label: "Defined workflow",
+                        hint: "Intake → spec → design → build → test → review → accept, each phase with its owner",
+                      },
+                      {
+                        value: "off",
+                        label: "Free-form",
+                        hint: "The head decides how to split the work",
+                      },
+                    ]}
+                  />
+                </Field>
+              </div>
+              <Field
+                label="Reasoning effort"
+                hint="Applies to every agent in this run. “Per agent” uses each agent's own setting."
+              >
+                <EffortPicker
+                  value={budget.reasoning_effort}
+                  defaultLabel="Per agent"
+                  onChange={(v) =>
+                    setBudget({ ...budget, reasoning_effort: v })
+                  }
+                />
+              </Field>
             </>
           )}
           <div className="flex flex-wrap gap-2">
