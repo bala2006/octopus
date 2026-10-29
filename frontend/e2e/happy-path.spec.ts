@@ -20,7 +20,7 @@ test("create project → company from template → edit agent → run in Demo Mo
   await dialog.getByRole("option", { name: /todo-app/ }).click();
   await expect(dialog.getByText(PROJECT)).toBeVisible();
   await shoot(page, "02-directory-picker");
-  await dialog.getByRole("button", { name: "Use this folder" }).click();
+  await dialog.getByRole("button", { name: "Open project", exact: true }).click();
   await expect(page).toHaveURL(/\/w\/.+\/agent/);
   expect(fs.existsSync(path.join(PROJECT, ".octopus", "octopus.db"))).toBeTruthy();
 
