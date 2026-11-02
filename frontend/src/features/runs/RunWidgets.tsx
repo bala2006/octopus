@@ -85,15 +85,15 @@ export function UsageBreakdown({ usage, children }: { usage: RunLive["usage"]; c
   );
 }
 
-const COLS = [["todo", "To do"], ["in_progress", "In progress"], ["in_review", "In review"], ["done", "Done"], ["blocked", "Blocked"]] as const;
+const COLS = [["todo", "To do"], ["in_progress", "In progress"], ["in_review", "In review"], ["done", "Done"], ["blocked", "Blocked"], ["cancelled", "Cancelled"]] as const;
 
-export function TaskBoard({ tasks, agents }: { tasks: LiveTask[]; agents: Record<string, AgentOut> }) {
+export function TaskBoard({ tasks, agents, compact = false }: { tasks: LiveTask[]; agents: Record<string, AgentOut>; compact?: boolean }) {
   if (!tasks.length) return <p className="py-10 text-center text-sm text-muted-foreground">No tasks on the board yet. Managers create them when delegating.</p>;
   return (
-    <div className="grid grid-cols-2 gap-2 p-3 xl:grid-cols-3">
+    <div className={cn("grid gap-2 p-3", compact ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-3")}>
       {COLS.map(([k, label]) => {
         const list = tasks.filter((t) => t.status === k);
-        if (k === "blocked" && !list.length) return null;
+        if ((k === "blocked" || k === "cancelled") && !list.length) return null;
         return (
           <div key={k} className="rounded-lg border border-border bg-muted/20 p-2">
             <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -108,6 +108,11 @@ export function TaskBoard({ tasks, agents }: { tasks: LiveTask[]; agents: Record
                       {a && <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground"><AgentAvatar name={a.name} color={a.color} avatar={a.avatar} size={14} />{a.name}</span>}</div>
                     <p className="mt-1 font-medium leading-snug">{t.title}</p>
                     {t.acceptance_criteria && <p className="mt-1 line-clamp-2 text-[10.5px] text-muted-foreground">{t.acceptance_criteria}</p>}
+                    {t.constraints_json && <dl className="mt-2 space-y-1 border-t border-border/60 pt-1.5 text-[10.5px] text-muted-foreground">
+                      {!!t.constraints_json.dependencies?.length && <div><dt className="inline font-medium">Depends on: </dt><dd className="inline">{t.constraints_json.dependencies.join(", ")}</dd></div>}
+                      {t.constraints_json.write_paths && <div><dt className="inline font-medium">Writes: </dt><dd className="inline">{t.constraints_json.write_paths.length ? t.constraints_json.write_paths.map((path) => path === "*" ? "Whole project" : path).join(", ") : "Read only"}</dd></div>}
+                      {t.constraints_json.max_turns !== undefined && <div><dt className="inline font-medium">Budget: </dt><dd className="inline">{t.constraints_json.max_turns} turns</dd></div>}
+                    </dl>}
                   </div>
                 );
               })}

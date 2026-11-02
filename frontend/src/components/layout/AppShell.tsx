@@ -11,17 +11,17 @@ import {
   Plus,
   Trash2,
   Check,
-  Radio,
   Sparkles,
   CircleCheck,
 } from "lucide-react";
 import {
   useCompanies,
   useCompanyId,
-  useRuns,
   useSettings,
   useWorkspace,
   useWorkspaceId,
+  useRun,
+  useRuns,
   qk,
 } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
@@ -44,16 +44,16 @@ import {
 } from "@/components/ui/overlays";
 import { ErrorBoundary } from "@/components/common";
 import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
-import { CommandPalette } from "./CommandPalette";
 import { ProcessIndicator } from "./ProcessIndicator";
 import { DesktopLayout } from "./DesktopLayout";
+import { threadKey, useWorkbenchStore } from "@/features/editor/workbenchStore";
 
 const VIEWS = [
   { to: "agent", label: "Conversation", shortcut: "0" },
   { to: "workspace", label: "Workspace", shortcut: "7" },
   { to: "canvas", label: "Team canvas", shortcut: "1" },
   { to: "chat", label: "Agent chats", shortcut: "2" },
-  { to: "runs", label: "Activity", shortcut: "3" },
+  { to: "runs", label: "Conversation history", shortcut: "3" },
   { to: "artifacts", label: "Changes", shortcut: "4" },
   { to: "settings", label: "Settings", shortcut: "5" },
   { to: "guide", label: "Guide", shortcut: "6" },
@@ -79,25 +79,20 @@ export function AppShell() {
   }, [nav, w]);
   return (
     <DesktopLayout
+      hideHeader={loc.pathname.split("/")[3] === "settings"}
       header={
         <>
-          <FolderOpen className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block" />
-          <div className="min-w-0 flex-1 truncate text-[13px] font-medium">
-            {ws.data?.name ?? "Opening project"}
-            <span className="mx-2 text-muted-foreground/40">/</span>
-            <span className="text-muted-foreground">
-              {view?.label ?? "Project"}
-            </span>
+          {view?.to !== "agent" && <FolderOpen className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block" />}
+          <div className="min-w-0 flex-1 truncate text-sm font-semibold">
+            {view?.to === "agent" ? <ConversationTitle /> : view?.label ?? "Project"}
           </div>
           <div className="hidden sm:block">
             <CompanySwitcher />
           </div>
-          <LiveRunsIndicator />
           <ProcessIndicator />
           <div className="hidden lg:block">
             <ModelStatus />
           </div>
-          <CommandPalette />
         </>
       }
     >
@@ -123,6 +118,17 @@ export function AppShell() {
       )}
     </DesktopLayout>
   );
+}
+
+function ConversationTitle() {
+  const w = useWorkspaceId();
+  const { companyId } = useCompanyId();
+  const { data: runs } = useRuns(w, companyId || undefined, true);
+  const selected = useWorkbenchStore((store) => store.threads[threadKey(w, companyId)]);
+  const id = companyId ? selected === undefined ? runs?.[0]?.id : selected : null;
+  const { data: conversation } = useRun(w, id ?? "");
+  const title = conversation?.goal.split("\n")[0]?.trim() || "New chat";
+  return <span title={title}>{title}</span>;
 }
 /** One glance: are agents using a real model, or the offline demo? Click → Settings → Model. */
 function ModelStatus() {
@@ -290,42 +296,9 @@ function CompanySwitcher() {
         title={`Delete ${current?.name}?`}
         destructive
         confirmLabel="Delete"
-        description="All agents, channels, chats and run history of this company will be removed from .octopus. Files in your project are not touched."
+        description="All agents, conversations and team activity for this company will be removed from .octopus. Files in your project are not touched."
         onConfirm={() => del.mutate()}
       />
     </>
-  );
-}
-
-function LiveRunsIndicator() {
-  const w = useWorkspaceId();
-  const { data } = useRuns(w, undefined, true);
-  const live =
-    data?.filter((r) =>
-      ["running", "paused", "awaiting_user", "queued"].includes(r.status),
-    ) ?? [];
-  if (!live.length) return null;
-  const needsYou = live.some((r) => r.status === "awaiting_user");
-  const first = live.find((r) => r.status === "awaiting_user") ?? live[0];
-  return (
-    <Tip
-      content={
-        needsYou ? "A run is waiting for you" : `${live.length} live run(s)`
-      }
-      side="bottom"
-    >
-      <Link
-        to={`/w/${w}/runs/${first.id}`}
-        className={cn(
-          "flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium transition hover:bg-accent",
-          needsYou
-            ? "border-warning/50 bg-warning/10 text-warning"
-            : "border-primary/40 bg-primary/10 text-primary",
-        )}
-      >
-        <Radio className={cn("h-3 w-3", !needsYou && "animate-pulse")} />
-        {needsYou ? "Needs you" : `${live.length} live`}
-      </Link>
-    </Tip>
   );
 }

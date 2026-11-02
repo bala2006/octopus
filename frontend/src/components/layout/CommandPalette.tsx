@@ -101,14 +101,11 @@ export function CommandPalette() {
   return (
     <>
       <button
-        aria-label="Quick open"
-        title="Quick open (Ctrl+K)"
+        aria-label="Search files and pages (Ctrl K)"
         onClick={() => setOpen(true)}
-        className="flex h-8 items-center gap-2 rounded-md border bg-surface/50 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent"
+        className="topbar-action"
       >
-        <Search className="h-3.5 w-3.5" />
-        <span className="hidden xl:inline">Go to file or page…</span>
-        <kbd className="hidden text-[10px] lg:inline">Ctrl K</kbd>
+        <Search />
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent

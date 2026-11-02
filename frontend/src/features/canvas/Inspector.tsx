@@ -243,10 +243,10 @@ function ActivityTab({ agentId }: { agentId: string }) {
     queryFn: () => unwrap(api.GET("/api/v1/w/{workspace_id}/runs/{run_id}/messages", { params: { path: { workspace_id: w, run_id: latest!.id } } })),
   });
   const mine = (msgs.data ?? []).filter((m) => m.from_agent_id === agentId || m.to_agent_id === agentId).slice(-40).reverse();
-  if (!latest) return <EmptyState icon={Activity} title="No runs yet" description="Run the company to see this agent's messages and tool calls." />;
+  if (!latest) return <EmptyState icon={Activity} title="No team activity yet" description="Start a conversation to see this agent's messages and tool calls." />;
   return (
     <div className="space-y-3">
-      <Heading>Latest run activity</Heading>
+      <Heading>Latest team activity</Heading>
       <p className="truncate text-xs text-muted-foreground">“{latest.goal}” · {timeAgo(latest.created_at)}</p>
       <ol className="space-y-1.5">
         {mine.map((m) => (
@@ -257,7 +257,7 @@ function ActivityTab({ agentId }: { agentId: string }) {
             <p className="mt-1 line-clamp-3 text-foreground/90">{m.content}</p>
           </li>
         ))}
-        {!mine.length && <li className="text-xs text-muted-foreground">This agent had no messages in the latest run.</li>}
+        {!mine.length && <li className="text-xs text-muted-foreground">This agent had no messages in the latest conversation.</li>}
       </ol>
     </div>
   );

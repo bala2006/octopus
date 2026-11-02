@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-
+import hashlib
+import json
+import platform
+from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, ConfigDict
 
 from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
-from app.models import Artifact, ChatSession, Message, Run, RunEvent, Task, User
+from app.models import Artifact, ChatSession, Message, Run, RunEvent, Task, User, Company
 from app.orchestrator.engine import ACTIVE_STATES, OPEN_TASK_STATES, ProjectRef, RunRuntime, manager
 from app.schemas import (
     ApprovalIn, ArtifactContentOut, ArtifactOut, InterjectIn, MessageOut, RevertIn, RunCreate, RunDetail, RunEventOut, RunOut,
@@ -18,6 +23,9 @@ from app.schemas import (
 from app.services import run_attachments
 from app.services.canvas import snapshot
 from app.tools.workspace import ProjectFS, WorkspaceError
+from app.orchestrator.runtime_store import RuntimeStore, Conflict
+from app.orchestrator.contracts import choose_lead, route_target
+from app.orchestrator.evidence import capture_manifest, validate_evidence, RevisionEvidence
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -37,6 +45,37 @@ async def owned_run(run_id: str, db: AsyncSession, user: User) -> Run:
 @router.post("", response_model=RunDetail, status_code=201)
 async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                      ctx: ProjectCtx = Depends(project_ctx)) -> Run:
+    import hashlib
+    import json
+    initial_hash = hashlib.sha256(json.dumps(body.model_dump(mode="json"), sort_keys=True).encode()).hexdigest()
+    company = await owned_company(body.company_id, db, user)
+    if body.client_request_id:
+        # Serialize initial request deduplication in the same project transaction.
+        await db.execute(update(Company).where(Company.id == company.id).values(revision=Company.revision))
+        existing = await db.scalar(select(Run).where(Run.company_id == company.id,
+            func.json_extract(Run.state_json, "$.initial_client_id") == body.client_request_id))
+        if existing:
+            if (existing.state_json or {}).get("initial_content_hash") != initial_hash:
+                raise HTTPException(409, "The initial request ID was already used for different content")
+            await db.commit()
+            if existing.started_at is None:
+                await manager.start(existing.id, ref(ctx))
+            return existing
+    from app.core.config import get_settings
+    from app.schemas import RunModel
+    from app.services.opencode import discover
+    if body.budget.model is None and not body.budget.force_mock and get_settings().default_provider == "opencode":
+        body.budget.model = RunModel(provider="opencode", model=get_settings().default_model)
+    if body.budget.model and body.budget.model.provider == "opencode" and not body.budget.force_mock:
+        if not get_settings().single_user_mode:
+            raise HTTPException(422, "Host OpenCode is available only in local single-user mode.")
+        local = await discover()
+        if not local.available:
+            raise HTTPException(422, local.error)
+        if body.budget.model.model != "default" and body.budget.model.model not in local.models:
+            raise HTTPException(422, "This model is no longer available in the installed OpenCode. Refresh the model list.")
+        if body.mode != "autonomous":
+            raise HTTPException(422, "OpenCode conversations use autonomous mode with OpenCode permission requests.")
     if body.budget.model is not None and body.budget.model.provider == "azure" and not body.budget.force_mock:
         from app.db.session import registry_factory
         from app.llm.router import allowed_models, is_configured, resolve_credentials
@@ -48,6 +87,15 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
         if body.budget.model.model not in allowed_models(options):
             raise HTTPException(422, "This deployment is no longer configured. Choose a model again in Model settings.")
     company = await owned_company(body.company_id, db, user)
+    from app.orchestrator.contracts import validate_reporting, choose_lead, route_target
+    try:
+        validate_reporting(snapshot(company)["agents"])
+        lead = choose_lead(snapshot(company)["agents"])
+        target = route_target(body.goal, snapshot(company)["agents"], lead)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if body.budget.execution_mode == "restricted":
+        raise HTTPException(422, "No verified restricted worker is configured. Trusted-host execution is not a sandbox.")
     if not company.agents:
         raise HTTPException(422, "Add at least one agent to the company before running it")
     live = (await db.execute(select(func.count()).select_from(Run).where(Run.company_id == company.id, Run.status.in_(["running", "queued"])))).scalar()
@@ -63,13 +111,18 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
         db.add(s)
         await db.flush()
         session_id = s.id
+    permission_level = body.permission_level or ctx.workspace.default_permission
+    if permission_level == "ask" and body.approval_mode == "auto":
+        permission_level = "auto"
     run = Run(company_id=company.id, session_id=session_id, goal=body.goal, mode=body.mode, status="queued",
-              permission_level=body.permission_level or ctx.workspace.default_permission,
+              permission_level=permission_level,
               budget_json=body.budget.model_dump(), snapshot_json=snapshot(company), state_json={"attachments": []})
     db.add(run)
     await db.flush()
     try:  # images are kept as files next to the project database; text attachments stay in the run state
-        run.state_json = {"attachments": run_attachments.store(ctx.root, run.id, body.attachments)}
+        run.state_json = {"attachments": run_attachments.store(ctx.root, run.id, body.attachments), "lead_agent_id": lead,
+                          "initial_target": target, "plan_revision": 1,
+                          "initial_client_id": body.client_request_id, "initial_content_hash": initial_hash}
     except (run_attachments.AttachmentError, OSError) as exc:
         run_attachments.delete_run(ctx.root, run.id)
         raise HTTPException(422, f"Attachment rejected: {exc}") from exc
@@ -178,31 +231,175 @@ async def control(run_id: str, action: str, db: AsyncSession = Depends(get_pdb),
 
 @router.post("/{run_id}/interject", status_code=202)
 async def interject(run_id: str, body: InterjectIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
-                    ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, bool]:
+                    ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, Any]:
     """Message the team. On a finished run this continues it (same run, full history, files untouched)."""
     return await _send(run_id, body, db, user, ctx)
 
 
 @router.post("/{run_id}/continue", status_code=202)
 async def continue_run(run_id: str, body: InterjectIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
-                       ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, bool]:
+                       ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, Any]:
     """Follow up on a run like a chat: the same team picks up where it left off."""
     return await _send(run_id, body, db, user, ctx)
 
 
-async def _send(run_id: str, body: InterjectIn, db: AsyncSession, user: User, ctx: ProjectCtx) -> dict[str, bool]:
+async def _send(run_id: str, body: InterjectIn, db: AsyncSession, user: User, ctx: ProjectCtx) -> dict[str, Any]:
+    normalized = body.model_copy(update={"client_request_id": body.client_request_id or str(uuid4()),
+        "delivery": "steer" if body.delivery == "steer" else "queue"})
+    result = await queue_request(run_id, normalized, db, user, ctx)
+    return {"ok": True, "request": result}
+
+
+def stored_request_attachments(ctx: ProjectCtx, run_id: str, body: InterjectIn) -> list[dict]:
+    """Stable names prevent both image overwrite across requests and false conflicts on retries."""
+    if len(body.attachments) > run_attachments.MAX_FILES:
+        raise run_attachments.AttachmentError("Too many attachments")
+    digest = hashlib.sha256(json.dumps([body.client_request_id, body.attachments], sort_keys=True).encode()).hexdigest()[:24]
+    original = [dict(attachment) for attachment in body.attachments]
+    renamed = [{**attachment, "filename": f"{digest}-{str(attachment.get('filename') or 'file')[:140]}"} for attachment in original]
+    stored = run_attachments.store(ctx.root, run_id, renamed)
+    for record, attachment in zip(stored, original):
+        record["filename"] = str(attachment.get("filename") or "file")[:200]
+    return stored
+
+
+async def queue_request(run_id: str, body: InterjectIn, db: AsyncSession, user: User, ctx: ProjectCtx) -> dict:
     run = await owned_run(run_id, db, user)
-    agent_ids = {a.get("id") for a in (run.snapshot_json or {}).get("agents", [])}
-    if body.to_agent_id and body.to_agent_id not in agent_ids and not (manager.get(run_id) and body.to_agent_id in manager.get(run_id).agents):
-        raise HTTPException(422, "Unknown agent")
-    for _ in range(40):  # a run that is finalizing right now can be continued a moment later
+    if not body.client_request_id:
+        raise HTTPException(422, "A client_request_id is required for durable delivery")
+    runtime = manager.get(run_id)
+    agents = [agent.to_dict() for agent in runtime.agents.values()] if runtime else (run.snapshot_json or {}).get("agents", [])
+    try:
+        lead = choose_lead(agents, (run.state_json or {}).get("lead_agent_id"))
+        target = route_target(body.content, agents, lead, body.to_agent_id)
+        attachments = await asyncio.to_thread(stored_request_attachments, ctx, run_id, body)
+        result, created = await RuntimeStore(ctx.sf, run_id).enqueue(client_id=body.client_request_id,
+            content=body.content, target=target, attachments=attachments, kind="steer" if body.delivery == "steer" else "queue")
+    except Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if created or result["state"] == "queued":
+        await manager.notify_requests(run_id, ref(ctx), steer=result["kind"] == "steer")
+    return result
+
+
+@router.post("/{run_id}/requests", status_code=202)
+async def post_request(run_id: str, body: InterjectIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                       ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    return await queue_request(run_id, body, db, user, ctx)
+
+
+@router.get("/{run_id}/requests")
+async def queued_requests(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                          ctx: ProjectCtx = Depends(project_ctx)) -> list[dict]:
+    await owned_run(run_id, db, user)
+    return await RuntimeStore(ctx.sf, run_id).requests()
+
+
+@router.delete("/{run_id}/requests/{request_id}", status_code=204, response_class=Response)
+async def remove_request(run_id: str, request_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                         ctx: ProjectCtx = Depends(project_ctx)) -> Response:
+    await owned_run(run_id, db, user)
+    try:
+        await RuntimeStore(ctx.sf, run_id).cancel_request(request_id)
+    except Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return Response(status_code=204)
+
+
+@router.post("/{run_id}/requests/{request_id}/steer")
+async def steer_request(run_id: str, request_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                        ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    await owned_run(run_id, db, user)
+    try:
+        record, changed = await RuntimeStore(ctx.sf, run_id).steer_request(request_id)
+    except Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if changed or record["state"] == "queued":
+        await manager.notify_requests(run_id, ref(ctx), steer=True)
+    return record
+
+
+async def execution_summary(run_id: str, ctx: ProjectCtx, run: Run) -> dict:
+    store = RuntimeStore(ctx.sf, run_id)
+    runtime = manager.get(run_id)
+    if runtime is None:
+        await store.recover()  # Marks uncertain invocations only. Never dispatches a prompt.
+    if runtime is None:
+        await store.expire_consultations()
+    result = await store.summary()
+    saved = run.state_json or {}
+    revision = max(int(result["plan_revision"]), runtime.plan_revision if runtime else int(saved.get("plan_revision", 1)))
+    manifest = await asyncio.to_thread(capture_manifest, ctx.root)
+    environment = {"platform": platform.system(), "python": platform.python_version(), "root": str(ctx.root.resolve()),
+                   "execution_root": str(ctx.root.resolve())}
+    for item in result["evidence"]:
         try:
-            if await manager.continue_run(run_id, ref(ctx), body.content, body.to_agent_id, body.attachments):
-                return {"ok": True}
-        except (run_attachments.AttachmentError, OSError) as exc:
-            raise HTTPException(422, f"Attachment rejected: {exc}") from exc
-        await asyncio.sleep(0.1)
-    raise HTTPException(409, "Run could not be continued")
+            record = RevisionEvidence.model_validate({key: value for key, value in item.items() if key not in ("attempt_id", "revision")})
+            validity = validate_evidence(record, manifest, task_revision=revision, environment=environment, criterion="requested_outcome")
+            item["validity"] = validity.model_dump(mode="json")
+        except ValueError:
+            item["validity"] = {"valid": False, "status": "unknown", "reasons": ["Evidence record is invalid or legacy"]}
+    result.update(plan_revision=revision, manifest_hash=manifest.content_hash, manifest_complete=manifest.complete)
+    if runtime:
+        result.update(engineering_checkpoints=runtime.engineering_checkpoints, engineering_blockers=runtime.engineering_blockers(),
+                      recovery_required=runtime.recovery_required, lead_agent_id=runtime.lead_agent_id,
+                      engineering_workflow=runtime.engineering_workflow, execution_mode=runtime.budget.execution_mode)
+    return result
+
+
+@router.get("/{run_id}/execution")
+async def execution_details(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                            ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    return await execution_summary(run_id, ctx, await owned_run(run_id, db, user))
+
+
+class RequestRecovery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["retry", "cancel"]
+    acknowledge_side_effects: Literal[True]
+
+
+class ExecutionRecovery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["acknowledge", "cancel"]
+    acknowledge_side_effects: Literal[True]
+
+
+@router.post("/{run_id}/requests/{request_id}/recover")
+async def recover_request(run_id: str, request_id: str, body: RequestRecovery, db: AsyncSession = Depends(get_pdb),
+                          user: User = Depends(current_user), ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    await owned_run(run_id, db, user)
+    try:
+        record = await RuntimeStore(ctx.sf, run_id).recover_request(request_id, body.action, acknowledged=body.acknowledge_side_effects)
+    except Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    runtime = manager.get(run_id)
+    if runtime:
+        await runtime.adopt_recovery()
+    if body.action == "retry":
+        await manager.notify_requests(run_id, ref(ctx))
+    return record
+
+
+@router.post("/{run_id}/recovery")
+async def recover_execution(run_id: str, body: ExecutionRecovery, db: AsyncSession = Depends(get_pdb),
+                            user: User = Depends(current_user), ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    run = await owned_run(run_id, db, user)
+    try:
+        await RuntimeStore(ctx.sf, run_id).acknowledge_recovery(body.action, acknowledged=body.acknowledge_side_effects)
+    except Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    runtime = manager.get(run_id)
+    if runtime:
+        await runtime.adopt_recovery()
+        if body.action == "cancel":
+            runtime.stop()
+        else:
+            runtime.resume()
+            runtime.wake.set()
+    return await execution_summary(run_id, ctx, run)
 
 
 @router.post("/{run_id}/approve", status_code=202)
@@ -259,7 +456,7 @@ async def report(run_id: str, download: bool = False, db: AsyncSession = Depends
 # ---------------- artifacts (versioned changes made by agents in a run)
 def _art_out(a: Artifact) -> ArtifactOut:
     return ArtifactOut(id=a.id, run_id=a.run_id, path=a.path, version=a.version, planned=a.planned, author_agent_id=a.author_agent_id,
-                       change_note=a.change_note, created_at=a.created_at, size=len(a.content))
+                       change_note=a.change_note, created_at=a.created_at, size=len(a.content), deleted=a.deleted)
 
 
 @router.get("/{run_id}/artifacts", response_model=list[ArtifactOut])
@@ -285,7 +482,7 @@ async def get_artifact(run_id: str, path: str, version: int | None = None, db: A
         if first is None:
             raise HTTPException(404, "Artifact not found")
         o = _art_out(first)
-        return ArtifactContentOut(**{**o.model_dump(), "version": 0, "change_note": "original"}, content=first.previous_content or "")
+        return ArtifactContentOut(**{**o.model_dump(), "version": 0, "change_note": "original", "deleted": first.previous_content is None}, content=first.previous_content or "")
     q = select(Artifact).where(Artifact.run_id == run_id, Artifact.path == path)
     q = q.where(Artifact.version == version) if version else q.order_by(Artifact.version.desc())
     a = (await db.execute(q.limit(1))).scalar_one_or_none()
@@ -318,6 +515,9 @@ async def revert_artifact(run_id: str, body: RevertIn, db: AsyncSession = Depend
     target = next((r for r in rows if r.version == body.to_version), None)
     if target is None:
         raise HTTPException(404, "No such version")
+    if target.deleted:
+        full.unlink(missing_ok=True)
+        return {"status": "deleted", "path": rel}
     fs.write(rel, target.content)
     return {"status": "restored", "path": rel}
 
@@ -347,16 +547,17 @@ async def download_zip(run_id: str, db: AsyncSession = Depends(get_pdb), user: U
     """ZIP of every file the run produced (latest version) plus the run report."""
     run = await owned_run(run_id, db, user)
     rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.path, Artifact.version))).scalars().all()
-    latest: dict[str, str] = {}
+    latest: dict[str, Artifact] = {}
     for a in rows:
-        latest[a.path] = a.content
+        latest[a.path] = a
     import io
     import zipfile
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for p, content in sorted(latest.items()):
-            zf.writestr(p, content)
+        for p, artifact in sorted(latest.items()):
+            if not artifact.deleted:
+                zf.writestr(p, artifact.content)
         if run.report_md:
             zf.writestr("RUN_REPORT.md", run.report_md)
     return Response(buf.getvalue(), media_type="application/zip",

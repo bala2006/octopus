@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('setup', 'start', 'test', 'check')]
+    [ValidateSet('setup', 'start', 'dev', 'test', 'check')]
     [string]$Action = 'start',
     [string]$Python = 'python',
     [ValidateRange(1024, 65535)]
@@ -56,6 +56,14 @@ try {
         try { Invoke-Checked $venvPython @('-m', 'pytest', '-q') } finally { Pop-Location }
         Invoke-Npm @('run', 'typecheck', '--prefix', 'frontend')
         Invoke-Npm @('test', '--prefix', 'frontend')
+        return
+    }
+    if ($Action -eq 'dev') {
+        $vite = Start-Process -FilePath $nodeCommand.Source -ArgumentList 'node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','5173','--strictPort' -WorkingDirectory (Join-Path $repoPath 'frontend') -WindowStyle Hidden -PassThru
+        Write-Host 'Octopus live development: http://127.0.0.1:5173'
+        Push-Location (Join-Path $repoPath 'backend')
+        try { Invoke-Checked $venvPython @('-m', 'app.dev', '--port', [string]$Port) }
+        finally { Pop-Location; if (-not $vite.HasExited) { Stop-Process -Id $vite.Id } }
         return
     }
     if (-not $SkipBuild) { Invoke-Npm @('run', 'build', '--prefix', 'frontend') }

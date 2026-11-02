@@ -1,11 +1,21 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { RunBudget, RunDetail } from "@/types";
+import { engineeringWorkflow, type EngineeringWorkflow } from "./runtimeApi";
 
-export type ComposerSettings = Pick<RunBudget, "model" | "reasoning_effort">;
+export type ApprovalMode = "ask" | "auto";
+export type ModelSettings = Pick<RunBudget, "model" | "reasoning_effort">;
+export type ComposerSettings = ModelSettings & {
+  approvalMode: ApprovalMode;
+  engineering_workflow?: EngineeringWorkflow;
+  model_scope?: "lead" | "team";
+  independent_review?: boolean;
+};
 export const defaultComposerSettings: ComposerSettings = {
   model: null,
   reasoning_effort: "default",
+  approvalMode: "ask",
+  engineering_workflow: "auto",
 };
 
 export function recordedComposerSettings(
@@ -34,21 +44,32 @@ export function recordedComposerSettings(
     return {
       model: { provider: "mock", model: "mock/demo" },
       reasoning_effort,
+      approvalMode: "ask",
+      engineering_workflow: engineeringWorkflow(budget?.engineering_workflow),
     };
   if (
     typeof raw === "object" &&
     raw !== null &&
     "provider" in raw &&
     "model" in raw &&
-    (raw.provider === "azure" || raw.provider === "mock") &&
+    (raw.provider === "azure" ||
+      raw.provider === "mock" ||
+      raw.provider === "opencode") &&
     typeof raw.model === "string"
   ) {
     return {
       model: { provider: raw.provider, model: raw.model },
       reasoning_effort,
+      approvalMode: "ask",
+      engineering_workflow: engineeringWorkflow(budget?.engineering_workflow),
     };
   }
-  return { model: null, reasoning_effort };
+  return {
+    model: null,
+    reasoning_effort,
+    approvalMode: "ask",
+    engineering_workflow: engineeringWorkflow(budget?.engineering_workflow),
+  };
 }
 
 interface WorkbenchState {

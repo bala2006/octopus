@@ -73,7 +73,7 @@ function MiniNode({ id, x, y, width, height, selected, onClick }: MiniMapNodePro
   );
 }
 
-export function CanvasMiniMap({ departments, onPick }: { departments: Record<string, DeptMeta>; onPick?: (id: string) => void }) {
+export function CanvasMiniMap({ departments, onPick, position = "bottom-right" }: { departments: Record<string, DeptMeta>; onPick?: (id: string) => void; position?: "bottom-right" | "top-right" }) {
   const live = useLive();
   const nodes = useNodes<AgentNode>();
   const rf = useReactFlow();
@@ -94,7 +94,7 @@ export function CanvasMiniMap({ departments, onPick }: { departments: Record<str
 
   if (!open) {
     return (
-      <Panel position="bottom-right">
+      <Panel position={position}>
         <button onClick={() => setOpen(true)} aria-label="Show minimap" title="Show minimap"
           className="flex items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 text-[11px] text-muted-foreground shadow-md transition hover:text-foreground">
           <MapIcon className="h-3.5 w-3.5" />Minimap
@@ -104,7 +104,7 @@ export function CanvasMiniMap({ departments, onPick }: { departments: Record<str
   }
   return (
     <MiniCtx.Provider value={ctx}>
-      <Panel position="bottom-right" style={{ marginBottom: 172 }} className="nopan nowheel">
+      <Panel position={position} style={position === "top-right" ? { marginTop: 172 } : { marginBottom: 172 }} className="nopan nowheel">
         <div className="flex w-[200px] flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg border border-border bg-popover/95 px-2 py-1 text-[10px] text-muted-foreground shadow-md" aria-label="Minimap legend">
           {legend.length ? legend.map((s) => (
             <span key={s} className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: STATUS[s as keyof typeof STATUS].color }} />{STATUS[s as keyof typeof STATUS].label}</span>
@@ -114,7 +114,7 @@ export function CanvasMiniMap({ departments, onPick }: { departments: Record<str
           </button>
         </div>
       </Panel>
-      <MiniMap<AgentNode> pannable zoomable position="bottom-right" nodeComponent={MiniNode} onNodeClick={(_, n) => pick(n.id)}
+      <MiniMap<AgentNode> pannable zoomable position={position} nodeComponent={MiniNode} onNodeClick={(_, n) => pick(n.id)}
         ariaLabel={minimapSummary(nodes, live)} bgColor="hsl(var(--surface))"
         maskColor="hsl(var(--background) / 0.45)" maskStrokeColor="hsl(var(--primary))" maskStrokeWidth={2}
         className="!rounded-lg !border !border-border !shadow-md" />

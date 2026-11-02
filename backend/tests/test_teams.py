@@ -56,11 +56,11 @@ async def test_agent_hires_teammate_without_privilege_escalation(client, workspa
                      "connect": [{"to": "Xan", "type": "consult"}, {"to": "Nobody", "type": "review"}],
                      "brief": "Build the API and report back."}),
                 env({"action": "finish", "summary": "team built"})],
-        "Leo": [env({"action": "write_file", "path": "api.py", "content": "print('api')\n"}, msg("Bea", "status_update", "API done: api.py"))],
+        "Leo": [env({"action": "write_file", "path": "api.py", "content": "print('api')\n"}, {"action": "finish", "summary": "API done: api.py"})],
     }))
     run = await start_run(client, workspace, cid, permission_level="danger")
     done = await wait_status(client, workspace, run["id"])
-    assert done["status"] == "completed"
+    assert done["status"] == "completed", done["halt_reason"]
     created = [e["payload"] for e in await events(client, workspace, run["id"], "agent_created")]
     assert len(created) == 1
     leo = created[0]["agent"]

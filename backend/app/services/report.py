@@ -134,7 +134,7 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
             "| Path | Versions | Last author | Kind | Note |", "|---|---|---|---|---|"]
     vcount = Counter(a.path for a in arts)
     first = {a.path: a for a in reversed(arts)}
-    kind = lambda p, a: "planned" if a.planned else ("modified" if first[p].previous_content is not None else "created")  # noqa: E731
+    kind = lambda p, a: "deleted" if a.deleted else "planned" if a.planned else ("modified" if first[p].previous_content is not None else "created")  # noqa: E731
     out += [f"| `{p}` | {vcount[p]} | {name(a.author_agent_id)} | {kind(p, a)} | {a.change_note[:80]} |" for p, a in sorted(latest.items())] or ["| - | - | - | - | - |"]
     out.append("")
 

@@ -1,22 +1,33 @@
 import * as React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  FileCode2,
-  FolderOpen,
-  GitBranch,
-  Network,
-  PanelRightClose,
-  PanelRightOpen,
+  ArrowLeft,
+  ArrowRight,
+  GripVertical,
+  Loader2,
+  Maximize2,
+  Minus,
 } from "lucide-react";
-import { useWorkspace, useWorkspaceId } from "@/hooks/queries";
+import { useWorkspaceId } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { AgentPanel } from "./AgentPanel";
+import { AgentPanel, type FloatingChatState } from "./AgentPanel";
+import { PanelResize, usePanelSize } from "./PanelResize";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/overlays";
+import "./conversation-layout.css";
+
+const CanvasPage = React.lazy(() => import("@/features/canvas/CanvasPage"));
+type ConversationStyle = React.CSSProperties & {
+  "--conversation-chat-width": string;
+};
 
 export default function AgentPage() {
   const w = useWorkspaceId();
-  const workspace = useWorkspace(w);
   const tree = useQuery({
     queryKey: ["editor-tree", w],
     enabled: !!w,
@@ -29,71 +40,152 @@ export default function AgentPage() {
       ),
   });
   const navigate = useNavigate();
-  const [context, setContext] = React.useState(() => window.innerWidth >= 1440);
-  React.useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setContext(false);
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
+  const split = React.useRef<HTMLDivElement>(null);
+  const floatingChat = React.useRef<HTMLDivElement>(null);
+  const chat = usePanelSize("floating-conversation-chat", 380, 340, 520);
+  const [windowState, setWindowState] =
+    React.useState<FloatingChatState>("minimized");
+  const [dock, setDock] = React.useState<"left" | "right">("right");
+  const changeWindowState = React.useCallback((state: FloatingChatState) => {
+    setWindowState(state);
   }, []);
-  const files = tree.data?.files ?? [];
-  return (
-    <div className="conversation-page">
-      <div className="conversation-content">
-        <AgentPanel
-          workspace={w}
-          files={files}
-          presentation="conversation"
-          onOpen={(path) =>
-            navigate(`/w/${w}/workspace?file=${encodeURIComponent(path)}`)
+  const [canvasInsets, setCanvasInsets] = React.useState({ left: 0, right: 0 });
+  const style: ConversationStyle = {
+    "--conversation-chat-width": `${chat.size}px`,
+  };
+  const windowMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="floating-chat-window-control"
+          aria-label="Chat window options"
+          title="Chat window options"
+        >
+          <GripVertical />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="bottom" align="end" className="w-56">
+        <DropdownMenuItem
+          onSelect={() =>
+            changeWindowState(windowState === "full" ? "expanded" : "full")
           }
-          onClose={() => navigate(`/w/${w}/workspace`)}
-        />
+        >
+          <Maximize2 />
+          {windowState === "full"
+            ? "Return to floating view"
+            : "Open in full view"}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={dock === "left" && windowState !== "full"}
+          onSelect={() => {
+            setDock("left");
+            if (windowState === "full") changeWindowState("expanded");
+          }}
+        >
+          <ArrowLeft />
+          Move to left pane
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={dock === "right" && windowState !== "full"}
+          onSelect={() => {
+            setDock("right");
+            if (windowState === "full") changeWindowState("expanded");
+          }}
+        >
+          <ArrowRight />
+          Move to right pane
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => changeWindowState("collapsed")}>
+          <Minus />
+          Minimize composer
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+  React.useLayoutEffect(() => {
+    const container = split.current;
+    const panel = floatingChat.current;
+    if (!container || !panel) return;
+    const observer = new ResizeObserver(() => {
+      const floating =
+        getComputedStyle(panel).position === "absolute" &&
+        panel.clientWidth > 0;
+      const inset =
+        floating && windowState === "expanded" ? panel.clientWidth + 16 : 0;
+      setCanvasInsets({
+        left: dock === "left" ? inset : 0,
+        right: dock === "right" ? inset : 0,
+      });
+    });
+    observer.observe(container);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [dock, windowState]);
+  return (
+    <div className="conversation-studio" style={style}>
+      <div className="conversation-split" ref={split}>
+        <section
+          id="conversation-canvas"
+          className="conversation-canvas-panel"
+          aria-label="Team canvas"
+          onPointerDownCapture={() => changeWindowState("collapsed")}
+          onFocusCapture={() => changeWindowState("collapsed")}
+        >
+          <React.Suspense
+            fallback={
+              <div
+                className="flex h-full items-center justify-center"
+                role="status"
+              >
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="sr-only">Loading canvas</span>
+              </div>
+            }
+          >
+            <CanvasPage
+              embedded
+              rightInset={canvasInsets.right}
+              leftInset={canvasInsets.left}
+            />
+          </React.Suspense>
+        </section>
+        <div
+          className="conversation-floating-chat"
+          data-window-state={windowState}
+          data-dock={dock}
+          ref={floatingChat}
+        >
+          <PanelResize
+            label="Resize floating chat"
+            orientation="vertical"
+            panel={chat}
+            pixelsToUnits={(delta) => (dock === "right" ? -delta : delta)}
+          />
+          <section
+            id="conversation-chat"
+            className="conversation-chat-panel"
+            aria-label="Conversation"
+          >
+            <div className="conversation-chat-content">
+              <AgentPanel
+                workspace={w}
+                files={tree.data?.files ?? []}
+                presentation="conversation"
+                floatingWindow={{
+                  state: windowState,
+                  onStateChange: changeWindowState,
+                  menu: windowMenu,
+                }}
+                onOpen={(path) =>
+                  navigate(`/w/${w}/workspace?file=${encodeURIComponent(path)}`)
+                }
+                onClose={() => navigate(`/w/${w}/workspace`)}
+              />
+            </div>
+          </section>
+        </div>
       </div>
-      <Button
-        className="conversation-context-toggle"
-        variant="ghost"
-        size="icon"
-        aria-label={context ? "Hide project details" : "Show project details"}
-        aria-expanded={context}
-        onClick={() => setContext(!context)}
-      >
-        {context ? <PanelRightClose /> : <PanelRightOpen />}
-      </Button>
-      {context && (
-        <aside className="conversation-context" aria-label="Project details">
-          <div className="context-card">
-            <p className="text-xs text-muted-foreground">Project</p>
-            <h2 className="mt-3 flex items-center gap-2 text-sm font-medium">
-              <FolderOpen className="h-4 w-4" />
-              {workspace.data?.name}
-            </h2>
-            <p className="mt-2 break-all text-xs leading-relaxed text-muted-foreground">
-              {workspace.data?.display_path || workspace.data?.path}
-            </p>
-            <Link
-              to={`/w/${w}/workspace?tool=git`}
-              className="context-card-link"
-            >
-              <GitBranch />
-              Review changes
-            </Link>
-            <Link to={`/w/${w}/workspace`} className="context-card-link">
-              <FileCode2 />
-              Open workspace
-            </Link>
-            <Link to={`/w/${w}/canvas`} className="context-card-link">
-              <Network />
-              Manage your team
-            </Link>
-          </div>
-          <p className="mt-5 px-1 text-xs leading-relaxed text-muted-foreground">
-            Your team's replies, file changes, and requests for approval appear
-            in the conversation.
-          </p>
-        </aside>
-      )}
     </div>
   );
 }

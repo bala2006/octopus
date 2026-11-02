@@ -22,6 +22,7 @@ from app.schemas import (
     TestProviderOut,
 )
 from app.services.files import UnsupportedFile, parse_file, parse_image
+from app.services.opencode import OpenCodeStatus, discover
 from app.tools.mcp_client import McpConfig, McpError, list_tools
 
 router = APIRouter(tags=["settings"])
@@ -34,6 +35,9 @@ async def get_settings_view(db: AsyncSession = Depends(get_registry_db), user: U
     rows = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user.id, ProviderKey.provider.in_(list(PROVIDER_CATALOG))))).scalars().all()
     keys = [key_out(r) for r in rows]
     providers = []
+    local = await discover() if s.single_user_mode else OpenCodeStatus(error="Host OpenCode is available only in local single-user mode.")
+    providers.append(ProviderInfo(provider="opencode", label="OpenCode (installed locally)",
+                                  models=["default", *local.models], configured=local.available, needs_key=False, needs_base=False))
     for name, info in PROVIDER_CATALOG.items():
         key, base, extra = await resolve_credentials(db, user.id, name)
         models = list(extra.get("deployments") or []) or info["models"]
@@ -41,6 +45,13 @@ async def get_settings_view(db: AsyncSession = Depends(get_registry_db), user: U
                                       needs_key=info["needs_key"], needs_base=info.get("needs_base", False)))
     return SettingsOut(demo_mode=s.demo_mode, single_user_mode=s.single_user_mode, default_provider=s.default_provider,
                        default_model=s.default_model, sandbox_mode=s.sandbox_mode, providers=providers, keys=keys)
+
+
+@router.get("/settings/opencode")
+async def opencode_status(user: User = Depends(current_user)) -> OpenCodeStatus:
+    if not get_settings().single_user_mode:
+        return OpenCodeStatus(error="Host OpenCode is available only in local single-user mode.")
+    return await discover()
 
 
 async def migrate_legacy_azure(db: AsyncSession, user_id: str) -> None:

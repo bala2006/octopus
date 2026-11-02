@@ -254,6 +254,7 @@ class Task(ProjectBase):
     assignee_agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="todo")
     acceptance_criteria: Mapped[str] = mapped_column(Text, default="")
+    constraints_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -270,6 +271,7 @@ class Artifact(ProjectBase):
     previous_content: Mapped[str | None] = mapped_column(Text, nullable=True)  # file content before v1 (pre-existing file)
     version: Mapped[int] = mapped_column(Integer, default=1)
     planned: Mapped[bool] = mapped_column(Boolean, default=False)  # plan mode: written to the shadow dir, not the project
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     author_agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     change_note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -289,3 +291,7 @@ __all__ = [
     "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate", "UserRole", "UserSkill",
     "Company", "Agent", "Edge", "ChatSession", "Run", "Message", "RunEvent", "Task", "Artifact", "AgentMemory",
 ]
+
+# Register project runtime tables for migrations and metadata consumers.
+from app.models.runtime_records import RunRequest, TaskAttempt, ExecutionEvidence, Consultation  # noqa: E402,F401
+from app.models import scoped_memory  # noqa: E402,F401

@@ -21,7 +21,7 @@ import { Badge, Input } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 
 type Source = "run" | "project";
-interface TreeNode { name: string; path: string; children: Map<string, TreeNode>; file?: { path: string; badge?: "created" | "modified" | "planned"; versions?: number; area?: "project" | "work"; generated?: boolean } }
+interface TreeNode { name: string; path: string; children: Map<string, TreeNode>; file?: { path: string; badge?: "created" | "modified" | "planned" | "deleted"; versions?: number; area?: "project" | "work"; generated?: boolean } }
 
 function buildTree(files: TreeNode["file"][]): TreeNode {
   const root: TreeNode = { name: "", path: "", children: new Map() };
@@ -74,7 +74,7 @@ export default function ArtifactsPage() {
   }, [arts.data]);
   const files = React.useMemo(() => {
     const list = source === "run"
-      ? [...byPath.entries()].map(([path, vs]) => ({ path, versions: vs.length, badge: vs[0].planned ? ("planned" as const) : undefined }))
+      ? [...byPath.entries()].map(([path, vs]) => ({ path, versions: vs.length, badge: vs[vs.length - 1].deleted ? ("deleted" as const) : vs[vs.length - 1].planned ? ("planned" as const) : undefined }))
       : (project.data?.files ?? []).map((f) => ({ path: f.path, area: f.area, generated: f.generated, badge: byPath.has(f.path) ? ("modified" as const) : undefined }));
     return list.filter((f) => f.path.toLowerCase().includes(q.toLowerCase()));
   }, [source, byPath, project.data, q]);
@@ -90,6 +90,8 @@ export default function ArtifactsPage() {
   const latest = versions[versions.length - 1];
   const shownVersion = version ?? latest?.version ?? null;
   const planned = latest?.planned;
+  const deleted = source === "run" && versions.find((item) => item.version === shownVersion)?.deleted;
+  React.useEffect(() => { if (deleted && mode === "preview") setMode("diff"); }, [deleted, mode]);
 
   const content = useQuery({
     queryKey: ["file", w, source, selectedRun, selected, shownVersion], enabled: !!selected,
@@ -183,7 +185,8 @@ export default function ArtifactsPage() {
             <>
               <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
                 <span className="truncate font-mono text-xs">{selected}</span>
-                <Button size="sm" variant="ghost" onClick={() => nav(`/w/${w}/workspace?file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
+                <Button size="sm" variant="ghost" disabled={latest?.deleted} onClick={() => nav(`/w/${w}/workspace?file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
+                {deleted && <Badge variant="outline">Deleted</Badge>}
                 {planned && <Badge>planned</Badge>}
                 {source === "run" && shownVersion !== null && <Badge variant="outline">v{shownVersion}{latest && shownVersion !== latest.version ? ` of ${latest.version}` : ""}</Badge>}
                 <div className="ml-auto flex items-center gap-1">
@@ -191,7 +194,7 @@ export default function ArtifactsPage() {
                     <TabsList>
                       <TabsTrigger value="view"><Code2 />Code</TabsTrigger>
                       <TabsTrigger value="diff" disabled={source !== "run" || shownVersion === null}><GitCompare />Diff</TabsTrigger>
-                      <TabsTrigger value="preview" disabled={!kind || (source === "run" && !selectedRun)}><Eye />Preview</TabsTrigger>
+                      <TabsTrigger value="preview" disabled={!!deleted || !kind || (source === "run" && !selectedRun)}><Eye />Preview</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
@@ -199,7 +202,8 @@ export default function ArtifactsPage() {
               <div className="relative min-h-0 flex-1">
                 {content.isLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
                 {content.isError && <EmptyState icon={FileCode2} title="Cannot open file" description={(content.error as Error).message} />}
-                {mode === "view" && content.data !== undefined && (
+                {mode === "view" && deleted && <EmptyState icon={FileCode2} title="File deleted" description="This version removes the file. Open Diff to review the removed content or choose an earlier version to restore it." />}
+                {mode === "view" && !deleted && content.data !== undefined && (
                   <Editor height="100%" language={languageFor(selected)} value={content.data} theme={theme === "dark" ? "octopus-dark" : "octopus-light"}
                     options={{ readOnly: true, minimap: { enabled: false }, fontSize: 12.5, fontFamily: "JetBrains Mono Variable, monospace", scrollBeyondLastLine: false, wordWrap: "on", renderLineHighlight: "none" }}
                     loading={<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />} />
@@ -209,7 +213,7 @@ export default function ArtifactsPage() {
                     options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, fontSize: 12.5, scrollBeyondLastLine: false }}
                     loading={<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />} />
                 )}
-                {mode === "preview" && kind && (
+                {mode === "preview" && !deleted && kind && (
                   <div className="flex h-full flex-col">
                     <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1 text-[11px] text-muted-foreground">
                       {kind === "html" ? "Live preview: scripts run in a sandbox without access to Octopus. Linked CSS, JS and images load from the project." : "Preview"}
@@ -245,6 +249,7 @@ export default function ArtifactsPage() {
                       <div className="flex items-center gap-1.5">
                         {a && <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} size={18} />}
                         <span className="font-medium">{a?.name ?? "Agent"}</span>
+                        {v.deleted && <span className="text-destructive">Deleted</span>}
                         <span className="ml-auto font-mono text-[10px] text-muted-foreground">v{v.version}</span>
                       </div>
                       {v.change_note && <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{v.change_note}</p>}
@@ -289,6 +294,7 @@ function TreeItem({ node, depth, selected, onSelect }: { node: TreeNode; depth: 
         className={cn("flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left transition", selected === node.path ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground")}>
         <Icon className={cn("h-3.5 w-3.5 shrink-0", f.badge === "planned" ? "text-steel" : f.badge === "modified" ? "text-terracotta" : "text-olive/80")} />
         <span className="truncate">{node.name}</span>
+        {f.badge === "deleted" && <span className="ml-auto text-[10px] text-destructive">Deleted</span>}
         {f.versions && f.versions > 1 && <Tip content={`${f.versions} versions`}><span className="ml-auto rounded bg-muted px-1 text-[10px] tabular-nums">{f.versions}</span></Tip>}
         {f.generated && f.area !== "work" && <Tip content="Written by agents (not one of your original files)"><Bot className="ml-auto h-3 w-3 shrink-0 text-muted-foreground/70" aria-label="written by agents" /></Tip>}
       </button>

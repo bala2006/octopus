@@ -13,6 +13,7 @@ EdgeType = Literal["delegate", "review", "debate", "report", "consult"]
 RunStatus = Literal["queued", "running", "paused", "awaiting_user", "completed", "incomplete", "failed", "cancelled"]
 RunMode = Literal["autonomous", "step", "supervised"]
 PermissionLevel = Literal["read_only", "plan", "ask", "danger"]
+ApprovalMode = Literal["ask", "auto"]
 AgentPermission = Literal["inherit", "read_only", "plan", "ask", "danger"]
 TaskStatus = Literal["todo", "in_progress", "in_review", "done", "blocked"]
 MessageType = Literal[
@@ -375,7 +376,7 @@ class ParsedFileOut(BaseModel):
 
 # ---------- runs ----------
 class RunModel(BaseModel):
-    provider: Literal["azure", "mock"]
+    provider: Literal["azure", "mock", "opencode"]
     model: str = Field(min_length=1, max_length=200)
 
 
@@ -400,6 +401,12 @@ class RunBudget(BaseModel):
     persist_team: bool = True  # save agents hired / edited during the run back to the company
     reasoning_effort: ReasoningEffort = "default"  # run-wide override; "default" = each agent's own setting
     model: RunModel | None = None
+    model_scope: Literal["lead", "team"] = "lead"
+    engineering_workflow: Literal["auto", "explain", "fix", "build", "review"] = "auto"
+    execution_mode: Literal["trusted_host", "restricted"] = "trusted_host"
+    independent_review: bool = False
+    max_concurrency: int = Field(3, ge=1, le=3)
+    max_delegation_depth: int = Field(2, ge=0, le=2)
 
 
 class RunCreate(BaseModel):
@@ -408,8 +415,10 @@ class RunCreate(BaseModel):
     session_id: str | None = None
     mode: RunMode = "autonomous"
     permission_level: PermissionLevel | None = None  # defaults to the workspace default
+    approval_mode: ApprovalMode = "ask"
     budget: RunBudget = Field(default_factory=RunBudget)
     attachments: list[dict[str, str]] = Field(default_factory=list)
+    client_request_id: str | None = Field(None, min_length=1, max_length=100)
 
 
 class RunOutcome(BaseModel):
@@ -458,6 +467,8 @@ class InterjectIn(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
     to_agent_id: str | None = None
     attachments: list[dict[str, str]] = Field(default_factory=list)
+    client_request_id: str | None = Field(default=None, min_length=1, max_length=100)
+    delivery: Literal["immediate", "queue", "steer"] = "immediate"
 
 
 class ApprovalIn(BaseModel):
@@ -484,6 +495,7 @@ class TaskOut(ORM):
     assignee_agent_id: str | None
     status: str
     acceptance_criteria: str
+    constraints_json: dict[str, Any] = Field(default_factory=dict)
     created_by: str | None
     updated_at: datetime
 
@@ -494,6 +506,7 @@ class ArtifactOut(ORM):
     path: str
     version: int
     planned: bool = False
+    deleted: bool = False
     author_agent_id: str | None
     change_note: str
     created_at: datetime
@@ -622,6 +635,11 @@ class NativeDialogOut(BaseModel):
     # Docker: the browser can ask the laptop-side helper (scripts/folder_bridge.py) at this URL to show the dialog
     bridge_url: str = ""
     host_dir: str = ""  # the laptop folder shared with the container (only folders inside it can be opened)
+
+
+class NativePickOut(BaseModel):
+    cancelled: bool
+    path: str | None = None  # the selected directory as the user sees it on their computer
 
 
 class WorkspacePatch(BaseModel):

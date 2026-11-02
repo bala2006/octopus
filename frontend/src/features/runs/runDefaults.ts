@@ -18,4 +18,10 @@ export const defaultRunBudget = (): RunBudget => ({
   force_mock: false,
   reasoning_effort: "default",
   model: null,
+  model_scope: "lead",
+  engineering_workflow: "auto",
+  execution_mode: "trusted_host",
+  independent_review: false,
+  max_concurrency: 3,
+  max_delegation_depth: 2,
 });

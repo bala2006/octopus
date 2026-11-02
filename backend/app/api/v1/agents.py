@@ -5,11 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_user, get_pdb, owned_company
+from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.db.base import utcnow
-from app.models import Agent, AgentMemory, Edge, User
+from app.models import Agent, Edge, User
+from app.models.scoped_memory import MemoryHead, MemoryRecord
 from app.schemas import AgentIn, AgentOut, AgentPatch, EdgeIn, EdgeOut, MemoryIn, MemoryOut
 from app.services.canvas import agent_out, apply_agent, edge_out, validate_edges
+from app.services import scoped_memory as memory
 
 router = APIRouter(tags=["agents & edges"])
 
@@ -64,33 +66,73 @@ async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_pdb), user:
 
 
 # ---- memory
+async def agent_memory_owner(agent_id: str, db: AsyncSession, user: User, ctx: ProjectCtx) -> memory.Actor:
+    agent = await owned_agent(agent_id, db, user)
+    actor = memory.Actor(user.id, agent.company_id)
+    await memory.import_legacy(ctx.sf, actor, ctx.root)
+    return actor
+
+
+async def agent_memory_records(ctx: ProjectCtx, actor: memory.Actor, agent_id: str, key: str | None = None):
+    query = select(MemoryRecord, MemoryHead.key).join(MemoryHead, MemoryRecord.head_id == MemoryHead.id).where(
+        MemoryHead.company_id == actor.company_id, MemoryHead.scope == "agent", MemoryHead.scope_id == agent_id,
+        MemoryRecord.version == MemoryHead.version)
+    if key is not None:
+        query = query.where(MemoryHead.key == key)
+    async with ctx.sf() as db:
+        return (await db.execute(query.order_by(MemoryHead.key))).all()
+
+
+async def legacy_memory_out(ctx: ProjectCtx, actor: memory.Actor, agent_id: str, key: str, record: MemoryRecord) -> MemoryOut:
+    view = await memory.get(ctx.sf, actor, record.id)
+    return MemoryOut(id=view.id, agent_id=agent_id, key=key, value=view.content, updated_at=record.created_at)
+
+
+def memory_failure(exc: Exception) -> HTTPException:
+    return HTTPException(409 if isinstance(exc, memory.MemoryConflict) else 404 if isinstance(exc, memory.MemoryDenied) else 422, str(exc))
+
+
 @router.get("/agents/{agent_id}/memory", response_model=list[MemoryOut])
-async def list_memory(agent_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[AgentMemory]:
-    await owned_agent(agent_id, db, user)
-    return list((await db.execute(select(AgentMemory).where(AgentMemory.agent_id == agent_id).order_by(AgentMemory.key))).scalars().all())
+async def list_memory(agent_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                      ctx: ProjectCtx = Depends(project_ctx)) -> list[MemoryOut]:
+    try:
+        actor = await agent_memory_owner(agent_id, db, user, ctx)
+        return [await legacy_memory_out(ctx, actor, agent_id, key, record)
+                for record, key in await agent_memory_records(ctx, actor, agent_id)
+                if record.classification in ("verified", "proposed")]
+    except (memory.MemoryDenied, ValueError) as exc:
+        raise memory_failure(exc) from exc
 
 
 @router.put("/agents/{agent_id}/memory", response_model=MemoryOut)
-async def put_memory(agent_id: str, body: MemoryIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> AgentMemory:
-    await owned_agent(agent_id, db, user)
-    row = (await db.execute(select(AgentMemory).where(AgentMemory.agent_id == agent_id, AgentMemory.key == body.key))).scalar_one_or_none()
-    if row is None:
-        row = AgentMemory(agent_id=agent_id, key=body.key, value=body.value)
-        db.add(row)
-    else:
-        row.value = body.value
-    await db.commit()
-    await db.refresh(row)
-    return row
+async def put_memory(agent_id: str, body: MemoryIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                     ctx: ProjectCtx = Depends(project_ctx)) -> MemoryOut:
+    try:
+        actor = await agent_memory_owner(agent_id, db, user, ctx)
+        rows = await agent_memory_records(ctx, actor, agent_id, body.key)
+        previous = rows[0][0] if rows else None
+        record = await memory.owner_put(ctx.sf, actor, memory.Target("agent", agent_id, previous.run_id if previous else None),
+            body.key, body.value, expected_version=previous.version if previous else 0,
+            refs=tuple(memory.SourceRef(ref["kind"], ref["id"]) for ref in previous.source_refs) if previous else (),
+            pinned=previous.pinned if previous else False)
+        return await legacy_memory_out(ctx, actor, agent_id, body.key, record)
+    except (memory.MemoryDenied, ValueError) as exc:
+        raise memory_failure(exc) from exc
 
 
 @router.delete("/agents/{agent_id}/memory/{key}", status_code=204, response_class=Response, response_model=None)
-async def delete_memory(agent_id: str, key: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> None:
-    await owned_agent(agent_id, db, user)
-    row = (await db.execute(select(AgentMemory).where(AgentMemory.agent_id == agent_id, AgentMemory.key == key))).scalar_one_or_none()
-    if row:
-        await db.delete(row)
-        await db.commit()
+async def delete_memory(agent_id: str, key: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                        ctx: ProjectCtx = Depends(project_ctx)) -> None:
+    try:
+        actor = await agent_memory_owner(agent_id, db, user, ctx)
+        rows = await agent_memory_records(ctx, actor, agent_id, key)
+        if rows and rows[0][0].classification != "deleted":
+            previous = rows[0][0]
+            await memory.owner_put(ctx.sf, actor, memory.Target("agent", agent_id, previous.run_id), key, "",
+                expected_version=previous.version, classification="deleted", pinned=previous.pinned,
+                refs=tuple(memory.SourceRef(ref["kind"], ref["id"]) for ref in previous.source_refs))
+    except (memory.MemoryDenied, ValueError) as exc:
+        raise memory_failure(exc) from exc
 
 
 # ---- edges

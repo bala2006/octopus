@@ -61,7 +61,7 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
 
   return (
     <div className="relative h-full">
-      <div ref={scroller} onScroll={onScroll} className="h-full space-y-1 overflow-y-auto px-3 py-3" role="log" aria-live="polite" aria-label="Run feed">
+      <div ref={scroller} onScroll={onScroll} className="h-full space-y-1 overflow-y-auto px-3 py-3" role="log" aria-live="polite" aria-label="Team conversation activity">
         {items.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">Waiting for the first message…</p>}
         {items.map((it) => it.kind === "msg" ? <FeedMessage key={it.m.id} m={it.m} agents={agents} />
           : it.kind === "files" ? <FileGroup key={it.ms[0].id} ms={it.ms} agents={agents} />

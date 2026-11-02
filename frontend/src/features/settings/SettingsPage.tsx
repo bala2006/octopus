@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/surfaces";
 import { Badge, Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select, Tip } from "@/components/ui/overlays";
-import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
+import { PermissionPicker } from "@/features/workspaces/PermissionPicker";
 
 // The key is the URL hash (settings#appearance deep links must keep working); the label is what the nav and the panel show.
 export const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", Plug], ["roles", "Roles", UserCog], ["skills", "Skills", BookOpenCheck], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Preferences", Palette]] as const;
@@ -39,8 +39,8 @@ export default function SettingsPage() {
       <nav className="section-navigation" aria-label="Settings sections">
         {SECTIONS.filter(([key]) => key !== "project" || workspaceId).map(([k, label, Icon]) => (
           <button key={k} onClick={() => setSection(k)} title={label} aria-current={section === k ? "page" : undefined}
-            className={cn("section-navigation-item", section === k && "is-active")}>
-            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" /><span className="min-w-0 truncate">{label}</span>
+            className={cn("sidebar-nav-item", section === k && "is-active")}>
+            <Icon className="h-4 w-4 shrink-0" /><span className="min-w-0 truncate">{label}</span>
           </button>
         ))}
       </nav>
@@ -71,12 +71,20 @@ function Section({ title, description, children }: { title: string; description?
 // ---------------------------------------------------------------- providers
 function Providers() {
   const { data, isLoading } = useSettings();
+  const opencode = useQuery({ queryKey: ["opencode-status"], queryFn: () => unwrap(api.GET("/api/v1/settings/opencode")), refetchInterval: 30_000 });
   const keys = Object.fromEntries((data?.keys ?? []).map((k) => [k.provider, k]));
   const info = Object.fromEntries((data?.providers ?? []).map((p) => [p.provider, p]));
   if (isLoading) return <div className="skeleton h-72" />;
   return (
-    <Section title="Model" description="Agents run on your Azure OpenAI deployment. The key is encrypted on this machine and never sent back to the browser.">
-      {!info.azure?.configured && (
+    <Section title="Model" description="Conversations use your existing OpenCode installation by default. You can also select an Azure deployment.">
+      <div className="rounded-xl border border-border p-5 space-y-3">
+        <div className="flex items-center gap-2"><Server className="h-4 w-4" /><h3 className="font-medium text-sm">OpenCode</h3><span className="ml-auto text-xs text-muted-foreground">{info.opencode?.configured ? "Connected locally" : "Unavailable"}</span></div>
+        <p className="text-xs text-muted-foreground">Uses the OpenCode already installed on your computer, with its existing sign-in, models, tools and permission rules. Permission requests appear in the conversation. Octopus does not install or upgrade OpenCode.</p>
+        {opencode.data?.executable && <p className="break-all font-mono text-xs text-muted-foreground">{opencode.data.executable}</p>}
+        {opencode.data?.error && <p className="text-xs text-destructive" role="alert">{opencode.data.error}</p>}
+        <p className="text-xs text-muted-foreground">{opencode.data?.models?.length ?? 0} models available · New conversations use OpenCode’s configured default model.</p>
+      </div>
+      {!info.azure?.configured && !info.opencode?.configured && (
         <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
           <Sparkles className="h-4 w-4 text-primary" />
           <div className="flex-1 text-sm"><span className="font-medium">Demo Mode until Azure is connected.</span>{" "}
@@ -455,12 +463,12 @@ function ProjectSettings() {
       <div className="space-y-4 rounded-xl border border-border bg-surface p-4">
         <Field label="Name"><div className="flex gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} /><Button variant="secondary" onClick={() => patch.mutate({ name })} disabled={name === data.name}>Rename</Button></div></Field>
         <Field label="Directory"><code className="block rounded-md bg-muted px-2.5 py-2 font-mono text-xs">{data.path}</code></Field>
-        <Field label="Data folder" hint="Contains octopus.db (companies, agents, chats, runs, events, artifact history), plans/ and exports/. Git-ignored by default.">
+        <Field label="Data folder" hint="Contains octopus.db (companies, agents, conversations, activity and artifact history), plans/ and exports/. Git-ignored by default.">
           <code className="block rounded-md bg-muted px-2.5 py-2 font-mono text-xs">{data.path}/.octopus/</code>
         </Field>
       </div>
       <div className="space-y-2">
-        <div className="flex items-center gap-1.5 text-sm font-medium"><ShieldCheck className="h-4 w-4 text-primary" />Default permission level for new runs</div>
+        <div className="flex items-center gap-1.5 text-sm font-medium"><ShieldCheck className="h-4 w-4 text-primary" />Default permission level for new conversations</div>
         <PermissionPicker value={data.default_permission as PermissionLevel} onChange={(v) => patch.mutate({ default_permission: v })} />
       </div>
     </Section>

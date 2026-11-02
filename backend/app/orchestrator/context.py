@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.llm.base import effective_max_tokens
 from app.orchestrator.actions import schema_doc
 from app.orchestrator.permissions import EdgeSpec, allowed_recipients
+from app.services import skills as SK
+from app.services.roles import resolve_prompt
+
+if TYPE_CHECKING:
+    from app.orchestrator.engine import RunRuntime
 
 EDGE_MEANING = {
     "delegate": "hand off tasks (send `task`)",
@@ -137,7 +142,7 @@ def fmt_msg(m: dict[str, Any], names: dict[str, str], me: str, limit: int = 1500
     if meta.get("task_id"):
         extra += f" [task {meta['task_id']}]"
     content = m["content"] if len(m["content"]) <= limit else m["content"][:limit] + f" …[truncated: {limit:,} of {len(m['content']):,} chars]"
-    return f"[turn {m['turn']}] {frm} → {to} ({m['type']}){extra}: {content}"
+    return f"[message:{m['id']}; turn {m['turn']}] {frm} → {to} ({m['type']}){extra}: {content}"
 
 
 def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str, max_chars: int = SUMMARY_CHARS) -> str:
@@ -147,7 +152,7 @@ def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str,
         first = re.split(r"(?<=[.!?])\s|\n", m["content"].strip(), maxsplit=1)[0][:160]
         frm = sender_name(m, names, me)
         to = "all" if m["to"] is None else ("you" if m["to"] == me else names.get(m["to"], "?"))
-        lines.append(f"- t{m['turn']} {frm}→{to} {m['type']}: {first}")
+        lines.append(f"- [message:{m['id']}] t{m['turn']} {frm}→{to} {m['type']}: {first}")
     out: list[str] = []
     total = 0
     for ln in reversed(lines):
@@ -156,7 +161,7 @@ def rolling_summary(older: list[dict[str, Any]], names: dict[str, str], me: str,
             out.append(f"- … {len(lines) - len(out)} earlier messages omitted (decisions, tasks and files are on the Blackboard)")
             break
         out.append(ln)
-    return "\n".join(reversed(out))
+    return "[Extractive digest; details are omitted. Use recall_context with message IDs for the originals.]\n" + "\n".join(reversed(out))
 
 
 def org_variables(agent: AgentSpec, agents: dict[str, AgentSpec]) -> dict[str, str]:
@@ -176,7 +181,7 @@ def browser_note(agent: AgentSpec, preview_url: str) -> str:
 
 
 def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
-                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False, project_memory: str = "",
+                        status: dict[str, str] | None = None, preview_url: str = "", native: bool = False,
                         role_prompt: str | None = None, skills_text: str = "") -> str:
     """``role_prompt``: the agent's prompt resolved from the role library (services/roles.py); default: its own."""
     names = {a.id: a.name for a in agents.values()}
@@ -214,9 +219,10 @@ def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: di
 {channels}
 
 ## Long-term memory notes
-{memory}{chr(10) + "## Project memory (shared by the whole team, kept across runs)" + chr(10) + project_memory if project_memory else ""}{browser_note(agent, preview_url)}{skills_text}
+{memory}{browser_note(agent, preview_url)}{skills_text}
 
 ## Rules
+0. Read the user's intent before acting. Greetings and simple questions about you, Octopus, or the configured AI model are ordinary chat: answer them directly with `finish`; do not list, search, or read project files and do not involve teammates unless the answer actually depends on project context. For project work, inspect only what is relevant and bring in teammates when their skills help. This is one ongoing team conversation, not a fresh build task for every message.
 1. Be concise. Do not repeat what others already said; reference it. The Blackboard (task board, workspace files) is always
    current: check it instead of asking a teammate whether something exists or is done, and never re-send a request they
    already have (repeats are blocked as loops). If you are waiting on someone, `wait`.
@@ -282,3 +288,22 @@ def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_
         parts.append("# Tool results & system notices\n" + "\n".join(obs))
     parts.append("Decide what to do next." if native else "Decide your next actions now. Respond with the JSON object only.")
     return "\n\n".join(parts)
+
+
+def build_turn_prompts(runtime: RunRuntime, agent: AgentSpec, inbox_ids: set[str], observations: list[dict[str, Any]],
+                       *, native: bool, memory_context: str) -> tuple[str, str]:
+    """The same role, instructions and selected context apply to every worker backend."""
+    system = build_system_prompt(agent, company=runtime.company_name, goal=runtime.goal, agents=runtime.agents,
+        edges=runtime.edges, status=runtime.status, preview_url=runtime.preview_url(), native=native,
+        role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, runtime.roles),
+        skills_text=SK.prompt_section(runtime.skills, str(agent.behavior.get("template_key") or ""),
+                                     list(agent.behavior.get("skills") or [])))
+    system += runtime.pinned_guidance.get("content", "") + memory_context + runtime.engineering_brief()
+    user = build_user_prompt(agent=agent, history=runtime.history, inbox_ids=inbox_ids, observations=observations,
+        blackboard=runtime.blackboard(), names=runtime.names, recent_n=runtime.budget.context_recent,
+        native=native, digest=runtime.digest(agent.id), team_status=team_status(runtime.agents, runtime.status))
+    from app.orchestrator.execution import ACTIVE_ATTEMPT
+    attempt = ACTIVE_ATTEMPT.get()
+    if attempt:
+        user += "\n\nYour immutable assignment for this turn:\n" + attempt.assignment.model_dump_json()
+    return system, user

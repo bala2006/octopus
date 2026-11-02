@@ -129,4 +129,5 @@ def test_native_dialog_module_has_no_backend_dependencies() -> None:
     """The helper imports native_dialog on the laptop, where pydantic & co. aren't installed."""
     src = (ROOT / "backend" / "app" / "services" / "native_dialog.py").read_text()
     top = [ln for ln in src.splitlines() if ln.startswith(("import ", "from "))]
-    assert all(ln.split()[1].split(".")[0] in {"__future__", "asyncio", "os", "shutil", "subprocess", "sys", "dataclasses", "pathlib"} for ln in top), top
+    import sys
+    assert all(ln.split()[1].split(".")[0] in sys.stdlib_module_names for ln in top), top

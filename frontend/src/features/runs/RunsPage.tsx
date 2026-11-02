@@ -42,7 +42,7 @@ export default function RunsPage() {
   });
   const rerun = useMutation({
     mutationFn: (r: RunOut) => unwrap(api.POST("/api/v1/w/{workspace_id}/runs", { params: { path: { workspace_id: w } }, body: {
-      company_id: r.company_id, goal: r.goal, mode: r.mode as "autonomous" | "step" | "supervised",
+      company_id: r.company_id, goal: r.goal, mode: r.mode as "autonomous" | "step" | "supervised", approval_mode: "ask",
       permission_level: r.permission_level as PermissionLevel, budget: r.budget as never } })),
     onSuccess: (r) => { refresh(); nav(`/w/${w}/runs/${r.id}`); },
     onError: (e: Error) => toast.error(e.message),
@@ -59,10 +59,10 @@ export default function RunsPage() {
 
   return (
     <div className="content-page flex h-full min-h-0 flex-col">
-      <PageHeader title="Runs" description="Watch your team's progress, revisit earlier work, or continue a conversation." actions={<Button onClick={() => setOpen(true)} disabled={!companyId}><Play />New run</Button>} />
+      <PageHeader title="Team activity" description="Follow your team's work, revisit conversations, or continue where you left off." actions={<Button onClick={() => setOpen(true)} disabled={!companyId}><Play />New conversation</Button>} />
       {!!data?.length && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div role="radiogroup" aria-label="Filter runs" className="flex items-center gap-1">
+          <div role="radiogroup" aria-label="Filter team activity" className="flex items-center gap-1">
             {FILTERS.map(([f, label]) => (
               <button key={f} role="radio" aria-checked={filter === f} onClick={() => setFilter(f)}
                 className={cn("rounded-full border px-2.5 py-1 text-xs transition", filter === f ? "border-primary/50 bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-accent")}>
@@ -72,19 +72,18 @@ export default function RunsPage() {
           </div>
           <div className="relative ml-auto">
             <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search goals" aria-label="Search runs by goal" className="h-8 w-56 pl-7 text-xs" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search conversations" aria-label="Search conversations by message" className="h-8 w-56 pl-7 text-xs" />
           </div>
           <Button size="sm" variant="ghost" onClick={() => setSort(sort === "newest" ? "oldest" : "newest")} aria-label={`Sort: ${sort} first`}>
             <ArrowDownUp />{sort === "newest" ? "Newest first" : "Oldest first"}
           </Button>
         </div>
       )}
-      {/* sized by its content (no flex-1): one run is one row, not a near-empty full-height panel */}
       <div className="ui-surface min-h-0 overflow-y-auto" data-testid="runs-list">
         {isLoading ? <LoadingRows rows={5} /> : !data?.length ? (
-          <EmptyState icon={History} title="No runs yet" description="Give the company a goal and watch the agents collaborate." action={<Button onClick={() => setOpen(true)} disabled={!companyId}><Play />Start first run</Button>} />
+          <EmptyState icon={History} title="No team activity yet" description={w ? "Send a message from Conversation and the orchestrator will coordinate your agents." : "Open a project to see its team activity."} action={w ? <Button onClick={() => setOpen(true)} disabled={!companyId}><Play />Start a conversation</Button> : <Button asChild><Link to="/">Open a project</Link></Button>} />
         ) : !shown.length ? (
-          <p className="p-6 text-center text-sm text-muted-foreground">No runs match{q ? ` "${q}"` : ""}.</p>
+          <p className="p-6 text-center text-sm text-muted-foreground">No conversations match{q ? ` "${q}"` : ""}.</p>
         ) : (
           groups.map((g) => (
             <section key={g.day} aria-label={g.day}>
@@ -99,7 +98,7 @@ export default function RunsPage() {
         )}
       </div>
       {companyId && <RunDialog open={open} onOpenChange={setOpen} companyId={companyId} />}
-      <ConfirmDialog open={!!del} onOpenChange={(o) => !o && setDel(null)} title="Delete this run?" destructive confirmLabel="Delete"
+      <ConfirmDialog open={!!del} onOpenChange={(o) => !o && setDel(null)} title="Delete this conversation?" destructive confirmLabel="Delete"
         description="Its messages, events, tasks and artifact history are removed from .octopus. Files in your project are not touched."
         onConfirm={() => del && remove.mutate(del)} />
     </div>
@@ -144,16 +143,16 @@ function RunRow({ r, w, onDelete, onStop, onRerun, onReport }: { r: RunOut; w: s
       <PermissionBadge level={r.permission_level as PermissionLevel} />
       <div className="shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} turns · {formatTokens(r.tokens_used)} tok · {money(r.cost_usd)}</div>
       {/* always reachable (keyboard and touch); dimmed until the row is hovered or focused */}
-      <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" aria-label="Run actions">
+      <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" aria-label="Conversation actions">
         {live ? (
-          <Tip content="Stop run"><Button variant="ghost" size="icon-sm" onClick={onStop} aria-label="Stop run"><Square /></Button></Tip>
+          <Tip content="Stop team work"><Button variant="ghost" size="icon-sm" onClick={onStop} aria-label="Stop team work"><Square /></Button></Tip>
         ) : (
-          <Tip content="Continue (send a follow-up)"><Button variant="ghost" size="icon-sm" asChild><Link to={`/w/${w}/runs/${r.id}`} aria-label="Continue run"><MessageSquarePlus /></Link></Button></Tip>
+          <Tip content="Continue this conversation"><Button variant="ghost" size="icon-sm" asChild><Link to={`/w/${w}/runs/${r.id}`} aria-label="Continue conversation"><MessageSquarePlus /></Link></Button></Tip>
         )}
-        <Tip content="Run again with the same goal and settings"><Button variant="ghost" size="icon-sm" onClick={onRerun} aria-label="Run again"><RotateCw /></Button></Tip>
-        <Tip content="Files this run changed"><Button variant="ghost" size="icon-sm" asChild><Link to={`/w/${w}/artifacts/${r.id}`} aria-label="Open run files"><FolderTree /></Link></Button></Tip>
+        <Tip content="Start a new conversation with the same message and settings"><Button variant="ghost" size="icon-sm" onClick={onRerun} aria-label="Start a new conversation"><RotateCw /></Button></Tip>
+        <Tip content="Files the team changed"><Button variant="ghost" size="icon-sm" asChild><Link to={`/w/${w}/artifacts/${r.id}`} aria-label="Open changed files"><FolderTree /></Link></Button></Tip>
         <Tip content="Download report"><Button variant="ghost" size="icon-sm" onClick={onReport} aria-label="Download report"><FileDown /></Button></Tip>
-        {TERMINAL.has(r.status) && <Tip content="Delete run"><Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete run"><Trash2 /></Button></Tip>}
+        {TERMINAL.has(r.status) && <Tip content="Delete conversation history"><Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete conversation history"><Trash2 /></Button></Tip>}
       </div>
     </li>
   );

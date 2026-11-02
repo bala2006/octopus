@@ -28,7 +28,8 @@ import {
 } from "@/components/ui/overlays";
 import { EffortPicker } from "@/features/canvas/EffortPicker";
 import { defaultRunBudget } from "./runDefaults";
-import { PermissionPicker } from "@/features/workspaces/DirectoryPicker";
+import { PermissionPicker } from "@/features/workspaces/PermissionPicker";
+import { ApprovalModePicker } from "@/features/editor/ApprovalModePicker";
 import {
   useAttachments,
   AttachmentChips,
@@ -42,13 +43,13 @@ const MODES = [
     v: "autonomous",
     label: "Autonomous",
     icon: Zap,
-    d: "Runs until finished or a limit is hit",
+    d: "Your team works until the task is done or a limit is reached",
   },
   {
     v: "step",
     label: "Step",
     icon: Footprints,
-    d: "You click Next turn for every agent turn",
+    d: "You guide the team one step at a time",
   },
   {
     v: "supervised",
@@ -94,6 +95,7 @@ export function RunDialog({
       (p) => p.provider !== "mock" && p.configured,
     ) ?? false;
   const [adv, setAdv] = React.useState(false);
+  const [approvalMode, setApprovalMode] = React.useState<"ask" | "auto">("ask");
   const [budget, setBudget] = React.useState(defaultRunBudget);
   const demo =
     budget.model?.provider === "mock" || (!budget.model && !anyConfigured);
@@ -107,7 +109,12 @@ export function RunDialog({
     if (!open) return;
     setGoal(initialGoal);
     if (initialSettings)
-      setBudget((current) => ({ ...current, ...initialSettings }));
+      setBudget((current) => ({
+        ...current,
+        model: initialSettings.model,
+        reasoning_effort: initialSettings.reasoning_effort,
+      }));
+    setApprovalMode(initialSettings?.approvalMode ?? "ask");
     setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask");
     if (initialAttachments?.length) att.setFiles(initialAttachments);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -123,6 +130,7 @@ export function RunDialog({
             session_id: sessionId,
             mode,
             permission_level: perm,
+            approval_mode: approvalMode,
             budget: { ...budget, force_mock: demo },
             attachments: attachmentPayload(att.files),
           },
@@ -132,7 +140,7 @@ export function RunDialog({
       qc.invalidateQueries({ queryKey: qk.runs(w) });
       onOpenChange(false);
       att.clear();
-      toast.success("Run started", {
+      toast.success("Team conversation started", {
         description: demo
           ? "Demo Mode: scripted, offline, free"
           : `${perm.replace("_", " ")} permissions`,
@@ -150,10 +158,10 @@ export function RunDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Play className="h-4 w-4 text-primary" />
-            Run the company
+            Start a team conversation
           </DialogTitle>
           <DialogDescription>
-            The goal goes to the entry agent(s), then flows along your channels.
+            Your message goes to the team orchestrator, which coordinates the agents through their communication channels.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -290,6 +298,12 @@ export function RunDialog({
             </>
           )}
           <div className="flex flex-wrap gap-2">
+            <ApprovalModePicker
+              value={approvalMode}
+              disabled={perm !== "ask"}
+              label={perm === "danger" ? "Danger mode" : perm === "plan" ? "Plan mode" : perm === "read_only" ? "Read only" : undefined}
+              onChange={setApprovalMode}
+            />
             <ModelPicker
               workspace={w}
               value={budget}
@@ -471,7 +485,7 @@ export function RunDialog({
               data-testid="start-run"
             >
               <Play />
-              Start run
+              Start conversation
             </Button>
           </div>
         </div>

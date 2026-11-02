@@ -1,4 +1,4 @@
-"""Talking to a live run: a message to everyone is one message, it resumes a paused run, and failed turns don't lose messages."""
+"""Durable follow-ups route to one accountable owner and failed turns retain their messages."""
 from __future__ import annotations
 
 import asyncio
@@ -37,7 +37,7 @@ async def _paused_team(client, workspace, provider) -> tuple[dict[str, Any], str
     return run, base
 
 
-async def test_message_to_everyone_is_shown_once_but_reaches_every_agent(client, workspace) -> None:
+async def test_unaddressed_message_is_persisted_once_and_routes_only_to_lead(client, workspace) -> None:
     rec = Recording()
     run, base = await _paused_team(client, workspace, rec)
     assert (await client.post(f"{base}/interject", json={"content": NOTE})).status_code == 202
@@ -46,32 +46,30 @@ async def test_message_to_everyone_is_shown_once_but_reaches_every_agent(client,
         await asyncio.sleep(0.15)
 
     shown = [e["payload"]["message"] for e in await events(client, workspace, run["id"], "message_created")
-             if e["payload"]["message"]["type"] == "user_interjection"]
+             if (e["payload"]["message"].get("meta") or {}).get("followup")]
     assert len(shown) == 1, "one feed / timeline entry, not one per agent"
-    assert shown[0]["to_agent_id"] is None and shown[0]["meta"]["recipients"] == 3
-    listed = [m for m in await run_messages(client, workspace, run["id"]) if m["type"] == "user_interjection"]
-    assert len(listed) == 1 and listed[0]["to_agent_id"] is None, "the message list agrees with the live feed"
+    assert shown[0]["to_agent_id"] == "a"
+    listed = [m for m in await run_messages(client, workspace, run["id"]) if (m["meta"] or {}).get("followup")]
+    assert len(listed) == 1 and listed[0]["to_agent_id"] == "a", "the message list agrees with the live feed"
 
     seen = {name for name, prompt in rec.prompts if NOTE in prompt.split("# NEW messages for you", 1)[-1]}
-    assert seen == {"Ann", "Ben", "Cat"}, "each agent still gets it as a new message"
-    ann = next(p for n, p in rec.prompts if n == "Ann" and NOTE in p)
-    assert "everyone (3 agents, you included)" in ann, "the agent knows the whole team got the same message"
+    assert seen == {"Ann"}, "specialists run only when assigned work"
+    requests = (await client.get(f"{base}/requests")).json()
+    assert len(requests) == 1 and requests[0]["state"] == "applied" and requests[0]["target"] == "a"
     await client.post(f"{base}/control/stop")
 
 
-async def test_message_resumes_a_paused_run(client, workspace) -> None:
-    agents = [agent("a", "Ann", entry=True, max_auto=200)]
-    cid = await make_company(client, workspace, agents, [])
-    set_provider_override(ScriptedProvider())
-    run = await start_run(client, workspace, cid, budget={"max_turns": 400})
-    base = f"/api/v1/w/{workspace['id']}/runs/{run['id']}"
-    await client.post(f"{base}/control/pause")
-    await wait_status(client, workspace, run["id"], {"paused", *("completed", "incomplete")})
-    if (await client.get(base)).json()["status"] != "paused":
-        return  # finished before the pause landed: nothing to resume (covered by the continue tests)
-    await client.post(f"{base}/interject", json={"content": "continue"})
-    d = await wait_status(client, workspace, run["id"], {"running", "completed", "incomplete"})
-    assert d["status"] != "paused", "saying continue used to leave the run paused until Resume was pressed"
+async def test_queued_message_preserves_pause_until_user_resumes(client, workspace) -> None:
+    run, base = await _paused_team(client, workspace, ScriptedProvider())
+    response = await client.post(f"{base}/interject", json={"content": "continue"})
+    assert response.status_code == 202
+    await asyncio.sleep(.1)
+    paused = (await client.get(base)).json()
+    assert paused["status"] == "paused" and paused["turns"] == 0
+    assert (await client.get(f"{base}/requests")).json()[0]["state"] == "queued"
+    await client.post(f"{base}/control/resume")
+    await wait_status(client, workspace, run["id"], {"running", "completed", "incomplete"}, timeout=10)
+    await client.post(f"{base}/control/stop")
 
 
 async def test_message_in_step_mode_does_not_take_a_turn_by_itself(client, workspace) -> None:

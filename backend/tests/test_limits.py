@@ -21,7 +21,7 @@ def pingpong(company: tuple[str, str]):  # type: ignore[no-untyped-def]
 
     def reply(ctx):  # type: ignore[no-untyped-def]
         other = company[1] if ctx["agent"]["name"] == company[0] else company[0]
-        return env(msg(other, "question", f"Q{next(counter)}: " + " ".join(rng.sample(WORDS, 7)) + "?"))
+        return env(msg(other, "answer", f"Update{next(counter)}: " + " ".join(rng.sample(WORDS, 7))))
 
     return reply
 
@@ -157,8 +157,8 @@ async def test_step_mode_and_interject_and_stop(client, workspace) -> None:
         assert d["turns"] == n
     r = await client.post(f"{base}/interject", json={"content": "Focus on security please", "to_agent_id": "b"})
     assert r.status_code == 202
-    msgs = await run_messages(client, workspace, run["id"])
-    assert any(m["type"] == "user_interjection" and m["to_agent_id"] == "b" for m in msgs)
+    requests = (await client.get(f"{base}/requests")).json()
+    assert any(request["content"] == "Focus on security please" and request["target"] == "b" and request["state"] == "queued" for request in requests)
     await client.post(f"{base}/control/stop")
     assert (await wait_status(client, workspace, run["id"]))["status"] == "cancelled"
 

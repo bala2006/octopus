@@ -12,6 +12,7 @@ import { useEditorStore } from "@/features/editor/editorStore";
 const CanvasPage = React.lazy(() => import("@/features/canvas/CanvasPage"));
 const ChatPage = React.lazy(() => import("@/features/chat/ChatPage"));
 const RunsPage = React.lazy(() => import("@/features/runs/RunsPage"));
+const ActivityPage = React.lazy(() => import("@/features/activity/ActivityPage"));
 const LiveRunPage = React.lazy(() => import("@/features/runs/LiveRunPage"));
 const ArtifactsPage = React.lazy(() => import("@/features/artifacts/ArtifactsPage"));
 const SettingsPage = React.lazy(() => import("@/features/settings/SettingsPage"));
@@ -45,6 +46,7 @@ export function App() {
           <React.Suspense fallback={<PageFallback />}>
             <Routes>
               <Route path="/" element={<WelcomePage />} />
+              <Route path="/activity" element={<DesktopLayout header={<span className="text-[13px] font-medium">Activity</span>}><ActivityPage /></DesktopLayout>} />
               <Route path="/settings" element={<DesktopLayout header={<span className="text-[13px] font-medium">Settings</span>}><SettingsPage /></DesktopLayout>} />
               <Route path="/w/:wid" element={<AppShell />}>
                 <Route index element={<Navigate to="agent" replace />} />

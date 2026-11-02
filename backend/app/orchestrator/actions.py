@@ -6,6 +6,7 @@ import re
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import AliasChoices, model_validator, BaseModel, Field, TypeAdapter, ValidationError, field_validator
+from app.orchestrator.task_contracts import TaskContract
 
 AgentMessageType = Literal[
     "task", "question", "answer", "proposal", "critique", "agreement", "objection", "decision",
@@ -115,6 +116,35 @@ class ListFiles(BaseModel):
 class RunCode(BaseModel):
     action: Literal["run_code"]
     command: str = Field(min_length=1, max_length=500)
+    covered_paths: list[str] = Field(default_factory=list, max_length=3000, description="Files this check actually covers; empty means no artifact proof")
+    criterion_ids: list[str] = Field(default_factory=list, max_length=100, description="Acceptance criterion IDs addressed by this check")
+    whole_project: bool = False
+
+
+class RecordCheckpoint(BaseModel):
+    """Submit a workflow output. Verification references must point to observed tool calls, never invented checks."""
+    action: Literal["record_checkpoint"]
+    step: str = Field(min_length=1, max_length=40)
+    outputs: dict[str, str] = Field(default_factory=dict, max_length=20)
+    tool_call_ids: list[str] = Field(default_factory=list, max_length=100)
+    unavailable: str = Field("", max_length=2000)
+
+
+class RecordInteraction(BaseModel):
+    """Certify a UI scenario from successful browser actions and a final observed assertion, never a screenshot alone."""
+    action: Literal["record_interaction"]
+    scenario: str = Field(min_length=10, max_length=2000)
+    tool_call_ids: list[str] = Field(min_length=2, max_length=100)
+    covered_paths: list[str] = Field(min_length=1, max_length=3000)
+    criterion_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class RecallContext(BaseModel):
+    """Retrieve authorized originals referenced by condensed context."""
+    action: Literal["recall_context"]
+    message_ids: list[str] = Field(default_factory=list, max_length=20)
+    memory_id: str | None = None
+    query: str = Field("", max_length=200, description="Find matching authorized original messages and memory; empty retrieves exact references only")
 
 
 class McpCall(BaseModel):
@@ -131,6 +161,7 @@ class TaskItem(BaseModel):
     assignee: str | None = None
     status: Literal["todo", "in_progress", "in_review", "done", "blocked"] | None = None
     acceptance_criteria: str | list[str] | None = None
+    constraints: TaskContract | None = None
 
     @field_validator("key", mode="before")
     @classmethod
@@ -147,8 +178,11 @@ class Remember(BaseModel):
     action: Literal["remember"]
     key: str = Field(min_length=1, max_length=200)
     value: str = Field(max_length=5000)
-    scope: Literal["self", "project"] = Field("self", description='"self": your own notes; "project": shared with every agent '
+    scope: Literal["self", "project", "group", "chat"] = Field("self", description='"self": your own notes; "project": shared with every agent '
                                                                   'in this project, in this and future runs')
+    scope_id: str | None = Field(None, max_length=36, description="Group ID required for group scope")
+    expected_version: int = Field(0, ge=0)
+    sources: list[dict[str, str]] = Field(default_factory=list, max_length=100)
 
 
 class Delegate(BaseModel):
@@ -295,11 +329,12 @@ class UseSkill(BaseModel):
     """Load a skill (a step-by-step playbook) by name; its full instructions come back as the result."""
     action: Literal["use_skill"]
     name: str = Field(min_length=1, max_length=80)
+    resource: str | None = Field(None, max_length=300, description="Exact path of a reference within the pinned bundle")
 
 
 Action = Annotated[
     Union[SendMessage, Delegate, WriteFile, EditFile, SearchProject, CreateFolder, MoveFile, ReadFile, ListFiles, RunCode, McpCall, UpdateTaskBoard, Remember, RequestUserInput,
-          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, UseSkill, SetTrack, Finish, Wait],
+          WebSearch, Calculate, CreateAgent, UpdateAgent, ListAgents, UseSkill, SetTrack, RecordCheckpoint, RecordInteraction, RecallContext, Finish, Wait],
     Field(discriminator="action"),
 ]
 _adapter: TypeAdapter[Any] = TypeAdapter(Action)
@@ -412,6 +447,8 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
         lines.append('{"action":"delegate","to":"<teammate>","objective":"...","deliverable":"...","done_when":"...","context":"..."}'
                      '  (hand work to a teammate you have a delegate channel to; it goes on the task board)')
     lines.append('{"action":"use_skill","name":"<skill name>"}  (load a step-by-step playbook from the Skills list, then follow it)')
+    lines.append('{"action":"record_checkpoint","step":"<workflow step>","outputs":{"<required output>":"details and references"},"tool_call_ids":["observed call ID"],"unavailable":"reason if blocked"}')
+    lines.append('{"action":"recall_context","message_ids":["message ID"],"memory_id":"optional exact memory version ID"} (retrieve authorized originals omitted from summaries)')
     lines += [
         '{"action":"update_task_board","tasks":[{"key":"T-1 (omit to create)","title":"...","description":"...",'
         '"assignee":"<name>","status":"todo|in_progress|in_review|done|blocked","acceptance_criteria":"..."}]}',

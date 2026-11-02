@@ -29,6 +29,14 @@ class EventBus:
     def unsubscribe(self, run_id: str, q: asyncio.Queue[dict[str, Any]]) -> None:
         self._subs[run_id].discard(q)
 
+    def relay(self, event: dict[str, Any]) -> None:
+        """Publish an already committed outbox row. Reconnect replays by its stable sequence."""
+        for q in list(self._subs.get(event["run_id"], ())):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
     async def publish(self, run_id: str, type_: str, data: dict[str, Any], sf: SessionFactory) -> dict[str, Any]:
         event: dict[str, Any] = {"type": type_, "run_id": run_id, "data": data,
                                  "ts": datetime.now(timezone.utc).isoformat()}

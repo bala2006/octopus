@@ -2,8 +2,8 @@ import * as React from "react";
 import { useStore } from "@xyflow/react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { BookOpenCheck, Crown, Flag, Maximize2, MessageSquare, PenLine, Plug, Power, Trash2, X } from "lucide-react";
-import { useMcpServers, useRoleTemplates, useSettings, useSkills, useWorkspaceId } from "@/hooks/queries";
+import { BookOpenCheck, Crown, Flag, Maximize2, MessageSquare, MoreHorizontal, PenLine, Plug, Power, Trash2, X } from "lucide-react";
+import { useCompanyId, useMcpServers, useRoleTemplates, useSettings, useSkills, useWorkspaceId } from "@/hooks/queries";
 import { PERMISSIONS, TOOLS } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useCanvas, type AgentData } from "@/stores/canvas";
@@ -11,10 +11,11 @@ import type { AgentPermission, AgentTools } from "@/types";
 import { AgentAvatar } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch } from "@/components/ui/primitives";
-import { Select, Tip } from "@/components/ui/overlays";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Select, Tip } from "@/components/ui/overlays";
 import { Combobox } from "@/components/ui/combobox";
 import { EFFORTS } from "./EffortPicker";
 import { applyRole, EFFORT_OPTIONS, isLinked, presetOf, roleOptions, TOOL_PRESETS } from "./roleHelpers";
+import { ScopedMemoryPanel } from "@/features/editor/ScopedMemoryPanel";
 
 /**
  * Mini configuration window next to a clicked agent node. Everything except the name is picked from a list (role,
@@ -62,6 +63,7 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
   const { data: roles = [] } = useRoleTemplates();
   const { data: settings } = useSettings();
   const w = useWorkspaceId();
+  const { companyId } = useCompanyId();
   const nav = useNavigate();
   const [customTools, setCustomTools] = React.useState(false);
   const tools = (data.tools ?? {}) as AgentTools;
@@ -77,9 +79,8 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
   const preset = presetOf(tools, role);
   const modelOptions = React.useMemo(() => (settings?.providers ?? []).flatMap((p) => p.models.map((m) => ({
     value: `${p.provider}::${m}`, label: m, group: p.label, hint: p.configured || p.provider === "mock" ? undefined : "not connected yet" }))), [settings]);
-  const effProvider = data.provider === "mock" ? "mock" : "azure";
-  const effModels = settings?.providers.find((p) => p.provider === effProvider)?.models ?? [];
-  const modelValue = `${effProvider}::${effModels.includes(data.model ?? "") ? data.model : effModels[0] ?? data.model}`;
+  const effProvider = data.provider || settings?.default_provider || "mock";
+  const modelValue = `${effProvider}::${data.model || "default"}`;
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -109,7 +110,6 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <AgentAvatar name={data.name} color={data.color} avatar={data.avatar} size={24} />
         <span className="flex-1 truncate text-sm font-semibold">{data.name || "Agent"}</span>
-        <Tip content="All settings"><Button variant="ghost" size="icon-sm" onClick={() => setInspector(id)} aria-label="Open full inspector"><Maximize2 /></Button></Tip>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close"><X /></Button>
       </div>
 
@@ -132,6 +132,9 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
           </div>
         </div>
 
+        <details className="rounded-lg border border-border p-2">
+          <summary className="cursor-pointer text-xs font-medium">Team <span className="ml-1 font-normal text-muted-foreground">{data.department || "No department"}</span></summary>
+          <div className="mt-2 space-y-2">
         <div className="grid grid-cols-[1fr_auto] items-end gap-2">
           <Field label="Department">
             <Combobox value={(data.department as string) ?? ""} ariaLabel="Department" placeholder="No department"
@@ -146,24 +149,20 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
             </button>
           </Tip>
         </div>
-        <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+        <div>
           <Field label="Reports to">
             <Select value={(data.reports_to as string) ?? "none"} onValueChange={(v) => update(id, { reports_to: v === "none" ? null : v }, { history: true })}
               options={[{ value: "none", label: "Nobody (top level)" }, ...managers.map((m) => ({ value: m.id, label: m.data.name, hint: m.data.department || m.data.role }))]} className="h-8 text-xs" />
           </Field>
-          <Tip content={data.active === false ? "Inactive: never takes turns or receives messages" : "Active"}>
-            <button role="switch" aria-checked={data.active !== false} aria-label="Active"
-              onClick={() => update(id, { active: data.active === false }, { history: true })}
-              className={cn("flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition active:scale-95", data.active !== false ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground")}>
-              <Power className="h-3.5 w-3.5" />{data.active !== false ? "Active" : "Inactive"}
-            </button>
-          </Tip>
         </div>
+          </div>
+        </details>
 
         <div className="grid grid-cols-[1fr_108px] gap-2">
           <Field label="Model">
             <Combobox value={modelValue} options={modelOptions} ariaLabel="Model" className="font-mono text-xs"
-              onChange={(v) => { const [p, m] = v.split("::"); update(id, { provider: p, model: m }, { history: true }); }} />
+              placeholder={data.model || "Choose model"}
+              onChange={(v) => { const choice = modelOptions.find((option) => option.value === v); if (!choice) return; const separator = v.indexOf("::"); update(id, { provider: v.slice(0, separator), model: v.slice(separator + 2) }, { history: true }); }} />
           </Field>
           <Field label="Thinking">
             <Select ariaLabel="Reasoning effort" value={(behavior.reasoning_effort ?? "default") as string} className="h-8 text-xs"
@@ -185,6 +184,18 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
           </Field>
         </div>
 
+        <div className="flex items-center justify-between gap-2">
+          <button role="switch" aria-checked={data.active !== false} aria-label="Active"
+            onClick={() => update(id, { active: data.active === false }, { history: true })}
+            className={cn("flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition active:scale-95", data.active !== false ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground")}>
+            <Power className="h-3.5 w-3.5" />{data.active !== false ? "Active" : "Inactive"}
+          </button>
+          <span className="text-[10px] text-muted-foreground">Permissions cap this agent’s access.</span>
+        </div>
+
+        <details className="rounded-lg border border-border p-2">
+          <summary className="cursor-pointer text-xs font-medium">Skills and tools <span className="ml-1 font-normal text-muted-foreground">{TOOLS.filter((tool) => tools[tool.key]).length} tools</span></summary>
+          <div className="mt-3 space-y-3">
         <AgentSkills id={id} behavior={behavior} roleKey={roleKey} />
 
         <div className="space-y-1.5">
@@ -233,12 +244,17 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
             </div>
           )}
         </div>
+          </div>
+        </details>
       </div>
 
       <div className="flex items-center gap-1 border-t border-border bg-surface px-2 py-1.5">
         <Button variant="ghost" size="xs" onClick={() => nav(`/w/${w}/chat?agent=${id}`)}><MessageSquare />Chat</Button>
         <Button variant="ghost" size="xs" onClick={() => setInspector(id)}><Maximize2 />All settings</Button>
-        <Button variant="ghost" size="xs" className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => deleteNodes([id])}><Trash2 />Delete</Button>
+        {companyId && <ScopedMemoryPanel workspace={w} companyId={companyId} agentId={id} agents={nodes.map((node) => ({ id: node.id, name: node.data.name }))} />}
+        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" className="ml-auto" aria-label="Agent actions"><MoreHorizontal /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end"><DropdownMenuItem className="text-destructive" onSelect={() => deleteNodes([id])}><Trash2 />Delete agent</DropdownMenuItem></DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );

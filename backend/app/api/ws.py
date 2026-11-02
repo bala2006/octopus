@@ -77,7 +77,16 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
         if seq is not None:
             if seq <= sent_seq:
                 return
-            sent_seq = seq
+            # Concurrent committed producers can relay out of order. Fill the
+            # durable gap before advancing the client's cursor.
+            async with ctx.sf() as db:
+                pending_rows = (await db.scalars(select(RunEvent).where(RunEvent.run_id == run_id,
+                    RunEvent.id > sent_seq, RunEvent.id <= seq).order_by(RunEvent.id))).all()
+            for row in pending_rows:
+                await ws.send_json({"type": row.type, "run_id": run_id, "data": row.payload_json,
+                                    "seq": row.id, "ts": row.created_at.isoformat(), "replay": event.get("replay", False)})
+                sent_seq = row.id
+            return
         await ws.send_json(event)
 
     try:
@@ -107,7 +116,7 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
         async def receive() -> None:
             while True:
                 msg = await ws.receive_json()
-                await handle_client(msg, run_id, project)
+                await handle_client(msg, run_id, project, user=user, ctx=ctx)
 
         pump_task = asyncio.create_task(pump())
         recv_task = asyncio.create_task(receive())
@@ -151,20 +160,25 @@ async def browser_socket(ws: WebSocket, workspace_id: str, run_id: str, agent_id
             await ws.close()
 
 
-async def handle_client(msg: dict[str, Any], run_id: str, project: ProjectRef) -> None:
+async def handle_client(msg: dict[str, Any], run_id: str, project: ProjectRef, *, user=None, ctx=None) -> None:
     kind = msg.get("type")
     if kind in (None, "pong"):
         return
     if kind in ("interject", "user_message", "continue"):
-        # live run → interjection; finished run → continue it like a chat (same run, full context)
-        content = str(msg.get("content", "")).strip()[:20000]
-        to = msg.get("to_agent_id") or None
-        if content:
-            for _ in range(40):
-                if await manager.continue_run(run_id, project, content, to):
-                    return
-                await asyncio.sleep(0.1)
-            await bus.publish(run_id, "error", {"message": "Run could not be continued", "kind": "client"}, project.sf)
+        from uuid import uuid4
+        from app.api.v1.runs import queue_request
+        from app.schemas import InterjectIn
+        from pydantic import ValidationError
+        try:
+            if user is None or ctx is None:
+                raise ValueError("An authenticated project connection is required")
+            body = InterjectIn(content=msg.get("content", ""), to_agent_id=msg.get("to_agent_id"),
+                attachments=msg.get("attachments") or [], client_request_id=msg.get("client_request_id") or str(uuid4()),
+                delivery="steer" if msg.get("delivery") == "steer" else "queue")
+            async with project.sf() as db:
+                await queue_request(run_id, body, db, user, ctx)
+        except (ValueError, HTTPException, ValidationError) as exc:
+            await bus.publish(run_id, "error", {"message": str(getattr(exc, "detail", exc)), "kind": "client"}, project.sf)
         return
     rt = await manager.ensure(run_id, project)
     if rt is None:

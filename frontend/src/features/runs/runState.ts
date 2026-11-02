@@ -4,8 +4,8 @@ import type { AgentOut, EdgeOut, MessageOut, PendingApproval, RunEvent } from "@
 import { appendStream } from "./streamView";
 
 export interface ToolCall { call_id: string; agent_id: string; tool: string; args: Record<string, unknown>; ok?: boolean; output?: string; turn_no?: number; seq?: number }
-export interface LiveTask { key: string; title: string; status: string; assignee_agent_id?: string | null; description?: string; acceptance_criteria?: string }
-export interface LiveArtifact { id: string; path: string; version: number; author_agent_id?: string | null; change_note?: string; planned?: boolean; created?: boolean; size?: number; lines?: number; previous_lines?: number; created_at?: string }
+export interface LiveTask { key: string; title: string; status: string; assignee_agent_id?: string | null; description?: string; acceptance_criteria?: string; constraints_json?: { dependencies?: string[]; write_paths?: string[]; max_turns?: number } }
+export interface LiveArtifact { id: string; path: string; version: number; author_agent_id?: string | null; change_note?: string; planned?: boolean; created?: boolean; deleted?: boolean; size?: number; lines?: number; previous_lines?: number; created_at?: string }
 export interface TimelineItem { seq: number; type: string; ts?: string; agent_id?: string | null; label: string; tone: "msg" | "protocol" | "file" | "tool" | "status" | "error" | "approval" | "org" }
 export interface OrgEvent { seq: number; kind: "created" | "updated"; by: string; agent_id: string; name: string; role?: string; department?: string; summary?: string; reason?: string; self?: boolean; persisted?: boolean; ts?: string }
 export type FeedMessage = MessageOut & { _seq?: number };

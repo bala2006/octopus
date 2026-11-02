@@ -18,6 +18,8 @@ os.environ.update({
     "MOCK_STREAM_DELAY": "0",
     "DEMO_MODE": "true",
     "SINGLE_USER_MODE": "true",
+    "DEFAULT_PROVIDER": "azure",
+    "DEFAULT_MODEL": "gpt-6-luna",
     "RATE_LIMIT_PER_MINUTE": "100000",
     "SANDBOX_TIMEOUT_S": "60",
 })

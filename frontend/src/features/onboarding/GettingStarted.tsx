@@ -21,7 +21,7 @@ export function GettingStarted({ onRun }: { onRun?: () => void }) {
   const hasRun = !!runs.data?.length;
   const finished = !!runs.data?.some((r) => r.status === "completed");
   const steps: Step[] = [
-    { title: "Open a project folder", hint: "Agents only work inside it.", done: true },
+    { title: "Create a project", hint: "Choose a local source folder for your agents.", done: true },
     { title: "Create a team", hint: "Start from a template, then tweak agents.", done: !!companies.data?.length },
     { title: "Connect a model", hint: "Optional: Demo Mode runs offline.", done: modelReady, optional: true,
       action: <Link to={`/w/${w}/settings#providers`} className="text-primary hover:underline">Connect</Link> },

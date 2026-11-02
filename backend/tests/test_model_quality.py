@@ -45,8 +45,9 @@ def test_long_tool_results_and_messages_are_marked_not_silently_cut() -> None:
                                blackboard="", names={}, recent_n=10)
     assert f"[truncated: showing {TOOL_RESULT_CHARS:,} of {len(big):,} characters" in prompt
     assert "offset" in prompt, "a cut file read tells the agent how to get the rest"
-    m = {"from": "b", "to": "a", "type": "task", "content": "y" * 3000, "turn": 1, "meta": {}}
+    m = {"id": "original-message", "from": "b", "to": "a", "type": "task", "content": "y" * 3000, "turn": 1, "meta": {}}
     assert "[truncated: 1,500 of 3,000 chars]" in fmt_msg(m, {"b": "Ben"}, "a", 1500)
+    assert "message:original-message" in fmt_msg(m, {"b": "Ben"}, "a", 1500)
 
 
 async def test_read_file_returns_big_files_in_pages(client, workspace) -> None:
@@ -87,15 +88,16 @@ class SilentJudge(ScriptedProvider):
             yield ch
 
 
-async def test_unanswered_condition_is_delivered_with_a_warning(client, workspace) -> None:
+async def test_unanswered_condition_blocks_delivery_with_a_warning(client, workspace) -> None:
     agents = [agent("a", "Ann", entry=True), agent("b", "Ben")]
     cid = await make_company(client, workspace, agents, [edge("e", "a", "b", "delegate", condition="when the spec is approved")])
     set_provider_override(SilentJudge({"Ann": [env(msg("Ben", "task", "Build it"))]}))
     run = await start_run(client, workspace, cid)
     await wait_status(client, workspace, run["id"])
-    assert any(m["to_agent_id"] == "b" for m in await run_messages(client, workspace, run["id"]))
+    assert not any(m["to_agent_id"] == "b" for m in await run_messages(client, workspace, run["id"]))
     warn = [e["payload"]["message"] for e in await events(client, workspace, run["id"], "error") if e["payload"].get("kind") == "warning"]
     assert any("could not be evaluated (no answer)" in w for w in warn)
+    assert any("delivery is blocked" in w for w in warn)
 
 
 async def test_invalid_actions_are_visible_in_the_run(client, workspace) -> None:

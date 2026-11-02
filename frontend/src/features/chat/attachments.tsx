@@ -1,6 +1,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { FileText, X } from "lucide-react";
+import { create } from "zustand";
 import { fetchRaw } from "@/lib/api";
 import type { ParsedFileOut } from "@/types";
 
@@ -8,6 +9,29 @@ const TEXT_ACCEPT = ".txt,.md,.markdown,.pdf,.py,.js,.ts,.tsx,.jsx,.json,.yaml,.
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp";
 export const MAX_ATTACHMENTS = 5;
 export const MAX_IMAGES = 4;
+
+// Keep home-composer attachments in memory while navigating into a project.
+export const usePendingAttachments = create<{
+  pending: Record<string, ParsedFileOut[]>;
+  home: ParsedFileOut[];
+  setHome: (files: ParsedFileOut[]) => void;
+  stageHome: (workspace: string) => void;
+  take: (workspace: string) => ParsedFileOut[];
+}>((set, get) => ({
+  pending: {},
+  home: [],
+  setHome: (home) => set({ home }),
+  stageHome: (workspace) => set((state) => state.home.length ? { home: [], pending: { ...state.pending, [workspace]: state.home } } : state),
+  take: (workspace) => {
+    const files = get().pending[workspace] ?? [];
+    set((state) => {
+      const pending = { ...state.pending };
+      delete pending[workspace];
+      return { pending };
+    });
+    return files;
+  },
+}));
 
 export const isImage = (f: ParsedFileOut) => f.kind === "image";
 export const imageSrc = (f: ParsedFileOut) => `data:${f.mime || "image/png"};base64,${f.data}`;

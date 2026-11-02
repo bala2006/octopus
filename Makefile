@@ -12,7 +12,7 @@ setup: ## Install backend (venv) + frontend deps
 dev: ## Hot-reload dev: API on :8000, UI on :5173 (proxying /api and /ws)
 	@echo "UI → http://localhost:5173   API docs → http://localhost:8000/docs"
 	@trap 'kill 0' INT TERM; \
-	(cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000) & \
+	(cd backend && .venv/bin/python -m app.dev --port 8000) & \
 	(cd frontend && npm run dev) & wait
 
 start: ## Production-style single process: build UI, serve UI + API on :8000

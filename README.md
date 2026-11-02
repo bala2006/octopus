@@ -54,6 +54,7 @@ On **Windows**, use PowerShell from this folder:
 ```powershell
 .\octopus.ps1 setup       # create the Python venv and install locked frontend dependencies
 .\octopus.ps1 start       # build and serve http://127.0.0.1:8000; Ctrl+C stops it
+.\octopus.ps1 dev         # live UI updates at :5173 and backend reload at :8000
 .\octopus.ps1 check       # inspect installed prerequisites without installing anything
 .\octopus.ps1 test        # backend and frontend checks
 ```
@@ -72,8 +73,16 @@ make dev                    # API :8000 (docs at /docs) + UI :5173
 
 1. **Open project folder** and pick or create a folder in the dialog that opens.
 2. **Create company** and choose a template, for example *Software Startup*.
-3. Press **Run**, type a goal, keep **Demo Mode** on, and watch.
+3. Send a message. New conversations use your installed OpenCode by default. Select **Offline demo** in the model picker for scripted responses.
 4. When it finishes, type a follow-up in the same box. The run continues.
+
+### Local OpenCode
+
+Octopus starts the OpenCode already installed on the backend computer using its [Agent Client Protocol](https://opencode.ai/v2/docs/cli/acp/). It does not download, install, or upgrade OpenCode. The integration uses its existing provider login, project configuration, tools, and permission rules. OpenCode permission requests are relayed to the conversation for approval.
+
+The model picker lists models reported by `opencode models`. **OpenCode default** uses the model configured in OpenCode; selecting a specific model applies it to that conversation. Messages and follow-ups share a persisted OpenCode session, and responses stream into Octopus. Stop terminates the backend-owned process. Token usage feeds the personal Activity dashboard.
+
+Run the backend natively on the computer with OpenCode installed. A Docker container cannot execute a Windows or macOS host installation. If PATH discovery fails, set `OPENCODE_EXECUTABLE` in `.env` to the absolute path of the existing executable. Model settings shows connection status and the resolved executable. This host integration is available in local single-user mode. OpenCode's own tools and permission rules apply; its execution is outside Octopus's agent command sandbox. Read-only and plan conversations select OpenCode's plan agent.
 
 ## Configuration
 
@@ -128,8 +137,9 @@ both:
   (`C:\Users\me\code\game`). To share less, set e.g. `OCTOPUS_HOST_DIR=C:\Users\me\code` before starting.
   Whatever you share is reachable from inside the container, so share only what Octopus should see.
 - **Your system folder dialog.** They also start `scripts/folder_bridge.py` on the laptop (Python 3.9+, standard library
-  only). "Open project folder" asks it to show the native dialog, and the folder you pick opens through the shared
-  folder. It listens on `127.0.0.1:8765` and only answers the Octopus UI. Without Python you get the in-app browser,
+  only). On Windows, `start.bat` checks PATH and then `%USERPROFILE%\py313\python.exe`. The Add button opens the native
+  Explorer-style folder picker, and the folder you pick opens through the shared folder. It listens on
+  `127.0.0.1:8765` and only answers the Octopus UI. Without Python you get the in-app browser,
   which browses the shared folder.
 
 Plain `docker compose up --build` works too; you just get the in-app browser instead of the system dialog. Running
@@ -233,7 +243,8 @@ The doodle octopus lives in [`docs/brand/`](docs/brand): `logo.svg` (full), `log
 
 ## Security
 
-- **File access.** Agents only see the project folder. Absolute paths, `..` and symlinks that escape the folder are rejected on real paths. `.octopus/` and `.git/` are off-limits except `.octopus/work/`, where agents keep their working documents (specs, plans, briefs, QA notes) so your folder only gets the deliverables. Secrets (`.env`, keys) are blocked outside danger mode.
+- **Execution boundary.** The desktop worker runs in trusted-host mode. Filesystem tools enforce project paths, but an unrestricted host command or inherited OpenCode integration is not contained by those application checks. Restricted execution is rejected until an enforceable runner is configured. Staging folders separate cooperative edits; they are not OS sandboxes.
+- **File access.** Octopus file tools reject absolute paths, `..` and symlinks that escape the folder on real paths. `.octopus/` and `.git/` are off-limits except `.octopus/work/`, where agents keep their working documents. Secret-looking filenames are blocked outside danger mode.
 - **Agent commands.** They run without a shell, with a scrubbed environment, bounded output, and a timeout. POSIX also applies CPU, file-size, and process limits. Address-space limits apply to compatible runtimes; Node, Go, Java, Dart, and Flutter are exempt because their large virtual reservations prevent startup under that limit. Network is disabled with `unshare -n` where available. An allowlist applies outside danger mode; `SANDBOX_MODE=docker` supplies container isolation and memory limits.
 - **Workspace commands and servers.** These start only from explicit user actions and run as local processes. They keep your user home and SDK path settings so Git identity, package configuration, and SDK discovery work, while omitting provider keys from the environment. They retain command restrictions, bounded live output, and owned-process start/stop controls. They can access the network for package installs and development servers; these managed processes require subprocess mode.
 - **Folder dialog.** It only opens for browsers on the same machine. The backend registers the chosen folder itself, so the browser never sends a path.
@@ -241,6 +252,20 @@ The doodle octopus lives in [`docs/brand/`](docs/brand): `logo.svg` (full), `log
 - **Browser.** The agents' browser uses an isolated, in-memory profile, so none of your cookies or logins.
 - **MCP.** stdio MCP servers run commands **you** configure (`MCP_ALLOW_STDIO=false` disables them).
 - **API.** It binds to `127.0.0.1`, with rate limiting, strict CORS and Pydantic validation. Single-user mode is on by default; set `SINGLE_USER_MODE=false` for JWT login.
+
+## Agent workflows and memory
+
+The floating chat routes unaddressed requests to one accountable lead. Use `@Name` to address an eligible specialist. A node keeps its own model and thinking level unless you explicitly choose a whole-team override.
+
+Choose Auto, Explain, Fix, Build, or Review from the chat menu for a new conversation. Pinned pstack bundles supply the engineering steps; the backend checks ownership, ordered checkpoints, and observed evidence. Fix requires the failing reproduction to pass on the resulting revision. Tasks and Report show attempts, blockers, and stale or missing proof. A passing unrelated command cannot certify every file.
+
+Accepted follow-ups are queued in the project database. Steering supersedes older revisions. Interrupted invocations require recovery review before retry; an approval card cannot authorize a superseded write. Independent specialists use separate text stages with base-content checks before canonical integration. The lead reviews their result before accepting completion.
+
+Open **Memory** from agent configuration or execution details to inspect agent, group, chat, and project notes. Notes retain versions and source IDs. Sharing to a group requires an explicit audience choice. Pinned verified constraints and proposed observations are labeled separately; originals remain retrievable. These access controls apply to application retrieval and do not sandbox trusted-host processes.
+
+Octopus uses the installed OpenCode executable without downloading or upgrading it. Auto thinking uses that CLI's default; explicit unsupported settings fail visibly. Provider quotas and authentication remain the provider's responsibility.
+
+See the [implementation checkpoints](docs/design/agent-runtime-progress.md), [reliability evaluation](docs/design/runtime-evaluation.md), and [installed capability report](docs/design/runtime-capabilities.json). Run local diagnostics with `backend\.venv\Scripts\python.exe scripts/runtime_doctor.py` and reliability fixtures with `backend\.venv\Scripts\python.exe scripts/evaluate_runtime.py` on Windows.
 
 
 ## Open source and community

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import "./index.css";
 import { App } from "./App";
 import { ApiError } from "./lib/api";
+import { HoverHints } from "./components/ui/HoverHints";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,6 +22,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
+      <HoverHints />
     </QueryClientProvider>
   </React.StrictMode>,
 );

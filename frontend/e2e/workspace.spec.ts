@@ -40,6 +40,49 @@ async function typeCode(page: Page, text: string) {
   await page.keyboard.type(text);
 }
 
+test("model popup remains anchored after canvas focus collapses and restores chat", async ({
+  page,
+  request,
+}) => {
+  const { w } = await setup(request);
+  const response = await request.post(
+    `/api/v1/w/${w}/companies/from-template`,
+    { data: { template_key: "solo_engineer" } },
+  );
+  expect(response.ok()).toBeTruthy();
+  await page.goto(`/w/${w}/agent`);
+  await expect(page.locator("#conversation-canvas .react-flow__node")).toHaveCount(1);
+  const floating = page.locator(".conversation-floating-chat");
+  const model = page.getByRole("button", {
+    name: /^Select model and thinking level:/,
+  });
+  const popup = page.locator(".thinking-popover");
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    await model.click();
+    await expect(popup).toBeVisible();
+    await expect(async () => {
+      const anchor = await model.boundingBox({ timeout: 1000 });
+      const bounds = await popup.boundingBox({ timeout: 1000 });
+      expect(anchor).not.toBeNull();
+      expect(bounds).not.toBeNull();
+      if (!anchor || !bounds)
+        throw new Error("Visible popup and model trigger need layout bounds");
+      expect(bounds.x).toBeGreaterThan(720);
+      expect(bounds.y).toBeGreaterThan(40);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(1440);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(anchor.y + 1);
+    }).toPass();
+    await page
+      .locator("#conversation-canvas .react-flow__pane")
+      .click({ position: { x: 80, y: 200 } });
+    await expect(floating).toHaveAttribute("data-window-state", "collapsed");
+    await expect(popup).not.toBeVisible();
+    await page.getByRole("button", { name: /^Restore chat:/ }).click();
+    await expect(floating).toHaveAttribute("data-window-state", "minimized");
+    await expect(model).toBeVisible();
+  }
+});
+
 test("live command output survives navigation, receives input, and can be stopped", async ({
   page,
   request,
