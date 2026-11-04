@@ -454,3 +454,7 @@ select option { background: hsl(var(--surface)); color: hsl(var(--foreground)); 
   .home-composer-context { min-height: 40px; padding: 3px 8px; }
   .home-computer-context { gap: 6px; padding: 0 5px; font-size: 11px; }
 }
+
+/* Agents hired during a run: previews on the canvas until the run's hires are saved to the company. */
+.react-flow__node.live-hire { opacity: 0.8; }
+

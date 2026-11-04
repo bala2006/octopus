@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useLiveHires } from "@/features/runs/liveHires";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -265,6 +266,11 @@ function CompanyAgentPanel({
     [base],
   );
   const { state, conn } = useRunStream(w, run.data ? runId : undefined, names);
+  const setLiveHires = useLiveHires((h) => h.setHires);
+  React.useEffect(() => {
+    setLiveHires(runId ?? null, state.extraAgents);
+  }, [runId, state.extraAgents, setLiveHires]);
+  React.useEffect(() => () => setLiveHires(null, []), [setLiveHires]);
   const agents = Object.fromEntries(
     [...base, ...state.extraAgents].map((a) => [
       a.id,
@@ -1546,7 +1552,7 @@ function CompanyAgentPanel({
                 Attaching files…
               </p>
             )}
-            {!companyId && (
+            {!companyId && !floatingWindow && (
               <p className="mb-2 text-xs text-muted-foreground">
                 Your first message creates a coding agent. You can add a team
                 later.
