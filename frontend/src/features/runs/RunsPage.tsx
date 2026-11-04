@@ -37,7 +37,7 @@ export default function RunsPage() {
   });
   const stop = useMutation({
     mutationFn: (id: string) => unwrap(api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/control/{action}", { params: { path: { workspace_id: w, run_id: id, action: "stop" } } })),
-    onSuccess: () => { refresh(); toast("Run stopped"); },
+    onSuccess: () => { refresh(); },
     onError: (e: Error) => toast.error(e.message),
   });
   const rerun = useMutation({

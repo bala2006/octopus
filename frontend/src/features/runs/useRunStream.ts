@@ -86,7 +86,6 @@ export function useRunStream(
               });
             else if (st === "failed")
               toast.error("Run halted", { description: e.data.reason });
-            else toast("Run stopped");
           }
         }
         if (e.type === "approval_requested")
