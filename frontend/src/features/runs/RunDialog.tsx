@@ -8,13 +8,12 @@ import {
   Paperclip,
   Play,
   ShieldCheck,
-  Sparkles,
   X,
   Zap,
 } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { qk, useSettings, useWorkspace, useWorkspaceId } from "@/hooks/queries";
+import { qk, useWorkspace, useWorkspaceId } from "@/hooks/queries";
 import type { ParsedFileOut, PermissionLevel, RunDetail } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
@@ -81,7 +80,6 @@ export function RunDialog({
 }) {
   const w = useWorkspaceId();
   const ws = useWorkspace(w);
-  const settings = useSettings();
   const nav = useNavigate();
   const qc = useQueryClient();
   const [goal, setGoal] = React.useState(initialGoal);
@@ -90,20 +88,9 @@ export function RunDialog({
   const [perm, setPerm] = React.useState<PermissionLevel>(
     (ws.data?.default_permission as PermissionLevel) ?? "ask",
   );
-  const anyConfigured =
-    settings.data?.providers.some(
-      (p) => p.provider !== "mock" && p.configured,
-    ) ?? false;
   const [adv, setAdv] = React.useState(false);
   const [approvalMode, setApprovalMode] = React.useState<"ask" | "auto">("ask");
   const [budget, setBudget] = React.useState(defaultRunBudget);
-  const demo =
-    budget.model?.provider === "mock" || (!budget.model && !anyConfigured);
-  const setDemo = (value: boolean) =>
-    setBudget((current) => ({
-      ...current,
-      model: value ? { provider: "mock", model: "mock/demo" } : null,
-    }));
   const att = useAttachments({ images: true });
   React.useEffect(() => {
     if (!open) return;
@@ -131,7 +118,7 @@ export function RunDialog({
             mode,
             permission_level: perm,
             approval_mode: approvalMode,
-            budget: { ...budget, force_mock: demo },
+            budget,
             attachments: attachmentPayload(att.files),
           },
         }),
@@ -141,9 +128,7 @@ export function RunDialog({
       onOpenChange(false);
       att.clear();
       toast.success("Team conversation started", {
-        description: demo
-          ? "Demo Mode: scripted, offline, free"
-          : `${perm.replace("_", " ")} permissions`,
+        description: `${perm.replace("_", " ")} permissions`,
       });
       if (onStarted) onStarted(r);
       else nav(`/w/${w}/runs/${r.id}`);
@@ -312,27 +297,6 @@ export function RunDialog({
               }
             />
           </div>
-          <label
-            className={cn(
-              "flex items-center gap-3 rounded-lg border p-3 transition",
-              demo ? "border-primary/40 bg-primary/5" : "border-border",
-            )}
-          >
-            <Sparkles className="h-4 w-4 text-primary" />
-            <span className="flex-1">
-              <span className="block text-sm font-medium">Demo Mode</span>
-              <span className="block text-xs text-muted-foreground">
-                Scripted, deterministic, offline agents (no API cost). Great for
-                presentations.
-              </span>
-            </span>
-            <Switch
-              checked={demo}
-              onCheckedChange={setDemo}
-              disabled={!anyConfigured && demo}
-              aria-label="Demo mode"
-            />
-          </label>
           <div>
             {adv && (
               <div className="mt-2 grid grid-cols-4 gap-2 animate-fade-up">

@@ -37,6 +37,4 @@ frontend/openapi.json
 # Playwright MCP output
 .playwright-mcp/
 
-# demo video recording scratch
-.demo-video/
 .tmp/

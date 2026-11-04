@@ -1,4 +1,4 @@
-"""Real, runnable artifacts produced by the scripted Demo Mode run ("build a todo app")."""
+"""Real, runnable artifacts produced by the scripted test run ("build a todo app")."""
 from __future__ import annotations
 
 

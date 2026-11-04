@@ -52,7 +52,7 @@ async def inspection_runtime(tmp_path):
 
 
 async def execute(runtime, owner, action):
-    assignment = Assignment(run_id=runtime.run_id, owner=owner, lead="lead", provider="mock", model="mock/demo",
+    assignment = Assignment(run_id=runtime.run_id, owner=owner, lead="lead", provider="azure", model="gpt-6-luna",
                             original_goal=runtime.goal, workflow="review",
                             policy=ExecutionPolicy(permission="danger", capabilities=frozenset({"file_read", "terminal"})))
     attempt_id = await runtime.runtime_store.start_attempt(assignment)

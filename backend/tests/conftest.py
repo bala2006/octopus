@@ -15,8 +15,10 @@ _TMP = Path(tempfile.mkdtemp(prefix="octopus-test-"))
 os.environ.update({
     "OCTOPUS_HOME": str(_TMP / "home"),
     "WORKSPACE_ALLOWED_ROOTS": json.dumps([str(_TMP / "projects")]),
-    "MOCK_STREAM_DELAY": "0",
-    "DEMO_MODE": "true",
+    "FAKE_STREAM_DELAY": "0",
+    "AZURE_API_KEY": "test-key",
+    "AZURE_API_BASE": "https://test.invalid/openai/v1/responses",
+
     "SINGLE_USER_MODE": "true",
     "DEFAULT_PROVIDER": "azure",
     "DEFAULT_MODEL": "gpt-6-luna",
@@ -34,6 +36,7 @@ from app.db.migrate import upgrade_registry  # noqa: E402
 from app.llm.base import LLMChunk, LLMRequest, Usage  # noqa: E402
 from app.llm.router import set_provider_override  # noqa: E402
 from app.main import app  # noqa: E402
+from fakes.fake_provider import FakeProvider  # noqa: E402
 
 upgrade_registry(get_settings().registry_database_url)
 
@@ -52,9 +55,9 @@ class ScriptedProvider:
         self.calls: list[str] = []
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        ctx = req.metadata.get("mock_context")
+        ctx = req.metadata.get("turn_context")
         if ctx is None:  # condition judge / chat
-            yield LLMChunk(delta=req.metadata.get("mock_script", "YES"))
+            yield LLMChunk(delta=req.metadata.get("scripted_reply", "YES"))
             yield LLMChunk(usage=Usage(1, 1, 0.0))
             return
         name = ctx["agent"]["name"]
@@ -86,9 +89,9 @@ class NativeScriptedProvider:
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
         from app.llm.base import ToolCall
 
-        ctx = req.metadata.get("mock_context")
+        ctx = req.metadata.get("turn_context")
         if ctx is None:
-            yield LLMChunk(delta=req.metadata.get("mock_script", "YES"))
+            yield LLMChunk(delta=req.metadata.get("scripted_reply", "YES"))
             yield LLMChunk(usage=Usage(1, 1, 0.0))
             return
         self.requests.append(LLMRequest(**{**req.__dict__, "continuation": list(req.continuation)}))
@@ -127,11 +130,27 @@ def tmp_root() -> Path:
     return _TMP / "projects"
 
 
+@pytest.fixture(autouse=True)
+def default_fake_provider():
+    """Every test answers from the offline fake provider unless it injects its own scripted provider."""
+    set_provider_override(FakeProvider())
+    yield
+    set_provider_override(None)
+
+
 @pytest_asyncio.fixture
 async def client() -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+    set_provider_override(None)
+
+
+@pytest.fixture(autouse=True)
+def default_fake_provider():
+    """Every test answers from the offline fake provider unless it injects its own scripted provider."""
+    set_provider_override(FakeProvider())
+    yield
     set_provider_override(None)
 
 
@@ -146,7 +165,7 @@ async def workspace(client: httpx.AsyncClient, tmp_root: Path, request: pytest.F
 
 
 def agent(aid: str, name: str, *, entry: bool = False, tools: dict[str, Any] | None = None, **kw: Any) -> dict[str, Any]:
-    return {"id": aid, "name": name, "role": kw.pop("role", "Engineer"), "provider": "mock", "model": "mock/demo", "is_entry": entry,
+    return {"id": aid, "name": name, "role": kw.pop("role", "Engineer"), "provider": "azure", "model": "gpt-6-luna", "is_entry": entry,
             "tools": {"terminal": True, **(tools or {})}, "behavior": {"max_autonomous_turns": kw.pop("max_auto", 30)}, **kw}
 
 

@@ -130,19 +130,19 @@ function ConversationTitle() {
   const title = conversation?.goal.split("\n")[0]?.trim() || "New chat";
   return <span title={title}>{title}</span>;
 }
-/** One glance: are agents using a real model, or the offline demo? Click → Settings → Model. */
+/** Shows whether a model is connected. Click → Settings → Model. */
 function ModelStatus() {
   const { data } = useSettings();
   if (!data) return null;
   const ready = data.providers.filter(
-    (p) => p.provider !== "mock" && p.configured,
+    (p) => p.configured,
   );
   return (
     <Tip
       content={
         ready.length
           ? `Connected: ${ready.map((p) => p.label).join(", ")}`
-          : "No model connected. Agents use the offline demo. Click to connect Azure OpenAI or another provider."
+          : "No model connected. Agents can't run until you connect Azure OpenAI in Settings."
       }
       side="bottom"
     >
@@ -164,7 +164,7 @@ function ModelStatus() {
           ready[0].label
         ) : (
           <>
-            Demo mode
+            Not connected
             <span className="hidden 2xl:inline">&nbsp;· connect a model</span>
           </>
         )}

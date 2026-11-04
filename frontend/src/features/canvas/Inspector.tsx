@@ -116,7 +116,7 @@ export function Inspector() {
 
             <TabsContent value="model" className="space-y-4">
               <Heading>Model</Heading>
-              <ModelPicker provider={d.provider ?? "mock"} model={d.model ?? ""} onChange={(p, m) => set({ provider: p, model: m })} />
+              <ModelPicker provider={d.provider ?? "azure"} model={d.model ?? ""} onChange={(p, m) => set({ provider: p, model: m })} />
               <Field label="Reasoning effort" hint="How long the model thinks before answering. Higher = better on hard work, more tokens and time.">
                 <EffortPicker value={(behavior.reasoning_effort ?? "default") as Effort} onChange={(v) => set({ behavior: { ...behavior, reasoning_effort: v } })} />
               </Field>

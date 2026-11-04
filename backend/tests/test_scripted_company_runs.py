@@ -1,9 +1,10 @@
-"""End-to-end Demo Mode: the Software Startup template builds a real todo app offline."""
+"""End-to-end company runs with the scripted test provider: the Software Startup template builds a real todo app."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from app.llm.router import set_provider_override
+from fakes.fake_provider import FakeProvider
 from conftest import events, run_messages, wait_status
 
 
@@ -13,13 +14,13 @@ async def _from_template(client, workspace, key: str) -> dict:  # type: ignore[n
     return r.json()
 
 
-async def test_software_startup_demo(client, workspace) -> None:
-    set_provider_override(None)
+async def test_software_startup_company(client, workspace) -> None:
+    set_provider_override(FakeProvider())
     canvas = await _from_template(client, workspace, "software_startup")
     assert len(canvas["agents"]) == 8 and len(canvas["edges"]) == 14
     r = await client.post(f"/api/v1/w/{workspace['id']}/runs", json={
         "company_id": canvas["company"]["id"], "goal": "Build a todo app with auth", "permission_level": "danger",
-        "budget": {"force_mock": True, "max_turns": 80}})
+        "budget": {"verify_before_finish": False, "workflow": "off", "max_turns": 80}})
     run = r.json()
     done = await wait_status(client, workspace, run["id"], timeout=120)
     assert done["status"] == "completed", done["halt_reason"]
@@ -58,11 +59,11 @@ async def test_software_startup_demo(client, workspace) -> None:
     assert {"thinking", "speaking", "writing", "running"} <= statuses
 
 
-async def test_debate_panel_demo(client, workspace) -> None:
-    set_provider_override(None)
+async def test_debate_panel_company(client, workspace) -> None:
+    set_provider_override(FakeProvider())
     canvas = await _from_template(client, workspace, "debate_panel")
     r = await client.post(f"/api/v1/w/{workspace['id']}/runs", json={
-        "company_id": canvas["company"]["id"], "goal": "Should we adopt AI pair programming?", "budget": {"force_mock": True}})
+        "company_id": canvas["company"]["id"], "goal": "Should we adopt AI pair programming?", "budget": {"verify_before_finish": False, "workflow": "off"}})
     run = r.json()
     done = await wait_status(client, workspace, run["id"])
     assert done["status"] == "completed"
@@ -71,11 +72,11 @@ async def test_debate_panel_demo(client, workspace) -> None:
     assert proto[-1]["state"]["rounds"] >= 2
 
 
-async def test_small_team_demo_review_by_qa(client, workspace) -> None:
-    set_provider_override(None)
+async def test_small_team_review_by_qa(client, workspace) -> None:
+    set_provider_override(FakeProvider())
     canvas = await _from_template(client, workspace, "small_dev_team")
     r = await client.post(f"/api/v1/w/{workspace['id']}/runs", json={
-        "company_id": canvas["company"]["id"], "goal": "Build a todo service", "permission_level": "danger", "budget": {"force_mock": True}})
+        "company_id": canvas["company"]["id"], "goal": "Build a todo service", "permission_level": "danger", "budget": {"verify_before_finish": False, "workflow": "off"}})
     run = r.json()
     done = await wait_status(client, workspace, run["id"], timeout=90)
     assert done["status"] == "completed", done["halt_reason"]
@@ -97,11 +98,11 @@ async def test_export_import_roundtrip(client, workspace) -> None:
 async def test_finished_run_continues_like_a_chat(client, workspace) -> None:
     """Regression: a follow-up after a run finished used to start a brand-new run with no context.
     Now the same run re-opens with its history, task board and files, and the team builds on them."""
-    set_provider_override(None)
+    set_provider_override(FakeProvider())
     canvas = await _from_template(client, workspace, "software_startup")
     base = f"/api/v1/w/{workspace['id']}/runs"
     run = (await client.post(base, json={"company_id": canvas["company"]["id"], "goal": "Build a todo app with auth",
-                                         "permission_level": "danger", "budget": {"force_mock": True, "max_turns": 80}})).json()
+                                         "permission_level": "danger", "budget": {"verify_before_finish": False, "workflow": "off", "max_turns": 80}})).json()
     first = await wait_status(client, workspace, run["id"], timeout=120)
     assert first["status"] == "completed"
     root = Path(workspace["path"])

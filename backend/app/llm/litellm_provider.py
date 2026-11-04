@@ -84,7 +84,7 @@ class LiteLLMProvider:
     @staticmethod
     def supports_native_tools(req: LLMRequest) -> bool:
         """Chat Completions function calling; reasoning deployments on these legacy endpoints keep the JSON envelope."""
-        return req.provider != "mock" and not req.extra.get("reasoning_model")
+        return not req.extra.get("reasoning_model")
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
         try:

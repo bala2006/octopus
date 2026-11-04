@@ -1,6 +1,6 @@
-"""Deterministic, role-aware scripted policies for Demo Mode.
+"""Deterministic, role-aware scripted policies for the offline test provider.
 
-The mock provider receives a `mock_context` describing the agent, its unread inbox,
+The fake provider receives a `turn_context` describing the agent, its unread inbox,
 tool observations and the channels it may use, and returns the same JSON action
 envelope a real LLM would. Policies degrade gracefully when the topology differs
 from the built-in templates (e.g. the user deleted QA): unknown roles fall back to
@@ -11,38 +11,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.llm import demo_assets as A
+from app.orchestrator.roles import ROLE_KEYWORDS, role_category  # noqa: F401
+from fakes import sample_project as A
 
 Ctx = dict[str, Any]
 Action = dict[str, Any]
-
-ROLE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
-    ("ceo", ("ceo", "chief executive", "founder")),
-    ("pm", ("product manager", "product owner", "pm")),
-    ("architect", ("architect",)),
-    ("frontend", ("frontend", "front-end", "ui developer")),
-    ("backend", ("backend", "back-end")),
-    ("qa", ("qa", "quality", "tester", "test engineer")),
-    ("designer", ("designer", "ux", "ui/ux")),
-    ("devops", ("devops", "sre", "infrastructure", "platform")),
-    ("moderator", ("moderator", "judge")),
-    ("proposer", ("proposer", "advocate")),
-    ("critic", ("critic", "skeptic")),
-    ("techlead", ("tech lead", "reviewer")),
-    ("developer", ("developer", "engineer", "programmer")),
-]
-
-
-def role_category(role: str, template_key: str = "") -> str:
-    if template_key:
-        return template_key
-    r = role.lower()
-    for cat, words in ROLE_KEYWORDS:
-        if any(re.search(rf"\b{re.escape(w)}\b", r) for w in words):
-            return cat
-    return "generic"
-
-
 # ---------------------------------------------------------------- helpers
 def _find(ctx: Ctx, *cats: str) -> str | None:
     for cat in cats:
@@ -621,7 +594,7 @@ def _followup_text(content: str) -> str:
 
 
 def followup(ctx: Ctx) -> list[Action] | None:
-    """Continued runs (Demo Mode): apply a follow-up on top of the existing work instead of starting over.
+    """Continued runs (scripted test run): apply a follow-up on top of the existing work instead of starting over.
 
     The entry agent logs the request, hands it to one teammate, and finishes again once that teammate reports back.
     The teammate records the change in the project (docs/CHANGES.md) and reports.

@@ -64,9 +64,9 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
     from app.core.config import get_settings
     from app.schemas import RunModel
     from app.services.opencode import discover
-    if body.budget.model is None and not body.budget.force_mock and get_settings().default_provider == "opencode":
+    if body.budget.model is None and get_settings().default_provider == "opencode":
         body.budget.model = RunModel(provider="opencode", model=get_settings().default_model)
-    if body.budget.model and body.budget.model.provider == "opencode" and not body.budget.force_mock:
+    if body.budget.model and body.budget.model.provider == "opencode":
         if not get_settings().single_user_mode:
             raise HTTPException(422, "Host OpenCode is available only in local single-user mode.")
         local = await discover()
@@ -76,7 +76,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
             raise HTTPException(422, "This model is no longer available in the installed OpenCode. Refresh the model list.")
         if body.mode != "autonomous":
             raise HTTPException(422, "OpenCode conversations use autonomous mode with OpenCode permission requests.")
-    if body.budget.model is not None and body.budget.model.provider == "azure" and not body.budget.force_mock:
+    if body.budget.model is not None and body.budget.model.provider == "azure":
         from app.db.session import registry_factory
         from app.llm.router import allowed_models, is_configured, resolve_credentials
 

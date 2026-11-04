@@ -371,7 +371,7 @@ const SECTIONS: Section[] = [
   {
     id: "models", title: "Connect Azure OpenAI (gpt-6-luna)", icon: Cloud,
     body: <>
-      <p>Out of the box Octopus runs in <b>Demo Mode</b>: a scripted offline model, so you can try everything for free. To use real models open
+      <p>Every agent runs on your Azure OpenAI deployment. To connect it, open
         <b> Settings › Model</b> and fill in three things:</p>
       <ol className="space-y-1.5 pl-5 [list-style:decimal]">
         <li><b>Endpoint</b>: paste it exactly as the Azure or Foundry portal shows it. Octopus detects the format and shows which URL it will call.</li>
@@ -380,7 +380,7 @@ const SECTIONS: Section[] = [
       </ol>
       <EndpointExamples />
       <p>Click <b>Save</b>, then <b>Test connection</b>. The deployment now appears in every agent's model picker. Reasoning models that reject settings such as
-        temperature are handled automatically. Every agent runs on this deployment; the only other choice is the offline Demo model.</p>
+        temperature are handled automatically. Every agent runs on this deployment.</p>
       <Shot name="settings" alt="Azure OpenAI settings card" />
     </>,
   },

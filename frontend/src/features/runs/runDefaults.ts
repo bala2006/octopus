@@ -15,7 +15,6 @@ export const defaultRunBudget = (): RunBudget => ({
   persist_team: true,
   verify_before_finish: true,
   workflow: "auto",
-  force_mock: false,
   reasoning_effort: "default",
   model: null,
   model_scope: "lead",

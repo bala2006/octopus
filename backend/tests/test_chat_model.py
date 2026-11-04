@@ -33,7 +33,11 @@ async def test_conversation_selection_reaches_model_requests_and_survives_follow
     assert saved["budget"]["model"] == {"provider": "azure", "model": "chosen-deployment"}
 
 
-async def test_explicit_unconfigured_model_fails_without_starting_a_demo(client, workspace):
+async def test_explicit_unconfigured_model_fails_without_starting_a_run(client, workspace, monkeypatch):
+    async def not_connected(db, user_id, provider):
+        return None, None, {}
+
+    monkeypatch.setattr(router, "resolve_credentials", not_connected)
     company = await make_company(client, workspace, [agent("a", "Ann", entry=True)], [])
     response = await client.post(f"/api/v1/w/{workspace['id']}/runs", json={
         "company_id": company, "goal": "Keep my message", "budget": {"model": {"provider": "azure", "model": "not-connected"}}})
@@ -42,7 +46,7 @@ async def test_explicit_unconfigured_model_fails_without_starting_a_demo(client,
     assert (await client.get(f"/api/v1/w/{workspace['id']}/runs")).json() == []
 
 
-async def test_explicit_demo_overrides_agent_model(client, workspace):
+async def test_explicit_model_overrides_agent_model(client, workspace):
     provider = ScriptedProvider(default={"actions": [{"action": "finish", "summary": "Done"}]})
     seen = []
     stream = provider.stream
@@ -55,6 +59,6 @@ async def test_explicit_demo_overrides_agent_model(client, workspace):
     provider.stream = record
     set_provider_override(provider)
     company = await make_company(client, workspace, [agent("a", "Ann", entry=True, provider="azure", model="other")], [])
-    run = await start_run(client, workspace, company, budget={"model": {"provider": "mock", "model": "mock/demo"}})
+    run = await start_run(client, workspace, company, budget={"model": {"provider": "azure", "model": "gpt-6-luna"}})
     await wait_status(client, workspace, run["id"])
-    assert seen and all(item == ("mock", "mock/demo") for item in seen)
+    assert seen and all(item == ("azure", "gpt-6-luna") for item in seen)

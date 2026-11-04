@@ -42,7 +42,6 @@ class Settings(BaseSettings):
     single_user_mode: bool = True
     single_user_email: str = "demo@octopus.local"
 
-    demo_mode: bool = True  # when true, the mock provider is used for any agent lacking a key
     default_provider: str = "opencode"
     default_model: str = "default"  # use the model configured in the host's OpenCode
     opencode_executable: str = ""  # existing host installation; never downloaded by Octopus

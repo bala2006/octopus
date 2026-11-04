@@ -336,9 +336,6 @@ function CompanyAgentPanel({
   }, [queued?.length, floatingState, changeFloatingState]);
   const submitLock = React.useRef(false);
   const preparedCompany = React.useRef<CanvasOut | null>(null);
-  const configured = !!settings.data?.providers.some(
-    (p) => p.provider !== "mock" && p.configured,
-  );
   const recordedBudget = recordedComposerSettings(run.data?.budget);
   const permission = modePermission(
     mode,
@@ -459,9 +456,6 @@ function CompanyAgentPanel({
               ...defaultRunBudget(),
               ...preferences,
               ...executionSettings,
-              force_mock:
-                preferences.model?.provider === "mock" ||
-                (!preferences.model && !configured),
               workflow: mode === "ask" ? "off" : "auto",
             },
           },

@@ -17,13 +17,13 @@ export function GettingStarted({ onRun }: { onRun?: () => void }) {
   const settings = useSettings();
   if (onboarded || companies.isLoading || runs.isLoading) return null;
 
-  const modelReady = !!settings.data?.providers.some((p) => p.provider !== "mock" && p.configured);
+  const modelReady = !!settings.data?.providers.some((p) => p.configured);
   const hasRun = !!runs.data?.length;
   const finished = !!runs.data?.some((r) => r.status === "completed");
   const steps: Step[] = [
     { title: "Create a project", hint: "Choose a local source folder for your agents.", done: true },
     { title: "Create a team", hint: "Start from a template, then tweak agents.", done: !!companies.data?.length },
-    { title: "Connect a model", hint: "Optional: Demo Mode runs offline.", done: modelReady, optional: true,
+    { title: "Connect a model", hint: "Agents need Azure OpenAI to run.", done: modelReady, optional: false,
       action: <Link to={`/w/${w}/settings#providers`} className="text-primary hover:underline">Connect</Link> },
     { title: "Run a goal", hint: "Tell the team what to build.", done: hasRun,
       action: onRun && <button onClick={onRun} className="text-primary hover:underline">Run</button> },

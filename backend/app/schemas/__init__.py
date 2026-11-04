@@ -31,7 +31,6 @@ class ORM(BaseModel):
 # ---------- auth ----------
 class AuthConfig(BaseModel):
     single_user_mode: bool
-    demo_mode: bool
 
 
 class Credentials(BaseModel):
@@ -106,8 +105,8 @@ class AgentBase(BaseModel):
     avatar: str = ""
     color: str = Field("#6366f1", pattern=r"^#[0-9a-fA-F]{6}$")
     system_prompt: str = ""
-    provider: str = "mock"
-    model: str = "mock/demo"
+    provider: str = "azure"
+    model: str = "gpt-6-luna"
     temperature: float = Field(0.4, ge=0, le=2)
     max_tokens: int = Field(DEFAULT_AGENT_MAX_TOKENS, ge=64, le=MAX_AGENT_MAX_TOKENS)
     tools: AgentTools = Field(default_factory=AgentTools)
@@ -276,7 +275,7 @@ class GenerateCompanyIn(BaseModel):
 class GenerateCompanyOut(BaseModel):
     spec: CanvasExport
     departments: list[DepartmentSummary]
-    source: Literal["ai", "demo"]
+    source: Literal["ai"]
     warning: str = ""
 
 
@@ -376,7 +375,7 @@ class ParsedFileOut(BaseModel):
 
 # ---------- runs ----------
 class RunModel(BaseModel):
-    provider: Literal["azure", "mock", "opencode"]
+    provider: Literal["azure", "opencode"]
     model: str = Field(min_length=1, max_length=200)
 
 
@@ -396,7 +395,6 @@ class RunBudget(BaseModel):
     # and gates), "off" = free-form, "auto" = the workflow when the team can staff a build and an independent check
     workflow: Literal["auto", "on", "off"] = "auto"
     context_recent: int = Field(30, ge=2, le=200)  # own messages kept verbatim; older ones are summarised
-    force_mock: bool = False  # Demo Mode: every agent uses the scripted offline mock provider
     max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
     persist_team: bool = True  # save agents hired / edited during the run back to the company
     reasoning_effort: ReasoningEffort = "default"  # run-wide override; "default" = each agent's own setting
@@ -570,7 +568,6 @@ class ProviderInfo(BaseModel):
 
 
 class SettingsOut(BaseModel):
-    demo_mode: bool
     single_user_mode: bool
     default_provider: str
     default_model: str

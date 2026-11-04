@@ -15,14 +15,9 @@
 
 **Octopus** gives you a small company of AI agents (a CEO, a product manager, engineers, a reviewer, QA…) that works inside a folder on your laptop. You pick the folder, pick a team, and give it a goal like *"Build a todo app with login"*. The agents plan, debate, delegate, write real files, review each other's code and run the tests. You watch it live, approve the risky steps, and keep the conversation going afterwards to ask for changes.
 
-<p align="center">
-  <a href="docs/media/octopus-demo.mp4"><img src="docs/media/teaser.gif" alt="Octopus in action: a live run" width="760"></a><br>
-  <sub>▶ <a href="docs/media/octopus-demo.mp4"><b>Watch the 1-minute demo</b></a> (real app footage, Demo Mode)</sub>
-</p>
-
 - **Local-first.** The folder you open is the agents' sandbox. Octopus keeps everything it knows about the project in `<folder>/.octopus/`, like `.git`.
 - **One model, done properly.** Azure OpenAI with the `gpt-6-luna` deployment over the v1 Responses API. Token counts and costs are exact, and you choose the reasoning effort.
-- **Try it for free.** Demo Mode runs a scripted, offline company. It needs no keys and makes no network calls.
+- **Your model, your keys.** Every agent runs on your own Azure OpenAI deployment, and keys stay encrypted on your machine.
 
 ## What you can do
 
@@ -73,7 +68,7 @@ make dev                    # API :8000 (docs at /docs) + UI :5173
 
 1. **Open project folder** and pick or create a folder in the dialog that opens.
 2. **Create company** and choose a template, for example *Software Startup*.
-3. Send a message. New conversations use your installed OpenCode by default. Select **Offline demo** in the model picker for scripted responses.
+3. Send a message. New conversations use your installed OpenCode by default, or Azure OpenAI once it is connected in **Settings → Model**.
 4. When it finishes, type a follow-up in the same box. The run continues.
 
 ### Local OpenCode
@@ -94,7 +89,7 @@ Open **Settings → Model**:
 2. **API key**, or Microsoft Entra ID under *Advanced* (`az login`; the identity needs the *Cognitive Services OpenAI User* role).
 3. **Deployment name.** `gpt-6-luna` is prefilled.
 
-Then **Save** and **Test connection**. Every agent runs on this deployment; the only other option is the offline Demo model. If a deployment rejects a parameter (for example `temperature` on a reasoning model), Octopus drops it and remembers. Keys are Fernet-encrypted on your machine and never sent back to the browser.
+Then **Save** and **Test connection**. Every agent runs on this deployment. If a deployment rejects a parameter (for example `temperature` on a reasoning model), Octopus drops it and remembers. Keys are Fernet-encrypted on your machine and never sent back to the browser.
 
 **Reasoning effort.** Set it per agent (quick config or inspector), or for a whole run in the Run dialog. It is sent as `reasoning.effort` and affects quality, speed and tokens.
 
@@ -116,7 +111,6 @@ Octopus starts `@playwright/mcp` on `127.0.0.1` the first time an agent needs a 
 |---|---|---|
 | `AZURE_API_BASE`, `AZURE_API_KEY` | – | Azure endpoint and key (the Settings page wins) |
 | `DEFAULT_MODEL` | `gpt-6-luna` | Deployment for new agents |
-| `DEMO_MODE` | `true` | Fall back to the offline model when Azure isn't configured |
 | `NATIVE_DIALOGS` | `true` | Use the OS folder dialog (off: the in-app browser) |
 | `BROWSER_ENABLED`, `PLAYWRIGHT_BROWSER`, `PLAYWRIGHT_HEADLESS` | `true`, auto, `true` | Agents' built-in browser |
 | `SANDBOX_MODE` | `subprocess` | Use `docker` for container isolation of commands |
@@ -153,7 +147,7 @@ backend/.venv/bin/python scripts/bench.py --projects-root ~/octopus-bench --temp
 
 Runs the coding tasks in `bench/tasks.json` with each template (fresh folder per case, objective checks such as "the
 tests pass") and prints pass rate, turns, coordination overhead, tokens and cost per template. `--repeat 3` evens out
-model randomness; `--demo` checks the harness offline.
+model randomness.
 
 ## How it works
 
@@ -170,7 +164,7 @@ flowchart LR
     WS["WebSockets<br/>runs · chats"]
     ORC["Orchestrator<br/>one runtime per run"]
     BUS["Event bus<br/>persist + fan-out"]
-    LLM["Azure OpenAI v1<br/>+ Demo model"]
+    LLM["Azure OpenAI v1"]
     TOOLS["Tools<br/>files · sandbox · MCP · browser"]
   end
   PW["Playwright MCP<br/>127.0.0.1"]
@@ -188,17 +182,15 @@ flowchart LR
   REST --> REG & PDB
 ```
 
-Agents reply with a validated JSON action schema. The server only delivers messages along channels, and every action goes through the permission gate. Details (the orchestrator loop, protocols, continuation, pricing and the security model) are in **[ARCHITECTURE.md](ARCHITECTURE.md)**. A 10-minute live demo script is in **[DEMO.md](DEMO.md)**.
+Agents reply with a validated JSON action schema. The server only delivers messages along channels, and every action goes through the permission gate. Details (the orchestrator loop, protocols, continuation, pricing and the security model) are in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ```
 octopus/
 ├─ backend/app/{api,core,db,models,schemas,services,orchestrator,llm,tools,prompts}
 │  ├─ migrations/{registry,project}   Alembic (applied automatically)
-│  └─ tests/                          pytest: routing, protocols, limits, security, MCP, teams, demo runs, continuation
+│  └─ tests/                          pytest: routing, protocols, limits, security, MCP, teams, scripted company runs, continuation
 ├─ frontend/src/{components,features/{canvas,chat,runs,artifacts,settings,workspaces,guide,onboarding},hooks,stores,lib,types}
-│  └─ e2e/                            Playwright: happy path + continuation, approvals, org generation, live hiring
-├─ docs/{brand,media,screenshots}     logo, banners, demo video, screenshots
-└─ scripts/demo-video/record.mjs      regenerates the 1-minute demo from the real app
+└─ docs/{brand,media,screenshots}     logo, banners, screenshots
 ```
 
 ## Development
@@ -206,7 +198,6 @@ octopus/
 ```bash
 make test-backend     # pytest (68 tests)
 make test-frontend    # tsc strict + vitest
-make e2e              # Playwright against the real backend in Demo Mode
 make gen-api          # regenerate the typed API client after changing backend schemas
 ```
 
@@ -214,7 +205,6 @@ make gen-api          # regenerate the typed API client after changing backend s
 - backend lint and tests
 - frontend typecheck, unit tests and build
 - a check that the generated API types are up to date
-- Playwright E2E
 - Docker builds
 
 Require the **CI passed** check on `main`.
@@ -224,8 +214,6 @@ Require the **CI passed** check on `main`.
 - `X.Y.Z`, `X.Y` and `latest` for `vX.Y.Z` tags
 
 Dependabot keeps actions and dependencies up to date.
-
-**Demo video.** `node scripts/demo-video/record.mjs` drives the real app in Demo Mode and records `docs/media/octopus-demo.mp4` (see the header of the script).
 
 ## Screenshots
 

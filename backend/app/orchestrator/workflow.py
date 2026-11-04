@@ -132,7 +132,7 @@ class WorkflowMixin:
 
     def wf_enabled_for_run(self: RunRuntime) -> bool:
         mode = getattr(self.budget, "workflow", "auto")
-        if mode == "off" or self.budget.force_mock:
+        if mode == "off":
             return False
         heads = self.entry_agents()
         if len(heads) != 1:
@@ -316,8 +316,7 @@ class WorkflowMixin:
                 return "Nothing was built in this phase: no project file changed. Build the deliverable, run or open it, then finish."
         if ph["key"] in ("test", "review") and a.outcome not in ("pass", "fail"):
             return 'Finish with outcome "pass" or "fail" and concrete evidence.'
-        if (ph["key"] in ("test", "review") and a.outcome == "pass" and self.budget.verify_before_finish
-                and not self.budget.force_mock):
+        if (ph["key"] in ("test", "review") and a.outcome == "pass" and self.budget.verify_before_finish):
             from app.orchestrator.evidence import RevisionEvidence, validate_evidence
             current = self._last_manifest
             cursor = ph.get("evidence_cursor", 0) if ph.get("evidence_version") == 1 else 0
@@ -325,7 +324,7 @@ class WorkflowMixin:
             if not current or not any(proof.producer == agent.id and validate_evidence(proof, current,
                     task_revision=self.plan_revision, environment=self._proof_environment, criterion="requested_outcome").valid for proof in proofs):
                 return "No independent current execution evidence. Run covered acceptance tests or record an observed UI interaction before passing."
-        if ph["key"] == "build" and self.budget.verify_before_finish and not self.budget.force_mock and self.unverified:
+        if ph["key"] == "build" and self.budget.verify_before_finish and self.unverified:
             return "Built files remain unverified: " + ", ".join(sorted(self.unverified)[:8])
         return None
 

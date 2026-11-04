@@ -82,7 +82,7 @@ Backend permissions take precedence over role descriptions, skills, imported pro
 
 Resolve models in this order: an explicit whole-team override selected by the user, an explicit node choice, an approved role default, then the project default. Label the whole-team override clearly. A normal chat model selection controls the lead or the new-agent default according to its visible scope. It must not silently replace explicit node choices.
 
-For thinking effort, respect explicit user settings. Auto may choose an effort within the task's budget and provider capabilities. Snapshot effective model, effort, policy, and skill versions for each attempt. Discover real model IDs from the installed provider configuration. Report unavailable models instead of silently substituting a demo or another model.
+For thinking effort, respect explicit user settings. Auto may choose an effort within the task's budget and provider capabilities. Snapshot effective model, effort, policy, and skill versions for each attempt. Discover real model IDs from the installed provider configuration. Report unavailable models instead of silently substituting another model.
 
 ### Routing and pstack workflows
 

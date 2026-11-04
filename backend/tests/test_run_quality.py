@@ -29,10 +29,10 @@ async def test_delegated_worker_yields_for_peer_answer_then_returns_result_to_le
     run = await start_run(client, workspace, cid, permission_level="danger")
     done = await wait_status(client, workspace, run["id"])
     assert done["status"] == "completed", done["halt_reason"]
-    ben = [r for r in provider.requests if r.metadata["mock_context"]["agent"]["name"] == "Ben"]
+    ben = [r for r in provider.requests if r.metadata["turn_context"]["agent"]["name"] == "Ben"]
     assert any(m["from"] == "Cy" and m["type"] == "answer" and m["content"] == "Use the title game"
-               for m in ben[1].metadata["mock_context"]["inbox"])
-    calls = [request.metadata["mock_context"]["agent"]["name"] for request in provider.requests]
+               for m in ben[1].metadata["turn_context"]["inbox"])
+    calls = [request.metadata["turn_context"]["agent"]["name"] for request in provider.requests]
     assert calls == ["Ann", "Ben", "Cy", "Ben", "Ben", "Ann"]
     messages = await run_messages(client, workspace, run["id"])
     assert [(m["from_agent_id"], m["to_agent_id"], m["type"], m["content"])
@@ -41,7 +41,7 @@ async def test_delegated_worker_yields_for_peer_answer_then_returns_result_to_le
     assert any(m["from_agent_id"] == "b" and m["to_agent_id"] == "a" and m["content"] == "built"
                and m["meta"].get("delegation_result") for m in messages)
     assert any(m["from"] == "Ben" and m["content"] == "built"
-               for m in provider.requests[-1].metadata["mock_context"]["inbox"])
+               for m in provider.requests[-1].metadata["turn_context"]["inbox"])
     assert (Path(workspace["path"]) / "index.html").read_text() == "<h1>game</h1>"
     assert not await events(client, workspace, run["id"], "message_rejected")
 

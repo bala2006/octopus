@@ -61,7 +61,7 @@ export function UsageBreakdown({ usage, children }: { usage: RunLive["usage"]; c
       <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
         <div className="border-b border-border px-3 py-2 text-xs font-semibold">
-          {usage.estimated_calls && usage.estimated_calls === usage.llm_calls ? "Estimated usage (Demo Mode)" : "Usage from Azure"}
+          {usage.estimated_calls && usage.estimated_calls === usage.llm_calls ? "Estimated usage" : "Usage from Azure"}
           {usage.llm_calls ? <span className="font-normal text-muted-foreground"> · {usage.llm_calls} calls{usage.estimated_calls && usage.estimated_calls !== usage.llm_calls ? `, ${usage.estimated_calls} estimated` : ""}</span> : null}
         </div>
         <table className="w-full text-xs tabular-nums">

@@ -57,7 +57,7 @@ async def test_integrated_worker_completion_does_not_certify_changed_code(client
     done = await wait_status(client, workspace, run["id"])
     assert done["status"] == "incomplete"
     assert "not verified" in done["halt_reason"]
-    lead_requests = [r for r in provider.requests if r.metadata["mock_context"]["agent"]["name"] == "Ann"]
+    lead_requests = [r for r in provider.requests if r.metadata["turn_context"]["agent"]["name"] == "Ann"]
     assert any("Not finished yet: verify first" in output for request in lead_requests for output in outs(request))
     assert (Path(workspace["path"]) / "app.py").read_text() == "print(1)\n"
     assert "app.py" in done["state"]["unverified"]

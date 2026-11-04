@@ -37,7 +37,7 @@ async def durable(tmp_path):
 
 
 def assignment(request_id=None):
-    return Assignment(run_id="r", request_id=request_id, owner="a", lead="a", provider="mock", model="mock/demo",
+    return Assignment(run_id="r", request_id=request_id, owner="a", lead="a", provider="azure", model="gpt-6-luna",
                       original_goal="Test", policy=ExecutionPolicy())
 
 

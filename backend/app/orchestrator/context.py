@@ -67,7 +67,7 @@ class AgentSpec:
     @classmethod
     def from_dict(cls, d: dict[str, Any], category: str) -> AgentSpec:
         return cls(id=d["id"], name=d["name"], role=d.get("role", ""), description=d.get("description", ""),
-                   system_prompt=d.get("system_prompt", ""), provider=d.get("provider", "mock"), model=d.get("model", "mock/demo"),
+                   system_prompt=d.get("system_prompt", ""), provider=d.get("provider", "azure"), model=d.get("model", "gpt-6-luna"),
                    temperature=float(d.get("temperature", 0.4)), max_tokens=effective_max_tokens(d.get("max_tokens")),
                    tools=d.get("tools") or {}, behavior=d.get("behavior") or {}, is_entry=bool(d.get("is_entry")),
                    color=d.get("color", "#6366f1"), category=category, department=d.get("department") or "",

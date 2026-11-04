@@ -29,7 +29,7 @@ class TruncatingProvider(ScriptedProvider):
         self.budgets: list[int] = []
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        if req.metadata.get("mock_context") is not None:
+        if req.metadata.get("turn_context") is not None:
             self.budgets.append(req.max_tokens)
             if req.max_tokens < self.needs:
                 yield LLMChunk(delta='{"thought": "writing the game", "actions": [{"action": "write_file", "path": "index.html", "content": "<html>')

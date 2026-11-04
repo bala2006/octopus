@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.llm.base import LLMChunk, LLMRequest
 from app.llm.router import set_provider_override
+from fakes.fake_provider import FakeProvider
 from app.tools.workspace import ProjectFS
 from conftest import NativeScriptedProvider, ScriptedProvider, agent, edge, env, events, make_company, run_messages, start_run, wait_status
 
@@ -33,10 +34,10 @@ async def test_delegation_returns_owned_result_to_lead_in_a_later_turn(client, w
     assert done["status"] == "completed", done["halt_reason"]
     assert (Path(workspace["path"]) / "hello.txt").read_text() == "hi"
     assert done["turns"] == 3, "the lead assigns, the owner works, and the lead accepts the result"
-    result = provider.requests[-1].metadata["mock_context"]["inbox"]
+    result = provider.requests[-1].metadata["turn_context"]["inbox"]
     assert any(message["from"] == "Ben" and message["content"] == "hello.txt written" for message in result)
     assert [t["status"] for t in await tasks(client, workspace, run["id"])] == ["done"]
-    ben_brief = next(r for r in provider.requests if r.metadata["mock_context"]["agent"]["name"] == "Ben").messages[-1]["content"]
+    ben_brief = next(r for r in provider.requests if r.metadata["turn_context"]["agent"]["name"] == "Ben").messages[-1]["content"]
     assert "Objective: Write hello.txt saying hi" in ben_brief and "Done when: the file exists" in ben_brief
     msgs = await run_messages(client, workspace, run["id"])
     assert any(m["type"] == "task" and m["from_agent_id"] == "a" and m["to_agent_id"] == "b" for m in msgs)
@@ -53,7 +54,7 @@ class BarrierProvider(NativeScriptedProvider):
         self.barrier = asyncio.Barrier(2)
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        ctx = req.metadata.get("mock_context")
+        ctx = req.metadata.get("turn_context")
         if ctx and ctx["agent"]["name"] in ("Ben", "Cy") and not req.continuation:
             await asyncio.wait_for(self.barrier.wait(), 5)
         async for ch in super().stream(req):
@@ -74,13 +75,13 @@ async def test_several_delegations_in_one_reply_run_in_parallel(client, workspac
     assert done["status"] == "completed", done["halt_reason"]
     root = Path(workspace["path"])
     assert (root / "a.txt").read_text() == "A" and (root / "b.txt").read_text() == "B"
-    results = provider.requests[-1].metadata["mock_context"]["inbox"]
+    results = provider.requests[-1].metadata["turn_context"]["inbox"]
     assert {(message["from"], message["content"]) for message in results} >= {("Ben", "a done"), ("Cy", "b done")}
     assert done["state"]["metrics"]["delegations"] == 2
 
 
 async def test_delegation_without_native_tools_becomes_a_task_message(client, workspace) -> None:
-    """JSON-envelope path (e.g. the offline demo): a delegation is a structured task message the teammate picks up next."""
+    """JSON-envelope path (the scripted test provider): a delegation is a structured task message the teammate picks up next."""
     set_provider_override(ScriptedProvider({"Ann": [env({"action": "delegate", "to": "Ben", "objective": "Write c.txt", "done_when": "c.txt exists"})],
                                             "Ben": [env({"action": "write_file", "path": "c.txt", "content": "C"})]}))
     cid = await make_company(client, workspace, TEAM, EDGES)
@@ -107,7 +108,7 @@ async def test_ben_cannot_delegate_without_a_channel(client, workspace) -> None:
     messages = await run_messages(client, workspace, run["id"])
     results = [message for message in messages if message["from_agent_id"] == "b" and message["to_agent_id"] == "a" and message["meta"].get("delegation_result")]
     assert results and "Not delegated:" in results[-1]["content"], "Ben sees the refused delegation and reports that result to the lead"
-    assert not any(request.metadata["mock_context"]["agent"]["name"] == "Cy" for request in provider.requests)
+    assert not any(request.metadata["turn_context"]["agent"]["name"] == "Cy" for request in provider.requests)
 
 
 async def test_team_digest_tells_an_agent_what_teammates_did(client, workspace) -> None:
@@ -122,7 +123,7 @@ async def test_team_digest_tells_an_agent_what_teammates_did(client, workspace) 
     cid = await make_company(client, workspace, TEAM, EDGES + [edge("ba", "b", "a", "report")])
     run = await start_run(client, workspace, cid, permission_level="danger")
     await wait_status(client, workspace, run["id"])
-    ann_second = [r for r in provider.requests if r.metadata["mock_context"]["agent"]["name"] == "Ann"][-1]
+    ann_second = [r for r in provider.requests if r.metadata["turn_context"]["agent"]["name"] == "Ann"][-1]
     user = ann_second.messages[-1]["content"]
     assert "# Team activity since your last turn" in user
     assert "Ben: created notes.md (v1): first draft" in user and "Ben: task board: T-1 → done" in user
@@ -192,7 +193,7 @@ async def test_small_team_templates(client, workspace) -> None:
     canvas = r.json()
     assert [a["name"] for a in canvas["agents"]] == ["Sam"] and canvas["agents"][0]["tools"]["terminal"] is True
     run = (await client.post(f"/api/v1/w/{workspace['id']}/runs", json={"company_id": canvas["company"]["id"], "goal": "Build a todo app",
-                                                                        "budget": {"force_mock": True}})).json()
+                                                                        "budget": {"verify_before_finish": False, "workflow": "off"}})).json()
     done = await wait_status(client, workspace, run["id"])
     assert done["status"] == "completed"
     assert json.dumps(done["state"]["metrics"])  # efficiency is recorded for every run
@@ -214,11 +215,11 @@ async def test_bench_case_end_to_end(client, tmp_root: Path) -> None:
     """The harness opens a fresh project, seeds it, runs a template, checks the folder and reports efficiency."""
     from app.services.bench import run_case, summarize
 
-    set_provider_override(None)
+    set_provider_override(FakeProvider())
     tasks = json.loads((Path(__file__).resolve().parents[2] / "bench" / "tasks.json").read_text())
     task = next(t for t in tasks if t["id"] == "fix-failing-tests")
     res = await run_case(client, folder=tmp_root / f"bench-{tmp_root.stat().st_ino}", template="solo_engineer", task=task,
-                         budget={"force_mock": True, "max_turns": 20}, timeout_s=60)
+                         budget={"verify_before_finish": False, "workflow": "off", "max_turns": 20}, timeout_s=60)
     assert res["status"] == "completed" and res["checks"] == 2
     assert res["passed"] is False and res["check_results"][1]["ok"] is True, "the mock doesn't fix bugs; the seeded test file is intact"
     assert res["turns"] >= 1 and res["overhead_share"] is not None

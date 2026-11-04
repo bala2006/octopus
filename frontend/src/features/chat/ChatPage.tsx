@@ -229,7 +229,7 @@ function ChatMessage({ m, agent, isLast, onRegenerate, busy }: { m: MessageOut; 
           <span className="font-semibold" style={{ color: tone(agent.color) }}>{agent.name}</span>
           <span className="text-muted-foreground">{agent.role}</span>
           <span className="font-mono text-[10px] text-muted-foreground">{meta.provider}/{meta.model}</span>
-          {meta.warning && <Tip content={meta.warning}><Badge variant="warning">demo</Badge></Tip>}
+          {meta.warning && <Tip content={meta.warning}><Badge variant="warning">note</Badge></Tip>}
           {meta.stopped && <Badge variant="outline">stopped</Badge>}
         </div>
         {meta.tool_calls?.length > 0 && <ToolCalls calls={meta.tool_calls} />}

@@ -67,7 +67,7 @@ async def test_quick_track_with_a_failed_test_loops_back_to_the_builder(client, 
     assert "FAILED" in briefs[2]["content"] and "prints ko instead of ok" in briefs[2]["content"]
     report = (await client.get(f"/api/v1/w/{workspace['id']}/runs/{run['id']}/report")).text
     assert "## Workflow (quick track)" in report and "| Build | Sam | done | 1 |" in report
-    head_first = next(r for r in provider.requests if r.metadata["mock_context"]["agent"]["name"] == "Ava")
+    head_first = next(r for r in provider.requests if r.metadata["turn_context"]["agent"]["name"] == "Ava")
     names = {t["name"] for t in head_first.tools}
     assert "set_track" in names and "delegate" not in names, "the head plans; the engine hands out the phases"
 
@@ -85,14 +85,14 @@ async def test_gate_sends_an_owner_back_when_its_document_is_missing(client, wor
     cid = await make_company(client, workspace, team, [])
     run = await start_run(client, workspace, cid, budget={**ON, "max_turns": 4})
     await wait_status(client, workspace, run["id"])
-    pia = [r for r in provider.requests if r.metadata["mock_context"]["agent"]["name"] == "Pia"]
+    pia = [r for r in provider.requests if r.metadata["turn_context"]["agent"]["name"] == "Pia"]
     assert "isn't done yet" in outs(pia[1])[-1] and "spec.md" in outs(pia[1])[-1]
     wf = (await events(client, workspace, run["id"], "workflow_updated"))[-1]["payload"]["workflow"]
     statuses = {p["key"]: p["status"] for p in wf["phases"]}
     assert statuses["spec"] == "done" and statuses["design"] == "skipped" and statuses["build"] == "active"
 
 
-async def test_off_and_demo_runs_stay_free_form(client, workspace) -> None:  # type: ignore[no-untyped-def]
+async def test_off_runs_stay_free_form(client, workspace) -> None:  # type: ignore[no-untyped-def]
     provider = NativeScriptedProvider({"Ava": [[("finish", {"summary": "ok"})]]})
     set_provider_override(provider)
     cid = await make_company(client, workspace, TEAM, [])

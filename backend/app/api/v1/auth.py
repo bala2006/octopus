@@ -17,7 +17,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.get("/config", response_model=AuthConfig)
 async def auth_config() -> AuthConfig:
     s = get_settings()
-    return AuthConfig(single_user_mode=s.single_user_mode, demo_mode=s.demo_mode)
+    return AuthConfig(single_user_mode=s.single_user_mode)
 
 
 @router.post("/register", response_model=TokenOut, status_code=201)

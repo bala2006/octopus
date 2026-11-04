@@ -1,7 +1,7 @@
-"""Offline mock provider for Demo Mode and tests.
+"""Offline fake LLM provider used by the test suite.
 
 - kind == "orchestrator": returns the JSON action envelope from the scripted role policies.
-- kind == "chat": returns a role-aware Markdown reply (with a tool-call demo for arithmetic).
+- kind == "chat": returns a role-aware Markdown reply (with a calculator tool call for arithmetic).
 - kind == "summary": returns an extractive summary.
 Streaming is simulated in small chunks so the UI behaves as with a real model.
 """
@@ -14,7 +14,7 @@ import re
 from collections.abc import AsyncIterator
 
 from app.llm.base import LLMChunk, LLMRequest, Usage, estimate_tokens
-from app.llm.demo_script import decide
+from fakes.scripted_policy import decide
 
 
 ROLE_TIPS: dict[str, list[str]] = {
@@ -31,7 +31,7 @@ ROLE_TIPS: dict[str, list[str]] = {
 
 def _delay() -> float:
     try:
-        return float(os.environ.get("MOCK_STREAM_DELAY", "0.012"))
+        return float(os.environ.get("FAKE_STREAM_DELAY", "0.012"))
     except ValueError:
         return 0.012
 
@@ -64,20 +64,20 @@ def _chat_reply(req: LLMRequest) -> str:
             f"From a {role} perspective, I'd approach it like this:\n\n"
             + "\n".join(f"{i}. {t}" for i, t in enumerate(tips, 1))
             + code + mem
-            + "\n\n*(Demo Mode: this is a scripted reply. Add an API key in Settings to use a real model.)*")
+            + "\n\n*(scripted test reply)*")
 
 
-class MockProvider:
-    name = "mock"
+class FakeProvider:
+    name = "fake"
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
         kind = req.metadata.get("kind", "chat")
         if kind == "orchestrator":
-            text = json.dumps(decide(req.metadata["mock_context"]), indent=1)
+            text = json.dumps(decide(req.metadata["turn_context"]), indent=1)
         elif kind == "summary":
             text = req.metadata.get("fallback", "")
-        elif "mock_script" in req.metadata:
-            text = req.metadata["mock_script"]
+        elif "scripted_reply" in req.metadata:
+            text = req.metadata["scripted_reply"]
         else:
             text = _chat_reply(req)
         delay = _delay()
@@ -92,5 +92,5 @@ class MockProvider:
         completion_tokens = estimate_tokens(text)
         from app.llm.pricing import apply
 
-        # Demo Mode: estimated token counts, priced like the real deployment so the cost meter is realistic
+        # Estimated token counts, priced like the real deployment so cost assertions stay realistic
         yield LLMChunk(usage=apply(Usage(prompt_tokens, completion_tokens, estimated=True), "gpt-6-luna"))

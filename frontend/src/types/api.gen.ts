@@ -2220,12 +2220,12 @@ export interface components {
             system_prompt: string;
             /**
              * Provider
-             * @default mock
+             * @default azure
              */
             provider: string;
             /**
              * Model
-             * @default mock/demo
+             * @default gpt-6-luna
              */
             model: string;
             /**
@@ -2314,12 +2314,12 @@ export interface components {
             system_prompt: string;
             /**
              * Provider
-             * @default mock
+             * @default azure
              */
             provider: string;
             /**
              * Model
-             * @default mock/demo
+             * @default gpt-6-luna
              */
             model: string;
             /**
@@ -2569,8 +2569,6 @@ export interface components {
         AuthConfig: {
             /** Single User Mode */
             single_user_mode: boolean;
-            /** Demo Mode */
-            demo_mode: boolean;
         };
         /** Body_parse_upload_api_v1_files_parse_post */
         Body_parse_upload_api_v1_files_parse_post: {
@@ -3069,9 +3067,9 @@ export interface components {
             departments: components["schemas"]["DepartmentSummary"][];
             /**
              * Source
-             * @enum {string}
+             * @constant
              */
-            source: "ai" | "demo";
+            source: "ai";
             /**
              * Warning
              * @default
@@ -3703,11 +3701,6 @@ export interface components {
              */
             context_recent: number;
             /**
-             * Force Mock
-             * @default false
-             */
-            force_mock: boolean;
-            /**
              * Max Agents
              * @default 24
              */
@@ -3863,7 +3856,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "azure" | "mock" | "opencode";
+            provider: "azure" | "opencode";
             /** Model */
             model: string;
         };
@@ -4080,8 +4073,6 @@ export interface components {
         };
         /** SettingsOut */
         SettingsOut: {
-            /** Demo Mode */
-            demo_mode: boolean;
             /** Single User Mode */
             single_user_mode: boolean;
             /** Default Provider */

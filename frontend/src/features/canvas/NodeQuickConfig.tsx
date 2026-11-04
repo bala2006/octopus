@@ -78,8 +78,8 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
   const linkedPrompt = isLinked(data, roles);
   const preset = presetOf(tools, role);
   const modelOptions = React.useMemo(() => (settings?.providers ?? []).flatMap((p) => p.models.map((m) => ({
-    value: `${p.provider}::${m}`, label: m, group: p.label, hint: p.configured || p.provider === "mock" ? undefined : "not connected yet" }))), [settings]);
-  const effProvider = data.provider || settings?.default_provider || "mock";
+    value: `${p.provider}::${m}`, label: m, group: p.label, hint: p.configured ? undefined : "not connected yet" }))), [settings]);
+  const effProvider = data.provider || settings?.default_provider || "azure";
   const modelValue = `${effProvider}::${data.model || "default"}`;
 
   React.useEffect(() => {

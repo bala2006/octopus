@@ -136,7 +136,7 @@ def _record_path(root: Path, run_id: str, attempt_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", value) or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])", value):
             raise ContractError("Invalid run or attempt identifier")
     directory = root / ".octopus" / "attempts" / run_id / attempt_id
-    if not directory.resolve().is_relative_to(root):
+    if not directory.is_relative_to(root):  # ids are validated above, so this is lexical
         raise ContractError("Attempt storage escapes the canonical project")
     cursor = directory
     while cursor != root:

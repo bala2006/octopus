@@ -30,7 +30,7 @@ from app.core.logging import get_logger
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
 from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest, LLMResult, ToolCall
-from app.llm.demo_script import role_category
+from app.orchestrator.roles import role_category
 from app.llm.router import get_provider, prepare_request, stream_with_retry
 from app.models import AgentMemory, Artifact, Message, Run, Task
 from app.orchestrator import actions as A
@@ -331,7 +331,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.decisions: list[str] = []
         self.user_notes: list[str] = []
         self.followups: list[str] = []  # messages sent after the run finished (the run continues like a chat)
-        self.mock_state: dict[str, dict[str, Any]] = {}
+        self.agent_state: dict[str, dict[str, Any]] = {}
         self.warned: set[str] = set()
         self.redeliveries: Counter[str] = Counter()  # message id -> times re-delivered after a failed turn
         self.browser_pages: dict[str, tuple[str, str]] = {}  # agent id -> (url, title) of its browser tab, for the Browser view
@@ -431,7 +431,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             "debates": {k: v.to_dict() for k, v in self.debates.items()},
             "reviews": {k: v.to_dict() for k, v in self.reviews.items()},
             "loop": self.loop.to_dict(), "task_counter": self.task_counter,
-            "decisions": self.decisions, "user_notes": self.user_notes, "followups": self.followups, "mock_state": self.mock_state,
+            "decisions": self.decisions, "user_notes": self.user_notes, "followups": self.followups, "agent_state": self.agent_state,
             "active_seconds": round(self.active_seconds, 2), "awaiting": self.awaiting,
             "pending_approval": self.pending_approval, "rejections": self.rejections,
             "auto_approve": sorted(self.auto_approve), "levels": self.levels, "activity": self.activity,
@@ -476,7 +476,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.task_counter = st.get("task_counter", 0)
         self.decisions, self.user_notes = st.get("decisions", []), st.get("user_notes", [])
         self.followups = st.get("followups", [])
-        self.mock_state = st.get("mock_state", {})
+        self.agent_state = st.get("agent_state", {})
         self.active_seconds = float(st.get("active_seconds", 0))
         self.awaiting = st.get("awaiting")
         self.rejections = st.get("rejections", 0)
@@ -1186,7 +1186,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         lines.append(f"Budget: turn {self.turn_no}/{self.budget.max_turns}, tokens {self.tokens}/{self.budget.max_tokens}")
         return "\n".join(lines)
 
-    def mock_context(self, agent: AgentSpec, inbox: list[dict[str, Any]], obs: list[dict[str, Any]]) -> dict[str, Any]:
+    def turn_context(self, agent: AgentSpec, inbox: list[dict[str, Any]], obs: list[dict[str, Any]]) -> dict[str, Any]:
         allowed = allowed_recipients(self.edges, agent.id)
         cat = lambda aid: self.agents[aid].category if aid in self.agents else "user"  # noqa: E731
         return {
@@ -1207,7 +1207,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                        for a in self.agents.values()],
             "tasks": [{"key": t["key"], "title": t["title"], "assignee": self.names.get(t["assignee"] or "", None), "status": t["status"]}
                       for t in self.tasks.values()],
-            "state": self.mock_state.setdefault(agent.id, {}),
+            "state": self.agent_state.setdefault(agent.id, {}),
         }
 
     def effort_for(self, agent: AgentSpec) -> str | None:
@@ -1386,7 +1386,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                 return
             text = await self.call_llm_escalating(agent, req)
             parsed = A.parse_envelope(text)
-            if not parsed.ok and req.provider != "mock":
+            if not parsed.ok:
                 req.messages += [{"role": "assistant", "content": head_tail(text, 6000)},
                                  {"role": "user", "content": "Your reply was not valid per the response format ("
                                   + "; ".join(parsed.errors) + "). Reply again with ONLY the JSON object."}]
@@ -1434,8 +1434,6 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         await self.end_turn(aid)
 
     def model_for(self, agent: AgentSpec) -> tuple[str, str]:
-        if self.budget.force_mock:
-            return "mock", "mock/demo"
         if self.budget.model is not None and (self.budget.model_scope == "team" or agent.id == self.lead_agent_id):
             return self.budget.model.provider, self.budget.model.model
         return agent.provider, agent.model
@@ -1448,7 +1446,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         provider, model = self.model_for(agent)
         req = LLMRequest(provider=provider, model=model, temperature=agent.temperature, max_tokens=agent.max_tokens,
                          extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {}, messages=[], json_mode=True,
-                         metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs),
+                         metadata={"kind": "orchestrator", "turn_context": self.turn_context(agent, inbox, obs),
                                    "cache_key": f"octopus-{self.run_id[:18]}-{agent.id}"[:64]})
         async with registry_factory()() as rdb:
             req, warn = await prepare_request(rdb, self.user_id, req)
@@ -1853,7 +1851,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             {"role": "system", "content": "You are a strict gatekeeper. Answer only YES or NO."},
             {"role": "user", "content": f"Channel condition: {cond}\nBlackboard:\n{clip(self.blackboard(), 8000)}\n\n"
                                         f"Message ({a.type}): {clip(a.content, 6000)}\n\nIs the condition satisfied?"}],
-            metadata={"kind": "chat", "mock_script": "YES"})
+            metadata={"kind": "chat", "scripted_reply": "YES"})
         try:
             async with registry_factory()() as rdb:
                 req, _ = await prepare_request(rdb, self.user_id, req)
@@ -2038,7 +2036,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
     async def _commit_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
                            appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
         fs = self.fs_for(agent.id)
-        if self.engineering_workflow == "fix" and self.budget.verify_before_finish and not self.budget.force_mock and not any(
+        if self.engineering_workflow == "fix" and self.budget.verify_before_finish and not any(
             r["revision"] == self.plan_revision and r["step"] == "reproduce" for r in self.engineering_checkpoints):
             await self.deny(agent, cid, tool, "Record the reproduction checkpoint before editing; use unavailable with the reason when reproduction cannot run.")
             return
@@ -2452,7 +2450,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         """Verify before done (MAST: missing/incomplete verification is a top cause of multi-agent failure). An agent that
         can run code or open a browser, finishing the run or a delegated task while code changed unexercised or a file
         fails its automatic check, is sent back once with what to check. Asking again finishes (it may be unverifiable)."""
-        if self.budget.force_mock or not self.budget.verify_before_finish or not (
+        if not self.budget.verify_before_finish or not (
                 agent.is_entry or self.wf_owner_of_active(agent.id)):
             return None
         can_run = A.tool_enabled(agent.tools, "terminal")
@@ -2599,7 +2597,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         status, reason = assess_completion(
             status, reason, workflow=self.wf, open_tasks=self.open_tasks(),
             broken_files=self.broken_files, unverified=self.unverified,
-            require_verification=self.budget.verify_before_finish and not self.budget.force_mock,
+            require_verification=self.budget.verify_before_finish,
         )
         if status in ("completed", "incomplete") and blockers:
             status, reason = "incomplete", "; ".join(filter(None, (reason, *blockers)))

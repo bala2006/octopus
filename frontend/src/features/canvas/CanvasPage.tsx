@@ -107,7 +107,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
     return () => { observer.disconnect(); clearTimeout(timer); };
   }, [embedded, nodesInitialized, fitCanvas]);
 
-  const defaults = React.useMemo(() => ({ provider: settings.data?.default_provider ?? "mock", model: settings.data?.default_model ?? "mock/demo" }), [settings.data]);
+  const defaults = React.useMemo(() => ({ provider: settings.data?.default_provider ?? "azure", model: settings.data?.default_model ?? "gpt-6-luna" }), [settings.data]);
   const addRole = React.useCallback((key: string, screen?: { x: number; y: number }) => {
     const t = roles.data?.find((r) => r.key === key);
     if (!t) return;

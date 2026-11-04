@@ -102,7 +102,7 @@ async def test_direct_specialist_requests_return_to_lead_for_initial_and_followu
     returned = [message for message in messages if message.get("from_agent_id") == "worker"
                 and message.get("to_agent_id") == "lead"]
     assert {message["content"] for message in returned} >= {"Initial specialist result", "Followup specialist result"}
-    assert [request.metadata["mock_context"]["agent"]["name"] for request in provider.requests] == [
+    assert [request.metadata["turn_context"]["agent"]["name"] for request in provider.requests] == [
         "Worker", "Lead", "Worker", "Lead"]
 
 
@@ -182,4 +182,4 @@ async def test_task_board_cannot_wake_peer_outside_specialist_authority(client, 
     await wait_status(client, workspace, run["id"], timeout=15)
     board = (await client.get(f"/api/v1/w/{workspace['id']}/runs/{run['id']}/tasks")).json()
     assert not any(item["title"] == "Unauthorized peer job" for item in board)
-    assert all(request.metadata["mock_context"]["agent"]["name"] != "Other" for request in provider.requests)
+    assert all(request.metadata["turn_context"]["agent"]["name"] != "Other" for request in provider.requests)

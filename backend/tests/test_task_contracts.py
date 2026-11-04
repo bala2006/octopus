@@ -47,7 +47,7 @@ async def test_dependency_scheduler_waits_for_producer_and_persists_contract(cli
                              [edge("lb", "lead", "builder"), edge("lr", "lead", "reviewer")])
     run = await start_run(client, workspace, cid, permission_level="danger")
     final = await wait_status(client, workspace, run["id"], timeout=15)
-    order = [r.metadata["mock_context"]["agent"]["name"] for r in provider.requests]
+    order = [r.metadata["turn_context"]["agent"]["name"] for r in provider.requests]
     assert order.index("Builder") < order.index("Reviewer")
     base = f"/api/v1/w/{workspace['id']}/runs/{run['id']}"
     tasks = (await client.get(base + "/tasks")).json()
@@ -101,8 +101,8 @@ async def scoped_manager(inspection_runtime):
 @contextmanager
 def parent_attempt(runtime, parent):
     contract = TaskContract.model_validate(parent["constraints_json"])
-    assignment = Assignment(run_id="run", owner="reviewer", lead="lead", task_id=parent["key"], provider="mock",
-                            model="mock/demo", original_goal=runtime.goal, write_paths=contract.write_paths,
+    assignment = Assignment(run_id="run", owner="reviewer", lead="lead", task_id=parent["key"], provider="azure",
+                            model="gpt-6-luna", original_goal=runtime.goal, write_paths=contract.write_paths,
                             max_turns=contract.max_turns, policy=ExecutionPolicy(permission="danger"))
     token = ACTIVE_ATTEMPT.set(AttemptContext("parent-attempt", assignment))
     try:

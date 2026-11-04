@@ -45,17 +45,6 @@ describe("home prompt handoff", () => {
     });
     expect(
       recordedComposerSettings({
-        force_mock: true,
-        model: { provider: "azure", model: "unused" },
-      }),
-    ).toEqual({
-      model: { provider: "mock", model: "mock/demo" },
-      reasoning_effort: "default",
-      approvalMode: "ask",
-      engineering_workflow: "auto",
-    });
-    expect(
-      recordedComposerSettings({
         model: "old-format",
         reasoning_effort: "unknown",
       }),

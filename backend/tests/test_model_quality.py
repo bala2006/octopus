@@ -81,7 +81,7 @@ def test_judge_verdict_treats_non_answers_as_unknown() -> None:
 
 class SilentJudge(ScriptedProvider):
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        if req.metadata.get("mock_context") is None:  # the condition judge: returns nothing at all
+        if req.metadata.get("turn_context") is None:  # the condition judge: returns nothing at all
             yield LLMChunk(usage=Usage(1, 1, 0.0))
             return
         async for ch in super().stream(req):

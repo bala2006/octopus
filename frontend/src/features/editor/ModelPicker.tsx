@@ -49,16 +49,14 @@ export function ModelPicker({
     (provider) => provider.provider === "opencode",
   );
   const label =
-    value.model?.provider === "mock"
-      ? "Offline demo"
-      : value.model?.provider === "opencode"
-        ? value.model.model === "default"
+    value.model?.provider === "opencode"
+      ? value.model.model === "default"
+        ? "OpenCode default"
+        : value.model.model
+      : (value.model?.model ??
+        (settings.data?.default_provider === "opencode"
           ? "OpenCode default"
-          : value.model.model
-        : (value.model?.model ??
-          (settings.data?.default_provider === "opencode"
-            ? "OpenCode default"
-            : "Team default"));
+          : "Team default"));
   const effortLabel =
     EFFORTS.find((effort) => effort.value === value.reasoning_effort)?.label ??
     "Auto";
@@ -72,7 +70,6 @@ export function ModelPicker({
   const rangeStyle: CSSProperties & { "--thinking-progress": string } = {
     "--thinking-progress": `${(effortIndex / (EFFORTS.length - 1)) * 100}%`,
   };
-  const thinkingLocked = locked || value.model?.provider === "mock";
   const modelPicker = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -154,23 +151,9 @@ export function ModelPicker({
               value.model.model === model && <Check />}
           </DropdownMenuItem>
         ))}
-        <DropdownMenuItem
-          disabled={locked}
-          onSelect={() =>
-            onChange({
-              ...value,
-              model: { provider: "mock", model: "mock/demo" },
-            })
-          }
-        >
-          <Sparkles />
-          <span className="flex-1">Offline demo</span>
-          {value.model?.provider === "mock" && <Check />}
-        </DropdownMenuItem>
         {!azure?.configured && !opencode?.configured && (
           <p className="px-3 py-2 text-xs text-muted-foreground">
-            Connect Azure in Model settings to use your deployments. The demo is
-            scripted and free.
+            Connect Azure in Model settings to use your deployments.
           </p>
         )}
         {settings.isError && (
@@ -214,7 +197,7 @@ export function ModelPicker({
               variant="ghost"
               className="thinking-popover-reset"
               aria-label="Reset thinking level to Auto"
-              disabled={thinkingLocked}
+              disabled={locked}
               onClick={() =>
                 onChange({ ...value, reasoning_effort: "default" })
               }
@@ -247,7 +230,7 @@ export function ModelPicker({
               aria-label="Thinking level"
               aria-valuetext={effortLabel}
               value={effortIndex}
-              disabled={thinkingLocked}
+              disabled={locked}
               onChange={(event) => {
                 const effort = EFFORTS[Number(event.target.value)];
                 if (effort)
@@ -260,9 +243,6 @@ export function ModelPicker({
               This conversation keeps its model and thinking level. Start a new
               conversation to change them.
             </p>
-          )}
-          {value.model?.provider === "mock" && (
-            <p className="sr-only">The offline demo does not use reasoning.</p>
           )}
         </PopoverContent>
       </Popover>
@@ -289,15 +269,10 @@ export function ModelPicker({
               Start a new conversation to change reasoning effort.
             </p>
           )}
-          {value.model?.provider === "mock" && (
-            <p className="px-3 pb-2 text-xs text-muted-foreground">
-              The scripted demo does not use reasoning.
-            </p>
-          )}
           {EFFORTS.map((effort) => (
             <DropdownMenuItem
               key={effort.value}
-              disabled={locked || value.model?.provider === "mock"}
+              disabled={locked}
               onSelect={() =>
                 onChange({ ...value, reasoning_effort: effort.value })
               }

@@ -40,21 +40,12 @@ export function recordedComposerSettings(
     effort === "max"
       ? effort
       : "default";
-  if (budget?.force_mock === true)
-    return {
-      model: { provider: "mock", model: "mock/demo" },
-      reasoning_effort,
-      approvalMode: "ask",
-      engineering_workflow: engineeringWorkflow(budget?.engineering_workflow),
-    };
   if (
     typeof raw === "object" &&
     raw !== null &&
     "provider" in raw &&
     "model" in raw &&
-    (raw.provider === "azure" ||
-      raw.provider === "mock" ||
-      raw.provider === "opencode") &&
+    (raw.provider === "azure" || raw.provider === "opencode") &&
     typeof raw.model === "string"
   ) {
     return {

@@ -43,7 +43,7 @@ async def get_settings_view(db: AsyncSession = Depends(get_registry_db), user: U
         models = list(extra.get("deployments") or []) or info["models"]
         providers.append(ProviderInfo(provider=name, label=info["label"], models=models, configured=is_configured(name, key, base, extra),
                                       needs_key=info["needs_key"], needs_base=info.get("needs_base", False)))
-    return SettingsOut(demo_mode=s.demo_mode, single_user_mode=s.single_user_mode, default_provider=s.default_provider,
+    return SettingsOut(single_user_mode=s.single_user_mode, default_provider=s.default_provider,
                        default_model=s.default_model, sandbox_mode=s.sandbox_mode, providers=providers, keys=keys)
 
 
@@ -105,14 +105,12 @@ async def delete_key(provider: str, db: AsyncSession = Depends(get_registry_db),
 async def test_provider(body: TestProviderIn, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> TestProviderOut:
     # generous budget: reasoning deployments (gpt-5+, o-series) spend output tokens on thinking before "pong"
     req = LLMRequest(provider=body.provider, model=body.model, max_tokens=1024, temperature=0,
-                     messages=[{"role": "user", "content": "Reply with the single word: pong"}], metadata={"kind": "chat", "mock_script": "pong"})
+                     messages=[{"role": "user", "content": "Reply with the single word: pong"}], metadata={"kind": "chat"})
     import time
 
     t0 = time.monotonic()
     try:
         req, warn = await prepare_request(db, user.id, req)
-        if warn and req.provider == "mock" and body.provider != "mock":  # not connected: fell back to the demo mock
-            return TestProviderOut(ok=False, detail=warn)
         if req.model in (req.extra.get("reasoning_models") or []):
             req.extra["reasoning_model"] = True
         out = ""

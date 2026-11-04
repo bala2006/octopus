@@ -8,7 +8,6 @@ Closes #
 
 - [ ] Relevant backend tests were run (`make test-backend`), or not applicable.
 - [ ] Relevant frontend checks were run (`make test-frontend`), or not applicable.
-- [ ] UI E2E checks were run (`make e2e`), or not applicable.
 - [ ] User-facing docs were updated, or not applicable.
 - [ ] No secrets, personal data, or unrelated generated files are included.
 

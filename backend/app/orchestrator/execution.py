@@ -457,7 +457,7 @@ class ExecutionMixin:
         await self._tool_result(agent, cid, "record_checkpoint", True, "Recorded" + (" as unverified" if action.unavailable else ""))
 
     def engineering_blockers(self) -> list[str]:
-        if self.budget.force_mock or not self.budget.verify_before_finish:
+        if not self.budget.verify_before_finish:
             return []
         if self.engineering_workflow == "explain" and not self.unverified and not any(
             c["tool"] in ("read_file", "search_project") for c in self.observed_checks.values()) and not self.budget.independent_review and not any(

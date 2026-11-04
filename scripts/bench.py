@@ -6,7 +6,6 @@
 
 Each (template, task) case gets a fresh folder under --projects-root (it must be a folder the backend may open: inside
 WORKSPACE_ALLOWED_ROOTS, or inside the shared laptop folder in Docker). Results: a Markdown table on stdout and a JSON file.
---demo uses the offline mock (checks the harness, not the model).
 """
 from __future__ import annotations
 
@@ -34,8 +33,7 @@ async def main() -> None:
     ap.add_argument("--only", default="", help="comma-separated task ids")
     ap.add_argument("--repeat", type=int, default=1, help="runs per case (models are not deterministic)")
     ap.add_argument("--max-turns", type=int, default=80)
-    ap.add_argument("--demo", action="store_true", help="offline mock model")
-    ap.add_argument("--workflow", default="auto", choices=["auto", "on", "off"], help="how the team works (defined workflow or free-form)")
+   ap.add_argument("--workflow", default="auto", choices=["auto", "on", "off"], help="how the team works (defined workflow or free-form)")
     ap.add_argument("--out", type=Path, default=Path("bench-results.json"))
     args = ap.parse_args()
 
@@ -43,7 +41,7 @@ async def main() -> None:
     if args.only:
         keep = set(args.only.split(","))
         tasks = [t for t in tasks if t["id"] in keep]
-    budget = {"max_turns": args.max_turns, "force_mock": args.demo, "workflow": args.workflow}
+    budget = {"max_turns": args.max_turns, "workflow": args.workflow}
     results = []
     async with httpx.AsyncClient(base_url=args.url, timeout=60) as client:
         for tpl in args.templates.split(","):

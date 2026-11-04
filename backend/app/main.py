@@ -28,7 +28,7 @@ async def lifespan(_: FastAPI):  # type: ignore[no-untyped-def]
     configure_logging()
     s = get_settings()
     await asyncio.to_thread(upgrade_registry, s.registry_database_url)
-    log.info("octopus_started", home=str(s.octopus_home), demo_mode=s.demo_mode, roots=s.workspace_allowed_roots)
+    log.info("octopus_started", home=str(s.octopus_home), roots=s.workspace_allowed_roots)
     yield
     from app.services.browser import browser
     from app.services.processes import commands, servers
@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", tags=["meta"])
     async def health() -> dict[str, object]:
-        return {"ok": True, "app": s.app_name, "demo_mode": s.demo_mode, "live_runs": len(manager.runtimes)}
+        return {"ok": True, "app": s.app_name, "live_runs": len(manager.runtimes)}
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:  # pragma: no cover

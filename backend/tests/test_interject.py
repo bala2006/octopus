@@ -20,7 +20,7 @@ class Recording(ScriptedProvider):
         self.prompts: list[tuple[str, str]] = []
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        ctx = req.metadata.get("mock_context")
+        ctx = req.metadata.get("turn_context")
         if ctx is not None:
             self.prompts.append((ctx["agent"]["name"], str(req.messages[-1]["content"])))
         async for ch in super().stream(req):
@@ -90,7 +90,7 @@ class FailsOnce(ScriptedProvider):
         self.ben_prompts: list[str] = []
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        ctx = req.metadata.get("mock_context")
+        ctx = req.metadata.get("turn_context")
         if ctx is not None and ctx["agent"]["name"] == "Ben":
             self.ben_prompts.append(str(req.messages[-1]["content"]))
             if not self.failed:

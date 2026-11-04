@@ -87,8 +87,8 @@ function Providers() {
       {!info.azure?.configured && !info.opencode?.configured && (
         <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
           <Sparkles className="h-4 w-4 text-primary" />
-          <div className="flex-1 text-sm"><span className="font-medium">Demo Mode until Azure is connected.</span>{" "}
-            <span className="text-muted-foreground">Agents use an offline scripted model, so you can try everything for free.</span></div>
+          <div className="flex-1 text-sm"><span className="font-medium">Azure OpenAI is not connected.</span>{" "}
+            <span className="text-muted-foreground">Connect a model below before agents can run.</span></div>
         </div>
       )}
       <AzureCard provider="azure" title="Azure OpenAI" subtitle="gpt-6-luna on your Azure OpenAI / Foundry resource (v1 Responses API)" info={info.azure} saved={keys.azure}

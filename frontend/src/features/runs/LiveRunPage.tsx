@@ -106,7 +106,6 @@ export default function LiveRunPage() {
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
             <span className="capitalize">{r.mode}</span>·<PermissionBadge level={r.permission_level as PermissionLevel} />
-            {!!(r.budget as Record<string, unknown> | undefined)?.force_mock && <Badge variant="secondary">Demo Mode</Badge>}
             {(liveState.reason && status !== "running") && <span className="truncate text-warning">{liveState.reason}</span>}
             <ConnectionDot state={conn} />
           </div>
