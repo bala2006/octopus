@@ -168,7 +168,7 @@ class ExecutionMixin:
             if session.get("state") == "recovery_required" and aid not in saved_sessions:
                 self.worker_sessions.pop(aid)
         self.worker_session_history = list(state.get("worker_session_history") or [])
-        if not self.recovery_required:
+        if not self.recovery_required and not self.stop_requested:
             self.resume()
         await self.save()
 

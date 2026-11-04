@@ -51,7 +51,9 @@ test("model popup remains anchored after canvas focus collapses and restores cha
   );
   expect(response.ok()).toBeTruthy();
   await page.goto(`/w/${w}/agent`);
-  await expect(page.locator("#conversation-canvas .react-flow__node")).toHaveCount(1);
+  await expect(
+    page.locator("#conversation-canvas .react-flow__node"),
+  ).toHaveCount(1);
   const floating = page.locator(".conversation-floating-chat");
   const model = page.getByRole("button", {
     name: /^Select model and thinking level:/,

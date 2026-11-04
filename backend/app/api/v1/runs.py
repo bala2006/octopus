@@ -393,10 +393,11 @@ async def recover_execution(run_id: str, body: ExecutionRecovery, db: AsyncSessi
         raise HTTPException(409, str(exc)) from exc
     runtime = manager.get(run_id)
     if runtime:
-        await runtime.adopt_recovery()
+        # Stop before reconciling: adopting the cleared state can resume the loop, which must not start another turn.
         if body.action == "cancel":
             runtime.stop()
-        else:
+        await runtime.adopt_recovery()
+        if body.action != "cancel":
             runtime.resume()
             runtime.wake.set()
     return await execution_summary(run_id, ctx, run)
