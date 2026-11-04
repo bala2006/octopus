@@ -1,6 +1,5 @@
 import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { api, ApiError, unwrap } from "@/lib/api";
 import { qk } from "@/hooks/queries";
 import { serialize, useCanvas } from "@/stores/canvas";
@@ -22,11 +21,10 @@ export function useAutosave(workspaceId: string, companyId: string, delay = 700)
   const inflight = React.useRef<Promise<void> | null>(null);
   const pending = React.useRef(false);
 
-  const reloadFromServer = React.useCallback(async (why: string) => {
+  const reloadFromServer = React.useCallback(async (_why: string) => {
     const fresh = await unwrap(api.GET("/api/v1/w/{workspace_id}/companies/{company_id}", { params: { path: { workspace_id: workspaceId, company_id: companyId } } }));
     qc.setQueryData(qk.canvas(workspaceId, companyId), fresh);
     useCanvas.getState().load(fresh as CanvasOut);
-    toast.info("Team updated", { description: why });
     setState("saved");
   }, [workspaceId, companyId, qc]);
 

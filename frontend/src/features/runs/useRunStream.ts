@@ -29,13 +29,11 @@ export function useRunStream(
   const [eventCount, setEventCount] = React.useState(0);
   const sock = React.useRef<ResilientSocket<RunEvent> | null>(null);
   const qc = useQueryClient();
-  const toasted = React.useRef<Set<string>>(new Set());
 
   React.useEffect(() => {
     dispatch({ type: "__reset", data: {} });
     events.current = [];
     setEventCount(0);
-    toasted.current.clear();
     if (!workspaceId || !runId) {
       setConn("closed");
       return;
@@ -64,7 +62,6 @@ export function useRunStream(
         if (!raf) raf = requestAnimationFrame(flush);
         if (e.replay) return;
         if (e.type === "run_continued") {
-          toasted.current.clear();
           qc.invalidateQueries({ queryKey: qk.runs(workspaceId) });
           qc.invalidateQueries({ queryKey: qk.run(workspaceId, runId) });
         }
@@ -73,33 +70,14 @@ export function useRunStream(
           qc.invalidateQueries({ queryKey: qk.runs(workspaceId) });
           qc.invalidateQueries({ queryKey: qk.artifacts(workspaceId, runId) });
           qc.invalidateQueries({ queryKey: qk.files(workspaceId) });
-          const st = e.data.status as string;
-          if (!toasted.current.has(st)) {
-            toasted.current.add(st);
-            if (st === "completed")
-              toast.success("Run completed", {
-                description: e.data.summary?.slice(0, 160),
-              });
-            else if (st === "incomplete")
-              toast.warning("Run stopped with unfinished tasks", {
-                description: e.data.reason,
-              });
-            else if (st === "failed")
-              toast.error("Run halted", { description: e.data.reason });
-          }
+
         }
         if (e.type === "approval_requested")
           toast.warning("Approval needed", {
             description: e.data.summary,
             duration: 6000,
           });
-        if (e.type === "error" && e.data.kind === "loop")
-          toast.error("Loop detected", { description: e.data.message });
-        if (e.type === "error" && e.data.kind === "stall")
-          toast.warning("Run paused: no progress", {
-            description: e.data.message,
-            duration: 10000,
-          });
+
         if (e.type === "artifact_updated") {
           qc.invalidateQueries({ queryKey: qk.artifacts(workspaceId, runId) });
           qc.invalidateQueries({ queryKey: ["editor-tree", workspaceId] });
@@ -120,13 +98,7 @@ export function useRunStream(
             role: string;
             department?: string;
           };
-          toast(
-            `${namesRef.current[e.data.created_by] ?? "An agent"} hired ${a.name}`,
-            {
-              description: `${a.role}${a.department ? ` · ${a.department}` : ""}`,
-              duration: 2500,
-            },
-          );
+
           namesRef.current = {
             ...namesRef.current,
             [(e.data.agent as { id: string }).id]: a.name,

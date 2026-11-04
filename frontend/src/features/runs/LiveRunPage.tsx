@@ -72,7 +72,7 @@ export default function LiveRunPage() {
     fresh: Object.fromEntries(Object.entries(state.fresh).filter(([, t]) => Date.now() - t < 3000).map(([k]) => [k, true])),
   }), [state, departments, agentsList]);
 
-  const control = (action: "pause" | "resume" | "step" | "stop") => { send({ type: "control", action }); if (action === "stop") toast("Stopping team work…"); };
+  const control = (action: "pause" | "resume" | "step" | "stop") => { send({ type: "control", action }); };
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

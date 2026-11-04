@@ -90,10 +90,8 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
     const otherCompany = st.companyId !== companyId;
     // load when switching company, or when the server has a newer team (e.g. agents hired during a run) and we have no local edits
     if (otherCompany || (!unsaved && (q.data.revision ?? 0) > st.revision)) {
-      const grew = !otherCompany && q.data.agents.length > st.nodes.length;
       st.load(q.data);
       if (otherCompany) requestAnimationFrame(() => fitCanvas(300));
-      else if (grew) toast.info("Your team grew", { description: "Agents hired teammates during a run; they're on the canvas now." });
     }
   }, [q.data, companyId, fitCanvas]);
 
