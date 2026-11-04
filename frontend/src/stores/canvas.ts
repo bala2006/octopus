@@ -36,6 +36,7 @@ interface CanvasState {
   future: Snapshot[];
   clipboard: Snapshot | null;
   version: number; // bumps on every persisted change → autosave
+  liveHires: AgentOut[];
   quickConfigId: string | null;
   inspectorId: string | null;
   edgeEditId: string | null;
@@ -44,6 +45,7 @@ interface CanvasState {
   revision: number;
   savedVersion: number;
   load: (c: CanvasOut) => void;
+  setLiveHires: (hires: AgentOut[]) => void;
   markSaved: (version: number, revision: number) => void;
   addDepartment: (spec: DeptSpec, defaults?: Partial<AgentData>) => string[];
   setDepartmentMeta: (name: string, meta: DeptMeta) => void;
@@ -72,6 +74,55 @@ interface CanvasState {
   toggleSnap: () => void;
 }
 
+const CARD_W = 250;
+const CARD_H = 170;
+const CLEARANCE = 40;
+
+/**
+ * Agents hired during a live run, shown as read-only nodes flagged `live_hire` (never saved). A hire goes to the right
+ * of its department, or to the right of the whole canvas for a new department. It moves past any spot that would overlap
+ * a card, so department zones never cover each other. Positions already shown in this run are kept.
+ */
+export function placeLiveHires(
+  nodes: AgentNode[],
+  hires: AgentOut[],
+  keep: Map<string, { x: number; y: number }> = new Map(),
+): AgentNode[] {
+  if (!hires.length) return nodes;
+  const known = new Set(nodes.map((n) => n.id));
+  const boxes: { x: number; y: number }[] = nodes.map((n) => n.position);
+  const placed: AgentNode[] = [];
+  for (const agent of hires) {
+    if (known.has(agent.id)) continue;
+    const node = toNode(agent);
+    let position = keep.get(agent.id);
+    if (!position) {
+      const all = [...nodes, ...placed];
+      const sameDept = all.filter((n) => agent.department && n.data.department === agent.department);
+      const pool = sameDept.length ? sameDept : all;
+      let x = pool.length ? Math.max(...pool.map((n) => n.position.x)) + CARD_W + CLEARANCE : 0;
+      const y = pool.length ? Math.min(...pool.map((n) => n.position.y)) : 0;
+      let guard = 0;
+      while (guard++ < 50 && boxes.some((b) => Math.abs(b.x - x) < CARD_W + CLEARANCE && Math.abs(b.y - y) < CARD_H + CLEARANCE)) {
+        x += CARD_W + CLEARANCE;
+      }
+      position = { x, y };
+    }
+    boxes.push(position);
+    known.add(agent.id);
+    placed.push({
+      ...node,
+      position,
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      deletable: false,
+      data: { ...node.data, live_hire: true },
+    });
+  }
+  return [...nodes, ...placed];
+}
+
 export function toNode(a: AgentOut | (AgentIn & { id: string })): AgentNode {
   const { position_x, position_y, ...rest } = a as AgentOut;
   const data = { ...rest } as AgentData;
@@ -86,7 +137,8 @@ export function toEdge(e: EdgeOut | (EdgeIn & { id: string })): ChannelEdge {
   };
 }
 
-export function serialize(nodes: AgentNode[], edges: ChannelEdge[]): { agents: AgentIn[]; edges: EdgeIn[] } {
+export function serialize(allNodes: AgentNode[], edges: ChannelEdge[]): { agents: AgentIn[]; edges: EdgeIn[] } {
+  const nodes = allNodes.filter((n) => !n.data.live_hire); // run-only hires are never saved
   return {
     agents: nodes.map((n) => {
       const d = { ...n.data } as Record<string, unknown>;
@@ -121,14 +173,19 @@ export const useCanvas = create<CanvasState>()((set, get) => {
     });
   };
   return {
-    companyId: null, nodes: [], edges: [], past: [], future: [], clipboard: null, version: 0,
+    companyId: null, nodes: [], edges: [], past: [], future: [], clipboard: null, version: 0, liveHires: [],
     quickConfigId: null, inspectorId: null, edgeEditId: null, snapToGrid: true, departments: {}, revision: 0, savedVersion: 0,
 
     load: (c) => set({
-      companyId: c.company.id, nodes: c.agents.map(toNode), edges: c.edges.map(toEdge), past: [], future: [], version: 0, savedVersion: 0,
+      companyId: c.company.id, nodes: placeLiveHires(c.agents.map(toNode), get().liveHires), edges: c.edges.map(toEdge), past: [], future: [], version: 0, savedVersion: 0,
       quickConfigId: null, inspectorId: null, edgeEditId: null, departments: { ...(c.departments ?? {}) }, revision: c.revision ?? 0,
     }),
     markSaved: (version, revision) => set({ savedVersion: version, revision }),
+  setLiveHires: (hires) => {
+    const current = get().nodes;
+    const keep = new Map(current.filter((n) => n.data.live_hire).map((n) => [n.id, n.position] as const));
+    set({ liveHires: hires, nodes: placeLiveHires(current.filter((n) => !n.data.live_hire), hires, keep) });
+  },
     addDepartment: (spec, defaults) => {
       const ids: string[] = [];
       const mk = (m: DeptMemberSpec, isManager: boolean, pos: { x: number; y: number }, reportsTo: string | null): AgentNode => {

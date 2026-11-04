@@ -40,7 +40,7 @@ export function DepartmentZones({ departments, onSelect }: { departments: Record
           style={{ transform: `translate(${z.x}px, ${z.y}px)`, width: z.w, height: z.h, borderColor: `${z.color}55`, background: `${z.color}0d`, zIndex: -1 }}
           aria-hidden>
           <button onClick={() => onSelect?.(z.name)}
-            className="pointer-events-auto absolute left-3 top-1.5 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition hover:brightness-125"
+            className="pointer-events-auto absolute left-3 top-1.5 flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition hover:brightness-125"
             style={{ color: z.color, background: `${z.color}1f` }} title={`Select the ${z.name} department`}>
             <span>{z.name}</span>
             <span className="font-normal normal-case tracking-normal opacity-80">

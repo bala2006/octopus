@@ -34,7 +34,7 @@ import { EdgeEditor } from "./EdgeEditor";
 import { Inspector } from "./Inspector";
 import { DND_MIME, Palette } from "./Palette";
 import { useAutosave, type SaveState } from "./useAutosave";
-import { useLiveHires, withLiveHires } from "@/features/runs/liveHires";
+import { useLiveHires } from "@/features/runs/liveHires";
 
 
 export default function CanvasPage({ embedded = false, rightInset = 0, leftInset = 0 }: { embedded?: boolean; rightInset?: number; leftInset?: number }) {
@@ -60,7 +60,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   const q = useCanvasQuery(workspaceId, companyId);
   const s = useCanvas();
   const liveHires = useLiveHires((h) => h.agents);
-  const canvasNodes = React.useMemo(() => withLiveHires(s.nodes, liveHires), [s.nodes, liveHires]);
+  React.useEffect(() => { useCanvas.getState().setLiveHires(liveHires); }, [liveHires]);
   const rf = useReactFlow();
   const nodesInitialized = useNodesInitialized();
   const roles = useRoleTemplates();
@@ -176,7 +176,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
             <div className="h-full w-full" onContextMenu={(e) => { menuPos.current = { x: e.clientX, y: e.clientY }; }}>
               <EdgeAnchorsProvider>
               <ReactFlow<AgentNodeT, ChannelEdgeT>
-                nodes={canvasNodes} edges={s.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+                nodes={s.nodes} edges={s.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
                 onNodesChange={s.onNodesChange} onEdgesChange={s.onEdgesChange}
                 onConnect={(c) => { const r = s.onConnect(c); if (!r.ok && r.reason) toast.error(r.reason); }}
                 isValidConnection={(c) => c.source !== c.target}

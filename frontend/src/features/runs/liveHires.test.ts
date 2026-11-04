@@ -1,53 +1,59 @@
 import { describe, expect, it } from "vitest";
-import { withLiveHires } from "./liveHires";
-import { toNode } from "@/stores/canvas";
+import { placeLiveHires, serialize, toNode, type AgentNode } from "@/stores/canvas";
 import type { AgentOut } from "@/types";
 
 const agent = (id: string, extra: Partial<AgentOut> = {}) =>
-  ({
-    id,
-    name: id,
-    role: "Engineer",
-    position_x: 0,
-    position_y: 0,
-    ...extra,
-  }) as AgentOut;
+  ({ id, name: id, role: "Engineer", position_x: 0, position_y: 0, department: "Executive", ...extra }) as AgentOut;
 
-describe("withLiveHires", () => {
+const card = (id: string, x: number, y: number, department = "Executive"): AgentNode => ({
+  ...toNode(agent(id, { department, position_x: x, position_y: y })),
+});
+
+const overlaps = (a: AgentNode, b: AgentNode) =>
+  Math.abs(a.position.x - b.position.x) < 250 && Math.abs(a.position.y - b.position.y) < 170;
+
+describe("placeLiveHires", () => {
   it("returns the saved nodes unchanged when nothing is hired", () => {
-    const nodes = [toNode(agent("ceo", { position_x: 10, position_y: 20 }))];
-    expect(withLiveHires(nodes, [])).toBe(nodes);
+    const nodes = [card("ceo", 100, 40)];
+    expect(placeLiveHires(nodes, [])).toBe(nodes);
   });
 
-  it("shows hired agents read-only, below the agent that hired them", () => {
-    const nodes = [toNode(agent("ceo", { position_x: 100, position_y: 40 }))];
-    const out = withLiveHires(nodes, [
-      agent("racer", { created_by: "ceo" }),
-      agent("qa", { created_by: "ceo" }),
-    ]);
-    expect(out.map((n) => n.id)).toEqual(["ceo", "racer", "qa"]);
-    expect(out[1].position).toEqual({ x: 100, y: 260 });
-    expect(out[2].position).toEqual({ x: 360, y: 260 });
-    expect(out[1]).toMatchObject({
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      className: "live-hire",
-    });
+  it("places a new department to the right of the canvas, flagged read-only", () => {
+    const nodes = [card("ceo", 100, 40)];
+    const out = placeLiveHires(nodes, [agent("racer", { department: "Game Engineering" })]);
+    const racer = out.find((n) => n.id === "racer")!;
+    expect(racer.position.x).toBeGreaterThan(100 + 250);
+    expect(racer.position.y).toBe(40);
+    expect(racer.data.live_hire).toBe(true);
+    expect(racer).toMatchObject({ draggable: false, selectable: false, connectable: false, deletable: false });
+  });
+
+  it("places a hire beside its own department, and never on top of another card", () => {
+    const nodes = [card("ceo", 0, 0), card("eng", 0, 300, "Engineering"), card("dev", 290, 300, "Engineering")];
+    const out = placeLiveHires(nodes, [agent("qa", { department: "Engineering" })]);
+    const qa = out.find((n) => n.id === "qa")!;
+    expect(qa.position.x).toBeGreaterThanOrEqual(290 + 250);
+    for (const other of out.filter((n) => n.id !== "qa")) expect(overlaps(qa, other)).toBe(false);
+  });
+
+  it("keeps positions that were already shown during the run", () => {
+    const nodes = [card("ceo", 0, 0)];
+    const first = placeLiveHires(nodes, [agent("racer", { department: "Game" })]);
+    const racerAt = first.find((n) => n.id === "racer")!.position;
+    const again = placeLiveHires(nodes, [agent("racer", { department: "Game" }), agent("qa", { department: "Quality" })], new Map([["racer", racerAt]]));
+    expect(again.find((n) => n.id === "racer")!.position).toEqual(racerAt);
   });
 
   it("does not duplicate agents that are already saved on the canvas", () => {
-    const nodes = [toNode(agent("ceo")), toNode(agent("racer"))];
-    expect(
-      withLiveHires(nodes, [agent("racer", { created_by: "ceo" })]),
-    ).toHaveLength(2);
+    const nodes = [card("ceo", 0, 0), card("racer", 300, 0, "Game")];
+    expect(placeLiveHires(nodes, [agent("racer", { created_by: "ceo" })])).toHaveLength(2);
   });
+});
 
-  it("places an agent with an unknown creator below the existing graph", () => {
-    const nodes = [toNode(agent("ceo", { position_x: 0, position_y: 300 }))];
-    const out = withLiveHires(nodes, [
-      agent("ghost", { created_by: "missing" }),
-    ]);
-    expect(out[1].position).toEqual({ x: 0, y: 520 });
+describe("serialize", () => {
+  it("never includes run-only hires in the saved company", () => {
+    const hired = placeLiveHires([card("ceo", 0, 0)], [agent("racer", { department: "Game" })]);
+    const saved = serialize(hired, []);
+    expect(saved.agents.map((a) => a.id)).toEqual(["ceo"]);
   });
 });
