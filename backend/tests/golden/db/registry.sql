@@ -45,6 +45,14 @@ CREATE TABLE mcp_servers (
 	CONSTRAINT uq_mcp_name UNIQUE (user_id, name)
 );
 
+CREATE TABLE plugins (
+	id VARCHAR(120) NOT NULL, 
+	enabled BOOLEAN DEFAULT 1 NOT NULL, 
+	version VARCHAR(40) NOT NULL, 
+	updated_at DATETIME, 
+	CONSTRAINT pk_plugins PRIMARY KEY (id)
+);
+
 CREATE TABLE provider_keys (
 	id VARCHAR(36) NOT NULL, 
 	user_id VARCHAR(36) NOT NULL, 
