@@ -19,8 +19,6 @@ import json
 import re
 import time
 from collections import Counter
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select, update, func, or_
@@ -28,8 +26,9 @@ from sqlalchemy import select, update, func, or_
 from app.core.config import PROJECT_DIRNAME, get_settings
 from app.core.logging import get_logger
 from app.core.policy import FOLLOWUP_BUDGET_CEILING, BudgetUsage, PolicyGate
+from app.core.run_manager import ACTIVE_STATES, ProjectRef, RunManager, StopRun, run_turn_loop  # noqa: F401 (ACTIVE_STATES is imported from here by the API)
 from app.db.base import new_id, utcnow
-from app.db.session import SessionFactory, registry_factory
+from app.db.session import registry_factory
 from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest, LLMResult, ToolCall
 from app.orchestrator.roles import role_category
 from app.llm.router import get_provider, prepare_request, stream_with_retry
@@ -58,7 +57,6 @@ from app.tools.workspace import ProjectFS, WorkspaceError
 log = get_logger("orchestrator")
 
 DEBATE_PROTOCOL_TYPES = {"proposal", "critique", "objection", "agreement", "decision"}
-ACTIVE_STATES = {"queued", "running", "paused", "awaiting_user"}
 TERMINAL_STATES = {"completed", "incomplete", "failed", "cancelled"}
 OPEN_TASK_STATES = {"todo", "in_progress", "in_review", "blocked"}
 # How many turns in a row an agent may take only because of its own tool results / notices (no new message). Reading a
@@ -230,19 +228,6 @@ def compact_rounds(items: list[dict[str, Any]], rounds: list[int]) -> list[dict[
         else:
             out.append(item)
     return out
-
-
-class StopRun(Exception):
-    pass
-
-
-@dataclass
-class ProjectRef:
-    """Where a run lives: the project directory and its .octopus database."""
-
-    workspace_id: str
-    root: Path
-    sf: SessionFactory
 
 
 _ACTION_RE = re.compile(r'"action"\s*:\s*"(\w+)"')
@@ -961,114 +946,96 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             await self.post_message(sender="user", from_id=None, to_id=aid, type_="task", content=content, meta=meta)
 
     async def main(self, fresh: bool = True) -> None:
-        try:
-            if not any(a.active for a in self.agents.values()):
-                await self.finalize("failed", "The company has no active agents")
-                return
-            async with self.db() as db:
-                await db.execute(update(Run).where(Run.id == self.run_id, Run.started_at.is_(None)).values(started_at=utcnow()))
-                await db.commit()
-            if fresh:
-                await self.set_run_status("running")
-                await self._load_memory()
-            await self.load_mcp()
-            await self.prepare_execution()
-            if fresh:
-                await self.bootstrap()
-            while True:
-                if self.recovery_required:
-                    self.paused = True
-                for consultation in await self.runtime_store.expire_consultations():
-                    sender = consultation["sender"]
-                    self.waiting_peers.pop(sender, None)
-                    self.notice(sender, "Peer consultation timed out. Escalate to the lead with what is still unknown.", activate=True)
-                if self.waiting_peers:
-                    consultations = (await self.runtime_store.summary())["consultations"]
-                    waiting = {c["sender"]: c["recipient"] for c in consultations if c["state"] == "waiting"}
-                    for sender in set(self.waiting_peers) - waiting.keys():
-                        self.waiting_peers.pop(sender, None)
-                        self.notice(sender, "Peer wait ended; inspect the result or escalate unresolved work.", activate=True)
-                if self.awaiting and not self.recovery_required:
-                    await self.apply_queued_request()
-                reason = self.limit_reason()
-                if reason:
-                    await self.emit("error", {"message": reason, "kind": "limit"})
-                    await self.finalize("failed", reason)
-                    return
-                await self.gate()
-                aid = self.next_runnable()
-                if aid is None:
-                    if await self.apply_queued_request():
-                        continue
-                    if self.awaiting:
-                        continue
-                    if self.waiting_peers:
-                        self.wake.clear()
-                        try:
-                            await asyncio.wait_for(self.wake.wait(), timeout=1)
-                        except asyncio.TimeoutError:
-                            pass
-                        continue
-                    if self.wf_active() and await self.nudge_workflow():
-                        continue
-                    if await self.nudge_open_tasks():
-                        continue
-                    open_ = self.open_tasks()
-                    acceptance_key = f"{self.plan_revision}:{self.current_request_id or 'initial'}"
-                    if not open_ and self.progress_turn > 0 and acceptance_key not in self.acceptance_nudges:
-                        self.acceptance_nudges.append(acceptance_key)
-                        await self.post_message(sender="system", from_id=None, to_id=self.lead_agent_id, type_="task",
-                            content="Work is quiescent. Review the integrated outcome against the user's request, then call finish with what is done and any missing verification. A successful tool call is not final acceptance.",
-                            meta={"acceptance_nudge": True})
-                        continue
-                    if open_:  # never report success while the board says work is unfinished
-                        await self.finalize("incomplete", f"Stalled: {len(open_)} open task(s) and no agent can make progress ("
-                                            + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) + ")")
-                    else:
-                        await self.finalize("incomplete", "No accountable lead acceptance: no agent has pending work and no final report was produced")
-                    return
-                t0 = self.turn_t0 = time.monotonic()
-                try:
-                    batch = [aid]
-                    # Only independently queued specialists overlap. The lead and
-                    # ordered workflow phases stay serial; writes use private stages.
-                    if aid != self.lead_agent_id and not self.wf_active():
-                        for _ in range(self.budget.max_concurrency - 1):
-                            other = self.next_runnable(exclude=set(batch) | {self.lead_agent_id})
-                            if other is None:
-                                break
-                            batch.append(other)
-                    if len(batch) == 1:
-                        await self.turn(aid)
-                    else:
-                        outcomes = await asyncio.gather(*(self.turn(worker) for worker in batch), return_exceptions=True)
-                        for outcome in outcomes:
-                            if isinstance(outcome, BaseException):
-                                raise outcome
-                finally:
-                    self.turn_t0 = None
-                    self.active_seconds += time.monotonic() - t0
-                await self.save()
-                await self.usage_event()
-                if self.finished_summary is not None:
-                    if await self.apply_queued_request():
-                        continue
-                    open_ = self.open_tasks()
-                    await self.finalize("completed", f"Finished with {len(open_)} open task(s): "
-                                        + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) if open_ else "")
-                    return
-                if self.loop.escalate() and not self.loop_escalated:
-                    self.loop_escalated = True
-                    self.paused = True
-                    await self.emit("error", {"message": f"Loop detected: agents keep repeating themselves ({self.loop.last_reason or 'repeated messages'}). "
-                                                         "Run paused for human review; interject to steer, then resume.", "kind": "loop"})
-                await self.check_stall()
-        except (StopRun, asyncio.CancelledError):
-            await asyncio.shield(self.finalize("cancelled", "Stopped by user (kill switch)"))
-        except Exception as exc:  # pragma: no cover - defensive
-            log.exception("run_failed", run_id=self.run_id)
-            await asyncio.shield(self.finalize("failed", f"{type(exc).__name__}: {exc}"))
+        await run_turn_loop(self, fresh=fresh)
 
+    def loop_has_active_agents(self) -> bool:
+        return any(a.active for a in self.agents.values())
+
+    async def loop_mark_started(self) -> None:
+        async with self.db() as db:
+            await db.execute(update(Run).where(Run.id == self.run_id, Run.started_at.is_(None)).values(started_at=utcnow()))
+            await db.commit()
+
+    async def begin_run(self, fresh: bool) -> None:
+        if fresh:
+            await self.set_run_status("running")
+            await self._load_memory()
+        await self.load_mcp()
+        await self.prepare_execution()
+        if fresh:
+            await self.bootstrap()
+
+    async def loop_housekeeping(self) -> None:
+        """Before each pick: expire peer consultations, end waits nobody serves any more, apply a queued user request."""
+        for consultation in await self.runtime_store.expire_consultations():
+            sender = consultation["sender"]
+            self.waiting_peers.pop(sender, None)
+            self.notice(sender, "Peer consultation timed out. Escalate to the lead with what is still unknown.", activate=True)
+        if self.waiting_peers:
+            consultations = (await self.runtime_store.summary())["consultations"]
+            waiting = {c["sender"]: c["recipient"] for c in consultations if c["state"] == "waiting"}
+            for sender in set(self.waiting_peers) - waiting.keys():
+                self.waiting_peers.pop(sender, None)
+                self.notice(sender, "Peer wait ended; inspect the result or escalate unresolved work.", activate=True)
+        if self.awaiting and not self.recovery_required:
+            await self.apply_queued_request()
+
+    async def loop_idle_step(self) -> bool:
+        """Nothing is runnable. True: keep looping. False: the run was finalized and the loop ends."""
+        if await self.apply_queued_request():
+            return True
+        if self.awaiting:
+            return True
+        if self.waiting_peers:
+            self.wake.clear()
+            try:
+                await asyncio.wait_for(self.wake.wait(), timeout=1)
+            except asyncio.TimeoutError:
+                pass
+            return True
+        if self.wf_active() and await self.nudge_workflow():
+            return True
+        if await self.nudge_open_tasks():
+            return True
+        open_ = self.open_tasks()
+        acceptance_key = f"{self.plan_revision}:{self.current_request_id or 'initial'}"
+        if not open_ and self.progress_turn > 0 and acceptance_key not in self.acceptance_nudges:
+            self.acceptance_nudges.append(acceptance_key)
+            await self.post_message(sender="system", from_id=None, to_id=self.lead_agent_id, type_="task",
+                content="Work is quiescent. Review the integrated outcome against the user's request, then call finish with what is done and any missing verification. A successful tool call is not final acceptance.",
+                meta={"acceptance_nudge": True})
+            return True
+        if open_:  # never report success while the board says work is unfinished
+            await self.finalize("incomplete", f"Stalled: {len(open_)} open task(s) and no agent can make progress ("
+                                + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) + ")")
+        else:
+            await self.finalize("incomplete", "No accountable lead acceptance: no agent has pending work and no final report was produced")
+        return False
+
+    def loop_pick_batch(self, aid: str) -> list[str]:
+        # Only independently queued specialists overlap. The lead and ordered workflow phases stay serial; writes use private stages.
+        batch = [aid]
+        if aid != self.lead_agent_id and not self.wf_active():
+            for _ in range(self.budget.max_concurrency - 1):
+                other = self.next_runnable(exclude=set(batch) | {self.lead_agent_id})
+                if other is None:
+                    break
+                batch.append(other)
+        return batch
+
+    def loop_completion_reason(self) -> str:
+        open_ = self.open_tasks()
+        return f"Finished with {len(open_)} open task(s): " + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) if open_ else ""
+
+    async def loop_after_turn(self) -> None:
+        """Loop detector: the first repeat pauses the run for a human; the detector keeps the evidence."""
+        if self.loop.escalate() and not self.loop_escalated:
+            self.loop_escalated = True
+            self.paused = True
+            await self.emit("error", {"message": f"Loop detected: agents keep repeating themselves ({self.loop.last_reason or 'repeated messages'}). "
+                                                 "Run paused for human review; interject to steer, then resume.", "kind": "loop"})
+
+    # ------------------------------------------------------------------ a single agent turn
     # ------------------------------------------------------------------ a single agent turn
     def blackboard(self) -> str:
         lines = [f"Goal: {clip(self.goal, 6000)}"]
@@ -2553,116 +2520,19 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             manager.forget(self.run_id)
 
 
-class RunManager:
-    """Owns live runtimes. Runs are keyed by id (UUIDs are globally unique across projects)."""
+async def _load_run(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
+    """Read a run row and its owner's user id from the project database."""
+    from app.models import Company
 
-    def __init__(self) -> None:
-        self.runtimes: dict[str, RunRuntime] = {}
-        self.locks: dict[str, asyncio.Lock] = {}
-
-    @staticmethod
-    async def _load(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
-        from app.models import Company
-
-        async with project.sf() as db:
-            run = await db.get(Run, run_id)
-            if run is None:
-                return None
-            company = await db.get(Company, run.company_id)
-            return run, company.user_id if company else ""
-
-    async def start(self, run_id: str, project: ProjectRef) -> RunRuntime:
-        async with self.locks.setdefault(run_id, asyncio.Lock()):
-            existing = self.runtimes.get(run_id)
-            if existing:
-                return existing
-            return await self._start(run_id, project)
-
-    async def _start(self, run_id: str, project: ProjectRef) -> RunRuntime:
-        loaded = await self._load(run_id, project)
-        assert loaded, "run not found"
-        run, user_id = loaded
-        rt = RunRuntime(run, user_id, project)
-        self.runtimes[run_id] = rt
-        rt.task = asyncio.create_task(rt.main(fresh=True), name=f"run-{run_id}")
-        return rt
-
-    async def ensure(self, run_id: str, project: ProjectRef) -> RunRuntime | None:
-        """Return the live runtime, restoring a persisted (paused / interrupted) run if needed."""
-        async with self.locks.setdefault(run_id, asyncio.Lock()):
-            return await self._ensure(run_id, project)
-
-    async def _ensure(self, run_id: str, project: ProjectRef) -> RunRuntime | None:
-        if run_id in self.runtimes:
-            return self.runtimes[run_id]
-        loaded = await self._load(run_id, project)
-        if not loaded:
+    async with project.sf() as db:
+        run = await db.get(Run, run_id)
+        if run is None:
             return None
-        run, user_id = loaded
-        if run.status not in ACTIVE_STATES:
-            return None
-        rt = RunRuntime(run, user_id, project)
-        await rt.restore(run)
-        rt.recovery_required = await rt.runtime_store.recover() or rt.recovery_required
-        rt.paused = True
-        if rt.recovery_required:
-            rt.mailbox.clear()
-            rt.observations.clear()
-            await rt.save()
-        self.runtimes[run_id] = rt
-        rt.task = asyncio.create_task(rt.main(fresh=run.started_at is None), name=f"run-{run_id}")
-        return rt
-
-    async def notify_requests(self, run_id: str, project: ProjectRef, *, steer: bool = False) -> RunRuntime | None:
-        """Wake a committed durable queue. Never replay ambiguous interrupted work."""
-        async with self.locks.setdefault(run_id, asyncio.Lock()):
-            rt = self.runtimes.get(run_id)
-            if rt and rt.task and not rt.task.done() and not rt.finalized:
-                if steer:
-                    await rt.steer_execution()
-                rt.wake.set()
-                return rt
-            loaded = await self._load(run_id, project)
-            if not loaded:
-                return None
-            run, user_id = loaded
-            rt = RunRuntime(run, user_id, project)
-            await rt.restore(run)
-            rt.recovery_required = await rt.runtime_store.recover() or rt.recovery_required
-            if rt.recovery_required or run.status not in ACTIVE_STATES:
-                rt.mailbox.clear()
-                rt.observations.clear()
-            rt.finalized = False
-            rt.stop_requested = False
-            rt.paused = rt.recovery_required
-            self.runtimes[run_id] = rt
-            if steer:
-                await rt.steer_execution()
-            await rt.set_run_status("paused" if rt.recovery_required else "running")
-            await rt.save()
-            rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
-            return rt
-
-    def get(self, run_id: str) -> RunRuntime | None:
-        return self.runtimes.get(run_id)
-
-    def forget(self, run_id: str) -> None:
-        self.runtimes.pop(run_id, None)
-
-    def active_for(self, root: Path) -> list[RunRuntime]:
-        return [rt for rt in self.runtimes.values() if rt.root == root.resolve() or rt.root == root]
-
-    async def shutdown(self) -> None:
-        tasks = [rt.task for rt in self.runtimes.values() if rt.task and not rt.task.done()]
-        for rt in list(self.runtimes.values()):
-            rt.stop_requested = True
-            if rt.task and not rt.task.done():
-                rt.task.cancel()
-        if tasks:
-            await asyncio.wait(tasks, timeout=5)
+        company = await db.get(Company, run.company_id)
+        return run, company.user_id if company else ""
 
 
-manager = RunManager()
+manager = RunManager(create=RunRuntime, load=_load_run)
 
 
 def default_budget() -> dict[str, Any]:
