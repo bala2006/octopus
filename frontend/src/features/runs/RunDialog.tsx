@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { qk, useWorkspace, useWorkspaceId } from "@/hooks/queries";
-import type { ParsedFileOut, PermissionLevel, RunDetail } from "@/types";
+import { qk, useWorkspaceId } from "@/hooks/queries";
+import type { ParsedFileOut, RunDetail } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import {
@@ -27,8 +27,6 @@ import {
 } from "@/components/ui/overlays";
 import { EffortPicker } from "@/features/canvas/EffortPicker";
 import { defaultRunBudget } from "./runDefaults";
-import { PermissionPicker } from "@/features/workspaces/PermissionPicker";
-import { ApprovalModePicker } from "@/features/editor/ApprovalModePicker";
 import {
   useAttachments,
   AttachmentChips,
@@ -79,17 +77,12 @@ export function RunDialog({
   initialSettings?: ComposerSettings;
 }) {
   const w = useWorkspaceId();
-  const ws = useWorkspace(w);
   const nav = useNavigate();
   const qc = useQueryClient();
   const [goal, setGoal] = React.useState(initialGoal);
   const [mode, setMode] =
     React.useState<(typeof MODES)[number]["v"]>("autonomous");
-  const [perm, setPerm] = React.useState<PermissionLevel>(
-    (ws.data?.default_permission as PermissionLevel) ?? "ask",
-  );
   const [adv, setAdv] = React.useState(false);
-  const [approvalMode, setApprovalMode] = React.useState<"ask" | "auto">("ask");
   const [budget, setBudget] = React.useState(defaultRunBudget);
   const att = useAttachments({ images: true });
   React.useEffect(() => {
@@ -101,8 +94,6 @@ export function RunDialog({
         model: initialSettings.model,
         reasoning_effort: initialSettings.reasoning_effort,
       }));
-    setApprovalMode(initialSettings?.approvalMode ?? "ask");
-    setPerm((ws.data?.default_permission as PermissionLevel) ?? "ask");
     if (initialAttachments?.length) att.setFiles(initialAttachments);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -116,8 +107,6 @@ export function RunDialog({
             goal: goal.trim(),
             session_id: sessionId,
             mode,
-            permission_level: perm,
-            approval_mode: approvalMode,
             budget,
             attachments: attachmentPayload(att.files),
           },
@@ -127,9 +116,7 @@ export function RunDialog({
       qc.invalidateQueries({ queryKey: qk.runs(w) });
       onOpenChange(false);
       att.clear();
-      toast.success("Team conversation started", {
-        description: `${perm.replace("_", " ")} permissions`,
-      });
+      toast.success("Team conversation started");
       if (onStarted) onStarted(r);
       else nav(`/w/${w}/runs/${r.id}`);
     },
@@ -234,10 +221,7 @@ export function RunDialog({
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-[1fr_210px] items-end gap-3">
-                <Field label="Permission level">
-                  <PermissionPicker value={perm} onChange={setPerm} compact />
-                </Field>
+              <div className="grid items-end gap-3">
                 <Field label="How the team works">
                   <Select
                     ariaLabel="How the team works"
@@ -283,12 +267,6 @@ export function RunDialog({
             </>
           )}
           <div className="flex flex-wrap gap-2">
-            <ApprovalModePicker
-              value={approvalMode}
-              disabled={perm !== "ask"}
-              label={perm === "danger" ? "Danger mode" : perm === "plan" ? "Plan mode" : perm === "read_only" ? "Read only" : undefined}
-              onChange={setApprovalMode}
-            />
             <ModelPicker
               workspace={w}
               value={budget}
@@ -426,7 +404,6 @@ export function RunDialog({
                     aria-label="Save team changes"
                   />
                   Save agents hired or edited during the run to the company
-                  (read-only and plan runs never save)
                 </label>
               </div>
             )}

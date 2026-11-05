@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  CheckCircle2, ChevronDown, Cloud, FolderOpen, KeyRound, Moon, Palette, Plug, Plus, RefreshCw, Server, ShieldCheck, Sparkles, Sun, Trash2, Wifi, XCircle, Zap,
+  CheckCircle2, ChevronDown, Cloud, FolderOpen, KeyRound, Moon, Palette, Plug, Plus, RefreshCw, Server, Sparkles, Sun, Trash2, Wifi, XCircle, Zap,
   LayoutTemplate, Download, Upload, Pencil, Globe, UserCog, BookOpenCheck,
 } from "lucide-react";
 import { RolesSection } from "./RolesSection";
@@ -16,12 +16,11 @@ import { api, unwrap } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { qk, useMcpServers, useSettings, useWorkspace, useWorkspaceId } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
-import type { McpServerOut, PermissionLevel, ProviderInfo, ProviderKeyOut } from "@/types";
+import type { McpServerOut, ProviderInfo, ProviderKeyOut } from "@/types";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/surfaces";
 import { Badge, Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select, Tip } from "@/components/ui/overlays";
-import { PermissionPicker } from "@/features/workspaces/PermissionPicker";
 
 // The key is the URL hash (settings#appearance deep links must keep working); the label is what the nav and the panel show.
 export const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", Plug], ["roles", "Roles", UserCog], ["skills", "Skills", BookOpenCheck], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Preferences", Palette]] as const;
@@ -302,7 +301,7 @@ function McpServers() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.mcp }); toast.success("MCP server removed"); },
   });
   return (
-    <Section title="MCP servers" description="Register Model Context Protocol servers, then grant them to individual agents from the canvas. Calls respect the run's permission level.">
+    <Section title="MCP servers" description="Register Model Context Protocol servers, then grant them to individual agents from the canvas. Calls follow the approval mode.">
       <BrowserCard />
       <div className="flex justify-end"><Button size="sm" onClick={() => setEditing("new")}><Plus />Add MCP server</Button></div>
       {isLoading ? <div className="skeleton h-24" /> : !data?.length ? (
@@ -454,7 +453,7 @@ function ProjectSettings() {
   const [name, setName] = React.useState("");
   React.useEffect(() => { if (data) setName(data.name); }, [data]);
   const patch = useMutation({
-    mutationFn: (body: { name?: string; default_permission?: PermissionLevel }) => unwrap(api.PATCH("/api/v1/workspaces/{workspace_id}", { params: { path: { workspace_id: w } }, body })),
+    mutationFn: (body: { name?: string }) => unwrap(api.PATCH("/api/v1/workspaces/{workspace_id}", { params: { path: { workspace_id: w } }, body })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.workspace(w) }); qc.invalidateQueries({ queryKey: qk.workspaces }); toast.success("Project updated"); },
   });
   if (!data) return <div className="skeleton h-40" />;
@@ -466,10 +465,6 @@ function ProjectSettings() {
         <Field label="Data folder" hint="Contains octopus.db (companies, agents, conversations, activity and artifact history), plans/ and exports/. Git-ignored by default.">
           <code className="block rounded-md bg-muted px-2.5 py-2 font-mono text-xs">{data.path}/.octopus/</code>
         </Field>
-      </div>
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 text-sm font-medium"><ShieldCheck className="h-4 w-4 text-primary" />Default permission level for new conversations</div>
-        <PermissionPicker value={data.default_permission as PermissionLevel} onChange={(v) => patch.mutate({ default_permission: v })} />
       </div>
     </Section>
   );

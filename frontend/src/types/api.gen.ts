@@ -309,6 +309,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/approval-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Approval Mode
+         * @description One global setting for every project and new run. "ask" asks for permission; "auto" approves for me.
+         */
+        put: operations["set_approval_mode_api_v1_settings_approval_mode_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/opencode": {
         parameters: {
             query?: never;
@@ -1409,26 +1429,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/w/{workspace_id}/runs/{run_id}/plans/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Apply Plan
-         * @description Apply every file planned in a plan-mode run to the real project.
-         */
-        post: operations["apply_plan_api_v1_w__workspace_id__runs__run_id__plans_apply_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/w/{workspace_id}/runs/{run_id}/artifacts.zip": {
         parameters: {
             query?: never;
@@ -1498,7 +1498,7 @@ export interface paths {
         };
         /**
          * Preview
-         * @description Serve the project as this run left it (plan shadow first) for the sandboxed live preview.
+         * @description Serve the project as it is on disk, for the sandboxed live preview.
          */
         get: operations["preview_api_v1_w__workspace_id__runs__run_id__preview__path__get"];
         put?: never;
@@ -2241,12 +2241,6 @@ export interface components {
             tools?: components["schemas"]["AgentTools"];
             behavior?: components["schemas"]["AgentBehavior"];
             /**
-             * Permission Level
-             * @default inherit
-             * @enum {string}
-             */
-            permission_level: "inherit" | "read_only" | "plan" | "ask" | "danger";
-            /**
              * Department
              * @default
              */
@@ -2335,12 +2329,6 @@ export interface components {
             tools?: components["schemas"]["AgentTools"];
             behavior?: components["schemas"]["AgentBehavior"];
             /**
-             * Permission Level
-             * @default inherit
-             * @enum {string}
-             */
-            permission_level: "inherit" | "read_only" | "plan" | "ask" | "danger";
-            /**
              * Department
              * @default
              */
@@ -2403,8 +2391,6 @@ export interface components {
             max_tokens?: number | null;
             tools?: components["schemas"]["AgentTools"] | null;
             behavior?: components["schemas"]["AgentBehavior"] | null;
-            /** Permission Level */
-            permission_level?: ("inherit" | "read_only" | "plan" | "ask" | "danger") | null;
             /** Department */
             department?: string | null;
             /** Is Manager */
@@ -2493,6 +2479,22 @@ export interface components {
              */
             scope: "once" | "always";
         };
+        /** ApprovalModeIn */
+        ApprovalModeIn: {
+            /**
+             * Approval Mode
+             * @enum {string}
+             */
+            approval_mode: "ask" | "auto";
+        };
+        /** ApprovalModeOut */
+        ApprovalModeOut: {
+            /**
+             * Approval Mode
+             * @enum {string}
+             */
+            approval_mode: "ask" | "auto";
+        };
         /** ArtifactContentOut */
         ArtifactContentOut: {
             /** Id */
@@ -2503,11 +2505,6 @@ export interface components {
             path: string;
             /** Version */
             version: number;
-            /**
-             * Planned
-             * @default false
-             */
-            planned: boolean;
             /**
              * Deleted
              * @default false
@@ -2540,11 +2537,6 @@ export interface components {
             path: string;
             /** Version */
             version: number;
-            /**
-             * Planned
-             * @default false
-             */
-            planned: boolean;
             /**
              * Deleted
              * @default false
@@ -2991,11 +2983,6 @@ export interface components {
              */
             modified: boolean;
             /**
-             * Planned
-             * @default false
-             */
-            planned: boolean;
-            /**
              * Area
              * @default project
              * @enum {string}
@@ -3361,14 +3348,7 @@ export interface components {
             host_dir: string;
         };
         /** NativeOpenIn */
-        NativeOpenIn: {
-            /**
-             * Default Permission
-             * @default ask
-             * @enum {string}
-             */
-            default_permission: "read_only" | "plan" | "ask" | "danger";
-        };
+        NativeOpenIn: Record<string, never>;
         /** NativeOpenOut */
         NativeOpenOut: {
             /** Cancelled */
@@ -3765,14 +3745,6 @@ export interface components {
              * @enum {string}
              */
             mode: "autonomous" | "step" | "supervised";
-            /** Permission Level */
-            permission_level?: ("read_only" | "plan" | "ask" | "danger") | null;
-            /**
-             * Approval Mode
-             * @default ask
-             * @enum {string}
-             */
-            approval_mode: "ask" | "auto";
             budget?: components["schemas"]["RunBudget"];
             /** Attachments */
             attachments?: {
@@ -3795,8 +3767,11 @@ export interface components {
             status: string;
             /** Mode */
             mode: string;
-            /** Permission Level */
-            permission_level: string;
+            /**
+             * Permission Level
+             * @enum {string}
+             */
+            permission_level: "ask" | "auto";
             /** Budget */
             budget?: {
                 [key: string]: unknown;
@@ -3874,8 +3849,11 @@ export interface components {
             status: string;
             /** Mode */
             mode: string;
-            /** Permission Level */
-            permission_level: string;
+            /**
+             * Permission Level
+             * @enum {string}
+             */
+            permission_level: "ask" | "auto";
             /** Budget */
             budget?: {
                 [key: string]: unknown;
@@ -4081,6 +4059,12 @@ export interface components {
             default_model: string;
             /** Sandbox Mode */
             sandbox_mode: string;
+            /**
+             * Approval Mode
+             * @default ask
+             * @enum {string}
+             */
+            approval_mode: "ask" | "auto";
             /** Providers */
             providers: components["schemas"]["ProviderInfo"][];
             /** Keys */
@@ -4312,12 +4296,6 @@ export interface components {
             path: string;
             /** Name */
             name?: string | null;
-            /**
-             * Default Permission
-             * @default ask
-             * @enum {string}
-             */
-            default_permission: "read_only" | "plan" | "ask" | "danger";
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -4327,8 +4305,6 @@ export interface components {
             name: string;
             /** Path */
             path: string;
-            /** Default Permission */
-            default_permission: string;
             /**
              * Created At
              * Format: date-time
@@ -4359,8 +4335,6 @@ export interface components {
         WorkspacePatch: {
             /** Name */
             name?: string | null;
-            /** Default Permission */
-            default_permission?: ("read_only" | "plan" | "ask" | "danger") | null;
         };
         /** MemoryIn */
         app__api__v1__memory__MemoryIn: {
@@ -5005,6 +4979,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+        };
+    };
+    set_approval_mode_api_v1_settings_approval_mode_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalModeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalModeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -7546,40 +7553,6 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    apply_plan_api_v1_w__workspace_id__runs__run_id__plans_apply_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                run_id: string;
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string[];
                     };
                 };
             };

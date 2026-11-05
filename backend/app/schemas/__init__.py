@@ -12,9 +12,8 @@ EdgeType = Literal["delegate", "review", "debate", "report", "consult"]
 # "incomplete": the run stopped with unfinished tasks on the board (it is never reported as "completed")
 RunStatus = Literal["queued", "running", "paused", "awaiting_user", "completed", "incomplete", "failed", "cancelled"]
 RunMode = Literal["autonomous", "step", "supervised"]
-PermissionLevel = Literal["read_only", "plan", "ask", "danger"]
+# "ask": Ask for permission. "auto": Approve for me. One global setting per user.
 ApprovalMode = Literal["ask", "auto"]
-AgentPermission = Literal["inherit", "read_only", "plan", "ask", "danger"]
 TaskStatus = Literal["todo", "in_progress", "in_review", "done", "blocked"]
 MessageType = Literal[
     "task", "question", "answer", "proposal", "critique", "agreement", "objection", "decision",
@@ -111,7 +110,6 @@ class AgentBase(BaseModel):
     max_tokens: int = Field(DEFAULT_AGENT_MAX_TOKENS, ge=64, le=MAX_AGENT_MAX_TOKENS)
     tools: AgentTools = Field(default_factory=AgentTools)
     behavior: AgentBehavior = Field(default_factory=AgentBehavior)
-    permission_level: AgentPermission = "inherit"
     department: str = Field("", max_length=80)
     is_manager: bool = False
     reports_to: str | None = None
@@ -139,7 +137,6 @@ class AgentPatch(BaseModel):
     max_tokens: int | None = None
     tools: AgentTools | None = None
     behavior: AgentBehavior | None = None
-    permission_level: AgentPermission | None = None
     department: str | None = None
     is_manager: bool | None = None
     reports_to: str | None = None
@@ -412,8 +409,6 @@ class RunCreate(BaseModel):
     goal: str = Field(min_length=1, max_length=20000)
     session_id: str | None = None
     mode: RunMode = "autonomous"
-    permission_level: PermissionLevel | None = None  # defaults to the workspace default
-    approval_mode: ApprovalMode = "ask"
     budget: RunBudget = Field(default_factory=RunBudget)
     attachments: list[dict[str, str]] = Field(default_factory=list)
     client_request_id: str | None = Field(None, min_length=1, max_length=100)
@@ -442,7 +437,13 @@ class RunOut(ORM):
     goal: str
     status: str
     mode: str
-    permission_level: str
+    permission_level: ApprovalMode
+
+    @field_validator("permission_level", mode="before")
+    @classmethod
+    def _legacy_levels_are_ask(cls, value: Any) -> str:
+        return "auto" if value == "auto" else "ask"  # runs recorded under read_only, plan or danger show as ask
+
     budget: dict[str, Any] = Field(default_factory=dict, validation_alias="budget_json")
     tokens_used: int
     cost_usd: float
@@ -503,7 +504,6 @@ class ArtifactOut(ORM):
     run_id: str
     path: str
     version: int
-    planned: bool = False
     deleted: bool = False
     author_agent_id: str | None
     change_note: str
@@ -572,8 +572,17 @@ class SettingsOut(BaseModel):
     default_provider: str
     default_model: str
     sandbox_mode: str
+    approval_mode: ApprovalMode = "ask"
     providers: list[ProviderInfo]
     keys: list[ProviderKeyOut]
+
+
+class ApprovalModeIn(BaseModel):
+    approval_mode: ApprovalMode
+
+
+class ApprovalModeOut(BaseModel):
+    approval_mode: ApprovalMode
 
 
 class FxRateOut(BaseModel):
@@ -618,11 +627,10 @@ class TestProviderOut(BaseModel):
 class WorkspaceIn(BaseModel):
     path: str = Field(min_length=1, max_length=1000)
     name: str | None = Field(None, max_length=200)
-    default_permission: PermissionLevel = "ask"
 
 
 class NativeOpenIn(BaseModel):
-    default_permission: PermissionLevel = "ask"
+    pass
 
 
 class NativeDialogOut(BaseModel):
@@ -641,14 +649,12 @@ class NativePickOut(BaseModel):
 
 class WorkspacePatch(BaseModel):
     name: str | None = Field(None, max_length=200)
-    default_permission: PermissionLevel | None = None
 
 
 class WorkspaceOut(ORM):
     id: str
     name: str
     path: str
-    default_permission: str
     created_at: datetime
     last_opened_at: datetime
     exists: bool = True
@@ -687,7 +693,6 @@ class FileNode(BaseModel):
     path: str
     size: int
     modified: bool = False  # changed by agents in the selected run
-    planned: bool = False
     area: Literal["project", "work"] = "project"  # "work": the agents' working documents in .octopus/work/
     generated: bool = False  # written by an Octopus run at some point (else: the user's own file)
 

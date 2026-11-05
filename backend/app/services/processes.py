@@ -44,7 +44,7 @@ class ManagedProcesses:
         record = self.records.get(key)
         return record.snapshot() if record else {"command": "", "status": "idle", "exit_code": None, "output": "", "truncated": False, "timed_out": False, "directory": "."}
 
-    async def start(self, key: str, root: Path, command: str, *, danger: bool, timeout: int = 3600, directory: str = ".") -> dict:
+    async def start(self, key: str, root: Path, command: str, *, timeout: int = 3600, directory: str = ".") -> dict:
         try:
             if directory == ".":
                 cwd, relative = root, "."
@@ -55,18 +55,18 @@ class ManagedProcesses:
         except WorkspaceError as exc:
             raise SandboxError(str(exc)) from exc
         async with self._locks.setdefault(key, asyncio.Lock()):
-            result = await self._start(key, cwd, command, danger=danger, timeout=timeout)
+            result = await self._start(key, cwd, command, timeout=timeout)
             self.records[key].directory = relative
             return {**result, "directory": relative}
 
-    async def _start(self, key: str, root: Path, command: str, *, danger: bool, timeout: int) -> dict:
+    async def _start(self, key: str, root: Path, command: str, *, timeout: int) -> dict:
         if get_settings().sandbox_mode == "docker":
             raise SandboxError("Managed processes are available in local subprocess mode. Use an external terminal or server with Docker.")
         if key in self._starting or (key in self.records and self.records[key].process.returncode is None):
             raise SandboxError(f"A {self.kind} is already running for this project. Stop it before starting another.")
         if len(self._starting) + sum(r.process.returncode is None for r in self.records.values()) >= MAX_SERVERS:
             raise SandboxError(f"Eight {self.kind} processes are already running. Stop one before starting another.")
-        argv = _resolve_exe(parse_command(command, danger=danger))
+        argv = _resolve_exe(parse_command(command))
         self._starting.add(key)
         try:
             process = await asyncio.create_subprocess_exec(

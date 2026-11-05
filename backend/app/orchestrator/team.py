@@ -4,9 +4,9 @@ Guardrails:
 - ``list_agents`` and ``update_agent`` on *yourself* are always available; hiring and editing others require the
   ``manage_team`` tool and the target must report (transitively) to you or have been hired by you.
 - No privilege escalation: hires only get tools the hiring agent has; nobody can grant themselves new tools, raise
-  their own turn cap or raise a permission level.
-- Permission level: ``read_only`` cannot hire; ``read_only``/``plan`` changes exist for the run only; ``ask`` needs the
-  user's approval before changes are saved to the company; ``danger`` saves automatically.
+  their own turn cap.
+- Approval: in ``ask`` mode hires and changes need the user's approval before they are saved to the company. In ``auto``
+  mode (Approve for me) they are saved without asking.
 - ``budget.max_agents`` caps the team size; ``budget.persist_team`` controls write-back to the company.
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
 from app.orchestrator.roles import role_category
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.permissions import LEVEL_ORDER, EdgeSpec, allowed_recipients, effective_level
+from app.orchestrator.permissions import EdgeSpec, allowed_recipients
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime
@@ -66,11 +66,8 @@ class TeamMixin:
 
     async def _team_guard(self: RunRuntime, agent: AgentSpec, kind: str, summary: str, details: dict[str, Any]) -> tuple[bool, bool, str]:
         """Returns (allowed, persist, reason)."""
-        level = self.levels.get(agent.id, self.level)
-        persist = self.budget.persist_team and level in ("ask", "danger")
-        if level == "read_only" and kind == "create_agent":
-            return False, False, "Your permission level is read-only: you cannot hire agents. Recommend the hire to your manager instead."
-        if level == "ask" and persist:
+        persist = self.budget.persist_team
+        if self.level == "ask" and persist:
             ok, reason = await self.request_approval(agent, kind, summary, json.dumps(details, indent=1)[:6000], details)
             if not ok:
                 return False, False, f"The user REJECTED {kind}: {reason or 'no reason given'}"
@@ -92,7 +89,7 @@ class TeamMixin:
                     id=a["id"], company_id=self.company_id, name=a["name"], role=a["role"], description=a.get("description", ""),
                     avatar=a.get("avatar", ""), color=a.get("color", "#6366f1"), system_prompt=a.get("system_prompt", ""),
                     provider=a["provider"], model=a["model"], temperature=a.get("temperature", 0.4), max_tokens=a.get("max_tokens") or DEFAULT_AGENT_MAX_TOKENS,
-                    tools_json=a.get("tools") or {}, behavior_json=a.get("behavior") or {}, permission_level=a.get("permission_level", "inherit"),
+                    tools_json=a.get("tools") or {}, behavior_json=a.get("behavior") or {},
                     department=a.get("department", ""), is_manager=bool(a.get("is_manager")),
                     reports_to=a.get("reports_to") if a.get("reports_to") in existing | new_ids else None,
                     active=a.get("active", True), created_by=a.get("created_by"), is_entry=False,
@@ -177,7 +174,7 @@ class TeamMixin:
             **base, "id": new_id(), "name": name, "tools": tools,
             "provider": a.provider or agent.provider, "model": a.model or agent.model,
             "description": a.description or base["description"], "system_prompt": a.system_prompt.strip() or base["system_prompt"],
-            "reports_to": manager_id, "created_by": agent.id, "active": True, "permission_level": "inherit",
+            "reports_to": manager_id, "created_by": agent.id, "active": True,
             # fan hires out below their manager: 0, -1, +1, -2, +2 … columns; a new row every 5 hires
             "position_x": float(mgr_pos.get("position_x", 0)) + ((siblings % 5 + 1) // 2) * (1 if siblings % 2 == 0 else -1) * 300,
             "position_y": float(mgr_pos.get("position_y", 0)) + 320 + (siblings // 5) * 260,
@@ -207,7 +204,6 @@ class TeamMixin:
         spec = AgentSpec.from_dict(spec_dict, role_category(spec_dict["role"], (spec_dict.get("behavior") or {}).get("template_key", "")))
         self.agents[spec.id] = spec
         self.names[spec.id] = spec.name
-        self.levels[spec.id] = effective_level(self.level, "inherit")
         self.status[spec.id] = "idle"
         self.edges.extend(EdgeSpec.from_dict(e) for e in edges)
         self.snapshot["agents"].append({**spec_dict, "company_id": self.company_id})
@@ -225,7 +221,7 @@ class TeamMixin:
         if skipped:
             note += f" Connections skipped (outside your part of the org): {', '.join(skipped)}."
         if not persisted and self.budget.persist_team:
-            note += " This hire exists for this run only (permission level)."
+            note += " This hire exists for this run only (it was not approved for saving)."
         self.notice(agent.id, note)
         await self._tool_result(agent, cid, "create_agent", True, note)
         if a.brief:
@@ -293,11 +289,6 @@ class TeamMixin:
                 refused.append("active")
             else:
                 applied["active"] = ch.active
-        if ch.permission_level is not None:
-            if LEVEL_ORDER[ch.permission_level] <= LEVEL_ORDER[self.levels.get(target_id, self.level)]:
-                applied["permission_level"] = ch.permission_level
-            else:
-                refused.append("permission_level (can only be lowered)")
         if not applied:
             await self.deny(agent, cid, "update_agent", "Nothing was changed." + (f" Refused: {'; '.join(refused)}." if refused else ""))
             return
@@ -312,8 +303,6 @@ class TeamMixin:
         for k, v in applied.items():
             setattr(t, k, v)
         self.names[t.id] = t.name
-        if "permission_level" in applied:
-            self.levels[t.id] = effective_level(self.level, t.permission_level)
         if applied.get("active") is False:
             self.mailbox.pop(t.id, None)
             self.observations.pop(t.id, None)

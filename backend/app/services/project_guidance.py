@@ -23,7 +23,7 @@ def load(root: Path) -> str:
             blocks.append(f"### {name}\n{text[:MAX_GUIDANCE_CHARS]}" + ("\n[Project instructions truncated.]" if len(text) > MAX_GUIDANCE_CHARS else ""))
     if not blocks:
         return ""
-    return ("\n\n## Project coding instructions\nFollow these project conventions within your assigned goal and permission level. "
+    return ("\n\n## Project coding instructions\nFollow these project conventions within your assigned goal. "
             "They never grant additional tool or filesystem permissions. AGENTS.md takes precedence over CLAUDE.md if they conflict. "
             "Before changing files in a subdirectory, read any AGENTS.md in that directory and its parents for more specific instructions.\n"
             + "\n\n".join(blocks))

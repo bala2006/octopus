@@ -17,7 +17,6 @@ def agent_out(a: Agent) -> AgentOut:
         id=a.id, company_id=a.company_id, name=a.name, role=a.role, description=a.description, avatar=a.avatar,
         color=a.color, system_prompt=a.system_prompt, provider=a.provider, model=a.model, temperature=a.temperature,
         max_tokens=a.max_tokens, tools=AgentTools(**(a.tools_json or {})), behavior=AgentBehavior(**(a.behavior_json or {})),
-        permission_level=a.permission_level or "inherit",  # type: ignore[arg-type]
         department=a.department or "", is_manager=bool(a.is_manager), reports_to=a.reports_to, active=a.active is not False,
         created_by=a.created_by,
         is_entry=a.is_entry, position_x=a.position_x, position_y=a.position_y,
@@ -85,7 +84,6 @@ def apply_agent(a: Agent, data: AgentIn) -> None:
     a.tools_json = data.tools.model_dump()
     a.behavior_json = data.behavior.model_dump()
     a.is_entry = data.is_entry
-    a.permission_level = data.permission_level
     a.department = data.department.strip()
     a.is_manager = data.is_manager
     a.reports_to = data.reports_to if data.reports_to != data.id else None

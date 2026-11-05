@@ -159,7 +159,8 @@ async def workspace(client: httpx.AsyncClient, tmp_root: Path, request: pytest.F
     name = re.sub(r"[^a-zA-Z0-9_-]", "_", request.node.name[:40])
     d = tmp_root / f"proj-{name}-{os.urandom(3).hex()}"
     d.mkdir()
-    r = await client.post("/api/v1/workspaces", json={"path": str(d), "default_permission": "danger"})
+    await set_approval(client, "auto")  # the old default ("danger") skipped approvals; "auto" is the closest mode
+    r = await client.post("/api/v1/workspaces", json={"path": str(d)})
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -184,7 +185,17 @@ async def make_company(client: httpx.AsyncClient, ws: dict[str, Any], agents: li
     return cid
 
 
+async def set_approval(client: httpx.AsyncClient, mode: str) -> None:
+    """Set the user's global approval mode ("ask" or "auto")."""
+    r = await client.put("/api/v1/settings/approval-mode", json={"approval_mode": mode})
+    assert r.status_code == 200, r.text
+
+
 async def start_run(client: httpx.AsyncClient, ws: dict[str, Any], company_id: str, goal: str = "Do the thing", **kw: Any) -> dict[str, Any]:
+    # Legacy callers pass permission_level: "danger" meant "no approvals" (now "auto"); "ask" means "ask" (read_only/plan: ask).
+    level = kw.pop("permission_level", None)
+    if level is not None:
+        await set_approval(client, "ask" if level in ("ask", "read_only", "plan") else "auto")
     # verify-before-finish sends a scripted agent back once; tests of other behaviour opt out (tests/test_verify.py covers it)
     kw["budget"] = {"verify_before_finish": False, "workflow": "off", **(kw.get("budget") or {})}
     r = await client.post(f"/api/v1/w/{ws['id']}/runs", json={"company_id": company_id, "goal": goal, **kw})

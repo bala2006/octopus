@@ -25,7 +25,7 @@ router = APIRouter(tags=["workspaces"])
 
 
 def ws_out(w: Workspace, existing: bool = False) -> WorkspaceOut:
-    return WorkspaceOut(id=w.id, name=w.name, path=w.path, default_permission=w.default_permission, created_at=w.created_at,
+    return WorkspaceOut(id=w.id, name=w.name, path=w.path, created_at=w.created_at,
                         last_opened_at=w.last_opened_at, exists=Path(w.path).is_dir(), existing_project=existing,
                         display_path=hostpaths.to_host(w.path))
 
@@ -108,7 +108,7 @@ async def open_native(body: NativeOpenIn, request: Request, db: AsyncSession = D
         root = validate_project_dir(str(picked), any_root=True)
     except ProjectPathError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return NativeOpenOut(cancelled=False, workspace=await _register(root, None, body.default_permission, db, user))
+    return NativeOpenOut(cancelled=False, workspace=await _register(root, None, db, user))
 
 
 @router.post("/workspaces", response_model=WorkspaceOut, status_code=201)
@@ -121,10 +121,10 @@ async def create_workspace(body: WorkspaceIn, db: AsyncSession = Depends(get_reg
         root = validate_project_dir(hostpaths.to_container(body.path))
     except ProjectPathError as exc:
         raise HTTPException(400, hostpaths.outside_shared_folder(body.path) or str(exc)) from exc
-    return await _register(root, body.name, body.default_permission, db, user)
+    return await _register(root, body.name, db, user)
 
 
-async def _register(root: Path, name: str | None, permission: str, db: AsyncSession, user: User) -> WorkspaceOut:
+async def _register(root: Path, name: str | None, db: AsyncSession, user: User) -> WorkspaceOut:
     existing_row = (await db.execute(select(Workspace).where(Workspace.user_id == user.id, Workspace.path == str(root)))).scalar_one_or_none()
     meta = init_project(root, name)
     if existing_row:
@@ -136,7 +136,7 @@ async def _register(root: Path, name: str | None, permission: str, db: AsyncSess
         return ws_out(existing_row, existing=True)
     if name and name != meta.name:
         rename_project(root, name)
-    w = Workspace(user_id=user.id, name=name or meta.name, path=str(root), default_permission=permission)
+    w = Workspace(user_id=user.id, name=name or meta.name, path=str(root))
     db.add(w)
     await db.commit()
     await db.refresh(w)
@@ -159,8 +159,6 @@ async def patch_workspace(workspace_id: str, body: WorkspacePatch, db: AsyncSess
     if body.name:
         w.name = body.name
         rename_project(Path(w.path), body.name)
-    if body.default_permission:
-        w.default_permission = body.default_permission
     await db.commit()
     await db.refresh(w)
     return ws_out(w)

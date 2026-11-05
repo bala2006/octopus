@@ -4,10 +4,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { BookOpenCheck, Crown, Flag, Maximize2, MessageSquare, MoreHorizontal, PenLine, Plug, Power, Trash2, X } from "lucide-react";
 import { useCompanyId, useMcpServers, useRoleTemplates, useSettings, useSkills, useWorkspaceId } from "@/hooks/queries";
-import { PERMISSIONS, TOOLS } from "@/lib/meta";
+import { TOOLS } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useCanvas, type AgentData } from "@/stores/canvas";
-import type { AgentPermission, AgentTools } from "@/types";
+import type { AgentTools } from "@/types";
 import { AgentAvatar } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch } from "@/components/ui/primitives";
@@ -19,7 +19,7 @@ import { ScopedMemoryPanel } from "@/features/editor/ScopedMemoryPanel";
 
 /**
  * Mini configuration window next to a clicked agent node. Everything except the name is picked from a list (role,
- * department, model, thinking, permission, tool preset); the role brings the prompt, which is edited in Settings → Roles
+ * department, model, thinking, tool preset); the role brings the prompt, which is edited in Settings → Roles
  * (or, for one agent, under All settings → Prompt).
  */
 export function NodeQuickConfig({ id, data, onClose }: { id: string; data: AgentData; onClose: () => void }) {
@@ -172,10 +172,6 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Permission">
-            <Select value={(data.permission_level as string) ?? "inherit"} onValueChange={(v) => update(id, { permission_level: v as AgentPermission }, { history: true })}
-              options={[{ value: "inherit", label: "Inherit from run" }, ...Object.entries(PERMISSIONS).map(([k, p]) => ({ value: k, label: p.label }))]} className="h-8 text-xs" />
-          </Field>
           <Field label="Receives the goal">
             <label className="flex h-8 items-center gap-2 rounded-md border border-border px-2 text-xs">
               <Switch checked={!!data.is_entry} onCheckedChange={(v) => update(id, { is_entry: v }, { history: true })} aria-label="Entry agent" />
@@ -190,7 +186,6 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
             className={cn("flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition active:scale-95", data.active !== false ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground")}>
             <Power className="h-3.5 w-3.5" />{data.active !== false ? "Active" : "Inactive"}
           </button>
-          <span className="text-[10px] text-muted-foreground">Permissions cap this agent’s access.</span>
         </div>
 
         <details className="rounded-lg border border-border p-2">

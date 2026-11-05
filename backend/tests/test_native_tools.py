@@ -60,17 +60,6 @@ async def test_edit_file_changes_only_the_target_and_keeps_history(client, works
     assert [r["ok"] for r in results] == [True, False] and "old_string not found" in results[1]["output"]
 
 
-async def test_edit_file_respects_read_only(client, workspace) -> None:
-    root = Path(workspace["path"])
-    (root / "a.txt").write_text("hello")
-    cid = await make_company(client, workspace, [agent("a", "Ann", entry=True)], [])
-    set_provider_override(ScriptedProvider({"Ann": [env({"action": "edit_file", "path": "a.txt", "old_string": "hello", "new_string": "bye"}),
-                                                    env({"action": "finish", "summary": "x"})]}))
-    run = await start_run(client, workspace, cid, permission_level="read_only")
-    await wait_status(client, workspace, run["id"])
-    assert (root / "a.txt").read_text() == "hello"
-
-
 # ------------------------------------------------------------------ tool definitions
 def test_tool_specs_follow_the_agents_tools() -> None:
     specs, mcp = tool_specs({"terminal": False}, [{"name": "browser", "tools": [

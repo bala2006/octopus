@@ -200,7 +200,7 @@ function FileGroup({ ms, agents }: { ms: MessageOut[]; agents: Record<string, Ag
       <span style={a ? { color: tone(a.color) } : undefined} className="font-medium">{a?.name}</span>
       {ms.map((m) => (
         <span key={m.id} className="rounded border border-border bg-muted/40 px-1.5 py-px font-mono">
-          {(m.meta?.planned ? "📝 " : "") + String(m.meta?.path ?? "")}<span className="text-muted-foreground/70"> v{String(m.meta?.version ?? "")}</span>
+          {String(m.meta?.path ?? "")}<span className="text-muted-foreground/70"> v{String(m.meta?.version ?? "")}</span>
         </span>
       ))}
     </div>

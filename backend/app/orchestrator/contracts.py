@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 class ExecutionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     mode: Literal["trusted_host", "restricted"] = "trusted_host"
-    permission: Literal["read_only", "plan", "ask", "auto", "danger"] = "ask"
     capabilities: frozenset[str] = frozenset()
     max_concurrency: int = Field(3, ge=1, le=3)
     max_depth: int = Field(2, ge=0, le=2)

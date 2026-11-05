@@ -234,7 +234,7 @@ class ExecutionMixin:
             criteria=tuple(c.id for c in task_policy.criteria) or ("requested_outcome",),
             dependencies=task_policy.dependencies, write_paths=task_policy.write_paths,
             max_turns=task_policy.max_turns, workflow_hash=task_policy.workflow_hash or self.workflow_contract().content_hash,
-            policy=ExecutionPolicy(mode=self.budget.execution_mode, permission=self.levels[aid], capabilities=capabilities,
+            policy=ExecutionPolicy(mode=self.budget.execution_mode, capabilities=capabilities,
                                    max_concurrency=self.budget.max_concurrency, max_depth=self.budget.max_delegation_depth),
             skill_hashes={key: value["content_hash"] for key, value in self.pinned_skills.items()},
             base_manifest={f.path: f.sha256 or "missing" for f in manifest.files})
@@ -246,7 +246,7 @@ class ExecutionMixin:
         stage_base = None
         # Only delegated specialists stage edits. Workflow handoff documents and the
         # accountable lead use the canonical tree, one turn at a time.
-        staged = aid != self.lead_agent_id and not self.wf_owner_of_active(aid) and self.levels[aid] != "plan"
+        staged = aid != self.lead_agent_id and not self.wf_owner_of_active(aid)
         if staged and (agent.tools.get("file_write", True) or agent.tools.get("terminal")):
             from app.orchestrator.workspaces import create_stage
             context.workspace, stage_base = await asyncio.to_thread(create_stage, self.root, self.run_id, attempt_id)
@@ -271,7 +271,7 @@ class ExecutionMixin:
                             content = journal.after_content[path]
                             await self.publish_file(agent, path, journal.before_content[path], content or "",
                                                     pending["note"] if pending else "Integrated worker output",
-                                                    planned=False, deleted=content is None)
+                                                    deleted=content is None)
                     result["integrated_paths"] = list(changed)
                     await self.emit("integration_completed", {"attempt_id": attempt_id, "paths": list(changed)})
                     if context.pending_finish:

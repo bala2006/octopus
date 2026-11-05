@@ -96,20 +96,15 @@ async def test_hiring_requires_manage_team_and_respects_cap(client, workspace) -
     assert any("cap" in e["payload"]["output"] for e in await events(client, workspace, run["id"], "tool_result") if e["payload"]["tool"] == "create_agent")
 
 
-async def test_permission_levels_for_hiring(client, workspace) -> None:
+async def test_hiring_follows_approval_mode(client, workspace) -> None:
     script = lambda: ScriptedProvider({"Bea": [env({"action": "create_agent", "name": "Leo", "role": "Dev"}), env({"action": "finish", "summary": "x"})]})  # noqa: E731
     cid = await make_company(client, workspace, [boss()], [])
     set_provider_override(script())
-    run = await start_run(client, workspace, cid, permission_level="read_only")
-    await wait_status(client, workspace, run["id"])
-    assert not await events(client, workspace, run["id"], "agent_created")
-
-    set_provider_override(script())
-    run = await start_run(client, workspace, cid, permission_level="plan")
+    run = await start_run(client, workspace, cid, permission_level="auto")
     await wait_status(client, workspace, run["id"])
     ev = await events(client, workspace, run["id"], "agent_created")
-    assert ev and ev[0]["payload"]["persisted"] is False
-    assert not any(a["name"] == "Leo" for a in (await canvas(client, workspace, cid))["agents"]), "plan-mode hires are run-only"
+    assert ev and ev[0]["payload"]["persisted"] is True
+    assert any(a["name"] == "Leo" for a in (await canvas(client, workspace, cid))["agents"]), "Approve for me saves hires without asking"
 
     set_provider_override(script())
     run = await start_run(client, workspace, cid, permission_level="ask")
@@ -120,7 +115,7 @@ async def test_permission_levels_for_hiring(client, workspace) -> None:
         if p:
             break
         await asyncio.sleep(0.02)
-    assert p["kind"] == "create_agent" and p["details"]["name"] == "Leo"
+    assert p["kind"] == "create_agent" and p["details"]["name"].startswith("Leo")  # "Leo 2": the auto run already hired Leo
     await client.post(f"{base}/approve", json={"approval_id": p["id"], "approved": True})
     await wait_status(client, workspace, run["id"])
     assert any(a["name"] == "Leo" for a in (await canvas(client, workspace, cid))["agents"])

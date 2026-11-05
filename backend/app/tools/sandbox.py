@@ -3,13 +3,13 @@
 Backends:
 - ``subprocess`` (default, local): no shell, scrubbed environment, POSIX rlimits (CPU, memory, file size,
   processes), wall-clock timeout, output caps, ``cwd`` = project root. Network is disabled with
-  ``unshare -n`` when the OS allows it (not in danger mode).
+  ``unshare -n`` when the OS allows it.
 - ``docker``: throwaway container, ``--network none``, memory/CPU/pids caps, read-only root FS,
   project mounted at /work.
 
-Permission levels: outside ``danger`` mode only allowlisted commands run, without a shell (operators inside quoted
-arguments are fine, unquoted ones are rejected); ``danger`` allows any command, and commands with shell operators run
-through ``sh -c`` (still no paths outside the project, same limits).
+Every approval mode uses the same rules: one allowlisted program, no shell, no network. Arguments that point outside the
+project folder are returned to the caller, which asks the user before running that command. ``.git`` and Octopus data
+stay protected in all cases.
 """
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def shell_operators(command: str) -> list[str]:
 
     Commands run without a shell, so ``node -e "const f = () => a && b"`` or ``python -c "if a < b: ..."`` are harmless:
     their operators are inside one quoted argument. The old substring check rejected those (and every multi-line script),
-    even at danger level, which is what made agents give up on running and testing their own code."""
+    which is what made agents give up on running and testing their own code."""
     ops: list[str] = []
     quote: str | None = None
     i, n = 0, len(command)
@@ -83,48 +83,59 @@ def needs_shell(command: str) -> bool:
     return bool(shell_operators(command))
 
 
-def parse_command(command: str, *, danger: bool = False) -> list[str]:
-    """Validate ``command`` and return the argv to execute.
+@dataclass(frozen=True)
+class CommandPlan:
+    argv: list[str]
+    outside: list[str]  # arguments that point outside the project folder; running the command needs the user's approval
 
-    Below danger level: one allowlisted program, no shell. At danger level any program, and commands with shell operators
-    (pipes, ``&&``, redirects…) run through ``sh -c``; the project-path checks still apply to every word."""
+
+def _path_parts(argument: str) -> tuple[str, list[str]]:
+    value = argument.split("=", 1)[-1] if argument.startswith("-") and "=" in argument else argument
+    value = value.replace("\\", "/")
+    return value, value.lower().split("/")
+
+
+def analyze_command(command: str) -> CommandPlan:
+    """Check ``command`` against the sandbox rules.
+
+    Raises ``SandboxError`` for anything that can never run: shell operators, programs outside the allowlist, inline code,
+    blocked programs, and ``.git`` or Octopus internals. Arguments that point outside the project are not an error here.
+    They come back in ``CommandPlan.outside`` so the caller can ask the user first."""
     ops = shell_operators(command)
-    if ops and not danger:
-        raise SandboxError(f"Shell operators ({' '.join(sorted(set(ops)))}) need the danger permission level; run one command "
-                           "per call (quoted arguments may contain any characters), or write a script file and run that")
-    if ops and os.name != "posix":
-        raise SandboxError("Shell operators are not supported on this platform; run one command per call")
+    if ops:
+        raise SandboxError(f"Shell operators ({' '.join(sorted(set(ops)))}) are not allowed; run one command per call "
+                           "(quoted arguments may contain any characters), or write a script file and run that")
     try:
         argv = shlex.split(command, comments=False)
     except ValueError as exc:
         raise SandboxError(f"Could not parse command: {exc}") from exc
     if not argv:
         raise SandboxError("Empty command")
-    if ops:
-        _check_paths(argv)
-        return ["sh", "-c", command]
     exe = os.path.basename(argv[0])
-    if exe in BLOCKED_ALWAYS and not danger:
-        raise SandboxError(f"'{exe}' is blocked; it requires danger mode")
-    if not danger and not any(argv[: len(p)] == p for p in ALLOWED_PREFIXES):
+    if exe in BLOCKED_ALWAYS:
+        raise SandboxError(f"'{exe}' is blocked")
+    if not any(argv[: len(p)] == p for p in ALLOWED_PREFIXES):
         allowed = ", ".join(" ".join(p) for p in ALLOWED_PREFIXES)
-        raise SandboxError(f"Command not allowed in this permission level. Allowed: {allowed}. (Danger mode allows any command.)")
-    inline = len(argv) > 2 and exe in ("python", "python3", "node") and argv[1] in ("-c", "-e", "--eval")
-    if inline and not danger:
+        raise SandboxError(f"Command not allowed. Allowed: {allowed}.")
+    if len(argv) > 2 and exe in ("python", "python3", "node") and argv[1] in ("-c", "-e", "--eval"):
         raise SandboxError("Inline code (-c / -e) is not allowed; write a file first")
-    _check_paths([a for i, a in enumerate(argv) if not (inline and i == 2)])  # inline code is a program, not a path
-    return argv
-
-
-def _check_paths(argv: list[str]) -> None:
-    for a in argv[1:]:
-        value = a.split("=", 1)[-1] if a.startswith("-") and "=" in a else a
-        value = value.replace("\\", "/")
-        parts = value.lower().split("/")
-        if value.startswith(("/", "~")) or (len(value) > 1 and value[1] == ":") or ".." in parts:
-            raise SandboxError("Arguments may not reference paths outside the project directory")
+    outside: list[str] = []
+    for argument in argv[1:]:
+        value, parts = _path_parts(argument)
         if ".octopus" in parts or ".git" in parts:
             raise SandboxError("Octopus data and .git internals are protected")
+        if value.startswith(("/", "~")) or (len(value) > 1 and value[1] == ":") or ".." in parts:
+            outside.append(argument)
+    return CommandPlan(argv=argv, outside=outside)
+
+
+def parse_command(command: str, *, allow_outside: bool = False) -> list[str]:
+    """Return the argv for ``command``. Paths outside the project raise unless ``allow_outside`` is set. Only set it after
+    the user approved that command."""
+    plan = analyze_command(command)
+    if plan.outside and not allow_outside:
+        raise SandboxError("Arguments may not reference paths outside the project directory")
+    return plan.argv
 
 
 def _limits(memory_mb: int, cpu_s: int, *, address_space: bool = True):  # type: ignore[no-untyped-def]
@@ -252,11 +263,11 @@ async def bounded_output(proc: asyncio.subprocess.Process) -> str:
     return head + "\n... [truncated] ...\n" + tail[-(MAX_OUTPUT - 2000):]
 
 
-async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: int, *, network: bool) -> ExecResult:
+async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: int) -> ExecResult:
     env = command_environment(cwd)
     exe = _resolve_exe(argv, env)
     backend = "subprocess"
-    if not network and await _unshare_available():
+    if await _unshare_available():
         exe = [shutil.which("unshare") or "unshare", "-rn", "--", *exe]
         backend = "subprocess+netns"
     # V8 and Go reserve large virtual address ranges without using that much RAM.
@@ -281,7 +292,7 @@ async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: i
     return ExecResult(proc.returncode == 0, proc.returncode or 0, text, backend=backend)
 
 
-async def _run_docker(argv: list[str], cwd: Path, timeout: int, memory_mb: int, *, network: bool) -> ExecResult:
+async def _run_docker(argv: list[str], cwd: Path, timeout: int, memory_mb: int) -> ExecResult:
     s = get_settings()
     local_env_args: list[str] = []
     from app.services.local_environment import environment_directory
@@ -290,7 +301,7 @@ async def _run_docker(argv: list[str], cwd: Path, timeout: int, memory_mb: int, 
         env_rel = venv.relative_to(cwd.resolve()).as_posix()
         local_env_args = ["-e", f"PATH=/work/{env_rel}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                           "-e", f"VIRTUAL_ENV=/work/{env_rel}"]
-    cmd = ["docker", "run", "--rm", "--network", "bridge" if network else "none", "--memory", f"{memory_mb}m", "--cpus", "1",
+    cmd = ["docker", "run", "--rm", "--network", "none", "--memory", f"{memory_mb}m", "--cpus", "1",
            "--pids-limit", "256", "--read-only", "--tmpfs", "/tmp", *local_env_args, "-v", f"{cwd}:/work", "-w", "/work",
            "--user", f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "1000:1000", s.sandbox_docker_image, *argv]
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
@@ -303,10 +314,10 @@ async def _run_docker(argv: list[str], cwd: Path, timeout: int, memory_mb: int, 
     return ExecResult(proc.returncode == 0, proc.returncode or 0, text, backend="docker")
 
 
-async def run_command(command: str, cwd: Path, *, danger: bool = False, timeout: int | None = None) -> ExecResult:
+async def run_command(command: str, cwd: Path, *, allow_outside: bool = False, timeout: int | None = None) -> ExecResult:
     s = get_settings()
-    argv = parse_command(command, danger=danger)
+    argv = parse_command(command, allow_outside=allow_outside)
     t = min(timeout or s.sandbox_timeout_s, s.sandbox_timeout_s)
     if s.sandbox_mode == "docker" and shutil.which("docker"):
-        return await _run_docker(argv, cwd, t, s.sandbox_memory_mb, network=danger)
-    return await _run_subprocess(argv, cwd, t, s.sandbox_memory_mb, network=danger)
+        return await _run_docker(argv, cwd, t, s.sandbox_memory_mb)
+    return await _run_subprocess(argv, cwd, t, s.sandbox_memory_mb)

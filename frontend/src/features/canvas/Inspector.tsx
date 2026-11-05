@@ -3,14 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Activity, Brain, Cpu, Flag, Plug, Save, SlidersHorizontal, Trash2, User, Wrench, X, FileText } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
-import { AGENT_COLORS, AVATARS, AVATAR_KEYS, MESSAGE_TYPE_LABEL, PERMISSIONS, TOOLS } from "@/lib/meta";
+import { AGENT_COLORS, AVATARS, AVATAR_KEYS, MESSAGE_TYPE_LABEL, TOOLS } from "@/lib/meta";
 import { cn, timeAgo } from "@/lib/utils";
 import { qk, useCompanyId, useMcpServers, useRoleTemplates, useRuns, useWorkspaceId } from "@/hooks/queries";
 import { Link } from "react-router-dom";
 import { Combobox } from "@/components/ui/combobox";
 import { applyRole, isLinked, roleOptions } from "./roleHelpers";
 import { useCanvas } from "@/stores/canvas";
-import type { AgentBehavior, AgentPermission, AgentTools } from "@/types";
+import type { AgentBehavior, AgentTools } from "@/types";
 import { AgentAvatar, EmptyState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Slider, Switch, Textarea } from "@/components/ui/primitives";
@@ -129,7 +129,7 @@ export function Inspector() {
             </TabsContent>
 
             <TabsContent value="tools" className="space-y-4">
-              <Heading>Tools & permissions</Heading>
+              <Heading>Tools</Heading>
               <div className="space-y-1.5">
                 {TOOLS.map((t) => (
                   <label key={t.key} className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-2.5 transition hover:bg-accent/30">
@@ -140,10 +140,6 @@ export function Inspector() {
                 ))}
               </div>
               <McpGrants tools={tools} onChange={(ids) => set({ tools: { ...tools, mcp_servers: ids } })} />
-              <Field label="Permission level" hint="An agent can only be more restrictive than the run's level.">
-                <Select value={(d.permission_level as string) ?? "inherit"} onValueChange={(v) => update(id, { permission_level: v as AgentPermission }, { history: true })}
-                  options={[{ value: "inherit", label: "Inherit from run" }, ...Object.entries(PERMISSIONS).map(([k, p]) => ({ value: k, label: p.label, hint: p.description }))]} />
-              </Field>
             </TabsContent>
 
             <TabsContent value="behavior" className="space-y-5">

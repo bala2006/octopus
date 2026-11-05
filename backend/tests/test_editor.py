@@ -106,5 +106,3 @@ async def test_commands_use_project_and_permission(client, workspace):
     assert result.status_code == 200
     assert result.json()["exit_code"] == 0
     assert "project command succeeded" in result.json()["output"]
-    await client.patch(f"/api/v1/workspaces/{workspace['id']}", json={"default_permission": "read_only"})
-    assert (await client.post(f"{base}/command", json={"command": "python check.py"})).status_code == 403

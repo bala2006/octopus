@@ -39,7 +39,7 @@ async def inspection_runtime(tmp_path):
         await db.flush()
         db.add_all([Agent(id=node["id"], company_id="co", name=node["name"]) for node in nodes])
         db.add(Agent(id="outsider", company_id="co", name="Not assigned to this chat"))
-        row = Run(id="run", company_id="co", goal="Review app.py", permission_level="danger",
+        row = Run(id="run", company_id="co", goal="Review app.py", permission_level="auto",
                   snapshot_json={"agents": nodes}, budget_json={"workflow": "off", "engineering_workflow": "review",
                   "verify_before_finish": True, "independent_review": False}, state_json={"plan_revision": 1})
         db.add(row)
@@ -54,7 +54,7 @@ async def inspection_runtime(tmp_path):
 async def execute(runtime, owner, action):
     assignment = Assignment(run_id=runtime.run_id, owner=owner, lead="lead", provider="azure", model="gpt-6-luna",
                             original_goal=runtime.goal, workflow="review",
-                            policy=ExecutionPolicy(permission="danger", capabilities=frozenset({"file_read", "terminal"})))
+                            policy=ExecutionPolicy(capabilities=frozenset({"file_read", "terminal"})))
     attempt_id = await runtime.runtime_store.start_attempt(assignment)
     token = ACTIVE_ATTEMPT.set(AttemptContext(attempt_id, assignment))
     try:

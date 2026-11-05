@@ -5,10 +5,8 @@ Guarantees:
   symlinks that resolve outside the root are rejected (checked on the *real* path).
 - Octopus' own data (``.octopus/``) and VCS internals (``.git/``) are never readable or writable by agents, with one
   exception: ``.octopus/work/`` is the agents' place for *working material* (plans, specs, briefs, notes, reviews, QA
-  reports), so it stays out of the user's project tree. The database, plans, exports and browser data stay sealed.
-- Secret-looking files (``.env``, keys, certificates) are blocked unless the run is in ``danger`` mode.
-- In ``plan`` mode writes go to a shadow directory (``.octopus/plans/<run_id>/``); reads prefer the
-  shadow copy, so agents see their own planned changes while the project stays untouched.
+  reports), so it stays out of the user's project tree. The database, exports and browser data stay sealed.
+- Secret-looking files (``.env``, keys, certificates) are always blocked for agents.
 """
 from __future__ import annotations
 
@@ -74,12 +72,8 @@ def is_secret(rel: str) -> bool:
 
 
 class ProjectFS:
-    def __init__(self, root: Path, *, shadow: Path | None = None, allow_secrets: bool = False) -> None:
+    def __init__(self, root: Path) -> None:
         self.root = root.resolve()
-        self.shadow = shadow.resolve() if shadow else None
-        self.allow_secrets = allow_secrets
-        if self.shadow:
-            self.shadow.mkdir(parents=True, exist_ok=True)
 
     def _inside(self, base: Path, rel: str) -> Path:
         full = base / rel
@@ -98,38 +92,24 @@ class ProjectFS:
 
     def resolve(self, path: str) -> tuple[str, Path]:
         rel = normalize_path(path)
-        if not self.allow_secrets and is_secret(rel):
-            raise WorkspaceError(f"'{rel}' looks like a secrets file; access requires danger mode")
+        if is_secret(rel):
+            raise WorkspaceError(f"'{rel}' looks like a secrets file; agents cannot read or change it")
         full = self._inside(self.root, rel)
         # A link inside the project must not expose protected metadata or secrets.
         actual = full.resolve().relative_to(self.root).as_posix()
         normalize_path(actual)
-        if not self.allow_secrets and is_secret(actual):
+        if is_secret(actual):
             raise WorkspaceError("Symlink points to a secrets file")
         return rel, full
 
-    def target_for_write(self, path: str) -> tuple[str, Path]:
-        rel, real = self.resolve(path)
-        if self.shadow:
-            return rel, self._inside(self.shadow, rel)
-        return rel, real
-
     def current(self, path: str) -> str | None:
-        """Current content as the agent sees it (shadow first in plan mode)."""
+        """Current content on disk."""
         rel, real = self.resolve(path)
-        if self.shadow:
-            sh = self._inside(self.shadow, rel)
-            if sh.is_file():
-                return sh.read_text(encoding="utf-8", errors="replace")
         return real.read_text(encoding="utf-8", errors="replace") if real.is_file() else None
 
     def current_file(self, path: str) -> tuple[str, Path] | None:
-        """Real file on disk for ``path`` (shadow first in plan mode), for serving binary assets such as images."""
+        """Real file on disk for ``path``, for serving binary assets such as images."""
         rel, real = self.resolve(path)
-        if self.shadow:
-            sh = self._inside(self.shadow, rel)
-            if sh.is_file():
-                return rel, sh
         return (rel, real) if real.is_file() else None
 
     def original(self, path: str) -> str | None:
@@ -137,7 +117,7 @@ class ProjectFS:
         return real.read_text(encoding="utf-8", errors="replace") if real.is_file() else None
 
     def write(self, path: str, content: str) -> str:
-        rel, target = self.target_for_write(path)
+        rel, target = self.resolve(path)
         data = content.encode("utf-8")
         if len(data) > MAX_FILE_BYTES:
             raise WorkspaceError("File too large (max 1MB)")
@@ -166,7 +146,7 @@ class ProjectFS:
         out: set[str] = set()
         visited_dirs = 0
         inspected_entries = 0
-        for base in [self.root] + ([self.shadow] if self.shadow else []):
+        for base in [self.root]:
             start = base
             if prefix:
                 rel = normalize_path(prefix)
@@ -195,7 +175,7 @@ class ProjectFS:
                                 if not entry.is_file(follow_symlinks=False):
                                     continue
                                 rel = os.path.relpath(entry.path, base).replace("\\", "/")
-                                if entry.name.endswith((".pyc", ".octopus-tmp")) or (not self.allow_secrets and is_secret(rel)):
+                                if entry.name.endswith((".pyc", ".octopus-tmp")) or is_secret(rel):
                                     continue
                                 out.add(rel)
                                 if len(out) >= MAX_LIST:
@@ -241,8 +221,8 @@ class ProjectFS:
             return []
 
     def make_dir(self, path: str) -> str:
-        """Create a folder (and its parents) inside the project; in plan mode it goes to the plan shadow."""
-        rel, target = self.target_for_write(path)
+        """Create a folder (and its parents) inside the project."""
+        rel, target = self.resolve(path)
         if target.exists() and not target.is_dir():
             raise WorkspaceError(f"'{rel}' already exists and is a file")
         target.mkdir(parents=True, exist_ok=True)
@@ -250,8 +230,6 @@ class ProjectFS:
 
     def move(self, src: str, dst: str) -> tuple[str, str, list[str]]:
         """Move/rename a file or folder inside the project. Returns (src, dst, moved file paths relative to the project)."""
-        if self.shadow:
-            raise WorkspaceError("Plan mode: files can't be moved; write the new file with write_file instead")
         s_rel, s_real = self.resolve(src)
         d_rel, d_real = self.resolve(dst)
         if s_rel == WORK_DIR:
@@ -268,8 +246,8 @@ class ProjectFS:
             raise WorkspaceError("Can't move a folder into itself")
         moved = [f"{d_rel}/{os.path.relpath(os.path.join(dp, f), s_real)}".replace("\\", "/") for dp, _, fs in os.walk(s_real) for f in fs] \
             if s_real.is_dir() else [d_rel]
-        if not self.allow_secrets and any(is_secret(m) for m in moved):
-            raise WorkspaceError("That move would touch a secrets file; it requires danger mode")
+        if any(is_secret(m) for m in moved):
+            raise WorkspaceError("That move would touch a secrets file")
         d_real.parent.mkdir(parents=True, exist_ok=True)
         os.replace(s_real, d_real)
         return s_rel, d_rel, moved

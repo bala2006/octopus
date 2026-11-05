@@ -36,8 +36,8 @@ export type MemoryOut = S["MemoryOut"];
 export type ParsedFileOut = S["ParsedFileOut"];
 
 export type EdgeType = EdgeOut["type"];
-export type PermissionLevel = "read_only" | "plan" | "ask" | "danger";
-export type AgentPermission = "inherit" | PermissionLevel;
+/** One global user setting: "ask" asks for permission, "auto" approves for me. */
+export type ApprovalMode = SettingsOut["approval_mode"];
 export type RunStatus = "queued" | "running" | "paused" | "awaiting_user" | "completed" | "incomplete" | "failed" | "cancelled";
 export type AgentStatus =
   | "idle" | "thinking" | "speaking" | "writing" | "reading" | "running" | "tool" | "waiting" | "awaiting_approval" | "error" | "done";
@@ -59,5 +59,5 @@ export interface PendingApproval {
   summary: string;
   preview: string;
   details: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-  level?: PermissionLevel;
+  level?: ApprovalMode;
 }

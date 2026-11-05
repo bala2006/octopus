@@ -57,7 +57,7 @@ class FakeRuntime:
 
     def context(self):
         assignment = Assignment(run_id="run", owner=self.agent.id, lead="lead", provider="opencode", model=self.agent.model,
-                                effort="high", original_goal=self.goal, policy=ExecutionPolicy(permission="ask"))
+                                effort="high", original_goal=self.goal, policy=ExecutionPolicy())
         return AttemptContext("attempt", assignment)
 
     def assert_current_attempt(self):

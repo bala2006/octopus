@@ -48,7 +48,6 @@ export function useOpenFolder() {
           body: {
             path: folder.path,
             name,
-            default_permission: "ask",
           },
         }),
       ),

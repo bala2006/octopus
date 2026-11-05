@@ -114,8 +114,6 @@ async def test_development_server_start_preview_stop_and_restart(client, workspa
         assert (await client.post(base, json={"command": "python serve.py"})).status_code == 200
     finally:
         await client.delete(base)
-    await client.patch(f"/api/v1/workspaces/{workspace['id']}", json={"default_permission": "read_only"})
-    assert (await client.post(base, json={"command": "python serve.py"})).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -123,9 +121,9 @@ async def test_server_shutdown_closes_real_process_and_bounds_output(tmp_path):
     (tmp_path / "worker.py").write_text("import time\nprint('x' * 40000, flush=True)\ntime.sleep(30)\n")
     manager = ManagedProcesses()
     try:
-        await manager.start("test", tmp_path, "python worker.py", danger=False)
+        await manager.start("test", tmp_path, "python worker.py")
         with pytest.raises(SandboxError, match="already running"):
-            await manager.start("test", tmp_path, "python worker.py", danger=False)
+            await manager.start("test", tmp_path, "python worker.py")
         for _ in range(100):
             if manager.status("test")["truncated"]:
                 break
@@ -144,7 +142,7 @@ async def test_concurrent_server_start_and_stop_leave_no_process(tmp_path):
     (tmp_path / "worker.py").write_text("import time\ntime.sleep(30)\n")
     manager = ManagedProcesses()
     try:
-        starting = asyncio.create_task(manager.start("test", tmp_path, "python worker.py", danger=False))
+        starting = asyncio.create_task(manager.start("test", tmp_path, "python worker.py"))
         await asyncio.sleep(0)
         stopping = asyncio.create_task(manager.stop("test"))
         await starting

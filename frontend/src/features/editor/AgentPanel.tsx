@@ -47,7 +47,6 @@ import {
 } from "@/hooks/queries";
 import type {
   AgentOut,
-  PermissionLevel,
   CompanyOut,
   CanvasOut,
   ParsedFileOut,
@@ -58,7 +57,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/primitives";
 import {
   ConfirmDialog,
-  Select,
   Tip,
   Popover,
   PopoverTrigger,
@@ -90,12 +88,8 @@ import { QuestionCard } from "@/features/runs/QuestionCard";
 import { useRunStream } from "@/features/runs/useRunStream";
 import { TERMINAL } from "@/features/runs/runState";
 import { useEditorStore } from "./editorStore";
-import {
-  contextGoal,
-  modePermission,
-  type AgentMode,
-  type CodeContext,
-} from "./agentContext";
+import { contextGoal, type CodeContext } from "./agentContext";
+import { APPROVAL_MODES, approvalModeOf } from "@/lib/meta";
 import {
   defaultComposerSettings,
   recordedComposerSettings,
@@ -306,7 +300,6 @@ function CompanyAgentPanel({
   const text = store.drafts[key] ?? "";
   const pendingPrompt = store.pendingPrompts[w];
   const conversation = presentation === "conversation";
-  const [mode, setMode] = React.useState<AgentMode>("agent");
   const [contexts, setContexts] = React.useState<CodeContext[]>([]);
   const [adding, setAdding] = React.useState(false);
   const [browsingFiles, setBrowsingFiles] = React.useState(false);
@@ -343,10 +336,7 @@ function CompanyAgentPanel({
   const submitLock = React.useRef(false);
   const preparedCompany = React.useRef<CanvasOut | null>(null);
   const recordedBudget = recordedComposerSettings(run.data?.budget);
-  const permission = modePermission(
-    mode,
-    (ws.data?.default_permission ?? "ask") as PermissionLevel,
-  );
+  const approvalMode = approvalModeOf(settings.data?.approval_mode);
   React.useEffect(() => {
     if (focusToken) input.current?.focus();
   }, [focusToken]);
@@ -427,7 +417,7 @@ function CompanyAgentPanel({
             api.POST("/api/v1/w/{workspace_id}/companies/from-template", {
               params: { path: { workspace_id: w } },
               body: {
-                template_key: mode === "ask" ? "solo_engineer" : "adaptive",
+                template_key: "adaptive",
                 name: "Octopus",
                 goal,
               },
@@ -454,15 +444,13 @@ function CompanyAgentPanel({
             company_id: targetCompany,
             goal,
             mode: "autonomous",
-            permission_level: permission,
-            approval_mode: preferences.approvalMode ?? "ask",
             attachments: attachmentPayload(prompt.files),
             ...{ client_request_id: prompt.clientId },
             budget: {
               ...defaultRunBudget(),
               ...preferences,
               ...executionSettings,
-              workflow: mode === "ask" ? "off" : "auto",
+              workflow: "auto",
             },
           },
         }),
@@ -1066,9 +1054,6 @@ function CompanyAgentPanel({
                           Deleted
                         </span>
                       )}
-                      {!a.deleted && a.planned && (
-                        <span className="ml-auto text-warning">Planned</span>
-                      )}
                     </button>
                   ))}
               </div>
@@ -1299,15 +1284,7 @@ function CompanyAgentPanel({
             caption={
               <>
                 <ShieldCheck className="h-3 w-3 shrink-0" />
-                <span>
-                  {(run.data?.permission_level ?? permission) === "read_only"
-                    ? "Read only. No edits or commands."
-                    : (run.data?.permission_level ?? permission) === "plan"
-                      ? "Plan only. Review proposed changes."
-                      : (run.data?.permission_level ?? permission) === "danger"
-                        ? "Full access. No approval required."
-                        : "Edits and commands need your approval."}
-                </span>
+                <span>{APPROVAL_MODES[approvalMode].caption}</span>
                 <span className="ml-auto hidden shrink-0 sm:inline">
                   Enter to send
                 </span>
@@ -1409,75 +1386,7 @@ function CompanyAgentPanel({
                     )}
                   </PopoverContent>
                 </Popover>
-                {!runId ? (
-                  <Select
-                    ariaLabel="Agent mode"
-                    variant="ghost"
-                    className="w-auto"
-                    value={mode}
-                    onValueChange={(value) => {
-                      if (
-                        value === "agent" ||
-                        value === "plan" ||
-                        value === "ask"
-                      )
-                        setMode(value);
-                    }}
-                    options={[
-                      {
-                        value: "agent",
-                        label: "Agent",
-                        hint: "Implement and verify changes",
-                      },
-                      {
-                        value: "plan",
-                        label: "Plan",
-                        hint: "Propose changes for review",
-                      },
-                      {
-                        value: "ask",
-                        label: "Ask",
-                        hint: "Read and explain your project",
-                      },
-                    ]}
-                  />
-                ) : (
-                  <span className="composer-pill">
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    {run.data?.permission_level?.replace("_", " ") ?? "Loading"}
-                  </span>
-                )}
-                <ApprovalModePicker
-                  compact={!!floatingWindow}
-                  value={
-                    runId
-                      ? run.data?.permission_level === "auto"
-                        ? "auto"
-                        : "ask"
-                      : (preferences.approvalMode ?? "ask")
-                  }
-                  disabled={!!runId || submit.isPending || permission !== "ask"}
-                  label={
-                    runId
-                      ? run.data?.permission_level === "danger"
-                        ? "Danger mode"
-                        : run.data?.permission_level === "plan"
-                          ? "Plan mode"
-                          : run.data?.permission_level === "read_only"
-                            ? "Read only"
-                            : undefined
-                      : permission === "danger"
-                        ? "Danger mode"
-                        : permission === "plan"
-                          ? "Plan mode"
-                          : permission === "read_only"
-                            ? "Read only"
-                            : undefined
-                  }
-                  onChange={(approvalMode) =>
-                    store.configure(w, { ...preferences, approvalMode })
-                  }
-                />
+                <ApprovalModePicker compact={!!floatingWindow} />
                 {current && (
                   <Button
                     size="xs"

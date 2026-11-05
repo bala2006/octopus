@@ -53,18 +53,19 @@ def evaluate(folder: Path, checks: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 async def run_case(client: httpx.AsyncClient, *, folder: Path, template: str, task: dict[str, Any], budget: dict[str, Any] | None = None,
-                   permission: str = "danger", timeout_s: float = 1800, path_for_api: str | None = None) -> dict[str, Any]:
+                   timeout_s: float = 1800, path_for_api: str | None = None) -> dict[str, Any]:
     """Run one task with one template. ``path_for_api``: the folder as the backend should see it (e.g. a laptop path in Docker)."""
     setup_project(folder, task)
     t0 = time.monotonic()
-    r = await client.post("/api/v1/workspaces", json={"path": path_for_api or str(folder), "default_permission": permission})
+    r = await client.put("/api/v1/settings/approval-mode", json={"approval_mode": "auto"})  # benchmarks run unattended
+    r.raise_for_status()
+    r = await client.post("/api/v1/workspaces", json={"path": path_for_api or str(folder)})
     r.raise_for_status()
     w = r.json()["id"]
     r = await client.post(f"/api/v1/w/{w}/companies/from-template", json={"template_key": template})
     r.raise_for_status()
     company = r.json()["company"]["id"]
-    r = await client.post(f"/api/v1/w/{w}/runs", json={"company_id": company, "goal": task["goal"], "permission_level": permission,
-                                                       "budget": budget or {}})
+    r = await client.post(f"/api/v1/w/{w}/runs", json={"company_id": company, "goal": task["goal"], "budget": budget or {}})
     r.raise_for_status()
     run_id = r.json()["id"]
     run: dict[str, Any] = {}

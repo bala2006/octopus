@@ -15,8 +15,9 @@ from app.db.session import get_registry_db
 from app.llm.base import LLMError, LLMRequest
 from app.llm.router import LEGACY_AZURE_ROWS, PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
 from app.models import McpServer, ProviderKey, User
+from app.orchestrator.permissions import normalize_mode
 from app.schemas import (
-    BrowserStatusOut, BrowserTestOut, FxRateOut,
+    ApprovalModeIn, ApprovalModeOut, BrowserStatusOut, BrowserTestOut, FxRateOut,
     McpServerIn, McpServerOut, McpToolOut, ParsedFileOut, ProviderInfo, ProviderKeyIn, ProviderKeyOut, ProviderOptions, SettingsOut,
     TestProviderIn,
     TestProviderOut,
@@ -44,7 +45,17 @@ async def get_settings_view(db: AsyncSession = Depends(get_registry_db), user: U
         providers.append(ProviderInfo(provider=name, label=info["label"], models=models, configured=is_configured(name, key, base, extra),
                                       needs_key=info["needs_key"], needs_base=info.get("needs_base", False)))
     return SettingsOut(single_user_mode=s.single_user_mode, default_provider=s.default_provider,
-                       default_model=s.default_model, sandbox_mode=s.sandbox_mode, providers=providers, keys=keys)
+                       default_model=s.default_model, sandbox_mode=s.sandbox_mode, approval_mode=normalize_mode(user.approval_mode),
+                       providers=providers, keys=keys)
+
+
+@router.put("/settings/approval-mode", response_model=ApprovalModeOut)
+async def set_approval_mode(body: ApprovalModeIn, db: AsyncSession = Depends(get_registry_db),
+                            user: User = Depends(current_user)) -> ApprovalModeOut:
+    """One global setting for every project and new run. "ask" asks for permission; "auto" approves for me."""
+    user.approval_mode = body.approval_mode
+    await db.commit()
+    return ApprovalModeOut(approval_mode=body.approval_mode)
 
 
 @router.get("/settings/opencode")
