@@ -40,9 +40,9 @@ from app.workflows.org import OrgService
 from app.workflows.company import CompanyWorkflow
 from app.orchestrator.execution import ACTIVE_ATTEMPT, ExecutionService, execution_field
 from app.core.evidence import redact_evidence
-from app.workflows.protocols import (
-    DebateState, LoopDetector, ReviewState,
-)
+from app.workflows.boardroom import DebateState
+from app.workflows.protocols import LoopDetector
+from app.workflows.review import ReviewState
 from app.schemas import RunBudget
 from app.orchestrator.handlers import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, tasks as task_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions, team_actions, workflow_actions
 from app.orchestrator import run_control, run_state, mailbox, board, turn_loop, lifecycle

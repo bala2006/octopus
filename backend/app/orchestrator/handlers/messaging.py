@@ -13,7 +13,8 @@ from app.orchestrator.context import AgentSpec, clip
 from app.orchestrator.execution import ACTIVE_ATTEMPT
 from app.orchestrator.handlers.shared import OPEN_TASK_STATES
 from app.orchestrator.permissions import allowed_recipients, find_channel, rejection_reason, EdgeSpec
-from app.workflows.protocols import DebateState, ReviewState, debate_decided_externally, debate_on_message, infer_verdict, review_on_request, review_on_result
+from app.workflows.boardroom import DebateState, debate_decided_externally, debate_on_message
+from app.workflows.review import ReviewState, infer_verdict, review_on_request, review_on_result
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime

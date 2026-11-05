@@ -7,7 +7,9 @@ from sqlalchemy import func, or_, update, select
 from typing import TYPE_CHECKING, Any
 
 from app.models import Run, Artifact, Message, Task
-from app.workflows.protocols import DebateState, LoopDetector, ReviewState
+from app.workflows.boardroom import DebateState
+from app.workflows.protocols import LoopDetector
+from app.workflows.review import ReviewState
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime
