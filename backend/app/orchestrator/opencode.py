@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from app.llm.base import Usage
 from app.orchestrator import actions as A
 from app.orchestrator.context import build_turn_prompts
-from app.orchestrator.evidence import redact_evidence
+from app.core.evidence import redact_evidence
 from app.orchestrator.execution import ACTIVE_ATTEMPT
 from app.orchestrator.worker_bridge import WorkerBridge
 from app.services.skill_contracts import content_hash
@@ -44,13 +44,13 @@ async def opencode_turn(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], obs
     context = ACTIVE_ATTEMPT.get()
     if context is None or context.assignment.owner != agent.id:
         raise OpenCodeError("OpenCode needs an owned current agent attempt")
-    rt.assert_current_attempt()
+    rt.execution.assert_current_attempt()
     if context.assignment.policy.mode != "trusted_host":
         raise OpenCodeError("This OpenCode runner does not provide restricted OS isolation")
-    root = rt.worker_root(agent.id)
+    root = rt.execution.worker_root(agent.id)
     provider, model = rt.model_for(agent)
     effort = rt.effort_for(agent) or "default"
-    memory_context = await rt.scoped_context(agent.id)
+    memory_context = await rt.execution.scoped_context(agent.id)
     signature = content_hash({"root": str(root.resolve()), "revision": context.assignment.revision, "model": model, "effort": effort,
                               "policy": context.assignment.policy.model_dump(mode="json"), "skills": context.assignment.skill_hashes,
                               "guidance": rt.pinned_guidance.get("content_hash"), "role": agent.to_dict(),
@@ -68,7 +68,7 @@ async def opencode_turn(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], obs
     native_violation = asyncio.Event()
 
     async def permission(params: dict) -> dict:
-        rt.assert_current_attempt()
+        rt.execution.assert_current_attempt()
         call = params.get("toolCall") or {}
         approved = bridge.grants_acp_call(call) and call.get("kind") not in {"execute", "edit", "delete", "move"}
         options = params.get("options") or []
@@ -77,7 +77,7 @@ async def opencode_turn(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], obs
 
     async def update_event(event: dict) -> None:
         nonlocal session_cost
-        rt.assert_current_attempt()
+        rt.execution.assert_current_attempt()
         kind = event.get("sessionUpdate")
         if kind in {"agent_message_chunk", "agent_thought_chunk"}:
             block = event.get("content") or {}
@@ -116,7 +116,7 @@ async def opencode_turn(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], obs
             try:
                 while not prompt.done():
                     await asyncio.wait({prompt}, timeout=.1)
-                    rt.assert_current_attempt()
+                    rt.execution.assert_current_attempt()
                     if native_violation.is_set():
                         raise OpenCodeError("OpenCode used a native mutation tool outside the Octopus broker. Review possible side effects before retrying.")
                     if rt.paused:
@@ -127,7 +127,7 @@ async def opencode_turn(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], obs
                         await session.send({"method": "session/cancel", "params": {"sessionId": session.session_id}})
                         cancelled = True
                 result = await prompt
-                rt.assert_current_attempt()
+                rt.execution.assert_current_attempt()
                 if native_violation.is_set():
                     raise OpenCodeError("OpenCode native mutation needs side-effect reconciliation")
                 if result.get("stopReason") == "cancelled" and not bridge.yielded.is_set():

@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from app.core.deps import get_or_create_single_user
+from app.channels.deps import get_or_create_single_user
 from app.db.session import registry_factory
 from app.llm.router import set_provider_override
 from fakes.fake_provider import FakeProvider
@@ -39,7 +39,7 @@ async def test_direct_chat_stream_tool_and_regenerate(client, workspace) -> None
     cid = await make_company(client, workspace, [agent("a1", "Ava", role="CEO")], [])
     base = f"/api/v1/w/{workspace['id']}"
     s = (await client.post(f"{base}/sessions", json={"company_id": cid, "mode": "direct", "agent_id": "a1"})).json()
-    from app.core.deps import load_project
+    from app.channels.deps import load_project
 
     async with registry_factory()() as rdb:
         user = await get_or_create_single_user(rdb)

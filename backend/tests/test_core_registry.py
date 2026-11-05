@@ -271,7 +271,7 @@ def test_run_topics_cover_every_run_event_named_in_the_ws_docstring():
 def test_run_topics_cover_every_literal_event_name_the_backend_sends():
     root = Path(app.__file__).parent
     pattern = re.compile(r'\b(?:emit|publish)\(\s*(?:[\w.]+,\s*)?"([a-z_]+)"')
-    sources = [*sorted((root / "orchestrator").glob("*.py")), root / "api" / "ws.py"]
+    sources = [*sorted((root / "orchestrator").rglob("*.py")), root / "api" / "ws.py"]  # rglob: handlers/ holds emit sites too
     emitted: set[str] = set()
     for path in sources:
         emitted |= set(pattern.findall(path.read_text(encoding="utf-8")))

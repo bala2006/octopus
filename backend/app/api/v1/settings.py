@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.deps import current_user
+from app.channels.deps import current_user
 from app.core.security import decrypt_secret, encrypt_secret, mask_secret
 from app.db.base import utcnow
 from app.db.session import get_registry_db

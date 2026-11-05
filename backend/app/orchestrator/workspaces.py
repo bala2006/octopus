@@ -11,7 +11,7 @@ from typing import Iterator
 
 from pydantic import Field
 
-from app.orchestrator.evidence import ArtifactManifest, ExcludedFile, FileDigest, MAX_DIRECTORIES, MAX_FILES, MAX_TEXT_BYTES, MAX_TOTAL_BYTES
+from app.core.evidence import ArtifactManifest, ExcludedFile, FileDigest, MAX_DIRECTORIES, MAX_FILES, MAX_TEXT_BYTES, MAX_TOTAL_BYTES
 from app.services.skill_contracts import Contract, ContractError, content_hash
 from app.tools.workspace import IGNORED_DIRS, ProjectFS, WorkspaceError, is_secret
 
@@ -276,7 +276,7 @@ def integrate(stage: Path, root: Path, base: ArtifactManifest, *, write_paths: t
     after = {file.path: file.sha256 for file in current_stage.files}
     changes = tuple(IntegrationChange(path=path, before=before.get(path), after=after.get(path))
                     for path in sorted(before.keys() | after.keys()) if before.get(path) != after.get(path))
-    from app.orchestrator.task_contracts import permits_path
+    from app.core.task_contracts import permits_path
     denied = [change.path for change in changes if not permits_path(write_paths, change.path)]
     if denied:
         raise WorkspaceConflict("Worker changed files outside its task write scope: " + ", ".join(denied))

@@ -93,7 +93,7 @@ async def test_node_model_role_scoped_context_and_broker_are_used(tmp_path):
         memory_reads.append(aid)
         return "\nScoped memory for " + aid
 
-    runtime.scoped_context = scoped_context
+    runtime.execution.scoped_context = scoped_context
     await run(runtime)
     invocation = FakeSession.instances[0]
     assert invocation.root == tmp_path

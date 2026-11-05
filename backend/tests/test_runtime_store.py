@@ -172,7 +172,7 @@ async def test_consultation_cycle_one_wait_and_expiry(durable):
 @pytest_asyncio.fixture
 async def durable_client(durable, monkeypatch):
     from app.api.v1.runs import router
-    from app.core.deps import current_user, get_pdb, project_ctx
+    from app.channels.deps import current_user, get_pdb, project_ctx
     from app.orchestrator.engine import manager
     store, sf, root = durable
     async def notify(*_, **__):

@@ -10,7 +10,6 @@ Guarantees:
 """
 from __future__ import annotations
 
-import fnmatch
 import io
 import os
 import re
@@ -19,18 +18,13 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from app.core.config import PROJECT_DIRNAME
+from app.core.paths import IGNORED_DIRS, SECRET_ALLOW, SECRET_PATTERNS, is_secret  # noqa: F401 (re-exported)
 
 MAX_FILE_BYTES = 1_000_000
 MAX_LIST = 3000
 MAX_LIST_DIRECTORIES = 12000
-IGNORED_DIRS = {".git", PROJECT_DIRNAME, "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
-                ".ruff_cache", ".tmp", "dist", "build", ".next", ".turbo", ".idea", ".vscode", ".ds_store",
-                ".dart_tool", ".gradle", ".cxx", ".pub-cache", ".npm", "coverage"}
 PROTECTED_TOP = {PROJECT_DIRNAME, ".git"}
 WORK_DIR = f"{PROJECT_DIRNAME}/work"  # the only agent-accessible subtree of .octopus/
-SECRET_PATTERNS = [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", ".npmrc", ".pypirc",
-                   ".netrc", "credentials*", "*.keystore", "secrets.*"]
-SECRET_ALLOW = {".env.example", ".env.sample", ".env.template"}
 
 
 class WorkspaceError(ValueError):
@@ -62,13 +56,6 @@ def normalize_path(path: str) -> str:
 
 def is_work_path(parts: tuple[str, ...] | list[str]) -> bool:
     return len(parts) >= 2 and parts[0] == PROJECT_DIRNAME and parts[1] == "work"
-
-
-def is_secret(rel: str) -> bool:
-    name = rel.rsplit("/", 1)[-1].lower()
-    if name in SECRET_ALLOW:
-        return False
-    return any(fnmatch.fnmatch(name, pat) for pat in SECRET_PATTERNS)
 
 
 class ProjectFS:

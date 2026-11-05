@@ -14,7 +14,7 @@ from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory
 from app.models import Run, RunEvent
 from app.models.runtime_records import RunRequest, TaskAttempt, ExecutionEvidence, Consultation
-from app.orchestrator.contracts import Assignment
+from app.core.contracts import Assignment
 
 
 class Conflict(ValueError):

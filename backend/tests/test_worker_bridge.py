@@ -43,6 +43,7 @@ class FakeRuntime:
         self.stop_requested = False
         self.turn_no = 1
         self.events = []
+        self.execution = self  # the fake plays the runtime and its execution service
         self.executed = []
         self.messages = []
         self.used = []

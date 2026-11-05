@@ -283,7 +283,7 @@ async def test_concurrent_first_requests_share_the_single_user(tmp_path) -> None
 
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-    from app.core.deps import get_or_create_single_user
+    from app.channels.deps import get_or_create_single_user
     from app.db.migrate import upgrade_registry
 
     url = f"sqlite+aiosqlite:///{tmp_path / 'registry.db'}"

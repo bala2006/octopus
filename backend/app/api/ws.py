@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
-from app.core.deps import load_project, resolve_user
+from app.channels.deps import load_project, resolve_user
 from app.core.logging import get_logger
 from app.db.session import registry_factory
 from app.models import ChatSession, Company, Run, RunEvent

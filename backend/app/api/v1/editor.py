@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Literal
 
-from app.core.deps import ProjectCtx, project_ctx
+from app.channels.deps import ProjectCtx, project_ctx
 from app.db.session import get_registry_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services import editor

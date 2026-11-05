@@ -30,6 +30,11 @@ HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "tra
 WS_PATHS = ("/ws/w/w1/runs/r1", "/ws/w/w1/runs/r1/browser/a1", "/ws/w/w1/chat/s1")
 # Imports allowed inside app/channels. app.capabilities, app.workflows, and app.main are never allowed.
 APP_IMPORTS_ALLOWED = ("app.api", "app.core", "app.services", "app.orchestrator", "app.channels")
+# app/channels/deps.py is the FastAPI wiring that opens registry and project DB sessions and loads the User model.
+# Phase 1 named it as the one exception to the layer rules (it moved from app/core/deps.py in Phase 2 slice D).
+# No other channel module may import storage.
+CHANNEL_STORAGE_ALLOWED = ("app.db", "app.models")
+CHANNEL_STORAGE_MODULES = {"app/channels/deps.py"}
 
 
 def _operations(schema: dict) -> set[tuple[str, str]]:
@@ -186,4 +191,6 @@ def test_channel_modules_import_only_the_layers_they_may() -> None:
             if not _under(module, "app"):
                 continue  # stdlib and third-party packages
             allowed = any(_under(module, prefix) for prefix in APP_IMPORTS_ALLOWED)
+            if not allowed and path.relative_to(BACKEND).as_posix() in CHANNEL_STORAGE_MODULES:
+                allowed = any(_under(module, prefix) for prefix in CHANNEL_STORAGE_ALLOWED)
             assert allowed, f"{path.relative_to(BACKEND)} imports {module}, which the channels layer may not import"

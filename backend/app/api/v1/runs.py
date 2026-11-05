@@ -13,7 +13,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
-from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
+from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.models import Artifact, ChatSession, Message, Run, RunEvent, Task, User, Company
 from app.orchestrator.engine import ACTIVE_STATES, OPEN_TASK_STATES, ProjectRef, RunRuntime, manager
 from app.schemas import (
@@ -342,7 +342,7 @@ async def execution_summary(run_id: str, ctx: ProjectCtx, run: Run) -> dict:
             item["validity"] = {"valid": False, "status": "unknown", "reasons": ["Evidence record is invalid or legacy"]}
     result.update(plan_revision=revision, manifest_hash=manifest.content_hash, manifest_complete=manifest.complete)
     if runtime:
-        result.update(engineering_checkpoints=runtime.engineering_checkpoints, engineering_blockers=runtime.engineering_blockers(),
+        result.update(engineering_checkpoints=runtime.engineering_checkpoints, engineering_blockers=runtime.execution.engineering_blockers(),
                       recovery_required=runtime.recovery_required, lead_agent_id=runtime.lead_agent_id,
                       engineering_workflow=runtime.engineering_workflow, execution_mode=runtime.budget.execution_mode)
     return result
@@ -376,7 +376,7 @@ async def recover_request(run_id: str, request_id: str, body: RequestRecovery, d
         raise HTTPException(409, str(exc)) from exc
     runtime = manager.get(run_id)
     if runtime:
-        await runtime.adopt_recovery()
+        await runtime.execution.adopt_recovery()
     if body.action == "retry":
         await manager.notify_requests(run_id, ref(ctx))
     return record
@@ -395,7 +395,7 @@ async def recover_execution(run_id: str, body: ExecutionRecovery, db: AsyncSessi
         # Stop before reconciling: adopting the cleared state can resume the loop, which must not start another turn.
         if body.action == "cancel":
             runtime.stop()
-        await runtime.adopt_recovery()
+        await runtime.execution.adopt_recovery()
         if body.action != "cancel":
             runtime.resume()
             runtime.wake.set()

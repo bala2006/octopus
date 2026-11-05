@@ -123,7 +123,7 @@ async def test_stage_terminal_results_publish_canonical_content_and_original_his
             await runtime.execute(worker, A.WriteFile(action="write_file", path="app.py", content="VALUE = 2\n"))
         await runtime.execute(worker, A.RunCode(action="run_code", command="python mutate.py"))
     monkeypatch.setattr(runtime, "_turn", turn)
-    await runtime.owned_turn("reviewer")
+    await runtime.execution.owned_turn("reviewer")
     async with runtime.db() as db:
         versions = (await db.scalars(select(Artifact).where(Artifact.run_id == "run", Artifact.path == "app.py")
                                     .order_by(Artifact.version))).all()
@@ -164,7 +164,7 @@ async def test_post_integration_command_can_verify_deleted_file_absence(inspecti
     async def turn(aid):
         await runtime.execute(runtime.agents[aid], A.RunCode(action="run_code", command="python remove.py"))
     monkeypatch.setattr(runtime, "_turn", turn)
-    await runtime.owned_turn("reviewer")
+    await runtime.execution.owned_turn("reviewer")
     assert "app.py" in runtime.unverified
     await execute(runtime, "lead", A.RunCode(action="run_code", command="python -m unittest test_absence",
                   covered_paths=["app.py", "test_absence.py"], criterion_ids=["requested_outcome"]))

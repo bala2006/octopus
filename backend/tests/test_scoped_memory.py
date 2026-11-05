@@ -180,7 +180,7 @@ async def memory_client(memory):
     import httpx
     from fastapi import FastAPI
     from app.api.v1.memory import router
-    from app.core.deps import current_user, get_pdb, project_ctx
+    from app.channels.deps import current_user, get_pdb, project_ctx
     from app.models import User
 
     sf, _, _ = memory
