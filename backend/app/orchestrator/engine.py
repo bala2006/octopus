@@ -36,8 +36,8 @@ from app.orchestrator.context import AgentSpec
 from app.orchestrator.permissions import (
     EdgeSpec, normalize_mode,
 )
-from app.workflows.org import TeamMixin
-from app.workflows.company import WorkflowMixin
+from app.workflows.org import OrgService
+from app.workflows.company import CompanyWorkflow
 from app.orchestrator.execution import ACTIVE_ATTEMPT, ExecutionService, execution_field
 from app.core.evidence import redact_evidence
 from app.workflows.protocols import (
@@ -131,7 +131,7 @@ ACTION_HANDLERS = {
 }
 
 
-class RunRuntime(TeamMixin, WorkflowMixin):
+class RunRuntime:
     runtime_store = execution_field("runtime_store")
     plan_revision = execution_field("plan_revision")
     engineering_workflow = execution_field("engineering_workflow")
@@ -150,6 +150,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
     _last_manifest = execution_field("_last_manifest")
 
     def __init__(self, run: Run, user_id: str, project: ProjectRef) -> None:
+        self.org = OrgService(self)
+        self.flow = CompanyWorkflow(self)
         snap = run.snapshot_json or {}
         self.snapshot: dict[str, Any] = {"company": snap.get("company") or {}, "agents": list(snap.get("agents") or []),
                                          "edges": list(snap.get("edges") or []), "departments": dict(snap.get("departments") or {})}
@@ -629,6 +631,81 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     # handlers.skills
     act_use_skill = skill_actions.act_use_skill
+
+    # Delegation to the workflow services. The methods live on OrgService and CompanyWorkflow.
+    # OrgService (self.org)
+    def manages(self, *args, **kwargs):
+        return self.org.manages(*args, **kwargs)
+
+    def _snapshot_agent(self, *args, **kwargs):
+        return self.org._snapshot_agent(*args, **kwargs)
+
+    async def _team_guard(self, *args, **kwargs):
+        return await self.org._team_guard(*args, **kwargs)
+
+    async def _persist_team(self, *args, **kwargs):
+        return await self.org._persist_team(*args, **kwargs)
+
+    async def act_list_agents(self, *args, **kwargs):
+        return await self.org.act_list_agents(*args, **kwargs)
+
+    async def act_create_agent(self, *args, **kwargs):
+        return await self.org.act_create_agent(*args, **kwargs)
+
+    async def act_update_agent(self, *args, **kwargs):
+        return await self.org.act_update_agent(*args, **kwargs)
+
+    # CompanyWorkflow (self.flow)
+    def wf_active(self, *args, **kwargs):
+        return self.flow.wf_active(*args, **kwargs)
+
+    def wf_phase(self, *args, **kwargs):
+        return self.flow.wf_phase(*args, **kwargs)
+
+    def wf_enabled_for_run(self, *args, **kwargs):
+        return self.flow.wf_enabled_for_run(*args, **kwargs)
+
+    def wf_tool_exclusions(self, *args, **kwargs):
+        return self.flow.wf_tool_exclusions(*args, **kwargs)
+
+    def wf_owner_of_active(self, *args, **kwargs):
+        return self.flow.wf_owner_of_active(*args, **kwargs)
+
+    async def wf_emit(self, *args, **kwargs):
+        return await self.flow.wf_emit(*args, **kwargs)
+
+    def wf_view(self, *args, **kwargs):
+        return self.flow.wf_view(*args, **kwargs)
+
+    def wf_blackboard(self, *args, **kwargs):
+        return self.flow.wf_blackboard(*args, **kwargs)
+
+    def wf_init(self, *args, **kwargs):
+        return self.flow.wf_init(*args, **kwargs)
+
+    def wf_intake_note(self, *args, **kwargs):
+        return self.flow.wf_intake_note(*args, **kwargs)
+
+    async def act_set_track(self, *args, **kwargs):
+        return await self.flow.act_set_track(*args, **kwargs)
+
+    async def wf_advance(self, *args, **kwargs):
+        return await self.flow.wf_advance(*args, **kwargs)
+
+    async def wf_start(self, *args, **kwargs):
+        return await self.flow.wf_start(*args, **kwargs)
+
+    def wf_brief(self, *args, **kwargs):
+        return self.flow.wf_brief(*args, **kwargs)
+
+    def wf_gate(self, *args, **kwargs):
+        return self.flow.wf_gate(*args, **kwargs)
+
+    async def wf_on_finish(self, *args, **kwargs):
+        return await self.flow.wf_on_finish(*args, **kwargs)
+
+    async def nudge_workflow(self, *args, **kwargs):
+        return await self.flow.nudge_workflow(*args, **kwargs)
 
 
 async def _load_run(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:

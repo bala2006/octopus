@@ -1,4 +1,4 @@
-"""Approval gate decisions, taken from the real PolicyGate.decide (and RunRuntime._team_guard for hiring and self-edits).
+"""Approval gate decisions, taken from the real PolicyGate.decide (and OrgService._team_guard for hiring and self-edits).
 
 The methods run unchanged on a stub host that carries only the attributes they read. ``request_approval`` is replaced on the
 gate or the stub: it records each call and returns a fixed decision, so no approval card, event or database write happens.
@@ -10,7 +10,7 @@ from typing import Any
 
 from app.core.policy import PolicyGate
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.engine import RunRuntime
+from app.workflows.org import OrgService
 from scripts.golden.canon import dump_json
 
 LEVELS = ("ask", "auto")
@@ -75,7 +75,7 @@ async def team_guard_records() -> list[dict[str, Any]]:
                     calls: list[dict[str, Any]] = []
                     stub = SimpleNamespace(level=level, budget=SimpleNamespace(persist_team=persist), request_approval=_record(calls, decision))
                     summary, details = TEAM_INPUTS[kind]
-                    allowed, persisted, reason = await RunRuntime._team_guard(stub, AGENT, kind, summary, details)
+                    allowed, persisted, reason = await OrgService._team_guard(SimpleNamespace(rt=stub), AGENT, kind, summary, details)
                     records.append({"level": level, "persist_team": persist, "kind": kind, "user_decision": outcome,
                                     "asked": bool(calls), "request": calls[0] if calls else None,
                                     "allowed": allowed, "persist": persisted, "reason": reason})

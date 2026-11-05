@@ -115,31 +115,33 @@ def can_staff(agents: list[AgentSpec], head: AgentSpec | None) -> bool:
     return any(pick_owner(others, PHASES[k], exclude={builder.id}) for k in ("test", "review"))
 
 
-class WorkflowMixin:
-    """Mixed into RunRuntime. State lives in ``self.wf`` (persisted in the run state)."""
+class CompanyWorkflow:
+    """Runs the company workflow for one run. ``self.rt`` is the RunRuntime; the state lives in ``self.rt.wf``
+    (persisted in the run state)."""
 
-    wf: dict[str, Any] | None
+    def __init__(self, rt: RunRuntime) -> None:
+        self.rt = rt
 
     # ------------------------------------------------------------ state
-    def wf_active(self: RunRuntime) -> bool:
-        return bool(self.wf) and not self.wf.get("ended")
+    def wf_active(self) -> bool:
+        return bool(self.rt.wf) and not self.rt.wf.get("ended")
 
-    def wf_phase(self: RunRuntime) -> dict[str, Any] | None:
+    def wf_phase(self) -> dict[str, Any] | None:
         if not self.wf_active():
             return None
-        i = self.wf["index"]
-        return self.wf["phases"][i] if 0 <= i < len(self.wf["phases"]) else None
+        i = self.rt.wf["index"]
+        return self.rt.wf["phases"][i] if 0 <= i < len(self.rt.wf["phases"]) else None
 
-    def wf_enabled_for_run(self: RunRuntime) -> bool:
-        mode = getattr(self.budget, "workflow", "auto")
+    def wf_enabled_for_run(self) -> bool:
+        mode = getattr(self.rt.budget, "workflow", "auto")
         if mode == "off":
             return False
-        heads = self.entry_agents()
+        heads = self.rt.entry_agents()
         if len(heads) != 1:
             return False
-        return mode == "on" or can_staff(list(self.agents.values()), self.agents[heads[0]])
+        return mode == "on" or can_staff(list(self.rt.agents.values()), self.rt.agents[heads[0]])
 
-    def wf_tool_exclusions(self: RunRuntime, agent: AgentSpec) -> set[str]:
+    def wf_tool_exclusions(self, agent: AgentSpec) -> set[str]:
         ph = self.wf_phase()
         out = set()
         if not (ph and ph["key"] == "intake" and agent.is_entry):
@@ -148,39 +150,39 @@ class WorkflowMixin:
             out.add("delegate")  # the engine hands work to phase owners; the head plans and accepts
         return out
 
-    def wf_owner_of_active(self: RunRuntime, agent_id: str) -> bool:
+    def wf_owner_of_active(self, agent_id: str) -> bool:
         ph = self.wf_phase()
         return bool(ph and ph["owner"] == agent_id and ph["key"] not in ("intake", "accept"))
 
-    async def wf_emit(self: RunRuntime) -> None:
-        if self.wf:
-            await self.emit("workflow_updated", {"workflow": self.wf_view()})
+    async def wf_emit(self) -> None:
+        if self.rt.wf:
+            await self.rt.emit("workflow_updated", {"workflow": self.wf_view()})
 
-    def wf_view(self: RunRuntime) -> dict[str, Any]:
-        w = self.wf or {}
+    def wf_view(self) -> dict[str, Any]:
+        w = self.rt.wf or {}
         return {"track": w.get("track"), "index": w.get("index", 0), "ended": bool(w.get("ended")), "reason": w.get("reason", ""),
                 "phases": [{"key": p["key"], "title": PHASES[p["key"]].title, "owner": p["owner"], "status": p["status"],
                             "loops": p.get("loops", 0), "summary": p.get("summary", "")[:300]} for p in w.get("phases", [])]}
 
-    def wf_blackboard(self: RunRuntime) -> str:
-        if not self.wf:
+    def wf_blackboard(self) -> str:
+        if not self.rt.wf:
             return ""
         marks = {"done": "✓", "active": "▶", "pending": "·", "skipped": "–", "failed": "✗"}
         rows = [f"{marks.get(p['status'], '?')} {PHASES[p['key']].title}"
-                + (f" ({self.names.get(p['owner'], '?')})" if p.get("owner") else "")
+                + (f" ({self.rt.names.get(p['owner'], '?')})" if p.get("owner") else "")
                 + (f": {PHASES[p['key']].doc}" if PHASES[p["key"]].doc and p["status"] == "done" else "")
-                for p in self.wf["phases"]]
-        return f"Workflow (track: {self.wf.get('track') or 'choosing'}):\n" + "\n".join(f"- {r}" for r in rows)
+                for p in self.rt.wf["phases"]]
+        return f"Workflow (track: {self.rt.wf.get('track') or 'choosing'}):\n" + "\n".join(f"- {r}" for r in rows)
 
     # ------------------------------------------------------------ start
-    def wf_init(self: RunRuntime) -> None:
-        head = self.entry_agents()[0]
-        self.wf = {"track": None, "index": 0, "ended": False, "reason": "",
+    def wf_init(self) -> None:
+        head = self.rt.entry_agents()[0]
+        self.rt.wf = {"track": None, "index": 0, "ended": False, "reason": "",
                    "phases": [{"key": "intake", "owner": head, "status": "active", "bounces": 0, "loops": 0, "summary": ""}]}
 
-    def wf_intake_note(self: RunRuntime) -> str:
+    def wf_intake_note(self) -> str:
         tracks = "; ".join(f"{k} = {v}" for k, v in TRACK_HELP.items())
-        profile = profile_goal(self.goal)
+        profile = profile_goal(self.rt.goal)
         hint = (f"\nTask director suggests {profile.suggested_track} ({profile.reason}); "
                 f"specialist checks: {', '.join(profile.checks) or 'standard checks'}. "
                 "Inspect the repository before deciding; override when evidence warrants it.\n")
@@ -190,14 +192,14 @@ class WorkflowMixin:
                 "Octopus then hands each phase (spec → design → build → test → review) to the teammate whose role fits, with this goal verbatim, and comes "
                 "back to you for acceptance. Load the `intake-and-plan` skill first. Don't delegate the phases yourself. " + hint)
 
-    async def act_set_track(self: RunRuntime, agent: AgentSpec, a: A.SetTrack) -> None:
+    async def act_set_track(self, agent: AgentSpec, a: A.SetTrack) -> None:
         from app.orchestrator.handlers import workflow_actions
-        await workflow_actions.act_set_track(self, agent, a)
+        await workflow_actions.act_set_track(self.rt, agent, a)
 
     # ------------------------------------------------------------ transitions
-    async def wf_advance(self: RunRuntime) -> None:
+    async def wf_advance(self) -> None:
         """Move to the next phase that has an owner and brief it."""
-        w = self.wf
+        w = self.rt.wf
         i = w["index"] + 1
         while i < len(w["phases"]) and w["phases"][i]["status"] == "skipped":
             i += 1
@@ -208,32 +210,32 @@ class WorkflowMixin:
             return
         await self.wf_start(w["phases"][i])
 
-    async def wf_start(self: RunRuntime, ph: dict[str, Any], *, extra: str = "") -> None:
+    async def wf_start(self, ph: dict[str, Any], *, extra: str = "") -> None:
         ph["status"], ph["bounces"] = "active", 0
-        ph["start_versions"] = {p: v["version"] for p, v in self.artifacts.items()}
-        ph["evidence_cursor"] = len(self.execution_records)
+        ph["start_versions"] = {p: v["version"] for p, v in self.rt.artifacts.items()}
+        ph["evidence_cursor"] = len(self.rt.execution_records)
         ph["evidence_version"] = 1
         phase = PHASES[ph["key"]]
-        owner = self.agents[ph["owner"]]
-        head_id = self.wf["phases"][0]["owner"]
-        await self.post_message(sender="agent", from_id=head_id, to_id=owner.id, type_="task", content=self.wf_brief(ph) + extra,
+        owner = self.rt.agents[ph["owner"]]
+        head_id = self.rt.wf["phases"][0]["owner"]
+        await self.rt.post_message(sender="agent", from_id=head_id, to_id=owner.id, type_="task", content=self.wf_brief(ph) + extra,
                                 meta={"workflow_phase": ph["key"], "task_id": None})
-        self.log(head_id, f"workflow: {phase.title} → {owner.name}")
+        self.rt.log(head_id, f"workflow: {phase.title} → {owner.name}")
         await self.wf_emit()
 
-    def wf_brief(self: RunRuntime, ph: dict[str, Any]) -> str:
+    def wf_brief(self, ph: dict[str, Any]) -> str:
         phase = PHASES[ph["key"]]
-        docs = [f"- {PHASES[p['key']].title}: {PHASES[p['key']].doc}" for p in self.wf["phases"]
+        docs = [f"- {PHASES[p['key']].title}: {PHASES[p['key']].doc}" for p in self.rt.wf["phases"]
                 if p["status"] == "done" and PHASES[p["key"]].doc]
-        summaries = [f"- {PHASES[p['key']].title} ({self.names.get(p['owner'], '?')}): {p['summary'][:600]}" for p in self.wf["phases"]
+        summaries = [f"- {PHASES[p['key']].title} ({self.rt.names.get(p['owner'], '?')}): {p['summary'][:600]}" for p in self.rt.wf["phases"]
                      if p["status"] == "done" and p.get("summary") and p["key"] != "intake"]
         if ph["key"] == "accept":
             lead = "All phases are done. Accept the result: check it against the goal and the acceptance criteria, with evidence."
         else:
             lead = f"You own the **{phase.title}** phase of this goal."
-        parts = [f"Workflow phase: {phase.title} (track {self.wf['track']}). {lead}",
+        parts = [f"Workflow phase: {phase.title} (track {self.rt.wf['track']}). {lead}",
                  "The goal, verbatim (attached images are shown to you as well):\n> "
-                 + clip(getattr(self, "goal_content", "") or self.goal, 20000).replace("\n", "\n> ")]
+                 + clip(getattr(self.rt, "goal_content", "") or self.rt.goal, 20000).replace("\n", "\n> ")]
         if docs:
             parts.append("Documents from earlier phases (read them first):\n" + "\n".join(docs))
         if summaries:
@@ -243,15 +245,15 @@ class WorkflowMixin:
             if source == phase.doc:
                 continue
             try:
-                contract = self.fs_for(ph["owner"]).current(source)
+                contract = self.rt.fs_for(ph["owner"]).current(source)
             except (OSError, ValueError):
                 contract = None
             if contract:
                 parts.append(f"Shared contract ({source}):\n" + clip(contract, 2200, "read the file for more"))
-        if self.decisions:
-            parts.append("Recorded decisions:\n" + "\n".join(f"- {d}" for d in self.decisions[-8:]))
+        if self.rt.decisions:
+            parts.append("Recorded decisions:\n" + "\n".join(f"- {d}" for d in self.rt.decisions[-8:]))
         if ph["key"] in ("test", "review", "accept", "design"):
-            parts.append("Relevant specialist quality checks (supply real evidence):\n" + quality_brief(self.goal))
+            parts.append("Relevant specialist quality checks (supply real evidence):\n" + quality_brief(self.rt.goal))
         if phase.doc:
             parts.append(f"Your deliverable: `{phase.doc}`" + ("" if ph["key"] != "test" else " plus the tests themselves"))
         parts.append(f"First load the `{phase.skill}` skill (use_skill) and follow it.")
@@ -261,10 +263,10 @@ class WorkflowMixin:
                          "teammates for specs: everything you need is in the goal and the documents above.")
         return "\n\n".join(parts)
 
-    def wf_gate(self: RunRuntime, agent: AgentSpec, ph: dict[str, Any], a: A.Finish) -> str | None:
+    def wf_gate(self, agent: AgentSpec, ph: dict[str, Any], a: A.Finish) -> str | None:
         """What's missing before this phase can close, or None."""
         phase = PHASES[ph["key"]]
-        fs = self.fs_for(agent.id)
+        fs = self.rt.fs_for(agent.id)
         if phase.doc:
             try:
                 text = fs.current(fs.resolve(phase.doc)[0])
@@ -276,24 +278,24 @@ class WorkflowMixin:
                 return "spec.md has no acceptance criteria section: add numbered, testable acceptance criteria."
         if ph["key"] == "build":
             before = ph.get("start_versions") or {}
-            changed = [p for p, v in self.artifacts.items() if not p.startswith(".octopus/") and before.get(p) != v["version"]]
+            changed = [p for p, v in self.rt.artifacts.items() if not p.startswith(".octopus/") and before.get(p) != v["version"]]
             if not changed:
                 return "Nothing was built in this phase: no project file changed. Build the deliverable, run or open it, then finish."
         if ph["key"] in ("test", "review") and a.outcome not in ("pass", "fail"):
             return 'Finish with outcome "pass" or "fail" and concrete evidence.'
-        if (ph["key"] in ("test", "review") and a.outcome == "pass" and self.budget.verify_before_finish):
+        if (ph["key"] in ("test", "review") and a.outcome == "pass" and self.rt.budget.verify_before_finish):
             from app.core.evidence import RevisionEvidence, validate_evidence
-            current = self._last_manifest
+            current = self.rt._last_manifest
             cursor = ph.get("evidence_cursor", 0) if ph.get("evidence_version") == 1 else 0
-            proofs = [RevisionEvidence.model_validate(raw) for raw in self.execution_records[cursor:]]
+            proofs = [RevisionEvidence.model_validate(raw) for raw in self.rt.execution_records[cursor:]]
             if not current or not any(proof.producer == agent.id and validate_evidence(proof, current,
-                    task_revision=self.plan_revision, environment=self._proof_environment, criterion="requested_outcome").valid for proof in proofs):
+                    task_revision=self.rt.plan_revision, environment=self.rt._proof_environment, criterion="requested_outcome").valid for proof in proofs):
                 return "No independent current execution evidence. Run covered acceptance tests or record an observed UI interaction before passing."
-        if ph["key"] == "build" and self.budget.verify_before_finish and self.unverified:
-            return "Built files remain unverified: " + ", ".join(sorted(self.unverified)[:8])
+        if ph["key"] == "build" and self.rt.budget.verify_before_finish and self.rt.unverified:
+            return "Built files remain unverified: " + ", ".join(sorted(self.rt.unverified)[:8])
         return None
 
-    async def wf_on_finish(self: RunRuntime, agent: AgentSpec, a: A.Finish) -> str | None:
+    async def wf_on_finish(self, agent: AgentSpec, a: A.Finish) -> str | None:
         """Called for a phase owner's finish. Returns a refusal (the owner keeps working) or None (phase closed)."""
         ph = self.wf_phase()
         assert ph is not None
@@ -304,38 +306,38 @@ class WorkflowMixin:
                 return f"Phase {PHASES[ph['key']].title} isn't done yet: {why}"
             ph["status"] = "failed"
             ph["summary"] = f"Unverified phase: {why}"[:2000]
-            for later in self.wf["phases"][self.wf["index"] + 1:]:
+            for later in self.rt.wf["phases"][self.rt.wf["index"] + 1:]:
                 if later["key"] != "accept" and later["status"] == "pending":
                     later["status"] = "skipped"
-            self.mark_progress()
+            self.rt.mark_progress()
             await self.wf_advance()
             return None
         ph["summary"] = (a.summary or "")[:2000]
         if ph["key"] in ("test", "review") and a.outcome == "fail":
-            build = next((p for p in self.wf["phases"] if p["key"] == "build"), None)
+            build = next((p for p in self.rt.wf["phases"] if p["key"] == "build"), None)
             if build and build.get("loops", 0) < MAX_FIX_LOOPS:
                 build["loops"] = build.get("loops", 0) + 1
                 ph["status"] = "pending"
-                for p in self.wf["phases"][self.wf["phases"].index(build) + 1:]:
+                for p in self.rt.wf["phases"][self.rt.wf["phases"].index(build) + 1:]:
                     if p["status"] == "done":
                         p["status"] = "pending"
-                self.wf["index"] = self.wf["phases"].index(build)
-                self.log(agent.id, f"workflow: {PHASES[ph['key']].title} failed, back to Build (fix round {build['loops']})")
+                self.rt.wf["index"] = self.rt.wf["phases"].index(build)
+                self.rt.log(agent.id, f"workflow: {PHASES[ph['key']].title} failed, back to Build (fix round {build['loops']})")
                 await self.wf_start(build, extra=f"\n\n--- Fix round {build['loops']}/{MAX_FIX_LOOPS}: {PHASES[ph['key']].title} "
                                                  f"by {agent.name} FAILED ---\n{a.summary[:4000]}\nFix every point, re-verify, then finish.")
                 return None
             ph["status"] = "failed"
-            for later in self.wf["phases"][self.wf["index"] + 1:]:
+            for later in self.rt.wf["phases"][self.rt.wf["index"] + 1:]:
                 if later["key"] != "accept" and later["status"] == "pending":
                     later["status"] = "skipped"
         else:
             ph["status"] = "done"
-        self.mark_progress()
-        self.log(agent.id, f"workflow: {PHASES[ph['key']].title} {ph['status']}")
+        self.rt.mark_progress()
+        self.rt.log(agent.id, f"workflow: {PHASES[ph['key']].title} {ph['status']}")
         await self.wf_advance()
         return None
 
-    async def nudge_workflow(self: RunRuntime) -> bool:
+    async def nudge_workflow(self) -> bool:
         """Nobody has work but the workflow isn't over: remind the active phase's owner once, then hand it to the head."""
         ph = self.wf_phase()
         if ph is None:
@@ -349,7 +351,7 @@ class WorkflowMixin:
             return True
         ph["nudged"] = ph.get("nudged", 0) + 1
         what = "call `set_track`" if ph["key"] == "intake" else "call `finish`"
-        self.notice(ph["owner"], f"The workflow is waiting on you: phase {PHASES[ph['key']].title}. Continue the work, then {what}.",
+        self.rt.notice(ph["owner"], f"The workflow is waiting on you: phase {PHASES[ph['key']].title}. Continue the work, then {what}.",
                     activate=True)
-        await self.set_agent_status(ph["owner"], "waiting")
+        await self.rt.set_agent_status(ph["owner"], "waiting")
         return True

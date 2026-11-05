@@ -41,11 +41,16 @@ def _edge(src: str, dst: str, etype: str, bidi: bool, label: str) -> dict[str, A
             "config": dict(EDGE_CFG)}
 
 
-class TeamMixin:
+class OrgService:
+    """Team management for one run. ``self.rt`` is the RunRuntime that owns the agents and the company."""
+
+    def __init__(self, rt: RunRuntime) -> None:
+        self.rt = rt
+
     # ------------------------------------------------------------------ helpers
-    def manages(self: RunRuntime, actor: str, target: str) -> bool:
+    def manages(self, actor: str, target: str) -> bool:
         """True if ``target`` reports (transitively) to ``actor``, or ``actor`` hired ``target``."""
-        t = self.agents.get(target)
+        t = self.rt.agents.get(target)
         if t is None:
             return False
         if t.created_by == actor:
@@ -56,35 +61,35 @@ class TeamMixin:
             if cur == actor:
                 return True
             seen.add(cur)
-            cur = self.agents[cur].reports_to if cur in self.agents else None
+            cur = self.rt.agents[cur].reports_to if cur in self.rt.agents else None
         return False
 
-    def _snapshot_agent(self: RunRuntime, aid: str) -> dict[str, Any] | None:
-        return next((a for a in self.snapshot["agents"] if a["id"] == aid), None)
+    def _snapshot_agent(self, aid: str) -> dict[str, Any] | None:
+        return next((a for a in self.rt.snapshot["agents"] if a["id"] == aid), None)
 
-    async def _team_guard(self: RunRuntime, agent: AgentSpec, kind: str, summary: str, details: dict[str, Any]) -> tuple[bool, bool, str]:
+    async def _team_guard(self, agent: AgentSpec, kind: str, summary: str, details: dict[str, Any]) -> tuple[bool, bool, str]:
         """Returns (allowed, persist, reason)."""
-        persist = self.budget.persist_team
-        if self.level == "ask" and persist:
-            ok, reason = await self.request_approval(agent, kind, summary, json.dumps(details, indent=1)[:6000], details)
+        persist = self.rt.budget.persist_team
+        if self.rt.level == "ask" and persist:
+            ok, reason = await self.rt.request_approval(agent, kind, summary, json.dumps(details, indent=1)[:6000], details)
             if not ok:
                 return False, False, f"The user REJECTED {kind}: {reason or 'no reason given'}"
         return True, persist, ""
 
-    async def _persist_team(self: RunRuntime, *, new_agents: list[dict[str, Any]] | None = None, new_edges: list[dict[str, Any]] | None = None,
+    async def _persist_team(self, *, new_agents: list[dict[str, Any]] | None = None, new_edges: list[dict[str, Any]] | None = None,
                             updates: dict[str, dict[str, Any]] | None = None) -> bool:
         """Write hires / edits back to the company (the canvas reflects them) and bump its revision."""
         from app.models import Agent as AgentRow, Company, Edge as EdgeRow
 
-        async with self.db() as db:
-            company = await db.get(Company, self.company_id)
+        async with self.rt.db() as db:
+            company = await db.get(Company, self.rt.company_id)
             if company is None:
                 return False
-            existing = set((await db.execute(select(AgentRow.id).where(AgentRow.company_id == self.company_id))).scalars())
+            existing = set((await db.execute(select(AgentRow.id).where(AgentRow.company_id == self.rt.company_id))).scalars())
             new_ids = {a["id"] for a in new_agents or []}
             for a in new_agents or []:
                 db.add(AgentRow(
-                    id=a["id"], company_id=self.company_id, name=a["name"], role=a["role"], description=a.get("description", ""),
+                    id=a["id"], company_id=self.rt.company_id, name=a["name"], role=a["role"], description=a.get("description", ""),
                     avatar=a.get("avatar", ""), color=a.get("color", "#6366f1"), system_prompt=a.get("system_prompt", ""),
                     provider=a["provider"], model=a["model"], temperature=a.get("temperature", 0.4), max_tokens=a.get("max_tokens") or DEFAULT_AGENT_MAX_TOKENS,
                     tools_json=a.get("tools") or {}, behavior_json=a.get("behavior") or {},
@@ -96,11 +101,11 @@ class TeamMixin:
             await db.flush()
             for e in new_edges or []:
                 if e["source_agent_id"] in existing and e["target_agent_id"] in existing:
-                    db.add(EdgeRow(id=e["id"], company_id=self.company_id, source_agent_id=e["source_agent_id"], target_agent_id=e["target_agent_id"],
+                    db.add(EdgeRow(id=e["id"], company_id=self.rt.company_id, source_agent_id=e["source_agent_id"], target_agent_id=e["target_agent_id"],
                                    bidirectional=e["bidirectional"], type=e["type"], label=e.get("label", ""), config_json=e.get("config") or {}))
             for aid, fields in (updates or {}).items():
                 row = await db.get(AgentRow, aid)
-                if row is None or row.company_id != self.company_id:
+                if row is None or row.company_id != self.rt.company_id:
                     continue
                 for k, v in fields.items():
                     col = {"tools": "tools_json", "behavior": "behavior_json"}.get(k, k)
@@ -112,16 +117,16 @@ class TeamMixin:
         return True
 
     # ------------------------------------------------------------------ list_agents
-    async def act_list_agents(self: RunRuntime, agent: AgentSpec, a: A.ListAgents) -> None:
+    async def act_list_agents(self, agent: AgentSpec, a: A.ListAgents) -> None:
         from app.orchestrator.handlers import team_actions
-        await team_actions.act_list_agents(self, agent, a)
+        await team_actions.act_list_agents(self.rt, agent, a)
 
     # ------------------------------------------------------------------ create_agent
-    async def act_create_agent(self: RunRuntime, agent: AgentSpec, a: A.CreateAgent) -> None:
+    async def act_create_agent(self, agent: AgentSpec, a: A.CreateAgent) -> None:
         from app.orchestrator.handlers import team_actions
-        await team_actions.act_create_agent(self, agent, a)
+        await team_actions.act_create_agent(self.rt, agent, a)
 
     # ------------------------------------------------------------------ update_agent
-    async def act_update_agent(self: RunRuntime, agent: AgentSpec, a: A.UpdateAgent) -> None:
+    async def act_update_agent(self, agent: AgentSpec, a: A.UpdateAgent) -> None:
         from app.orchestrator.handlers import team_actions
-        await team_actions.act_update_agent(self, agent, a)
+        await team_actions.act_update_agent(self.rt, agent, a)
