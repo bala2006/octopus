@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core import evidence as CORE_EVIDENCE
 from app.orchestrator import evidence as E
 from app.services.skill_contracts import ContractError
 
@@ -82,7 +83,7 @@ def test_binary_hashes_are_bounded_and_incomplete_inventory_cannot_pass(tmp_path
     (tmp_path / "image.png").write_bytes(b"\x89PNG\x00test")
     first = E.capture_manifest(tmp_path)
     assert [file.path for file in first.files] == ["image.png"]
-    monkeypatch.setattr(E, "MAX_BINARY_BYTES", 4)
+    monkeypatch.setattr(CORE_EVIDENCE, "MAX_BINARY_BYTES", 4)  # the limit is read where capture_manifest now lives (app.core)
     capped = E.capture_manifest(tmp_path)
     assert not capped.complete
     assert record(capped).status == "unknown"

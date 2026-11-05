@@ -44,7 +44,7 @@ from app.orchestrator.permissions import (
 from app.orchestrator.team import TeamMixin
 from app.orchestrator.workflow import WorkflowMixin
 from app.orchestrator.execution import ExecutionMixin, ACTIVE_ATTEMPT
-from app.orchestrator.evidence import redact_evidence
+from app.core.evidence import redact_evidence
 from app.orchestrator.protocols import (
     DebateState, LoopDetector, ReviewState, debate_decided_externally, debate_on_message, infer_verdict,
     review_on_request, review_on_result,
@@ -695,7 +695,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         return [t for t in self.tasks.values() if t["status"] in OPEN_TASK_STATES]
 
     def task_ready(self, task: dict[str, Any]) -> bool:
-        from app.orchestrator.task_contracts import dependency_blockers
+        from app.core.task_contracts import dependency_blockers
         return task["status"] != "blocked" and not dependency_blockers(task, self.tasks)
 
     def task_line(self, t: dict[str, Any]) -> str:
@@ -866,7 +866,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         if to_agent_id in self.agents:
             targets = [to_agent_id]
         else:  # "entry agent": the entry agent plus everyone who still owns an open task (they'd never be woken otherwise)
-            from app.orchestrator.contracts import route_target
+            from app.core.contracts import route_target
             targets = [route_target(content, [a.to_dict() for a in self.agents.values()], self.lead_agent_id)]
         for t in targets:
             if t != self.lead_agent_id:
@@ -1600,7 +1600,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             raise ValueError("A worker cannot act for another agent")
         name = action.action
         if context and context.assignment.task_id:
-            from app.orchestrator.task_contracts import permits_path
+            from app.core.task_contracts import permits_path
             owned_task = self.tasks.get(context.assignment.task_id)
             if owned_task and not self.task_ready(owned_task) and name not in (
                 "send_message", "read_file", "search_project", "list_files", "recall_context", "wait"):
@@ -1801,7 +1801,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         return False
 
     async def link_task(self, creator: str, assignee: str, task_key: str | None, content: str) -> str:
-        from app.orchestrator.task_contracts import contract
+        from app.core.task_contracts import contract
         if task_key and task_key not in self.tasks:
             raise ValueError("Unknown task; create its owned contract before delegating it")
         if task_key and task_key in self.tasks:
@@ -1823,7 +1823,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         return t["key"]
 
     def child_task_contract(self, proposed=None):
-        from app.orchestrator.task_contracts import TaskContract, contract, permits_path
+        from app.core.task_contracts import TaskContract, contract, permits_path
         parent = ACTIVE_ATTEMPT.get()
         if not parent or not parent.assignment.task_id:
             return proposed or TaskContract()
@@ -1834,7 +1834,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         return proposed
 
     async def create_task(self, creator: str | None, fields: dict[str, Any]) -> dict[str, Any]:
-        from app.orchestrator.task_contracts import TaskContract, validate_task
+        from app.core.task_contracts import TaskContract, validate_task
         constraints = self.child_task_contract(TaskContract.model_validate(fields["constraints_json"]) if fields.get("constraints_json") else None).model_copy(
             update={"workflow_hash": self.workflow_contract().content_hash})
         t = {"id": new_id(), "key": f"T-{self.task_counter + 1}", "title": fields.get("title") or "Untitled task",
@@ -1862,7 +1862,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         await self.emit("task_updated", {"task": {**t, "assignee_agent_id": t["assignee"], "run_id": self.run_id}})
 
     async def act_update_task_board(self, agent: AgentSpec, a: A.UpdateTaskBoard) -> None:
-        from app.orchestrator.task_contracts import validate_task
+        from app.core.task_contracts import validate_task
         cid = await self._tool_event(agent, "update_task_board", {"count": len(a.tasks)})
         changed = []
         for item in a.tasks:

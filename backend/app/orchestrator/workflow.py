@@ -317,7 +317,7 @@ class WorkflowMixin:
         if ph["key"] in ("test", "review") and a.outcome not in ("pass", "fail"):
             return 'Finish with outcome "pass" or "fail" and concrete evidence.'
         if (ph["key"] in ("test", "review") and a.outcome == "pass" and self.budget.verify_before_finish):
-            from app.orchestrator.evidence import RevisionEvidence, validate_evidence
+            from app.core.evidence import RevisionEvidence, validate_evidence
             current = self._last_manifest
             cursor = ph.get("evidence_cursor", 0) if ph.get("evidence_version") == 1 else 0
             proofs = [RevisionEvidence.model_validate(raw) for raw in self.execution_records[cursor:]]

@@ -161,7 +161,7 @@ async def exact_memory(record_id: str, actor: memory.Actor = Depends(owner), ctx
 async def exact_source(kind: Literal["memory", "message", "artifact"], source_id: str,
                        actor: memory.Actor = Depends(owner), ctx: ProjectCtx = Depends(project_ctx),
                        db: AsyncSession = Depends(get_pdb)) -> dict:
-    from app.orchestrator.evidence import redact_evidence
+    from app.core.evidence import redact_evidence
     if kind == "memory":
         try:
             item = await memory.get(ctx.sf, actor, source_id)

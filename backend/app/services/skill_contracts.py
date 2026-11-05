@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 from typing import Iterable, Literal
 from urllib.parse import unquote, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
+from app.core.contracts import Contract, ContractError, content_hash  # noqa: F401 (base types live in core)
 from app.services import project_guidance
 from app.services.skills import Skill
 from app.tools.workspace import ProjectFS, is_secret
@@ -19,18 +19,6 @@ MAX_BUNDLE_BYTES = 2_000_000
 MAX_DOCUMENT_BYTES = 512_000
 WorkflowName = Literal["auto", "explain", "fix", "build", "review"]
 Strategy = Literal["solo", "arena", "swarm"]
-
-
-class ContractError(ValueError):
-    pass
-
-
-class Contract(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-def content_hash(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
 class PinnedDocument(Contract):

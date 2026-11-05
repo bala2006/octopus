@@ -6,7 +6,7 @@ import re
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import AliasChoices, model_validator, BaseModel, Field, TypeAdapter, ValidationError, field_validator
-from app.orchestrator.task_contracts import TaskContract
+from app.core.task_contracts import TaskContract
 
 AgentMessageType = Literal[
     "task", "question", "answer", "proposal", "critique", "agreement", "objection", "decision",

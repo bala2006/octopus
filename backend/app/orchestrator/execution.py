@@ -2,36 +2,15 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
-from dataclasses import dataclass, field
 from pathlib import Path
 import platform
-from typing import Any
 
-from app.orchestrator.contracts import Assignment, ExecutionPolicy, choose_lead, route_target, classify_workflow
+from app.core.contracts import Assignment, ExecutionPolicy, choose_lead, classify_workflow
+from app.core.evidence import capture_manifest, record_evidence, validate_evidence, RevisionEvidence, VerificationCheck, redact_evidence
+from app.core.execution_contracts import ACTIVE_ATTEMPT, AttemptContext, SupersededAttempt  # noqa: F401 (re-exported)
 from app.orchestrator.runtime_store import RuntimeStore
-from app.orchestrator.evidence import capture_manifest, record_evidence, validate_evidence, RevisionEvidence, VerificationCheck, redact_evidence
+from app.tools.workspace import ProjectFS
 from app.services.skill_contracts import pin_skill_bundle, pin_project_guidance, workflow_spec, WorkflowSpec, WorkflowStep, content_hash
-
-
-class SupersededAttempt(Exception):
-    pass
-
-
-@dataclass
-class AttemptContext:
-    id: str
-    assignment: Assignment
-    tool_manifests: dict[str, Any] = field(default_factory=dict)
-    tool_details: dict[str, dict] = field(default_factory=dict)
-    workspace: Path | None = None
-    pending_artifacts: dict[str, dict] = field(default_factory=dict)
-    pending_finish: Any = None
-    integrated: bool = False
-    error: str | None = None
-
-
-ACTIVE_ATTEMPT: contextvars.ContextVar[AttemptContext | None] = contextvars.ContextVar("octopus_attempt", default=None)
 
 
 class ExecutionMixin:
@@ -208,7 +187,7 @@ class ExecutionMixin:
         known = set(self.artifacts) | set(self.unverified)
         if self._last_manifest:
             known.update(file.path for file in self._last_manifest.files)
-        return capture_manifest(root, known_paths=known)
+        return capture_manifest(root, known_paths=known, resolver=ProjectFS(root))
 
     async def _owned_turn(self, aid: str) -> None:
         agent = self.agents[aid]

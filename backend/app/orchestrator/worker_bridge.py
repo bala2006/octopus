@@ -17,7 +17,7 @@ import uvicorn
 
 from app.orchestrator import tools as T
 from app.orchestrator.execution import ACTIVE_ATTEMPT
-from app.orchestrator.evidence import redact_evidence
+from app.core.evidence import redact_evidence
 from app.llm.base import ToolCall
 
 if TYPE_CHECKING:
