@@ -1,0 +1,29 @@
+# Layer rules for import-linter. Run with `make lint-arch`, or `cd backend && .venv/bin/lint-imports`.
+#
+# Phase 1 ships one contract: app.core must not import the layers above it.
+# The full five-layer contract (channels > agents > workflows > capabilities > core) comes in Phase 2,
+# after modules move into their target packages. Phase 1 moves nothing, so that contract can't pass yet.
+
+[importlinter]
+root_package = app
+
+[importlinter:contract:core-imports-nothing-above]
+name = Core does not import the layers above it
+type = forbidden
+source_modules =
+    app.core
+forbidden_modules =
+    app.api
+    app.orchestrator
+    app.services
+    app.llm
+    app.tools
+    app.prompts
+    app.skills
+    app.models
+    app.main
+ignore_imports =
+    # Known exceptions. app/core/deps.py predates this contract: it is FastAPI wiring (current user, project
+    # context) that belongs in the channels layer. Phase 2 moves it out of core and removes these two lines.
+    app.core.deps -> app.models
+    app.core.deps -> app.services.projects
