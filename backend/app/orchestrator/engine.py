@@ -1217,13 +1217,16 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         think: list[str] = []
         think_buf, think_last = "", time.monotonic()
         fresh_call = False
+        # Characters streamed since the last persisted status refresh. Counted, never timed: agent_status is stored in the run
+        # log, so a clock-based refresh would make the log depend on how fast the database answers.
+        streamed_since_status = 0
         remaining = max(5.0, self.budget.timeout_s - self.active_now())
 
         idle: asyncio.Timeout | None = None
         t_start = time.monotonic()
 
         async def _consume() -> None:
-            nonlocal buf, last, speaking, tool_buf, think_buf, think_last, fresh_call
+            nonlocal buf, last, speaking, tool_buf, think_buf, think_last, fresh_call, streamed_since_status
             async for chunk in stream_with_retry(req):
                 if idle is not None:  # output is flowing: push the inactivity deadline out (never past the run's budget)
                     left = remaining - (time.monotonic() - t_start)
@@ -1252,9 +1255,12 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                     if fresh_call:  # the arguments object's own "{" is already written by the marker above
                         d, fresh_call = d.lstrip().removeprefix("{"), False
                     buf += d
-                    if len(buf) >= 120 or time.monotonic() - last > 0.1:
+                    streamed_since_status += len(d)
+                    if streamed_since_status >= 120:
+                        streamed_since_status = 0
                         status, activity = live_activity(tool_buf[:2000])
                         await self.set_agent_status(agent.id, status, activity)
+                    if len(buf) >= 120 or time.monotonic() - last > 0.1:  # token_stream is live-only, so timing may decide
                         await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
                         buf, last = "", time.monotonic()
                 if chunk.tool_calls is not None:
@@ -1264,10 +1270,14 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                 if chunk.delta:
                     parts.append(chunk.delta)
                     buf += chunk.delta
-                    if not speaking or len(buf) >= 80 or time.monotonic() - last > 0.06:
-                        speaking = True
+                    streamed_since_status += len(chunk.delta)
+                    first = not speaking
+                    speaking = True
+                    if first or streamed_since_status >= 80:  # the first chunk always sets the status; later ones are counted
+                        streamed_since_status = 0
                         status, activity = live_activity("".join(parts))
                         await self.set_agent_status(agent.id, status, activity)
+                    if first or len(buf) >= 80 or time.monotonic() - last > 0.06:  # token_stream is live-only, so timing may decide
                         await self.emit("token_stream", {"agent_id": agent.id, "delta": buf, "turn_no": self.turn_no})
                         buf, last = "", time.monotonic()
                 if chunk.usage:

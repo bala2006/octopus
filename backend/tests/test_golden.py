@@ -7,11 +7,15 @@ rules, protocol transcripts, or run event sequences). If the change is intended,
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from app.orchestrator.engine import RunRuntime
 from scripts.golden.export_all import BACKEND, GOLDEN_DIR, generate_all
 
 REGENERATE = "Regenerate with: cd backend && python -m scripts.golden.export_all"
@@ -51,3 +55,23 @@ def test_generation_is_identical_across_processes(tmp_path: Path) -> None:
     assert first.keys() == second.keys()
     differing = sorted(rel for rel in first if first[rel] != second[rel])
     assert not differing, f"hash seed changes the output: {differing}"
+
+
+async def test_slow_status_write_does_not_change_the_run_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow database commit for a status write must not add a streaming status to the persisted run log.
+
+    Streaming status used to be refreshed on a timer (0.1 s). Any write slower than that put an extra agent_status event into the
+    log, so the log depended on wall-clock speed. Every writing status below takes 0.15 s, so a timer-based refresh always shows up.
+    """
+    baseline = await generate_all()
+    original = RunRuntime.set_agent_status
+
+    async def slow_status(self: RunRuntime, aid: str, status: str, activity: str = "") -> None:
+        if status == "writing":
+            await asyncio.sleep(0.15)
+        await original(self, aid, status, activity)
+
+    monkeypatch.setattr(RunRuntime, "set_agent_status", slow_status)
+    slowed = await generate_all()
+    differing = sorted(rel for rel in baseline if baseline[rel] != slowed[rel])
+    assert not differing, f"a slow status write changed the run log: {differing}"
