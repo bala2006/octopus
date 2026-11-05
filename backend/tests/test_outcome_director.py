@@ -1,5 +1,5 @@
 """Deterministic task director and outcome gates (no live model required)."""
-from app.orchestrator.director import profile_goal, quality_brief, specialist_bonus
+from app.workflows.director import profile_goal, quality_brief, specialist_bonus
 from app.orchestrator.quality import assess_completion
 
 
@@ -45,7 +45,7 @@ def test_unrelated_successful_command_is_not_code_verification():
     assert command_is_verification("npm run build")
 
 def test_adaptive_company_staffing_is_proportionate():
-    from app.orchestrator.director import default_company_template
+    from app.workflows.director import default_company_template
 
     assert default_company_template("Fix typo in README") == "solo_engineer"
     assert default_company_template("Implement onboarding feature and API") == "small_dev_team"

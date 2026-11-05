@@ -5,10 +5,10 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from app.llm import router
-from app.llm.azure_v1 import _body
-from app.llm.base import LLMChunk, LLMRequest, Usage
-from app.llm.router import prepare_request, set_provider_override
+from app.capabilities.models import router
+from app.capabilities.models.azure_v1 import _body
+from app.capabilities.models.base import LLMChunk, LLMRequest, Usage
+from app.capabilities.models.router import prepare_request, set_provider_override
 from app.orchestrator.actions import MAX_ACTIONS, parse_envelope
 from app.orchestrator.context import TOOL_RESULT_CHARS, build_user_prompt, fmt_msg
 from app.orchestrator.engine import head_tail, judge_verdict

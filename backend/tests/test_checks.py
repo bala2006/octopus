@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from app.orchestrator import actions as A
 from app.orchestrator.engine import apply_edits
 from app.services.checks import check_file

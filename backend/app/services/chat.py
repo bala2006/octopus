@@ -13,12 +13,12 @@ from sqlalchemy import delete, select
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
 from app.core.config import get_settings
-from app.llm.base import LLMError, LLMRequest, effective_max_tokens
+from app.capabilities.models.base import LLMError, LLMRequest, effective_max_tokens
 from app.orchestrator.roles import role_category
-from app.llm.router import prepare_request, stream_with_retry
+from app.capabilities.models.router import prepare_request, stream_with_retry
 from app.models import Agent, AgentMemory, ChatSession, Company, Message
 from app.orchestrator.context import clip, render_template, rolling_summary
-from app.tools import basic
+from app.capabilities.tools import basic
 
 TOOL_RE = re.compile(r"^\s*```tool\s*(\{.*?\})\s*```", re.S)
 MAX_TOOL_ROUNDS = 3

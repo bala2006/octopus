@@ -11,8 +11,8 @@ from pydantic import Field
 
 from app.core.contracts import Contract, ContractError, content_hash  # noqa: F401 (base types live in core)
 from app.services import project_guidance
-from app.services.skills import Skill
-from app.tools.workspace import ProjectFS, is_secret
+from app.capabilities.skills.library import Skill
+from app.capabilities.workspace.project_fs import ProjectFS, is_secret
 
 MAX_BUNDLE_FILES = 128
 MAX_BUNDLE_BYTES = 2_000_000

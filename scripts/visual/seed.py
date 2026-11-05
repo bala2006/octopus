@@ -414,7 +414,7 @@ async def seed(home: Path, projects_root: Path) -> dict[str, Any]:
     from app.main import app
     from app.models import Agent, Company, Workspace
     from app.schemas import CanvasOut
-    from app.services.canvas import snapshot
+    from app.workflows.canvas import snapshot
 
     upgrade_registry(get_settings().registry_database_url)
     info: dict[str, Any] = {"seed_version": SEED_VERSION, "clock": CLOCK, "projects": {}}

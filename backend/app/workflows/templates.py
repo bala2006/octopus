@@ -18,7 +18,7 @@ from typing import Any
 
 from app.db.base import new_id
 from app.prompts.roles import agent_from_role, all_roles
-from app.services.canvas import department_color
+from app.workflows.canvas import department_color
 
 DEFAULT_EDGE_CONFIG = {"max_turns": 20, "handoff_instructions": "", "condition": "", "max_rounds": 4, "max_revisions": 3}
 
@@ -435,7 +435,7 @@ def template_summary(t: CompanyTemplate) -> dict[str, Any]:
 def workflow_ready(agents: list[dict[str, Any]]) -> bool:
     """Can this team run the defined workflow (a head, a builder, and someone else to test or review)?"""
     from app.orchestrator.context import AgentSpec
-    from app.orchestrator.workflow import can_staff
+    from app.workflows.company import can_staff
 
     specs = [AgentSpec.from_dict({**a, "id": a.get("id") or str(i)}, "generic") for i, a in enumerate(agents)]
     heads = [a for a in specs if a.is_entry]

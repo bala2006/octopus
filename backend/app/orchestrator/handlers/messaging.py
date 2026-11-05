@@ -6,14 +6,14 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from app.db.session import registry_factory
-from app.llm.base import LLMError, LLMRequest
-from app.llm.router import prepare_request, stream_with_retry
+from app.capabilities.models.base import LLMError, LLMRequest
+from app.capabilities.models.router import prepare_request, stream_with_retry
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec, clip
 from app.orchestrator.execution import ACTIVE_ATTEMPT
 from app.orchestrator.handlers.shared import OPEN_TASK_STATES
 from app.orchestrator.permissions import allowed_recipients, find_channel, rejection_reason, EdgeSpec
-from app.orchestrator.protocols import DebateState, ReviewState, debate_decided_externally, debate_on_message, infer_verdict, review_on_request, review_on_result
+from app.workflows.protocols import DebateState, ReviewState, debate_decided_externally, debate_on_message, infer_verdict, review_on_request, review_on_result
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime

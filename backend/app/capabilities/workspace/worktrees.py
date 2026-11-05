@@ -7,8 +7,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.services import git_review
-from app.tools.workspace import WorkspaceError
+from app.capabilities.workspace import git as git_review
+from app.capabilities.workspace.project_fs import WorkspaceError
 
 
 def _environment_file(root: Path) -> Path:

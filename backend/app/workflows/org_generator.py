@@ -12,12 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.base import new_id
-from app.llm.base import LLMError, LLMRequest
-from app.llm.router import prepare_request, stream_with_retry
+from app.capabilities.models.base import LLMError, LLMRequest
+from app.capabilities.models.router import prepare_request, stream_with_retry
 from app.orchestrator.actions import _extract_json
 from app.prompts.roles import agent_from_role, all_roles
-from app.services.canvas import department_color
-from app.services.templates import layout_departments, wire_org
+from app.workflows.canvas import department_color
+from app.workflows.templates import layout_departments, wire_org
 
 EDGE_TYPES = {"delegate", "review", "debate", "report", "consult"}
 TOOL_KEYS = {"file_read", "file_write", "list_files", "terminal", "web_search", "calculator", "ask_user", "send_message", "manage_team"}

@@ -13,7 +13,7 @@ from app.db.base import utcnow
 from app.db.session import registry_factory
 from app.models import Run
 from app.schemas import RunBudget
-from app.services import skills as SK
+from app.capabilities.skills import library as SK
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime
@@ -163,7 +163,7 @@ async def _finalize(rt: RunRuntime, status: str, reason: str) -> None:
             status=status, halt_reason=reason[:200], summary=summary, ended_at=utcnow(),
             tokens_used=rt.tokens, cost_usd=round(rt.cost, 6), turns=rt.turn_no, state_json=rt.state_dict()))
         await db.commit()
-    from app.services.browser import browser
+    from app.capabilities.browser.service import browser
     from app.services.report import build_report  # local import avoids a cycle
 
     await browser.close_run(rt.run_id)

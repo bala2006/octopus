@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.base import ProjectBase
 from app.db.session import make_engine
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from app.models import Company, Run
 from app.orchestrator.engine import ProjectRef, RunRuntime
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status

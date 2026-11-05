@@ -7,7 +7,7 @@ from typing import Any
 
 from app.channels.deps import get_or_create_single_user
 from app.db.session import registry_factory
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from fakes.fake_provider import FakeProvider
 from app.services.chat import ChatConnection
 from conftest import ScriptedProvider, agent, env, events, make_company, start_run, wait_status

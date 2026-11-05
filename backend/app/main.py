@@ -32,8 +32,8 @@ async def lifespan(_: FastAPI):  # type: ignore[no-untyped-def]
     await asyncio.to_thread(upgrade_registry, s.registry_database_url)
     log.info("octopus_started", home=str(s.octopus_home), roots=s.workspace_allowed_roots)
     yield
-    from app.services.browser import browser
-    from app.services.processes import commands, servers
+    from app.capabilities.browser.service import browser
+    from app.capabilities.sandbox.processes import commands, servers
 
     await manager.shutdown()
     await browser.shutdown()

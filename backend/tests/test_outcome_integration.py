@@ -1,5 +1,5 @@
 """Integration guards for auto staffing and independently verified acceptance."""
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from conftest import NativeScriptedProvider, agent, events, make_company, start_run, wait_status
 
 

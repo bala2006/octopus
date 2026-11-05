@@ -10,11 +10,11 @@ from app.core.contracts import Assignment, ExecutionPolicy, choose_lead, classif
 from app.core.evidence import capture_manifest, record_evidence, validate_evidence, RevisionEvidence, VerificationCheck, redact_evidence
 from app.core.execution_contracts import ACTIVE_ATTEMPT, AttemptContext, SupersededAttempt  # noqa: F401 (re-exported)
 from app.orchestrator.runtime_store import RuntimeStore
-from app.tools.workspace import ProjectFS
+from app.capabilities.workspace.project_fs import ProjectFS
 
 if TYPE_CHECKING:
     from app.orchestrator.engine import RunRuntime
-from app.services.skill_contracts import pin_skill_bundle, pin_project_guidance, workflow_spec, WorkflowSpec, WorkflowStep, content_hash
+from app.capabilities.skills.contracts import pin_skill_bundle, pin_project_guidance, workflow_spec, WorkflowSpec, WorkflowStep, content_hash
 
 
 class ExecutionService:
@@ -120,17 +120,17 @@ class ExecutionService:
                     await self.rt.emit("error", {"kind": "skill", "message": f"Skill {name} was not loaded: {exc}"})
             self.rt.skills = {name: skill for name, skill in self.rt.skills.items() if name in self.pinned_skills}
         else:
-            from app.services.skills import Skill
+            from app.capabilities.skills.library import Skill
             self.rt.skills = {name: Skill(name=name, description=data["description"], body=data["body"], source=data["origin"])
                            for name, data in self.pinned_skills.items()}
         self._last_manifest = await asyncio.to_thread(self.execution_manifest, self.rt.root)
-        from app.services import scoped_memory as memory
+        from app.capabilities.memory import scoped as memory
         await memory.import_legacy(self.rt.sf, memory.Actor(self.rt.user_id, self.rt.company_id), self.rt.root)
         await self.rt.save()
 
     def skill_directory(self, name: str, source: str) -> Path | None:
         if source == "builtin":
-            from app.services.skills import BUILTIN_DIR
+            from app.capabilities.skills.library import BUILTIN_DIR
             path = BUILTIN_DIR / name
             return path if path.is_dir() else None
         if source != "project":
@@ -142,7 +142,7 @@ class ExecutionService:
         return None
 
     async def scoped_context(self, agent_id: str) -> str:
-        from app.services import scoped_memory as memory
+        from app.capabilities.memory import scoped as memory
         try:
             value = await memory.runtime_context(self.rt.sf, self.rt.user_id, self.rt.company_id, agent_id, self.rt.run_id)
         except memory.MemoryDenied:
@@ -165,7 +165,7 @@ class ExecutionService:
         await self.rt.save()
 
     async def act_recall_context(self, agent, action) -> None:
-        from app.services import scoped_memory as memory
+        from app.capabilities.memory import scoped as memory
         cid = await self.rt._tool_event(agent, "recall_context", {"message_ids": action.message_ids, "memory_id": action.memory_id, "query": action.query})
         allowed = [m for m in self.rt.history if (m["id"] in action.message_ids or action.query and action.query.casefold() in m["content"].casefold()) and
                    (agent.id in (m["from"], m["to"]) or (m["to"] is None and m["from"] is None))]
@@ -240,14 +240,14 @@ class ExecutionService:
         # accountable lead use the canonical tree, one turn at a time.
         staged = aid != self.rt.lead_agent_id and not self.rt.wf_owner_of_active(aid)
         if staged and (agent.tools.get("file_write", True) or agent.tools.get("terminal")):
-            from app.orchestrator.workspaces import create_stage
+            from app.capabilities.workspace.stages import create_stage
             context.workspace, stage_base = await asyncio.to_thread(create_stage, self.rt.root, self.rt.run_id, attempt_id)
         token = ACTIVE_ATTEMPT.set(context)
         status, result = "completed", {}
         try:
             await self.rt._turn(aid)
             if staged and stage_base is not None and assignment.revision == self.plan_revision:
-                from app.orchestrator.workspaces import integrate, integration_status, WorkspaceConflict
+                from app.capabilities.workspace.stages import integrate, integration_status, WorkspaceConflict
                 try:
                     from app.orchestrator.runtime_store import mutation_lock
                     async with mutation_lock(self.rt.run_id):

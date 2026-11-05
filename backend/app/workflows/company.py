@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec, clip
-from app.orchestrator.director import profile_goal, quality_brief, specialist_bonus
+from app.workflows.director import profile_goal, quality_brief, specialist_bonus
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime

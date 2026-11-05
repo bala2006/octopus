@@ -10,7 +10,7 @@ from app.channels.deps import current_user
 from app.db.session import get_registry_db
 from app.models import User, UserTemplate
 from app.schemas import CanvasExport, DepartmentSummary, RoleTemplateOut, TemplateOut, UserTemplateIn
-from app.services.templates import TEMPLATES, build_from_template, summarize_departments, template_summary, workflow_ready
+from app.workflows.templates import TEMPLATES, build_from_template, summarize_departments, template_summary, workflow_ready
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 USER_PREFIX = "user:"

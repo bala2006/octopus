@@ -9,7 +9,7 @@ import pytest
 async def test_doctor_only_discovers_and_handshakes_in_disposable_directory(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
     from scripts import runtime_doctor as doctor
-    from app.services.opencode import OpenCodeProbe
+    from app.capabilities.models.opencode import OpenCodeProbe
 
     calls = []
     directories = []

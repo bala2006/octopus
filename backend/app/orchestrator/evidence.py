@@ -29,7 +29,7 @@ from app.core.evidence import (  # noqa: F401
     redact_evidence,
     validate_evidence,
 )
-from app.tools.workspace import ProjectFS
+from app.capabilities.workspace.project_fs import ProjectFS
 
 
 def capture_manifest(root: Path, paths: Iterable[str] | None = None, *, known_paths: Iterable[str] = ()) -> ArtifactManifest:

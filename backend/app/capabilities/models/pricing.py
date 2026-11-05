@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.llm.base import Usage
+from app.capabilities.models.base import Usage
 
 
 @dataclass(frozen=True)

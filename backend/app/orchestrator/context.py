@@ -5,10 +5,10 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from app.llm.base import effective_max_tokens
+from app.capabilities.models.base import effective_max_tokens
 from app.orchestrator.actions import schema_doc
 from app.orchestrator.permissions import EdgeSpec, allowed_recipients
-from app.services import skills as SK
+from app.capabilities.skills import library as SK
 from app.services.roles import resolve_prompt
 
 if TYPE_CHECKING:

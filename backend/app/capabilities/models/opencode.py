@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import get_settings
-from app.tools.sandbox import stop_process
+from app.capabilities.sandbox.commands import stop_process
 
 
 class OpenCodeError(Exception):

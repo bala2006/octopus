@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.workflow import PHASES, TRACKS, pick_owner
+from app.workflows.company import PHASES, TRACKS, pick_owner
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime

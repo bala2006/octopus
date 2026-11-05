@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-BUILTIN_DIR = Path(__file__).resolve().parent.parent / "skills"
+BUILTIN_DIR = Path(__file__).resolve().parents[2] / "skills"
 PROJECT_DIRS = (".octopus/skills", ".agents/skills", ".claude/skills")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 MAX_BODY = 40_000

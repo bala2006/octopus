@@ -22,8 +22,8 @@ from app.schemas import (
 )
 from app.orchestrator.permissions import normalize_mode
 from app.services import run_attachments
-from app.services.canvas import snapshot
-from app.tools.workspace import ProjectFS, WorkspaceError
+from app.workflows.canvas import snapshot
+from app.capabilities.workspace.project_fs import ProjectFS, WorkspaceError
 from app.orchestrator.runtime_store import RuntimeStore, Conflict
 from app.orchestrator.contracts import choose_lead, route_target
 from app.orchestrator.evidence import capture_manifest, validate_evidence, RevisionEvidence
@@ -64,7 +64,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
             return existing
     from app.core.config import get_settings
     from app.schemas import RunModel
-    from app.services.opencode import discover
+    from app.capabilities.models.opencode import discover
     if body.budget.model is None and get_settings().default_provider == "opencode":
         body.budget.model = RunModel(provider="opencode", model=get_settings().default_model)
     if body.budget.model and body.budget.model.provider == "opencode":
@@ -79,7 +79,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
             raise HTTPException(422, "OpenCode conversations use autonomous mode with OpenCode permission requests.")
     if body.budget.model is not None and body.budget.model.provider == "azure":
         from app.db.session import registry_factory
-        from app.llm.router import allowed_models, is_configured, resolve_credentials
+        from app.capabilities.models.router import allowed_models, is_configured, resolve_credentials
 
         async with registry_factory()() as registry:
             key, base, options = await resolve_credentials(registry, user.id, "azure")
@@ -202,7 +202,7 @@ async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: Use
         raise HTTPException(409, "Stop the run before deleting it")
     await db.delete(run)
     await db.commit()
-    from app.services import browser_frames
+    from app.capabilities.browser import frames as browser_frames
 
     browser_frames.delete_run(run_id)
     run_attachments.delete_run(ctx.root, run_id)
@@ -546,7 +546,7 @@ async def download_zip(run_id: str, db: AsyncSession = Depends(get_pdb), user: U
 @router.get("/{run_id}/browser/{name}")
 async def browser_frame(run_id: str, name: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> Response:
     """One screenshot of an agent's browser tab (named by a browser_action event)."""
-    from app.services import browser_frames
+    from app.capabilities.browser import frames as browser_frames
 
     await owned_run(run_id, db, user)
     p = browser_frames.path(run_id, name)
@@ -573,7 +573,7 @@ async def run_attachment(run_id: str, name: str, db: AsyncSession = Depends(get_
 async def preview(run_id: str, path: str, request: Request, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                   ctx: ProjectCtx = Depends(project_ctx)) -> Response:
     """Serve the project as it is on disk, for the sandboxed live preview."""
-    from app.services.preview import serve
+    from app.capabilities.workspace.preview import serve
 
     await owned_run(run_id, db, user)
     fs = ProjectFS(ctx.root)

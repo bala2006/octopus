@@ -15,10 +15,10 @@ from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, Response
 import uvicorn
 
-from app.orchestrator import tools as T
+from app.capabilities.tools import specs as T
 from app.orchestrator.execution import ACTIVE_ATTEMPT
 from app.core.evidence import redact_evidence
-from app.llm.base import ToolCall
+from app.capabilities.models.base import ToolCall
 
 if TYPE_CHECKING:
     from app.orchestrator.context import AgentSpec

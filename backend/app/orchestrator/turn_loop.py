@@ -10,10 +10,11 @@ from typing import TYPE_CHECKING, Any
 from app.core.config import get_settings
 from app.core.run_manager import StopRun
 from app.db.session import registry_factory
-from app.llm.base import LLMError, LLMOutputTruncated, LLMRequest, ToolCall
-from app.llm.router import prepare_request, get_provider
+from app.capabilities.models.base import LLMError, LLMOutputTruncated, LLMRequest, ToolCall
+from app.capabilities.models.router import prepare_request, get_provider
 from app.models import Message
-from app.orchestrator import actions as A, tools as T
+from app.orchestrator import actions as A
+from app.capabilities.tools import specs as T
 from app.orchestrator.context import AgentSpec, build_turn_prompts, TOOL_RESULT_CHARS, clip
 from app.orchestrator.execution import ACTIVE_ATTEMPT
 
@@ -118,7 +119,7 @@ async def _turn(rt: RunRuntime, aid: str) -> None:
     inbox_set = set(inbox_ids)
     inbox = [m for m in rt.history if m["id"] in inbox_set]
     if rt.model_for(agent)[0] == "opencode":
-        from app.orchestrator.opencode import opencode_turn
+        from app.capabilities.models.opencode_turn import opencode_turn
         await opencode_turn(rt, agent, inbox, obs)
         await rt.end_turn(aid)
         return

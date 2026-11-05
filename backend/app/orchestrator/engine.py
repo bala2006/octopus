@@ -26,9 +26,9 @@ from app.core.logging import get_logger
 from app.core.policy import PolicyGate
 from app.core.run_manager import ACTIVE_STATES, ProjectRef, RunManager, StopRun, run_turn_loop  # noqa: F401 (ACTIVE_STATES is imported from here by the API)
 from app.db.base import new_id
-from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMOutputTruncated, LLMRequest, LLMResult
+from app.capabilities.models.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMOutputTruncated, LLMRequest, LLMResult
 from app.orchestrator.roles import role_category
-from app.llm.router import stream_with_retry
+from app.capabilities.models.router import stream_with_retry
 from app.models import Message, Run, Task
 from app.orchestrator import actions as A
 from app.orchestrator.bus import bus
@@ -36,16 +36,16 @@ from app.orchestrator.context import AgentSpec
 from app.orchestrator.permissions import (
     EdgeSpec, normalize_mode,
 )
-from app.orchestrator.team import TeamMixin
-from app.orchestrator.workflow import WorkflowMixin
+from app.workflows.org import TeamMixin
+from app.workflows.company import WorkflowMixin
 from app.orchestrator.execution import ACTIVE_ATTEMPT, ExecutionService, execution_field
 from app.core.evidence import redact_evidence
-from app.orchestrator.protocols import (
+from app.workflows.protocols import (
     DebateState, LoopDetector, ReviewState,
 )
 from app.schemas import RunBudget
-from app.services import skills as SK
-from app.tools.workspace import ProjectFS
+from app.capabilities.skills import library as SK
+from app.capabilities.workspace.project_fs import ProjectFS
 from app.orchestrator.handlers import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, tasks as task_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions, team_actions, workflow_actions
 from app.orchestrator import run_control, run_state, mailbox, board, turn_loop, lifecycle
 from app.orchestrator.handlers.messaging import DEBATE_PROTOCOL_TYPES, JUDGE_MAX_TOKENS, judge_verdict  # noqa: F401 (re-exported for existing callers)

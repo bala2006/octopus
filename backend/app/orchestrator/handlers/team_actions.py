@@ -9,7 +9,7 @@ from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
 from app.orchestrator.permissions import allowed_recipients, EdgeSpec
 from app.orchestrator.roles import role_category
-from app.orchestrator.team import _edge, _tool_map, EDITABLE_BEHAVIOR
+from app.workflows.org import _edge, _tool_map, EDITABLE_BEHAVIOR
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime
@@ -39,7 +39,7 @@ async def act_list_agents(rt: RunRuntime, agent: AgentSpec, a: A.ListAgents) -> 
 
 async def act_create_agent(rt: RunRuntime, agent: AgentSpec, a: A.CreateAgent) -> None:
     from app.prompts.roles import agent_from_role, all_roles
-    from app.services.canvas import department_color
+    from app.workflows.canvas import department_color
 
     cid = await rt._tool_event(agent, "create_agent", {"name": a.name, "role": a.role, "department": a.department})
     if len(rt.agents) >= rt.budget.max_agents:

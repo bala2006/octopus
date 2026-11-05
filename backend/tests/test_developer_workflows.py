@@ -6,9 +6,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.services.processes import ManagedProcesses
-from app.services.git_review import diff, stage, status
-from app.tools.sandbox import SandboxError
+from app.capabilities.sandbox.processes import ManagedProcesses
+from app.capabilities.workspace.git import diff, stage, status
+from app.capabilities.sandbox.commands import SandboxError
 
 
 def git(root: Path, *args: str) -> str:

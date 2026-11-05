@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.tools.sandbox import (
+from app.capabilities.sandbox.commands import (
     SandboxError,
     analyze_command,
     parse_command,

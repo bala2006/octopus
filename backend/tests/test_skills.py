@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from app.prompts.roles import all_roles
-from app.services import skills as S
+from app.capabilities.skills import library as S
 from conftest import NativeScriptedProvider, agent, make_company, start_run, wait_status
 
 

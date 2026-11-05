@@ -278,7 +278,7 @@ class BrowserService:
             self.status, self.verified = "server_ready", False
             log.info("browser_server_started", url=self.url, browser=self._browser_arg())
         try:
-            from app.tools.mcp_client import McpConfig, list_tools
+            from app.capabilities.mcp.client import McpConfig, list_tools
 
             listed = await list_tools(McpConfig(id=SERVER_ID, name=SERVER_NAME, transport="http", url=self.url))
             order = {n: i for i, n in enumerate(PREFERRED)}

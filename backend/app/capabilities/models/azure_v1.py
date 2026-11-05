@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap, with_images, chat_continuation, chat_tools, ChatToolAccumulator
+from app.capabilities.models.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap, with_images, chat_continuation, chat_tools, ChatToolAccumulator
 
 ApiStyle = str  # "responses" | "chat"
 _PROTECTED = {"model", "input", "messages", "stream", "tools", "tool_choice"}  # never auto-dropped
@@ -169,7 +169,7 @@ def _error_message(status: int, text: str) -> str:
 
 async def _auth_headers(req: LLMRequest) -> dict[str, str]:
     if req.extra.get("auth") == "entra":
-        from app.llm.litellm_provider import entra_token_provider
+        from app.capabilities.models.litellm_provider import entra_token_provider
 
         token = await asyncio.to_thread(entra_token_provider())
         return {"Authorization": f"Bearer {token}"}
@@ -239,7 +239,7 @@ class AzureV1Provider:
         if usage is None:
             prompt_text = "".join(str(m.get("content", "")) for m in req.messages)
             usage = Usage(prompt_tokens=estimate_tokens(prompt_text), completion_tokens=estimate_tokens("".join(text_parts)), estimated=True)
-        from app.llm.pricing import apply
+        from app.capabilities.models.pricing import apply
 
         apply(usage, req.model, req.extra)  # exact Azure usage × deployment rates (Settings → Model → Pricing)
         yield LLMChunk(usage=usage)

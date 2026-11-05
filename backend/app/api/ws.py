@@ -138,7 +138,7 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
 @router.websocket("/ws/w/{workspace_id}/runs/{run_id}/browser/{agent_id}")
 async def browser_socket(ws: WebSocket, workspace_id: str, run_id: str, agent_id: str) -> None:
     """Live view of one agent's browser tab (see services/browser_live.py for the protocol)."""
-    from app.services import browser_live
+    from app.capabilities.browser import live as browser_live
 
     await ws.accept()
     user, ctx = await _auth(ws, workspace_id)

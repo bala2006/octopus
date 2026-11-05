@@ -16,7 +16,7 @@ from app.db.session import get_registry_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services import editor
 from app.services import file_items
-from app.tools.workspace import MAX_LIST, ProjectFS, WorkspaceError
+from app.capabilities.workspace.project_fs import MAX_LIST, ProjectFS, WorkspaceError
 
 router = APIRouter(prefix="/editor", tags=["project editor"])
 
@@ -181,7 +181,7 @@ class ProjectTasks(BaseModel):
 
 @router.get("/tasks", response_model=ProjectTasks)
 async def project_tasks(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.project_tasks import discover
+    from app.workflows.tasks import discover
     try:
         return await asyncio.to_thread(discover, ctx.root)
     except OSError as exc:
@@ -190,7 +190,7 @@ async def project_tasks(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 
 @router.post("/git/commit", response_model=GitCommitResult)
 async def git_commit(body: GitCommit, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services import git_review
+    from app.capabilities.workspace import git as git_review
     try:
         async with git_review.operation_lock(ctx.root):
             return await git_review.commit(ctx.root, body.message, body.expected_index)
@@ -200,7 +200,7 @@ async def git_commit(body: GitCommit, ctx: ProjectCtx = Depends(project_ctx)) ->
 
 @router.post("/git/stage", response_model=GitStatus)
 async def git_stage(body: GitStage, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services import git_review
+    from app.capabilities.workspace import git as git_review
     try:
         async with git_review.operation_lock(ctx.root):
             return await git_review.stage(ctx.root, body.path, body.staged)
@@ -210,7 +210,7 @@ async def git_stage(body: GitStage, ctx: ProjectCtx = Depends(project_ctx)) -> d
 
 @router.get("/git", response_model=GitStatus)
 async def git_status(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services import git_review
+    from app.capabilities.workspace import git as git_review
     try:
         return await git_review.status(ctx.root)
     except (WorkspaceError, OSError, TimeoutError) as exc:
@@ -219,7 +219,8 @@ async def git_status(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 
 @router.get("/local-environment")
 async def get_local_environment(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services import hostpaths, local_environment
+    from app.services import hostpaths
+    from app.capabilities.workspace import worktrees as local_environment
     try:
         result = await local_environment.inspect(ctx.root)
         for worktree in result["worktrees"]:
@@ -232,7 +233,8 @@ async def get_local_environment(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 
 @router.post("/git/branch")
 async def switch_local_branch(body: LocalBranchIn, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services import git_review, local_environment
+    from app.capabilities.workspace import git as git_review
+    from app.capabilities.workspace import worktrees as local_environment
     try:
         async with git_review.operation_lock(ctx.root):
             await local_environment.switch_branch(ctx.root, body.branch)
@@ -245,7 +247,9 @@ async def switch_local_branch(body: LocalBranchIn, ctx: ProjectCtx = Depends(pro
 async def create_local_worktree(body: LocalWorktreeIn, ctx: ProjectCtx = Depends(project_ctx),
                                 db: AsyncSession = Depends(get_registry_db)) -> dict:
     from app.api.v1.workspaces import _register
-    from app.services import git_review, hostpaths, local_environment
+    from app.services import hostpaths
+    from app.capabilities.workspace import git as git_review
+    from app.capabilities.workspace import worktrees as local_environment
     from app.services.projects import ProjectPathError, validate_project_dir
     try:
         async with git_review.operation_lock(ctx.root):
@@ -259,7 +263,7 @@ async def create_local_worktree(body: LocalWorktreeIn, ctx: ProjectCtx = Depends
 
 @router.put("/local-environment")
 async def set_local_environment(body: LocalEnvironmentIn, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services import local_environment
+    from app.capabilities.workspace import worktrees as local_environment
     try:
         selected = local_environment.save_environment(ctx.root, body.selected)
         return await local_environment.inspect(ctx.root)
@@ -269,7 +273,7 @@ async def set_local_environment(body: LocalEnvironmentIn, ctx: ProjectCtx = Depe
 
 @router.get("/git/diff", response_model=GitDiff)
 async def git_diff(path: str, staged: bool = False, ctx: ProjectCtx = Depends(project_ctx)) -> GitDiff:
-    from app.services import git_review
+    from app.capabilities.workspace import git as git_review
     try:
         return GitDiff(patch=await git_review.diff(ctx.root, path, staged))
     except (WorkspaceError, OSError, TimeoutError) as exc:
@@ -278,14 +282,14 @@ async def git_diff(path: str, staged: bool = False, ctx: ProjectCtx = Depends(pr
 
 @router.get("/server", response_model=ServerStatus)
 async def server_status(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.processes import servers
+    from app.capabilities.sandbox.processes import servers
     return servers.status(ctx.key)
 
 
 @router.post("/server", response_model=ServerStatus)
 async def start_server(body: StartServer, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.processes import servers
-    from app.tools.sandbox import SandboxError
+    from app.capabilities.sandbox.processes import servers
+    from app.capabilities.sandbox.commands import SandboxError
     try:
         return await servers.start(ctx.key, ctx.root, body.command, directory=body.directory)
     except (SandboxError, OSError) as exc:
@@ -294,13 +298,13 @@ async def start_server(body: StartServer, ctx: ProjectCtx = Depends(project_ctx)
 
 @router.delete("/server", response_model=ServerStatus)
 async def stop_server(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.processes import servers
+    from app.capabilities.sandbox.processes import servers
     return await servers.stop(ctx.key)
 
 
 @router.post("/command", response_model=CommandResult)
 async def command(body: CommandIn, ctx: ProjectCtx = Depends(project_ctx)) -> CommandResult:
-    from app.tools.sandbox import SandboxError, run_command
+    from app.capabilities.sandbox.commands import SandboxError, run_command
     try:
         result = await run_command(body.command, ctx.root, timeout=60)
         return CommandResult(**result.__dict__)
@@ -310,14 +314,14 @@ async def command(body: CommandIn, ctx: ProjectCtx = Depends(project_ctx)) -> Co
 
 @router.get("/commands/current", response_model=CommandStatus)
 async def current_command(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.processes import commands
+    from app.capabilities.sandbox.processes import commands
     return commands.status(ctx.key)
 
 
 @router.post("/commands/current", response_model=CommandStatus)
 async def start_command(body: StartCommand, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.processes import commands
-    from app.tools.sandbox import SandboxError
+    from app.capabilities.sandbox.processes import commands
+    from app.capabilities.sandbox.commands import SandboxError
     try:
         return await commands.start(ctx.key, ctx.root, body.command, timeout=body.timeout_seconds, directory=body.directory)
     except (SandboxError, OSError) as exc:
@@ -326,14 +330,14 @@ async def start_command(body: StartCommand, ctx: ProjectCtx = Depends(project_ct
 
 @router.delete("/commands/current", response_model=CommandStatus)
 async def stop_command(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.processes import commands
+    from app.capabilities.sandbox.processes import commands
     return await commands.stop(ctx.key)
 
 
 @router.post("/commands/input", response_model=CommandStatus)
 async def command_input(body: CommandInput, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.processes import commands
-    from app.tools.sandbox import SandboxError
+    from app.capabilities.sandbox.processes import commands
+    from app.capabilities.sandbox.commands import SandboxError
     try:
         return await commands.send(ctx.key, body.text)
     except (SandboxError, OSError) as exc:
@@ -342,8 +346,8 @@ async def command_input(body: CommandInput, ctx: ProjectCtx = Depends(project_ct
 
 @router.delete("/commands/output", response_model=CommandStatus)
 async def clear_command(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.services.processes import commands
-    from app.tools.sandbox import SandboxError
+    from app.capabilities.sandbox.processes import commands
+    from app.capabilities.sandbox.commands import SandboxError
     try:
         return commands.clear(ctx.key)
     except SandboxError as exc:

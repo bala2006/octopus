@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Literal
 
 from app.core.config import get_settings
-from app.tools.sandbox import SandboxError, _resolve_exe, command_environment, parse_command, stop_process
-from app.tools.workspace import ProjectFS, WorkspaceError
+from app.capabilities.sandbox.commands import SandboxError, _resolve_exe, command_environment, parse_command, stop_process
+from app.capabilities.workspace.project_fs import ProjectFS, WorkspaceError
 
 MAX_LOG_CHARS = 24_000
 MAX_SERVERS = 8

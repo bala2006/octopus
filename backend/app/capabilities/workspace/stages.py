@@ -12,8 +12,8 @@ from typing import Iterator
 from pydantic import Field
 
 from app.core.evidence import ArtifactManifest, ExcludedFile, FileDigest, MAX_DIRECTORIES, MAX_FILES, MAX_TEXT_BYTES, MAX_TOTAL_BYTES
-from app.services.skill_contracts import Contract, ContractError, content_hash
-from app.tools.workspace import IGNORED_DIRS, ProjectFS, WorkspaceError, is_secret
+from app.capabilities.skills.contracts import Contract, ContractError, content_hash
+from app.capabilities.workspace.project_fs import IGNORED_DIRS, ProjectFS, WorkspaceError, is_secret
 
 
 class WorkspaceConflict(ContractError):

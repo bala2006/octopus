@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from app.orchestrator.permissions import is_dangerous_edit, normalize_mode
-from app.tools.sandbox import SandboxError, analyze_command, parse_command
+from app.capabilities.sandbox.commands import SandboxError, analyze_command, parse_command
 from conftest import ScriptedProvider, agent, env, make_company, set_approval, start_run, wait_status
 
 

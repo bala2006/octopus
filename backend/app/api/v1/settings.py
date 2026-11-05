@@ -12,8 +12,8 @@ from app.channels.deps import current_user
 from app.core.security import decrypt_secret, encrypt_secret, mask_secret
 from app.db.base import utcnow
 from app.db.session import get_registry_db
-from app.llm.base import LLMError, LLMRequest
-from app.llm.router import LEGACY_AZURE_ROWS, PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
+from app.capabilities.models.base import LLMError, LLMRequest
+from app.capabilities.models.router import LEGACY_AZURE_ROWS, PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
 from app.models import McpServer, ProviderKey, User
 from app.orchestrator.permissions import normalize_mode
 from app.schemas import (
@@ -23,8 +23,8 @@ from app.schemas import (
     TestProviderOut,
 )
 from app.services.files import UnsupportedFile, parse_file, parse_image
-from app.services.opencode import OpenCodeStatus, discover
-from app.tools.mcp_client import McpConfig, McpError, list_tools
+from app.capabilities.models.opencode import OpenCodeStatus, discover
+from app.capabilities.mcp.client import McpConfig, McpError, list_tools
 
 router = APIRouter(tags=["settings"])
 
@@ -138,7 +138,7 @@ async def test_provider(body: TestProviderIn, db: AsyncSession = Depends(get_reg
 async def fx_rate(currency: str = "USD", user: User = Depends(current_user)) -> FxRateOut:
     import httpx
 
-    from app.services.fx import usd_to
+    from app.capabilities.models.fx import usd_to
 
     try:
         r = await usd_to(currency)
@@ -153,7 +153,7 @@ async def fx_rate(currency: str = "USD", user: User = Depends(current_user)) -> 
 def _browser_status() -> BrowserStatusOut:
     import shutil
 
-    from app.services.browser import browser
+    from app.capabilities.browser.service import browser
 
     s = get_settings()
     return BrowserStatusOut(enabled=s.browser_enabled, status=browser.status, verified=browser.verified, error=browser.error,
@@ -171,7 +171,7 @@ async def browser_test(user: User = Depends(current_user)) -> BrowserTestOut:
     """Start the browser if needed, open a test page in a throwaway tab and read it back."""
     import time
 
-    from app.services.browser import SMOKE_PAGE, SMOKE_TEXT, browser, diagnose
+    from app.capabilities.browser.service import SMOKE_PAGE, SMOKE_TEXT, browser, diagnose
 
     t0 = time.monotonic()
     await browser.recheck()  # the user may have fixed the environment since the last failure

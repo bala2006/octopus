@@ -10,7 +10,7 @@ from app.channels.deps import current_user
 from app.db.session import get_registry_db
 from app.models import User, UserSkill
 from app.schemas import SkillIn, SkillOut
-from app.services import skills as S
+from app.capabilities.skills import library as S
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 

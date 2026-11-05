@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
-from app.tools.sandbox import SandboxError, analyze_command, run_command
+from app.capabilities.sandbox.commands import SandboxError, analyze_command, run_command
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime

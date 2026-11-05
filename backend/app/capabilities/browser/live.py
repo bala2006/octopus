@@ -24,7 +24,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from app.core.logging import get_logger
-from app.services.browser import browser
+from app.capabilities.browser.service import browser
 
 log = get_logger("browser_live")
 

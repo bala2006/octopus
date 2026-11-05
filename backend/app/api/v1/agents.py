@@ -10,8 +10,8 @@ from app.db.base import utcnow
 from app.models import Agent, Edge, User
 from app.models.scoped_memory import MemoryHead, MemoryRecord
 from app.schemas import AgentIn, AgentOut, AgentPatch, EdgeIn, EdgeOut, MemoryIn, MemoryOut
-from app.services.canvas import agent_out, apply_agent, edge_out, validate_edges
-from app.services import scoped_memory as memory
+from app.workflows.canvas import agent_out, apply_agent, edge_out, validate_edges
+from app.capabilities.memory import scoped as memory
 
 router = APIRouter(tags=["agents & edges"])
 

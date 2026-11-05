@@ -63,7 +63,7 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
 
     wf = state.get("workflow") or {}
     if wf.get("phases"):
-        from app.orchestrator.workflow import PHASES
+        from app.workflows.company import PHASES
 
         out += [f"## Workflow ({wf.get('track') or 'intake only'} track)", "", "| Phase | Owner | Status | Fix rounds | Summary |", "|---|---|---|---|---|"]
         for p in wf["phases"]:

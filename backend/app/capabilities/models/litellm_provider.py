@@ -5,8 +5,8 @@ from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
 
-from app.llm.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap, with_images, chat_continuation, chat_tools, ChatToolAccumulator
-from app.llm.azure_v1 import legacy_api_base
+from app.capabilities.models.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap, with_images, chat_continuation, chat_tools, ChatToolAccumulator
+from app.capabilities.models.azure_v1 import legacy_api_base
 
 PREFIX = {
     "azure": "azure/", "azure_ai": "azure_ai/", "openai": "openai/", "anthropic": "anthropic/", "gemini": "gemini/",
@@ -128,7 +128,7 @@ class LiteLLMProvider:
         if usage is None:
             prompt_text = "".join(m.get("content", "") for m in req.messages)
             usage = Usage(prompt_tokens=estimate_tokens(prompt_text), completion_tokens=estimate_tokens("".join(text_parts)))
-        from app.llm.pricing import apply, rates_for
+        from app.capabilities.models.pricing import apply, rates_for
 
         if rates_for(req.model, req.extra):
             apply(usage, req.model, req.extra)

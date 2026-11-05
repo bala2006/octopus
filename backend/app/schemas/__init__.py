@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.llm.base import DEFAULT_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS
+from app.capabilities.models.base import DEFAULT_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS
 
 EdgeType = Literal["delegate", "review", "debate", "report", "consult"]
 # "incomplete": the run stopped with unfinished tasks on the board (it is never reported as "completed")

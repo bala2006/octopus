@@ -4,7 +4,7 @@ import pytest
 
 from app.core import evidence as CORE_EVIDENCE
 from app.orchestrator import evidence as E
-from app.services.skill_contracts import ContractError
+from app.capabilities.skills.contracts import ContractError
 
 
 ENV = {"python": "3.12", "lockfile": "known-lock"}

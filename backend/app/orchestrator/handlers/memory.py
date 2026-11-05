@@ -13,7 +13,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 async def act_remember(rt: RunRuntime, agent: AgentSpec, a: A.Remember) -> None:
     cid = await rt._tool_event(agent, "remember", {"key": a.key, "scope": a.scope})
-    from app.services import scoped_memory as memory
+    from app.capabilities.memory import scoped as memory
     actor = memory.Actor(rt.user_id, rt.company_id, agent.id)
     target = (memory.Target("project", rt.company_id) if a.scope == "project" else
               memory.Target("chat", rt.run_id) if a.scope == "chat" else

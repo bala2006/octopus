@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from app.models import Agent, Task
 from app.models.runtime_records import TaskAttempt
 from app.orchestrator import actions as A

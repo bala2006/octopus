@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.orchestrator.evidence import redact_evidence
-from app.services.opencode import executable, probe, process_options
-from app.tools.sandbox import stop_process
+from app.capabilities.models.opencode import executable, probe, process_options
+from app.capabilities.sandbox.commands import stop_process
 
 
 async def inspect_command(argv: list[str], cwd: Path, timeout: float = 20) -> dict:

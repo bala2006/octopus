@@ -19,7 +19,7 @@ from app.schemas import (
 from app.core.config import get_settings
 from app.services import hostpaths, native_dialog
 from app.services.projects import ProjectPathError, allowed_roots, browse, init_project, make_dir, rename_project, validate_project_dir
-from app.tools.workspace import ProjectFS, WorkspaceError
+from app.capabilities.workspace.project_fs import ProjectFS, WorkspaceError
 
 router = APIRouter(tags=["workspaces"])
 
@@ -172,7 +172,7 @@ async def forget_workspace(workspace_id: str, db: AsyncSession = Depends(get_reg
         raise HTTPException(404, "Workspace not found")
     if manager.active_for(Path(w.path)):
         raise HTTPException(409, "Stop this project's active runs first")
-    from app.services.processes import commands, servers
+    from app.capabilities.sandbox.processes import commands, servers
     if servers.status(str(Path(w.path)))["status"] == "running":
         raise HTTPException(409, "Stop this project's development server before removing it from the list")
     if commands.status(str(Path(w.path)))["status"] == "running":
@@ -188,7 +188,7 @@ async def project_tree(ctx: ProjectCtx = Depends(project_ctx)) -> ProjectTreeOut
     """The project folder as the agents see it (``.git``, dependency folders and secrets hidden), plus the agents'
     working documents from ``.octopus/work/`` (``area="work"``). The rest of ``.octopus`` stays hidden."""
     files = await project_files(ctx)
-    from app.tools.workspace import MAX_LIST
+    from app.capabilities.workspace.project_fs import MAX_LIST
 
     return ProjectTreeOut(root=str(ctx.root), name=ctx.root.name, files=files, truncated=len(files) >= MAX_LIST)
 
@@ -225,7 +225,7 @@ async def project_file(path: str = Query(...), ctx: ProjectCtx = Depends(project
 @router.get("/w/{workspace_id}/preview/{path:path}", tags=["project files"])
 async def project_preview(path: str, request: Request, ctx: ProjectCtx = Depends(project_ctx)) -> Response:
     """Live preview of the project folder (HTML apps with their CSS/JS/images, Markdown, images…)."""
-    from app.services.preview import serve
+    from app.capabilities.workspace.preview import serve
 
     return serve(ProjectFS(ctx.root), path, f"{str(request.base_url).rstrip('/')}/api/v1/w/{ctx.workspace.id}/preview/")
 

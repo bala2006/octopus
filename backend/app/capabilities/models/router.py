@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import decrypt_secret
-from app.llm.base import LLMChunk, LLMError, LLMProvider, LLMRequest
-from app.llm.azure_v1 import AzureV1Provider, azure_v1_target
-from app.llm.litellm_provider import LiteLLMProvider
+from app.capabilities.models.base import LLMChunk, LLMError, LLMProvider, LLMRequest
+from app.capabilities.models.azure_v1 import AzureV1Provider, azure_v1_target
+from app.capabilities.models.litellm_provider import LiteLLMProvider
 from app.models import ProviderKey
 
 log = get_logger("llm")

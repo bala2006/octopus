@@ -418,7 +418,7 @@ CODE_ROLES = {"frontend", "backend", "developer", "devops", "fullstack_dev", "ga
 
 
 def default_max_tokens(key: str) -> int:
-    from app.llm.base import CODE_AGENT_MAX_TOKENS, DEFAULT_AGENT_MAX_TOKENS
+    from app.capabilities.models.base import CODE_AGENT_MAX_TOKENS, DEFAULT_AGENT_MAX_TOKENS
 
     return CODE_AGENT_MAX_TOKENS if key in CODE_ROLES else DEFAULT_AGENT_MAX_TOKENS
 

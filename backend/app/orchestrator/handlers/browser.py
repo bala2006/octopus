@@ -17,8 +17,8 @@ log = get_logger("orchestrator")
 
 async def _browser_action(rt: RunRuntime, agent: AgentSpec, cid: str, a: A.McpCall, ok: bool, out: str) -> None:
     """Record what the agent did in its browser tab and what the tab showed afterwards (the run's Browser view)."""
-    from app.services import browser_frames
-    from app.services.browser import browser, page_info
+    from app.capabilities.browser import frames as browser_frames
+    from app.capabilities.browser.service import browser, page_info
 
     url, title = page_info(out)
     if (ok and a.tool in ("browser_snapshot", "browser_console_messages", "browser_click", "browser_take_screenshot")

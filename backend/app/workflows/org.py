@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 
 from app.db.base import new_id, utcnow
-from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
+from app.capabilities.models.base import DEFAULT_AGENT_MAX_TOKENS
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
 

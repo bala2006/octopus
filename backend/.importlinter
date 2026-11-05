@@ -34,9 +34,9 @@ ignore_imports =
     # removed in Phase 8
     app.orchestrator.execution -> app.core.execution_contracts
     # removed in Phase 8 (path policy: IGNORED_DIRS, SECRET_*, is_secret)
-    app.tools.workspace -> app.core.paths
+    app.capabilities.workspace.project_fs -> app.core.paths
     # removed in Phase 8 (base Contract, ContractError, content_hash)
-    app.services.skill_contracts -> app.core.contracts
+    app.capabilities.skills.contracts -> app.core.contracts
 # Agents (app/agents) sit above core and below channels. They may use prompts, services.roles and core, but not the
 # orchestrator, the API, or channels.
 [importlinter:contract:agents-stay-below-orchestrator-api-channels]

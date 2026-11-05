@@ -210,7 +210,7 @@ def command_environment(cwd: Path, *, developer: bool = False) -> dict[str, str]
     for key in ("JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT", "FLUTTER_ROOT", "DART_SDK", "PUB_CACHE", "GRADLE_USER_HOME"):
         if key in os.environ:
             env[key] = os.environ[key]
-    from app.services.local_environment import environment_directory
+    from app.capabilities.workspace.worktrees import environment_directory
     venv = environment_directory(cwd)
     if venv:
         scripts = venv / ("Scripts" if os.name == "nt" else "bin")
@@ -295,7 +295,7 @@ async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: i
 async def _run_docker(argv: list[str], cwd: Path, timeout: int, memory_mb: int) -> ExecResult:
     s = get_settings()
     local_env_args: list[str] = []
-    from app.services.local_environment import environment_directory
+    from app.capabilities.workspace.worktrees import environment_directory
     venv = environment_directory(cwd)
     if venv:
         env_rel = venv.relative_to(cwd.resolve()).as_posix()

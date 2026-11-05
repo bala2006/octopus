@@ -6,11 +6,11 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from app.orchestrator import tools as T
+from app.capabilities.tools import specs as T
 from app.orchestrator.context import AgentSpec
 from app.orchestrator.contracts import Assignment, ExecutionPolicy
 from app.orchestrator.execution import ACTIVE_ATTEMPT, AttemptContext
-from app.orchestrator.worker_bridge import WorkerBridge
+from app.capabilities.mcp.worker_bridge import WorkerBridge
 
 
 def node(aid="worker", **kwargs):

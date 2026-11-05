@@ -18,9 +18,9 @@ async def load_mcp(rt: RunRuntime) -> None:
     """Resolve MCP servers granted to each agent (only the run owner's registered, enabled servers)."""
     await rt.load_roles()
     from app.models import McpServer
-    from app.tools.mcp_client import McpConfig
+    from app.capabilities.mcp.client import McpConfig
 
-    from app.services.browser import SERVER_ID, SERVER_NAME, browser
+    from app.capabilities.browser.service import SERVER_ID, SERVER_NAME, browser
 
     wanted = {sid for a in rt.agents.values() for sid in (a.tools.get("mcp_servers") or [])}
     if wanted:
@@ -36,10 +36,10 @@ async def load_mcp(rt: RunRuntime) -> None:
 
 
 async def act_mcp_call(rt: RunRuntime, agent: AgentSpec, a: A.McpCall) -> None:
-    from app.tools.mcp_client import call_tool
+    from app.capabilities.mcp.client import call_tool
 
     cid = await rt._tool_event(agent, f"mcp:{a.server}/{a.tool}", {"server": a.server, "tool": a.tool, "arguments": a.arguments})
-    from app.services.browser import SERVER_ID, browser
+    from app.capabilities.browser.service import SERVER_ID, browser
 
     granted = {m["name"].lower(): m["id"] for m in agent.mcp}
     sid = granted.get(a.server.lower())

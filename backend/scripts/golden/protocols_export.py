@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.orchestrator.protocols import (
+from app.workflows.protocols import (
     DebateState,
     ReviewState,
     Verdict,

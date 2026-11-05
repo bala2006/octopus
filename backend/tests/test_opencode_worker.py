@@ -3,9 +3,9 @@ import asyncio
 import httpx
 import pytest
 
-from app.orchestrator import opencode as adapter
+from app.capabilities.models import opencode_turn as adapter
 from app.orchestrator.execution import ACTIVE_ATTEMPT
-from app.services.opencode import OpenCodeError
+from app.capabilities.models.opencode import OpenCodeError
 from test_worker_bridge import FakeRuntime, node
 
 

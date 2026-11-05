@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.orchestrator import actions as A
-from app.orchestrator import tools as T
+from app.capabilities.tools import specs as T
 from scripts.golden.canon import dump_json
 
 # Every tool toggle on, so each action appears once in the function list.
