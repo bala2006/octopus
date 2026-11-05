@@ -1,249 +1,154 @@
 # Octopus architecture
 
-## 1. Storage model
+Octopus runs a team of AI agents against a project folder. This document describes the code as it is on the
+`refactor/plugin-architecture` branch. The plan and its status are in `docs/architecture/refactor-plan.md`, and the guide
+for adding a plugin is in `docs/plugins.md`.
+
+## 1. Layers
+
+Code is organised in five layers. Each layer may import the layers below it. import-linter enforces the rules (`make lint-arch`).
+
+| Layer | Package (`backend/app/…`) | What it holds |
+|---|---|---|
+| Channels | `channels/` | How people and tools reach Octopus: the HTTP API, the WebSocket, the built web UI, dev CLI scripts. Chat apps are planned and have no routes yet. |
+| Agents | `agents/` | Role plugins (built-in and user roles) and the chief plugin, which picks the lead, routes work and sets the track. |
+| Workflows | `workflows/` | Company workflow (phases and gates), org and hiring, debate and review protocols, org templates and generator, and command discovery from project manifests. |
+| Orchestrator | `orchestrator/` | The run engine (`RunRuntime`), its turn loop, action handlers, run state and lifecycle. |
+| Capabilities | `capabilities/` | Model providers, tools, sandbox, project workspace, browser, MCP, memory, skills. |
+| Core | `core/` | Plugin manifests and registry, the built-in catalog, the event bus, the approval gate (`PolicyGate`), run manager, LLM contract, evidence and contracts, capability ports, config and logging. |
+
+The database models live in `models/` and `db/`. Shared request and budget schemas live in `schemas/`.
+
+Core has no upward imports. The engine reaches models, the project filesystem and skills through the ports in
+`core/ports.py`. `capabilities/bootstrap.py` fills those ports in once at startup (`app/main.py` calls it in `create_app`).
+The engine itself imports no capability module. Its action handlers in `orchestrator/handlers/` still import capability
+modules directly (see section 9).
+
+## 2. Storage
 
 | Store | Location | Contents |
 |---|---|---|
-| Registry | `$OCTOPUS_HOME/registry.db` (default `~/.octopus`) | users, Fernet-encrypted provider keys (+ Azure options), MCP servers (encrypted env/headers), list of workspaces |
+| Registry | `$OCTOPUS_HOME/registry.db` (default `~/.octopus`) | users, Fernet-encrypted provider keys (plus Azure options), MCP servers (encrypted env and headers), the list of workspaces, the `plugins` table (enabled state and version per plugin) |
 | Project | `<project>/.octopus/octopus.db` | companies, agents, edges, chat sessions, runs, messages, run events, tasks, artifact versions, agent memory |
 | Project files | `<project>/…` | what agents read and write (sandboxed) |
-| Working docs | `<project>/.octopus/work/` | agents' working material (specs, plans, briefs, reviews, QA notes); the only part of `.octopus/` agents can read or write |
-| Plans | `<project>/.octopus/plans/<run_id>/` | shadow files written in `plan` permission mode |
+| Working docs | `<project>/.octopus/work/` | agents' working material (specs, plans, briefs, reviews, QA notes). This is the only part of `.octopus/` agents can read or write. |
 
-Both databases are migrated with Alembic (`backend/migrations/{registry,project}`). The project DB is migrated when the folder is first opened. Opening a folder that already has `.octopus/project.json` re-attaches all of its history. When a project opens, any run that was `queued`/`running` in the previous process is marked `paused`, so it can be resumed.
+Both databases are migrated with Alembic (`backend/migrations/{registry,project}`). The project database is migrated when
+its folder is first opened. Opening a folder that has `.octopus/project.json` re-attaches its history. When a project opens,
+any run left `queued` or `running` by the previous process is marked `paused`, so the user can resume it.
 
-## 2. Orchestrator
+## 3. Run flow
 
-One `RunRuntime` (asyncio task) per run, in `backend/app/orchestrator/engine.py`.
+One `RunRuntime` (an asyncio task, `orchestrator/engine.py`) runs each run. It is a composition root. It creates
+`self.org = OrgService(self)` (team management) and `self.flow = CompanyWorkflow(self)` (the company workflow). Both
+services hold the runtime as `self.rt`. `RunRuntime` keeps one-line delegations to their methods, so handlers and tests
+call `rt.manages(...)` or `rt.wf_phase()` as before.
 
-```mermaid
-flowchart TD
-  A[bootstrap: goal → entry agents' mailboxes] --> L{limits ok?<br/>turns · tokens · cost · active time}
-  L -- no --> F[finalize: failed + report]
-  L -- yes --> G[gate: pause / step credits / awaiting user]
-  G --> N{next runnable agent<br/>FIFO over mailbox + activating observations}
-  N -- none --> Q[finalize: completed (quiescent)]
-  N -- agent --> P[build prompt:<br/>system prompt + meta rules + roster + channels<br/>+ blackboard + rolling summary + recent + inbox + tool results]
-  P --> S[stream LLM → token_stream + live activity detection]
-  S --> T{native function calls?<br/>Azure Responses API}
-  T -- yes --> E2[run each call → function_call_output<br/>replay items, call the model again<br/>until it stops calling tools]
-  T -- no --> X[parse JSON envelope → validated actions<br/>one repair retry]
-  X --> E[execute actions<br/>permissions · protocols · approvals]
-  E2 --> R
-  E --> R[route messages → mailboxes<br/>persist + publish events]
-  R --> D{entry agent finished?}
-  D -- yes --> C[finalize: completed + report]
-  D -- no --> L
-```
+Each turn:
 
-**Actions** (`orchestrator/actions.py`) are Pydantic models: `send_message`, `write_file`, `edit_file`, `read_file`, `list_files`, `run_code`, `mcp_call`, `update_task_board`, `remember`, `request_user_input`, `web_search`, `calculate`, team actions, `finish` and `wait`. Agents only get the actions their tools allow. They reach the model in one of two ways:
+1. The turn loop (`orchestrator/turn_loop.py`) builds the prompt: system prompt, roster, channels, blackboard, summary and inbox.
+2. The model is called through `ports.handles().stream_llm(req)`.
+3. The reply is parsed into actions (`orchestrator/actions.py`, Pydantic models). Each action goes through the approval
+   gate, the protocol checks and the limits.
+4. The action runs in its handler (`orchestrator/handlers/`): files, commands, web, MCP, browser, memory, skills,
+   messaging, tasks, delegation, team, workflow.
+5. Messages are routed to mailboxes, and events are persisted and published on the bus. The loop repeats until the run finishes or waits for the user.
 
-- **Native function calling** (`orchestrator/tools.py`, used on the Azure Responses API). Each action is a function tool whose JSON schema is generated from its model; each MCP tool is its own function (`mcp__<server>__<tool>`). A turn is a tool loop: the model's `function_call` items are validated and executed, their results go back as `function_call_output` items together with the replayed output items (encrypted reasoning included, since requests are stateless with `store: false`), and the model continues until it stops calling tools, calls `wait`/`finish`, or asks the user (`budget.max_tool_rounds` calls per turn). Invalid arguments come back to the model as a tool error instead of failing the turn. `NATIVE_TOOLS=false` turns this off.
-- **JSON envelope** (everything else: Chat Completions, legacy endpoints). The reply is `{"thought": "...", "actions": [...]}`, described in the prompt, with one repair retry.
+Run bookkeeping lives in `run_state.py`, `run_control.py`, `mailbox.py`, `board.py` and `lifecycle.py`.
 
-**Editing files.** `edit_file` replaces exact existing text (`edits: [{old_string, new_string, replace_all?}]`). Each `old_string` must match exactly once unless `replace_all`; edits apply in order and all succeed or none do. The result shows the changed lines with line numbers. It goes through the same permission gate, version history and events as `write_file`.
+## 4. Approvals
 
-**Delegation** (`delegate` action). A lead hands work to a teammate it has a delegate channel to, with an objective,
-deliverable, done-when and context. Inside a native tool loop the teammate's sub-turn runs immediately (it is counted as
-that agent's turn, with its own tool loop) and its result comes back as the delegator's tool result: the teammate's
-`finish` summary, the files it changed and the task's status. No message round-trips, no question/answer turns. Several
-`delegate` calls in one reply run concurrently (asyncio); writes to the same file and approval cards are serialised.
-Delegation chains are limited to 3 levels and never cycle; outside a native tool loop (JSON envelope) a delegation
-becomes a structured task message.
+There is one approval setting per user, not a per-action permission level. It is either:
 
-**Shared knowledge.** The engine keeps a team log (files written, task-board changes, decisions, delegations and their
-results, finishes, project notes). Every prompt carries "Team activity since your last turn": the log entries plus one
-line per message between other agents since that agent last acted. `search_project` greps the project and the working
-docs (`.octopus/work/`). **Project memory** is a scoped, versioned store in `services/scoped_memory.py`, kept in the database and
-outliving runs. Each entry is `proposed`, `verified`, `superseded`, or `deleted`. Agents save notes with `remember`, which
-records a `proposed` entry. Notes from a legacy `.octopus/memory.json` are imported as proposals when the owner opens agent memory; the file itself is not rewritten.
+- `ask`: the user approves every gated action (commands, edits, external tools, web search, team changes).
+- `auto` ("Approve for me"): only dangerous actions ask. Everything else runs without a prompt.
 
-**Efficiency metrics.** Each agent turn is counted, and marked as work when it changes a deliverable (not a working doc)
-or runs a command or browser/MCP tool. Runs report work turns vs. all turns, the turn of the first deliverable file and
-delegations (Runs page, report, `state.metrics`). `scripts/bench.py` runs `bench/tasks.json` (coding tasks with objective
-checks) per template against a backend and prints a comparison table.
+`core/policy.py` (`PolicyGate.decide`) makes every decision. Tool calls, team changes and approval events all go through it.
+The approval events and their payloads are the same in both modes. Hiring and editing agents follow the same setting:
+in `ask` the change waits for approval before it is saved to the company, and in `auto` it is saved directly.
 
-**Routing** (`orchestrator/permissions.py`). `find_channel(edges, src, dst, type)` picks the edge a message travels on, preferring the edge type that matches the message type (`proposal`→debate, `review_*`→review, `task`→delegate, `status_update`→report…). It respects direction; debate edges only carry debate-protocol types. If no channel exists, the message is **rejected server-side**: it is never delivered, and the sender gets an activating notice explaining why (`no channel`, `one-way`, `wrong type`).
+## 5. Routing and protocols
 
-**Limits.** Global max turns, per-edge `max_turns`, token budget, cost budget, active wall-clock timeout (paused time is excluded), per-agent `max_autonomous_turns`, and a loop detector. The detector rejects near-duplicate messages on the same pair; after N strikes the run auto-pauses for human review. The kill switch cancels the task immediately; a report is still produced.
+- **Routing** (`orchestrator/permissions.py`, `find_channel`). A message travels on the edge that matches its direction
+  and type. Debate edges carry only debate types. If no edge fits, the message is rejected server-side, and the sender
+  gets a notice that explains why (`no channel`, `one-way`, `wrong type`).
+- **Debate** (`workflows/boardroom.py`). Decides when a discussion is settled and who speaks next.
+- **Review** (`workflows/review.py`). A reviewer answers a request with a verdict and comments.
+- **Loop detection** (`workflows/protocols.py`, `LoopDetector`). Shared `Verdict` type, plus detection of agents that
+  repeat the same question. Escalation is handled by the run.
+- **Task board** (`orchestrator/board.py`). Still in the orchestrator. `workflows/tasks.py` only discovers developer commands from project manifests.
 
-**Context management.** Each turn contains the agent's last N messages verbatim. Older ones are compressed into an extractive rolling summary (first sentence per message, newest first within a character budget), plus the blackboard: goal, decisions, debate/review states, task board, file index, and user notes.
+## 6. Company workflow, org and roles
 
-**Live activity.** While a reply streams, `live_activity()` scans the partial JSON for the action being composed. It emits `agent_status` updates such as *"Drafting proposal to Priya…"* or *"Writing backend/todo_api.py…"* before the action executes. During execution, statuses become `writing`, `reading`, `running`, `tool` and `awaiting_approval`.
+- **Company workflow** (`workflows/company.py`, `CompanyWorkflow`). A run can follow defined phases (intake, spec,
+  design, build, test, review, accept) with owners, document handoffs and exit gates. The run option `workflow` is
+  `auto`, `on` or `off`. A failed test or review sends the work back to build, up to a fixed number of loops.
+- **Org and hiring** (`workflows/org.py`, `OrgService`). Agents can list the team, hire agents and edit their own or
+  their reports' settings. Guardrails: hires get only tools the hiring agent has, nobody raises their own turn cap, and
+  `budget.max_agents` caps the team size.
+- **Templates and generator** (`workflows/templates.py`, `workflows/org_generator.py`). Templates declare departments
+  (one manager plus members). `org_generator` builds an org from a goal.
+- **Roles** (`agents/roles/`, `agents/user_roles.py`). Built-in roles are plugins generated from `app/prompts/roles.py`
+  and `roles_org.py`. Prompt text stays byte-identical. User roles load from the `user_roles` table as role plugins.
+- **Chief** (`agents/chief.py`). Lead selection and routing helpers (`choose_lead`, `route_target`, `validate_reporting`).
+- **Skills**. Built-in playbooks are `app/skills/*/SKILL.md`. Skill loading lives in `capabilities/skills/`.
 
-## 2b. Company workflow, roles and skills
+## 7. Capabilities
 
-- **Workflow** (`orchestrator/workflow.py`, run option `workflow`: auto / on / off). The goal goes to the company head,
-  who calls `set_track` (quick / standard / large). The engine then briefs each phase owner in order: research, spec,
-  design, build, test, review, accept. Each owner is picked by role, gets the goal verbatim plus the earlier
-  documents, and has its `finish` gated: the document must exist, the build must have changed and been exercised, and
-  test/review must report pass or fail. A failure loops back to Build (at most 3 fix rounds). Phases nobody can own are
-  skipped. `auto` turns the workflow on when the team has a builder and an independent tester or reviewer.
-- **Roles** (`services/roles.py`, Settings → Roles). Built-in roles plus the user's edits and own roles (`user_roles`).
-  Agents link to a role (`behavior.template_key`, `prompt_linked`) and run with its current prompt plus
-  `extra_instructions`.
-- **Skills** (`services/skills.py`, `app/skills/*/SKILL.md`, Settings → Skills). Step-by-step playbooks in the Agent
-  Skills format. Prompts carry only names and descriptions; `use_skill` loads the steps. Skills come from three
-  sources: built-in, the user's (`user_skills`), and the project's `.octopus/skills`, `.agents/skills` or
-  `.claude/skills`.
-
-## 3. Teams, departments and templates
-
-**Org model.** Every agent has `department`, `is_manager`, `reports_to`, `active` and `created_by`. Templates
-(`services/templates.py`) are declared as departments (one manager plus members). `wire_org()` derives the channels:
-manager → member `delegate`, member → manager `report`, head ↔ department managers, peer managers `consult`,
-plus explicit cross-department links (reviews, debates, consults). User templates are stored in the global registry
-(`user_templates`) as company exports, so they're reusable in every project. `org_generator.py` designs an org from a
-prompt with the connected Azure model (strict JSON spec). Without a connected model, generation fails with a clear error.
-
-**Runtime team management** (`orchestrator/team.py`, mixed into `RunRuntime`):
-
-| Action | Who | Rules |
+| Capability | Package | Notes |
 |---|---|---|
-| `list_agents` | everyone | the roster with department, manager, live status (or *inactive*), activity, turns, hired-by, and your channels |
-| `update_agent` target `self` | everyone | role, prompt (`append_to_prompt`), description, temperature, behavior; tools can only be dropped; the turn cap can't be raised; the permission level can only go down |
-| `create_agent` | `manage_team` tool | hire into a department and report to yourself or someone you manage; tools ⊆ the hirer's tools; auto delegate/report channels plus `connect` to agents you can already reach; optional `brief` becomes the first task; capped by `budget.max_agents` |
-| `update_agent` other | `manage_team` + you manage or hired the target | same as self, plus `is_manager`, `active` (deactivate), and granting tools you have |
+| Models | `capabilities/models/` | Azure Responses API, OpenAI-compatible (LiteLLM) and OpenCode adapters, plus the scripted fake provider used by tests. `router.py` picks the provider and retries streams that fail before any output. The contract types (`LLMRequest`, `LLMResult`, `LLMChunk`, `LLMOutputTruncated`) are in `core/llm.py`. |
+| Tools | `capabilities/tools/` | Basic tool implementations and the tool specs the model sees (`specs.py`). |
+| Sandbox | `capabilities/sandbox/` | Command allow and deny rules, process supervision. |
+| Workspace | `capabilities/workspace/` | `project_fs.py` (sandboxed file access, secrets and ignored directories), git, worktrees, preview serving, stages, and `manifests.py` (artifact manifests with `ProjectFS` as the resolver). |
+| Browser | `capabilities/browser/` | One supervised `@playwright/mcp` process on `127.0.0.1`, started on first use and stopped on shutdown. |
+| MCP | `capabilities/mcp/` | Client for MCP servers, and the worker bridge. |
+| Memory | `capabilities/memory/` | Scoped, versioned project memory in the project database. |
+| Skills | `capabilities/skills/` | Skill library, contracts and pinned bundles. |
 
-Inactive agents never take turns, and messages to them are rejected. Permission levels: `read_only` can't hire;
-`read_only` and `plan` changes live only for the run; `ask` requests approval before a change is saved; `danger` saves
-directly. Saved changes are written to the company and bump `Company.revision`. The canvas autosaves with
-`revision`, so a stale editor gets **409** and reloads instead of overwriting hires. Events `agent_created` and
-`agent_updated` animate the live graph and appear in the feed and the run report ("Org changes").
+## 8. Channels and the plugin registry
 
-## 4. Protocols (`orchestrator/protocols.py`)
+- **API** (`channels/api/`). Mounts the routers in `app/api/v1/`. Global routers sit under `/api/v1`. Project routers sit
+  under `/api/v1/w/{workspace_id}`. Health is at `/api/health`.
+- **WebSocket** (`channels/ws/`, `api/ws.py`). Live events for runs and chats, with replay.
+- **Web shell** (`channels/web_shell/`). Serves the built UI from `frontend/dist`.
+- **CLI** (`scripts/`, `backend/scripts/`). Dev scripts, the runtime doctor, and the golden and visual tooling. The start
+  scripts and Makefile targets are unchanged.
+- **Chat apps** (`channels/chat_apps/`). A manifest with status `planned`. There are no routes.
 
-### Debate
-- A debate opens with a `proposal`. Each side replies with `objection` (reasons), a compromise `proposal`, or `agreement`.
-- **Consensus is explicit:** *both* participants must send `agreement` after the latest proposal or objection. Any new proposal or objection resets it.
-- It ends on consensus, on a `decision` (e.g. from a moderator over consult edges), or at `max_rounds` (closed; both sides are told to escalate).
+Every component has a manifest (`core/manifest.py`): an id such as `capability.sandbox`, a layer, a version, the
+capabilities it provides and requires, and a status (`built`, `partly`, or `planned`). `core/registry.py` checks
+dependencies, detects cycles and gives the start order. `core/builtin.py` is the catalog of 33 built-in manifests. The
+registry table stores enabled state and version. Nothing reads that table yet.
 
-```mermaid
-sequenceDiagram
-  participant CEO
-  participant PM
-  CEO->>PM: proposal (scope incl. sharing)
-  PM->>CEO: objection (sharing doubles work)
-  CEO->>PM: proposal (compromise: sharing → v2)
-  PM->>CEO: agreement
-  CEO->>PM: agreement
-  Note over CEO,PM: consensus → decision logged on blackboard
-  CEO->>PM: task (deliver agreed MVP) [delegate edge]
-```
+The frontend mirrors this. `frontend/src/plugins/registry.ts` lists pages and navigation entries, and `routes.tsx`
+builds the router from it. The paths and element tree match the earlier `App.tsx`.
 
-### Review
-The author sends `review_request`; the reviewer replies with `review_result`, `verdict` = `approve` or `request_changes`, and itemized `comments`. Each `request_changes` increments the revision count; at `max_revisions` the loop closes with outstanding comments recorded.
+## 9. Known gaps
 
-```mermaid
-sequenceDiagram
-  participant Dev as Backend Dev
-  participant Arch as Architect
-  participant QA
-  Dev->>Dev: write_file backend/todo_api.py (v1)
-  Dev->>Arch: review_request
-  Arch->>Dev: review_result: request_changes (plaintext passwords, …)
-  Dev->>Dev: write_file backend/todo_api.py (v2)
-  Dev->>Arch: review_request
-  Arch->>Dev: review_result: approve
-  Dev->>QA: task (test it)
-  QA->>QA: write tests, run_code "python -m unittest …"
-  QA-->>QA: tool result (real output)
-  QA->>PM: status_update (results)
-```
+These are the parts of the target design that are not in code yet:
 
-### Delegation / task board
-A `task` message is linked to a task-board entry (by `task_id`, or an open task assigned to the recipient), or a new task is created automatically. Managers use `update_task_board` to create or update tasks (assignee, acceptance criteria, status `todo → in_progress → in_review → done | blocked`).
+- Tool families are not `ToolPlugin`s. The handlers in `orchestrator/handlers/` import capability modules directly, and
+  the action dispatch table still lives in `engine.py`.
+- Routing (`find_channel`) is still in `orchestrator/permissions.py`, not in `workflows/org.py`.
+- The task board (`orchestrator/board.py`) is still in the orchestrator, not in `workflows/`.
+- `set_track` is handled by `CompanyWorkflow`, not by the chief plugin.
+- The registry table is written but not read. Plugins cannot be enabled or disabled at runtime.
 
-## 5. Permissions and approvals
+## 10. Events and realtime
 
-The effective level is `min(run level, agent override)`, ordered `read_only < plan < ask < danger`.
+Runs write `RunEvent` rows and publish them on the bus (`orchestrator/bus.py`, `core/bus.py` for the topic constants).
+Event names and payloads are part of the API. Their golden sequences are in `backend/tests/golden/runs/`. The WebSocket
+replays events to clients that reconnect. Usage is aggregated per agent and per run, and costs are stored in USD.
+`capabilities/models/fx.py` converts them to the display currency.
 
-| Action | read_only | plan | ask | danger |
-|---|---|---|---|---|
-| read / list files | ✅ | ✅ (shadow first) | ✅ | ✅ (+ secrets) |
-| write_file | ❌ | ✅ → `.octopus/plans/<run>` | 🟡 approval (diff) | ✅ |
-| run_code | ❌ | ❌ | 🟡 approval, allowlist | ✅ any single command, network |
-| mcp_call | ❌ | ❌ | 🟡 approval | ✅ |
+## 11. Verification
 
-An approval blocks the agent's turn on a future. The run is `awaiting_user`, and the UI shows an approval card with a diff, command or arguments. *Always allow* auto-approves that action kind for that agent for the rest of the run. Supervised mode also asks before `finish`.
-
-## 6. Events and realtime
-
-Every event except `token_stream` is appended to `run_events` with a monotonic id (`seq`). WebSocket clients connect with `?last_seq=N`. The server sends a snapshot, then **replays** every persisted event after N, then streams live events, de-duplicated by `seq`. The frontend reducer (`features/runs/runState.ts`) is pure and powers both the live view and the timeline scrubber (`replayTo(events, cursor)`).
-
-```mermaid
-sequenceDiagram
-  participant UI
-  participant WS as /ws/w/:ws/runs/:id
-  participant Bus
-  participant DB as run_events
-  UI->>WS: connect ?last_seq=120
-  WS->>UI: snapshot (status, agent states, pending approval)
-  WS->>DB: SELECT id > 120
-  WS->>UI: replayed events (seq 121…)
-  WS->>UI: replay_done
-  Bus-->>WS: live events
-  WS->>UI: agent_status, token_stream, message_created, edge_activity, …
-  UI->>WS: control / interject / approve / reject
-```
-
-Event types: `snapshot`, `run_status`, `agent_created`, `agent_updated`, `agent_status` (+activity), `turn_started`, `token_stream`, `thought`, `message_created`, `message_rejected`, `edge_activity`, `tool_call`, `tool_result`, `task_updated`, `artifact_updated`, `usage_update`, `protocol`, `approval_requested`, `approval_resolved`, `agent_finished`, `error`.
-
-## 7. LLM layer (`backend/app/llm`)
-
-- **One real provider.** `router.PROVIDER_CATALOG` holds Azure OpenAI (`gpt-6-luna` by default). `prepare_request` routes every agent to Azure, maps unknown models to the configured deployment, and fails with a clear error when Azure isn't connected. It moves credentials saved on the legacy *Foundry* card to Azure.
-- **`azure_v1.AzureV1Provider`** streams from `/openai/v1/responses` (default) or `/openai/v1/chat/completions`. `azure_v1_target()` accepts any endpoint shape and needs no `api-version`.
-  - The deployment is sent as `model`, with `reasoning.effort` (Responses) or `reasoning_effort` (Chat).
-  - `max_output_tokens` gets reasoning headroom.
-  - `phase: "commentary"` text is skipped.
-  - A parameter the deployment rejects (for example `temperature`) is dropped, retried and remembered per deployment.
-  - Legacy `/openai/deployments/...` URLs go through `LiteLLMProvider`.
-- **Usage and pricing (`pricing.py`).** `Usage` carries the exact provider counts: input (incl. cached and cache-write) and output (incl. reasoning). `pricing.apply()` prices each part at per-deployment rates:
-  - Defaults for gpt-6-luna Standard, per 1M tokens: $0.10 input, $0.01 cached, $0.125 cache write, $0.50 output.
-  - Prompts over 272K tokens: 2× input and 1.5× output.
-  - Data Zone and regional deployments: +10%.
-  - User overrides come from Settings.
-
-  The runtime aggregates totals, per-agent tokens and cost, and a cost breakdown, and emits them in `usage_update`. Costs are stored in USD. `services/fx.py` supplies USD→display-currency rates (ECB via Frankfurter, with ExchangeRate-API as a fallback), cached for 6h, with the last known rate used offline.
-- **Retries.** `stream_with_retry` retries 429/5xx/network errors with exponential backoff and jitter, but only if nothing has streamed yet.
-- **Test fakes.** `backend/tests/fakes/` holds the deterministic, role-aware scripted policy and the offline fake provider that the test suite uses. The policy reacts to the actual inbox and topology, so edited companies still terminate. QA really runs the generated tests in the sandbox. `followup()` handles continued runs: the entry agent hands the change to a teammate, who records it in `docs/CHANGES.md` and reports back. Usage is estimated and priced at gpt-6-luna rates.
-
-## 7b. Runs continue like chats
-
-`RunManager.continue_run()` is used by `POST /runs/{id}/continue`, by `/interject`, and by the run WebSocket's `interject` message.
-- **Live run:** the message is injected into the running team.
-- **Finished run (`completed`/`failed`/`cancelled`):** the **same run** is re-opened in these steps:
-  1. The `RunRuntime` is rebuilt with `restore()`: the full message history, task board, artifacts, observations, protocol state and agent state.
-  2. The stale mailbox is cleared.
-  3. `continue_with()` runs:
-     - it records the follow-up;
-     - it resets the per-agent autonomy counters;
-     - it gives the budgets fresh headroom on top of what was already used;
-     - it sets `status=running` and emits `run_continued`;
-     - it delivers `"Follow-up from the user: …"` to the entry agent(s), or to the agent you chose.
-  4. The blackboard lists the follow-ups and tells agents to build on the existing work.
-
-The files are never touched, artifact versions keep counting on the same run, and the chat stays one continuous feed. **New run** is a separate, explicit action.
-
-## 7c. Agent tools added on top of the core schema
-
-- **Folders.** `create_folder` and `move_file` (move or rename files or whole folders, with `ProjectFS.make_dir` / `ProjectFS.move`) are gated like `write_file`. They respect the sandbox (no traversal, no `.git`/`.octopus`, no secrets outside danger mode, no moving a folder into itself). In plan mode, folders go to the plan shadow and moves are refused. The run's artifact paths follow moves.
-- **Questions.** `request_user_input` takes `question` plus `options: [{label, description, recommended}]` (2-5; exactly one ends up recommended). The UI (`QuestionCard`) shows them as choices with a **Recommended** tag plus *Something else* for a typed answer. The answer is delivered to the asking agent.
-- **Browser (`services/browser.py`).** Octopus supervises one `@playwright/mcp` process on `127.0.0.1` (random port, `--allowed-hosts`, `--isolated`, `--shared-browser-context`). It installs the browser on first use and stops it on shutdown.
-  - Each (run, agent) pair gets a **long-lived MCP session**, i.e. a persistent tab, in a dedicated task. The regular MCP client opens a session per call, which would lose the page.
-  - Agents with the `browser` tool (on by default) see it as MCP server `browser` and are told the preview URL.
-  - Sessions close when the run finalizes.
-- **Reasoning effort.** `behavior.reasoning_effort` per agent, overridable run-wide with `budget.reasoning_effort` (`default|none|low|medium|high|xhigh|max`). The channel-condition gatekeeper always uses `low`.
-
-## 7d. Projects, folders and preview
-
-- **Native folder dialog (`services/native_dialog.py`).** It uses `osascript` on macOS, PowerShell `FolderBrowserDialog` on Windows, and zenity/kdialog/yad on Linux, with a Tk fallback. It runs only for requests from the same machine. `POST /workspaces/native` opens the dialog and registers the folder server-side; the allowed-roots check doesn't apply because the user picked the folder on their own desktop. Without a desktop (Docker/SSH) the UI falls back to the in-app browser.
-- **Self-managed `.octopus/`.** `ensure_layout()` creates or repairs `work/`, `plans/`, `exports/`, `browser/`, `README.md` and `.gitignore` (`*`) every time a project is opened.
-- **Preview (`services/preview.py`).** It serves project files (plan shadow first for run previews) with real MIME types under a CSP sandbox. That CSP explicitly allows the preview base URL, because `'self'` matches nothing in an opaque-origin sandbox. It also allows `https:` CDNs and forbids forms and framing by other origins. `/api/v1/w/{id}/preview/…` serves the live folder, and `/runs/{id}/preview/…` serves a run's view.
-
-## 8. Frontend
-
-- The typed client (`openapi-fetch`) is generated from FastAPI's OpenAPI schema (`npm run gen:api`).
-- Canvas state lives in a Zustand store with history (undo/redo), clipboard and connection rules. Autosave is a debounced full-graph `PUT /canvas`; the server upserts and deletes by id, so client-generated UUIDs stay stable.
-- Nodes read a `LiveContext` overlay, so the same components render the editable canvas and the animated read-only run graph.
-- Monaco and the fonts are bundled locally. No CDNs are used, so it works offline.
+- **Golden files** (`backend/tests/golden/`, regenerated with `python -m scripts.golden.export_all`). They cover OpenAPI,
+  the schemas, tool names and schemas, prompts, approval and sandbox cases, scripted runs, and protocol transcripts.
+  `test_golden.py` checks them on every test run.
+- **Architecture rules** (`backend/.importlinter`). Three contracts: core imports nothing above it, agents stay below the
+  orchestrator, the API and channels, and the engine imports no capability module directly.
+- **Screenshots** (`scripts/visual/`). Headless Chromium captures for 18 screens at two viewports. Hashes live in
+  `scripts/visual/manifest.json`. The PNGs are kept outside the repository.
+- **Tests**: `backend` `pytest`, frontend `vitest`, and `tsc --noEmit`.

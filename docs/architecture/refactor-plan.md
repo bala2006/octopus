@@ -335,3 +335,48 @@ Planned after Phase 8, with its own plan. The golden files from Phase 0 are the 
 - O2: GHCR publish on merge to `main`.
 - O3: screenshot baseline storage.
 - O4: visual threshold per screen.
+
+## 9. Status on this branch
+
+Module paths in sections 2 to 6 are the plan's targets. Where the code differs, this section records it. Each gate is
+checked against the commit that adds this section.
+
+| Phase | State | Notes |
+|---|---|---|
+| 0 Baseline | Done | Golden files (62), visual harness, 36-PNG baseline outside the repo. Screenshot sign-off is pending (O3, O4). |
+| 1 Core and rules | Done | Manifests, registry, 33-entry catalog, `0006_plugins`, import-linter. |
+| 2 Kernel | Done | `engine.py` is 652 lines (target under 800). Policy gate, contracts, run manager, execution service and handler modules are in place. Mixins are removed in Phase 5. |
+| 3 Capabilities | Partly | Models, workspace, sandbox, browser, MCP, memory, skills and tools are moved into `app/capabilities/`. The engine imports no capability module (import-linter checks it). Not done: each action as a `ToolPlugin`, registry-based tool dispatch, and storage repositories. Handler modules still import capabilities directly. |
+| 4 Agents | Done | Role plugins (`agents/roles`), user roles (`agents/user_roles.py`), chief (`agents/chief.py`). The custom role group includes `ceo`, `moderator`, `proposer` and `roles_org` (42 roles). This grouping is not confirmed. |
+| 5 Workflows | Partly | Debate (`boardroom.py`), review (`review.py`), company workflow, org and hiring are done. `TeamMixin` and `WorkflowMixin` are now services (`OrgService`, `CompanyWorkflow`). Not done: the task board stays in `orchestrator/board.py`, and routing (`find_channel`) stays in `orchestrator/permissions.py`. `workflows/tasks.py` is command discovery. |
+| 6 Channels | Done | API, WebSocket, web shell and CLI plugins; chat apps are a `planned` placeholder. The start scripts and Makefile targets are unchanged, and the scripts are not moved into `channels/cli`. |
+| 7 Frontend | Done | `frontend/src/plugins/registry.ts` drives the routes. G6 is not green (see below). |
+| 8 Hardening | Done | Shims removed and import-linter runs with no ignore list. No dead modules found. `ARCHITECTURE.md` rewritten. `docs/plugins.md` added. |
+
+Gate results on this branch:
+
+- G1 backend: 520 passed, 2 skipped. `tests/test_thinking.py::test_long_call_that_keeps_streaming_is_not_cut_off` failed
+  once in six full runs since the mixin change. It uses a 0.4 s idle timeout and passes when run alone. The failure is a timing flake, not a
+  regression.
+- G2 golden: all 62 files regenerate with no diff. Two changes were approved before this section: the additive `plugins`
+  table, and the streamed-status counting in `call_llm_result` (`dff75c1`), which lowers how often the live "Writing…"
+  label updates.
+- G3 import-linter: 3 contracts kept, 0 ignored.
+- G4 frontend: typecheck clean, 109 of 109 tests, production build succeeds.
+- G5 OpenAPI: golden `openapi.json` unchanged. `npm run gen:api` reproduces `api.gen.ts` with no diff.
+- G6 screenshots: 31 of 36 captures match the baseline. Five run-detail captures differ: `run-timeline` at both
+  viewports, `run-approval` at 1440x900, and `run-question` at both viewports. The same build gives different PNGs
+  across captures (for example, one capture matched the baseline exactly and another did not), so these screens are
+  non-deterministic. `run-timeline` at 1024x768 differs in both captures, and its cause is not yet known. The
+  frontend changed only in `App.tsx` and the plugin registry, so the component code is unchanged. Sign-off or a
+  per-screen threshold is needed (O4).
+- G7 start path: the app boots in-process with the real lifespan (migrations and capability install). The UI returns
+  200, the OpenAPI schema lists 112 paths, and sampled API routes return 200. No live server was started from the sandbox
+  shell. Scripted runs are covered by the test suite.
+
+Timing (scripted golden export, median of three runs, from commit `4063c76` and the current branch): 3.39 s before and
+3.44 s after. The difference is within noise. The before commit still has the wall-clock status cadence that
+`dff75c1` replaced.
+
+Open items: O1 (confirm the #74 removals), O2 (GHCR publish on merge to `main`), O3 (where the PNG baseline is stored),
+and O4 (per-screen thresholds, which the G6 result depends on).

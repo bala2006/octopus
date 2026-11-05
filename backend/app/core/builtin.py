@@ -1,7 +1,7 @@
 """Catalog of the components in the refactor plan's section 4 mapping, one manifest per table row.
 
-This file only describes the code. No manifest changes wiring. Nothing reads the catalog at runtime yet, except that
-app/agents/roles imports its VERSION constant.
+This file only describes the code. No manifest changes wiring. At runtime, channels read their manifest through
+app.channels.catalog_manifest, and app/agents/roles imports its VERSION constant. Nothing reads the registry table yet.
 
 Status:
 - built: the component exists in the code now.
