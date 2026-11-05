@@ -1,0 +1,5 @@
+# Dev-only tooling for the visual baseline harness (scripts/visual/). Not used by the app or the test suite.
+# Install after requirements.txt:  uv pip install -r requirements.txt -r requirements-dev.txt
+# Then:                            python -m playwright install chromium
+playwright==1.64.1
+pillow==13.0.0
