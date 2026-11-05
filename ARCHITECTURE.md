@@ -54,9 +54,9 @@ becomes a structured task message.
 **Shared knowledge.** The engine keeps a team log (files written, task-board changes, decisions, delegations and their
 results, finishes, project notes). Every prompt carries "Team activity since your last turn": the log entries plus one
 line per message between other agents since that agent last acted. `search_project` greps the project and the working
-docs (`.octopus/work/`). **Project memory** (`.octopus/memory.json`, `services/project_memory.py`) outlives runs: notes saved
-with `remember(scope="project")` and an automatic retrospective of each finished run (goal, outcome, files, open tasks,
-decisions, efficiency) are shown to every agent in later runs.
+docs (`.octopus/work/`). **Project memory** is a scoped, versioned store in `services/scoped_memory.py`, kept in the database and
+outliving runs. Each entry is `proposed`, `verified`, `superseded`, or `deleted`. Agents save notes with `remember`, which
+records a `proposed` entry. Notes from a legacy `.octopus/memory.json` are imported as proposals when the owner opens agent memory; the file itself is not rewritten.
 
 **Efficiency metrics.** Each agent turn is counted, and marked as work when it changes a deliverable (not a working doc)
 or runs a command or browser/MCP tool. Runs report work turns vs. all turns, the turn of the first deliverable file and
