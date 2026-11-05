@@ -26,9 +26,9 @@ from app.core.logging import get_logger
 from app.core.policy import PolicyGate
 from app.core.run_manager import ACTIVE_STATES, ProjectRef, RunManager, StopRun, run_turn_loop  # noqa: F401 (ACTIVE_STATES is imported from here by the API)
 from app.db.base import new_id
-from app.capabilities.models.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMOutputTruncated, LLMRequest, LLMResult
+from app.core.llm import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMOutputTruncated, LLMRequest, LLMResult
 from app.orchestrator.roles import role_category
-from app.capabilities.models.router import stream_with_retry
+from app.core import ports
 from app.models import Message, Run, Task
 from app.orchestrator import actions as A
 from app.orchestrator.bus import bus
@@ -44,8 +44,6 @@ from app.workflows.protocols import (
     DebateState, LoopDetector, ReviewState,
 )
 from app.schemas import RunBudget
-from app.capabilities.skills import library as SK
-from app.capabilities.workspace.project_fs import ProjectFS
 from app.orchestrator.handlers import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, tasks as task_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions, team_actions, workflow_actions
 from app.orchestrator import run_control, run_state, mailbox, board, turn_loop, lifecycle
 from app.orchestrator.handlers.messaging import DEBATE_PROTOCOL_TYPES, JUDGE_MAX_TOKENS, judge_verdict  # noqa: F401 (re-exported for existing callers)
@@ -232,7 +230,7 @@ class RunRuntime:
         from app.prompts.roles import all_roles
 
         self.roles = all_roles()  # replaced by the owner's role library in load_roles()
-        self.skills: dict[str, SK.Skill] = SK.builtin_skills()  # + the owner's and the project's skills in load_roles()
+        self.skills: dict[str, Any] = ports.handles().builtin_skills()  # + the owner's and the project's skills in load_roles()
         self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
         self.wf: dict[str, Any] | None = None  # the workflow's state (orchestrator/workflow.py); None = free-form run
         # verify-before-finish: code changed since anything was last run / opened in the browser
@@ -251,7 +249,7 @@ class RunRuntime:
         self.finalized = False
         self.task: asyncio.Task[None] | None = None
         self.root = project.root
-        self._fs: dict[str, ProjectFS] = {}
+        self._fs: dict[str, Any] = {}
         self.mcp_configs: dict[str, Any] = {}
         self.activity: dict[str, str] = {}
         self.policy = PolicyGate(self)
@@ -261,11 +259,11 @@ class RunRuntime:
     def db(self):  # type: ignore[no-untyped-def]
         return self.sf()
 
-    def fs_for(self, aid: str) -> ProjectFS:
+    def fs_for(self, aid: str) -> Any:
         root = self.execution.worker_root(aid)
         key = str(root)
         if key not in self._fs:
-            self._fs[key] = ProjectFS(root)
+            self._fs[key] = ports.handles().project_fs(root)
         return self._fs[key]
 
     async def emit(self, type_: str, data: dict[str, Any]) -> None:
@@ -333,7 +331,7 @@ class RunRuntime:
 
         async def _consume() -> None:
             nonlocal buf, last, speaking, tool_buf, think_buf, think_last, fresh_call, streamed_since_status
-            async for chunk in stream_with_retry(req):
+            async for chunk in ports.handles().stream_llm(req):
                 if idle is not None:  # output is flowing: push the inactivity deadline out (never past the run's budget)
                     left = remaining - (time.monotonic() - t_start)
                     if left <= 0:

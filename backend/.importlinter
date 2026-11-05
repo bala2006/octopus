@@ -22,6 +22,7 @@ forbidden_modules =
     app.skills
     app.models
     app.main
+    app.capabilities
 ignore_imports =
     # Phase 2 slice B shims: each old module path re-exports names that moved into app.core. The shim modules import
     # core, so the forbidden contract above never sees these edges. They are listed so Phase 8 finds every shim. Removed in Phase 8.
@@ -48,3 +49,15 @@ forbidden_modules =
     app.orchestrator
     app.api
     app.channels
+
+# Phase 3: the run engine reaches models, the project filesystem and skills through core ports (app.core.ports).
+# Indirect imports are allowed: the handler modules it dispatches to still import capability modules (the tool
+# families are not yet ToolPlugins, see docs/architecture/refactor-plan.md).
+[importlinter:contract:engine-imports-no-capability-directly]
+name = The run engine imports no capability module directly
+type = forbidden
+source_modules =
+    app.orchestrator.engine
+forbidden_modules =
+    app.capabilities
+allow_indirect_imports = true

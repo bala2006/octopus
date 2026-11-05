@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.capabilities.bootstrap import install as install_capabilities
 from app.channels.api import ApiChannel
 from app.channels.web_shell import WebShellChannel
 from app.channels.ws import WsChannel
@@ -44,6 +45,7 @@ async def lifespan(_: FastAPI):  # type: ignore[no-untyped-def]
 
 def create_app() -> FastAPI:
     s = get_settings()
+    install_capabilities()  # the core ports must be set before any run can call a model, read a project or load skills
     app = FastAPI(title="Octopus API", version="1.0.0", lifespan=lifespan,
                   description="Multi-agent orchestration platform: a virtual software company of AI agents.")
     app.add_middleware(RateLimitMiddleware, per_minute=s.rate_limit_per_minute)
