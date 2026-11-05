@@ -1,6 +1,7 @@
 """Catalog of the components in the refactor plan's section 4 mapping, one manifest per table row.
 
-This file only describes the code. No manifest changes wiring, and nothing imports this module at runtime yet.
+This file only describes the code. No manifest changes wiring. Nothing reads the catalog at runtime yet, except that
+app/agents/roles imports its VERSION constant.
 
 Status:
 - built: the component exists in the code now.

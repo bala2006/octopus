@@ -37,3 +37,14 @@ ignore_imports =
     app.tools.workspace -> app.core.paths
     # removed in Phase 8 (base Contract, ContractError, content_hash)
     app.services.skill_contracts -> app.core.contracts
+# Agents (app/agents) sit above core and below channels. They may use prompts, services.roles and core, but not the
+# orchestrator, the API, or channels.
+[importlinter:contract:agents-stay-below-orchestrator-api-channels]
+name = Agents do not import the orchestrator, the API, or channels
+type = forbidden
+source_modules =
+    app.agents
+forbidden_modules =
+    app.orchestrator
+    app.api
+    app.channels

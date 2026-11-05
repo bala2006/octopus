@@ -1,17 +1,20 @@
-"""Octopus API entrypoint. Runs fully locally: ``uvicorn app.main:app`` (serves the built UI too)."""
+"""Octopus API entrypoint. Runs fully locally: ``uvicorn app.main:app`` (serves the built UI too).
+
+Routes come from the channels in app/channels. This file builds the app-wide pieces: lifespan, middleware, CORS,
+and the error handler. Mount order matters: the web shell's catch-all route must be added last.
+"""
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
-from app.api import ws
-from app.api.v1 import activity, agents, auth, companies, editor, memory, roles, runs, sessions, settings, skills, templates, workspaces
+from app.channels.api import ApiChannel
+from app.channels.web_shell import WebShellChannel
+from app.channels.ws import WsChannel
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.ratelimit import RateLimitMiddleware
@@ -20,7 +23,6 @@ from app.db.session import dispose_all
 from app.orchestrator.engine import manager
 
 log = get_logger("app")
-FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -55,35 +57,15 @@ def create_app() -> FastAPI:
         return await call_next(request)
     app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-    api = APIRouter(prefix="/api/v1")
-    for r in (activity.router, auth.router, templates.router, roles.router, skills.router, settings.router, workspaces.router):
-        api.include_router(r)
-    project = APIRouter(prefix="/w/{workspace_id}")
-    for r in (companies.router, agents.router, sessions.router, runs.router, editor.router, memory.router):
-        project.include_router(r)
-    api.include_router(project)
-    app.include_router(api)
-    app.include_router(ws.router)
-
-    @app.get("/api/health", tags=["meta"])
-    async def health() -> dict[str, object]:
-        return {"ok": True, "app": s.app_name, "live_runs": len(manager.runtimes)}
+    ApiChannel().mount(app)
+    WsChannel().mount(app)
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:  # pragma: no cover
         log.exception("unhandled_error", path=request.url.path)
         return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
-    if FRONTEND_DIST.is_dir():  # single-process local mode: serve the built SPA
-        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
-
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def spa(full_path: str) -> FileResponse:
-            f = (FRONTEND_DIST / full_path).resolve()
-            if full_path and f.is_file() and FRONTEND_DIST in f.parents:
-                return FileResponse(f)
-            return FileResponse(FRONTEND_DIST / "index.html")
-
+    WebShellChannel().mount(app)  # last: the catch-all must come after every API route
     return app
 
 
