@@ -301,7 +301,7 @@ def build_turn_prompts(runtime: RunRuntime, agent: AgentSpec, inbox_ids: set[str
     user = build_user_prompt(agent=agent, history=runtime.history, inbox_ids=inbox_ids, observations=observations,
         blackboard=runtime.blackboard(), names=runtime.names, recent_n=runtime.budget.context_recent,
         native=native, digest=runtime.digest(agent.id), team_status=team_status(runtime.agents, runtime.status))
-    from app.orchestrator.execution import ACTIVE_ATTEMPT
+    from app.core.execution_contracts import ACTIVE_ATTEMPT
     attempt = ACTIVE_ATTEMPT.get()
     if attempt:
         user += "\n\nYour immutable assignment for this turn:\n" + attempt.assignment.model_dump_json()

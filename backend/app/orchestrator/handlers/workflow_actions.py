@@ -1,4 +1,4 @@
-"""set_track, moved out of WorkflowMixin. Phase 5 moves it again."""
+"""set_track: the workflow action, run by CompanyWorkflow."""
 
 from __future__ import annotations
 

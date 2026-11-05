@@ -10,7 +10,7 @@ from app.capabilities.models.base import Usage
 from app.orchestrator import actions as A
 from app.orchestrator.context import build_turn_prompts
 from app.core.evidence import redact_evidence
-from app.orchestrator.execution import ACTIVE_ATTEMPT
+from app.core.execution_contracts import ACTIVE_ATTEMPT
 from app.capabilities.mcp.worker_bridge import WorkerBridge
 from app.capabilities.skills.contracts import content_hash
 from app.capabilities.models.opencode import OpenCodeError, OpenCodeSession

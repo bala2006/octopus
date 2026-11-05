@@ -16,7 +16,7 @@ from starlette.responses import JSONResponse, Response
 import uvicorn
 
 from app.capabilities.tools import specs as T
-from app.orchestrator.execution import ACTIVE_ATTEMPT
+from app.core.execution_contracts import ACTIVE_ATTEMPT
 from app.core.evidence import redact_evidence
 from app.capabilities.models.base import ToolCall
 

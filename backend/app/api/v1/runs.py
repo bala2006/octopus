@@ -26,7 +26,8 @@ from app.workflows.canvas import snapshot
 from app.capabilities.workspace.project_fs import ProjectFS, WorkspaceError
 from app.orchestrator.runtime_store import RuntimeStore, Conflict
 from app.agents.chief import choose_lead, route_target
-from app.orchestrator.evidence import capture_manifest, validate_evidence, RevisionEvidence
+from app.capabilities.workspace.manifests import capture_manifest
+from app.core.evidence import validate_evidence, RevisionEvidence
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 

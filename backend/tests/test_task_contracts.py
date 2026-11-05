@@ -11,9 +11,9 @@ from app.models import Agent, Task
 from app.models.runtime_records import TaskAttempt
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.contracts import Assignment, ExecutionPolicy
-from app.orchestrator.execution import ACTIVE_ATTEMPT, AttemptContext
-from app.orchestrator.task_contracts import TaskContract, validate_task
+from app.core.contracts import Assignment, ExecutionPolicy
+from app.core.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
+from app.core.task_contracts import TaskContract, validate_task
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, start_run, wait_status
 from test_runtime_recovery_regressions import inspection_runtime
 

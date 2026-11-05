@@ -36,7 +36,7 @@ def test_unverified_code_downgrades_outcome_when_checks_enabled():
     assert assess_completion("failed", "budget", unverified={}, **kwargs) == ("failed", "budget")
 
 def test_unrelated_successful_command_is_not_code_verification():
-    from app.orchestrator.evidence import command_is_verification
+    from app.core.evidence import command_is_verification
 
     assert not command_is_verification("python --version")
     assert not command_is_verification("ls")
@@ -52,7 +52,7 @@ def test_adaptive_company_staffing_is_proportionate():
     assert default_company_template("Build full UI application from scratch") == "web_app_studio"
 
 def test_an_unrelated_successful_command_cannot_certify_a_changed_file():
-    from app.orchestrator.evidence import command_is_verification
+    from app.core.evidence import command_is_verification
 
     assert not command_is_verification("echo src/app.py")
     assert not command_is_verification("ls src/app.py")

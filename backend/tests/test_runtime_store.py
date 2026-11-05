@@ -15,7 +15,7 @@ from app.db.base import ProjectBase, utcnow
 from app.db.session import make_engine
 from app.models import Company, Run, User
 from app.models.runtime_records import Consultation, RunRequest, TaskAttempt
-from app.orchestrator.contracts import Assignment, ExecutionPolicy
+from app.core.contracts import Assignment, ExecutionPolicy
 from app.orchestrator.runtime_store import RuntimeStore, Conflict, mutation_lock
 
 
@@ -214,7 +214,8 @@ async def test_request_api_images_have_stable_references_and_reject_conflicts(du
 @pytest.mark.asyncio
 async def test_execution_api_reports_current_evidence_and_recovery(durable_client, durable):
     import platform
-    from app.orchestrator.evidence import capture_manifest, record_evidence, VerificationCheck
+    from app.capabilities.workspace.manifests import capture_manifest
+    from app.core.evidence import record_evidence, VerificationCheck
     store, _, root = durable
     (root / "app.py").write_text("print('ok')", encoding="utf-8")
     aid = await store.start_attempt(assignment())
@@ -243,7 +244,8 @@ async def test_execution_api_reports_current_evidence_and_recovery(durable_clien
 @pytest.mark.asyncio
 async def test_staged_evidence_cannot_certify_canonical_workspace(durable_client, durable):
     import platform
-    from app.orchestrator.evidence import capture_manifest, record_evidence, VerificationCheck
+    from app.capabilities.workspace.manifests import capture_manifest
+    from app.core.evidence import record_evidence, VerificationCheck
     store, sf, root = durable
     (root / "app.py").write_text("print('ok')", encoding="utf-8")
     aid = await store.start_attempt(assignment())

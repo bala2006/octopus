@@ -209,7 +209,7 @@ class ExecutionService:
         manifest = await asyncio.to_thread(self.execution_manifest, self.rt.root)
         from app.orchestrator import actions as A
         capabilities = frozenset(k for k in set(A.TOOL_DEFAULTS) | set(agent.tools) if A.tool_enabled(agent.tools, k))
-        from app.orchestrator.task_contracts import TaskContract, contract
+        from app.core.task_contracts import TaskContract, contract
         owned = [t for t in self.rt.open_tasks() if t.get("assignee") == aid]
         task = next((t for t in owned if self.rt.task_ready(t)), owned[0] if owned else None)
         task_policy = contract(task) if task else TaskContract()
@@ -492,7 +492,7 @@ class ExecutionService:
                 for ref in record.get("checks", [])):
                 blockers.append("Inspection needs the owner's current observed source read or search")
         if self._last_manifest is not None:
-            from app.orchestrator.task_contracts import contract
+            from app.core.task_contracts import contract
             for task in self.rt.tasks.values():
                 if task["status"] == "cancelled":
                     continue

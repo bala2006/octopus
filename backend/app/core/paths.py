@@ -1,6 +1,6 @@
 """Path policy shared by every layer: directories never read and secret filenames never read or shown to agents.
 
-Moved from app/tools/workspace.py in Phase 2 slice B. tools/workspace.py re-exports these names until Phase 8.
+Moved from app/tools/workspace.py in Phase 2. Importers use this module directly.
 """
 from __future__ import annotations
 

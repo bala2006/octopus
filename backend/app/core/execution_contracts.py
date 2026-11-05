@@ -1,6 +1,6 @@
 """Attempt identity shared by every execution path: the superseded signal and the per-attempt context.
 
-Moved from app/orchestrator/execution.py in Phase 2 slice B. execution.py re-exports these names until Phase 8.
+Moved from app/orchestrator/execution.py in Phase 2. Importers use this module directly.
 """
 from __future__ import annotations
 

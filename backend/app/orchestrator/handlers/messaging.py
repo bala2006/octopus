@@ -10,7 +10,7 @@ from app.capabilities.models.base import LLMError, LLMRequest
 from app.capabilities.models.router import prepare_request, stream_with_retry
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec, clip
-from app.orchestrator.execution import ACTIVE_ATTEMPT
+from app.core.execution_contracts import ACTIVE_ATTEMPT
 from app.orchestrator.handlers.shared import OPEN_TASK_STATES
 from app.orchestrator.permissions import allowed_recipients, find_channel, rejection_reason, EdgeSpec
 from app.workflows.boardroom import DebateState, debate_decided_externally, debate_on_message

@@ -9,7 +9,7 @@ from app.db.base import new_id, utcnow
 from app.models import Task
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.execution import ACTIVE_ATTEMPT
+from app.core.execution_contracts import ACTIVE_ATTEMPT
 from app.orchestrator.permissions import find_channel
 
 if TYPE_CHECKING:  # pragma: no cover

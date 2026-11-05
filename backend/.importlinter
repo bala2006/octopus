@@ -1,8 +1,7 @@
 # Layer rules for import-linter. Run with `make lint-arch`, or `cd backend && .venv/bin/lint-imports`.
 #
-# Phase 1 ships one contract: app.core must not import the layers above it.
-# The full five-layer contract (channels > agents > workflows > capabilities > core) comes in Phase 2,
-# after modules move into their target packages. Phase 1 moves nothing, so that contract can't pass yet.
+# Layers, from the top: channels > agents > workflows > orchestrator > capabilities > core.
+# Contracts below keep the lower layers from importing the upper ones. None of them uses ignore_imports.
 
 [importlinter]
 root_package = app
@@ -23,21 +22,7 @@ forbidden_modules =
     app.models
     app.main
     app.capabilities
-ignore_imports =
-    # Phase 2 slice B shims: each old module path re-exports names that moved into app.core. The shim modules import
-    # core, so the forbidden contract above never sees these edges. They are listed so Phase 8 finds every shim. Removed in Phase 8.
-    # removed in Phase 8
-    app.orchestrator.contracts -> app.core.contracts
-    # removed in Phase 8
-    app.orchestrator.task_contracts -> app.core.task_contracts
-    # removed in Phase 8
-    app.orchestrator.evidence -> app.core.evidence
-    # removed in Phase 8
-    app.orchestrator.execution -> app.core.execution_contracts
-    # removed in Phase 8 (path policy: IGNORED_DIRS, SECRET_*, is_secret)
-    app.capabilities.workspace.project_fs -> app.core.paths
-    # removed in Phase 8 (base Contract, ContractError, content_hash)
-    app.capabilities.skills.contracts -> app.core.contracts
+
 # Agents (app/agents) sit above core and below channels. They may use prompts, services.roles and core, but not the
 # orchestrator, the API, or channels.
 [importlinter:contract:agents-stay-below-orchestrator-api-channels]
@@ -50,7 +35,7 @@ forbidden_modules =
     app.api
     app.channels
 
-# Phase 3: the run engine reaches models, the project filesystem and skills through core ports (app.core.ports).
+# The run engine reaches models, the project filesystem and skills through core ports (app.core.ports).
 # Indirect imports are allowed: the handler modules it dispatches to still import capability modules (the tool
 # families are not yet ToolPlugins, see docs/architecture/refactor-plan.md).
 [importlinter:contract:engine-imports-no-capability-directly]

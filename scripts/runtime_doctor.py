@@ -15,7 +15,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.orchestrator.evidence import redact_evidence
+from app.core.evidence import redact_evidence
 from app.capabilities.models.opencode import executable, probe, process_options
 from app.capabilities.sandbox.commands import stop_process
 

@@ -38,7 +38,8 @@ from app.orchestrator.permissions import (
 )
 from app.workflows.org import OrgService
 from app.workflows.company import CompanyWorkflow
-from app.orchestrator.execution import ACTIVE_ATTEMPT, ExecutionService, execution_field
+from app.core.execution_contracts import ACTIVE_ATTEMPT
+from app.orchestrator.execution import ExecutionService, execution_field
 from app.core.evidence import redact_evidence
 from app.workflows.boardroom import DebateState
 from app.workflows.protocols import LoopDetector

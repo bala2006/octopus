@@ -31,7 +31,7 @@ WS_PATHS = ("/ws/w/w1/runs/r1", "/ws/w/w1/runs/r1/browser/a1", "/ws/w/w1/chat/s1
 # Imports allowed inside app/channels. app.capabilities, app.workflows, and app.main are never allowed.
 APP_IMPORTS_ALLOWED = ("app.api", "app.core", "app.services", "app.orchestrator", "app.channels")
 # app/channels/deps.py is the FastAPI wiring that opens registry and project DB sessions and loads the User model.
-# Phase 1 named it as the one exception to the layer rules (it moved from app/core/deps.py in Phase 2 slice D).
+# The one exception to the layer rules: it moved from app/core/deps.py in Phase 2.
 # No other channel module may import storage.
 CHANNEL_STORAGE_ALLOWED = ("app.db", "app.models")
 CHANNEL_STORAGE_MODULES = {"app/channels/deps.py"}

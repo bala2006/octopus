@@ -18,9 +18,9 @@ from app.db.session import make_engine
 from app.models import Agent, Artifact, Company, Run, RunEvent
 from app.orchestrator import actions as A
 from app.capabilities.models import opencode_turn as adapter
-from app.orchestrator.contracts import Assignment, ExecutionPolicy
+from app.core.contracts import Assignment, ExecutionPolicy
 from app.orchestrator.engine import ProjectRef, RunRuntime, manager
-from app.orchestrator.execution import ACTIVE_ATTEMPT, AttemptContext
+from app.core.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
 from app.capabilities.models import opencode
 from app.capabilities.memory.scoped import Actor, MemoryDenied, Target, get, owner_put, put
 from conftest import agent, make_company, start_run, wait_status

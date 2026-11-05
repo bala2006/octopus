@@ -16,7 +16,7 @@ from app.models import Message
 from app.orchestrator import actions as A
 from app.capabilities.tools import specs as T
 from app.orchestrator.context import AgentSpec, build_turn_prompts, TOOL_RESULT_CHARS, clip
-from app.orchestrator.execution import ACTIVE_ATTEMPT
+from app.core.execution_contracts import ACTIVE_ATTEMPT
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime

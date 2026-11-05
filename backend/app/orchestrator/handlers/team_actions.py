@@ -1,4 +1,4 @@
-"""create_agent, update_agent and list_agents, moved out of TeamMixin. Phase 5 moves them again."""
+"""create_agent, update_agent and list_agents: the team-management actions, run by OrgService."""
 
 from __future__ import annotations
 
