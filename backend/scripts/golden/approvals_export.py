@@ -1,13 +1,14 @@
-"""Approval gate decisions, taken from the real RunRuntime.guard (and _team_guard for hiring and self-edits).
+"""Approval gate decisions, taken from the real PolicyGate.decide (and RunRuntime._team_guard for hiring and self-edits).
 
-The methods run unchanged on a stub object that carries only the attributes they read. ``request_approval`` is replaced on the
-stub: it records each call and returns a fixed decision, so no approval card, event or database write happens.
+The methods run unchanged on a stub host that carries only the attributes they read. ``request_approval`` is replaced on the
+gate or the stub: it records each call and returns a fixed decision, so no approval card, event or database write happens.
 """
 from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
 
+from app.core.policy import PolicyGate
 from app.orchestrator.context import AgentSpec
 from app.orchestrator.engine import RunRuntime
 from scripts.golden.canon import dump_json
@@ -39,8 +40,9 @@ TEAM_INPUTS: dict[str, tuple[str, dict[str, Any]]] = {
 
 
 def _record(calls: list[dict[str, Any]], decision: tuple[bool, str]):  # type: ignore[no-untyped-def]
-    async def request_approval(agent: AgentSpec, kind: str, summary: str, preview: str, details: dict[str, Any] | None = None):  # type: ignore[no-untyped-def]
-        calls.append({"agent": agent.id, "kind": kind, "summary": summary, "preview": preview, "details": details})
+    async def request_approval(agent: Any, kind: str, summary: str, preview: str, details: dict[str, Any] | None = None):  # type: ignore[no-untyped-def]
+        # The gate passes an agent id; the team guard passes the AgentSpec. Both record the same id.
+        calls.append({"agent": getattr(agent, "id", agent), "kind": kind, "summary": summary, "preview": preview, "details": details})
         return decision
 
     return request_approval
@@ -54,9 +56,10 @@ async def guard_records() -> list[dict[str, Any]]:
                 for dangerous in DANGEROUS:
                     for outcome, decision in DECISIONS.items():
                         calls: list[dict[str, Any]] = []
-                        stub = SimpleNamespace(level=level, mode=mode, request_approval=_record(calls, decision))
+                        gate = PolicyGate(SimpleNamespace(level=level, mode=mode, status={}, budget=None))
+                        gate.request_approval = _record(calls, decision)  # type: ignore[method-assign]
                         summary, preview, details = GUARD_INPUTS[kind]
-                        allowed, reason = await RunRuntime.guard(stub, AGENT, kind, summary, preview, details, dangerous=dangerous)
+                        allowed, reason = await gate.decide(AGENT.id, kind, summary, preview, details, dangerous=dangerous)
                         records.append({"level": level, "run_mode": mode, "kind": kind, "dangerous": dangerous, "user_decision": outcome,
                                         "asked": bool(calls), "request": calls[0] if calls else None,
                                         "allowed": allowed, "reason": reason})

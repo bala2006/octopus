@@ -27,6 +27,7 @@ from sqlalchemy import select, update, func, or_
 
 from app.core.config import PROJECT_DIRNAME, get_settings
 from app.core.logging import get_logger
+from app.core.policy import FOLLOWUP_BUDGET_CEILING, BudgetUsage, PolicyGate
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
 from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest, LLMResult, ToolCall
@@ -63,8 +64,6 @@ OPEN_TASK_STATES = {"todo", "in_progress", "in_review", "blocked"}
 # How many turns in a row an agent may take only because of its own tool results / notices (no new message). Reading a
 # file and acting on it needs one; an agent that keeps re-reading without producing anything is spinning.
 MAX_SELF_TURNS = 3
-# A run and all of its follow-ups may spend at most this multiple of the run's original budget (turns, tokens, cost, time).
-FOLLOWUP_BUDGET_CEILING = 3
 # Delegation as a tool call: the delegated teammate's sub-turn runs inside the delegator's tool call. These context vars
 # follow each asyncio task, so parallel delegations each see their own frame.
 JOURNAL_MAX = 400
@@ -352,7 +351,6 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.first_deliverable_turn: int | None = None
         self.turn_work: dict[str, bool] = {}
         self._file_locks: dict[str, asyncio.Lock] = {}
-        self._approval_lock = asyncio.Lock()
 
         self.seq = 0
         self.turn_no = run.turns or 0
@@ -377,16 +375,14 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.step_credits = 0
         self.stop_requested = False
         self.awaiting: dict[str, Any] | None = None
-        self.approvals: dict[str, asyncio.Future[tuple[bool, str]]] = {}
-        self.pending_approval: dict[str, Any] | None = None
         self.finished_summary: str | None = None
         self.finalized = False
         self.task: asyncio.Task[None] | None = None
         self.root = project.root
         self._fs: dict[str, ProjectFS] = {}
         self.mcp_configs: dict[str, Any] = {}
-        self.auto_approve: set[str] = set()  # "agent_id:kind" approved with scope=always
         self.activity: dict[str, str] = {}
+        self.policy = PolicyGate(self)
         self.init_execution(run)
 
     # ------------------------------------------------------------------ persistence helpers
@@ -430,7 +426,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             "decisions": self.decisions, "user_notes": self.user_notes, "followups": self.followups, "agent_state": self.agent_state,
             "active_seconds": round(self.active_seconds, 2), "awaiting": self.awaiting,
             "pending_approval": self.pending_approval, "rejections": self.rejections,
-            "auto_approve": sorted(self.auto_approve), "activity": self.activity,
+            "auto_approve": sorted(self.policy.auto_approve), "activity": self.activity,
             "budget_base": self.budget_base,
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
@@ -476,7 +472,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.active_seconds = float(st.get("active_seconds", 0))
         self.awaiting = st.get("awaiting")
         self.rejections = st.get("rejections", 0)
-        self.auto_approve = set(st.get("auto_approve", []))
+        self.policy.auto_approve = set(st.get("auto_approve", []))
         self.self_turns = Counter(st.get("self_turns", {}))
         self.progress_turn = int(st.get("progress_turn", self.turn_no))
         self.nudged = dict(st.get("nudged", {}))
@@ -774,19 +770,8 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
 
     def limit_reason(self, *, turns: bool = True) -> str | None:
         """``turns=False`` inside a turn's tool loop: the turn is already counted, only spend and time can run out."""
-        b = self.budget
-        reason = None
-        if turns and self.turn_no >= b.max_turns:
-            reason = f"Budget: max turns reached ({b.max_turns})"
-        elif self.tokens >= b.max_tokens:
-            reason = f"Budget: token budget exhausted ({self.tokens}/{b.max_tokens})"
-        elif b.max_cost_usd > 0 and self.cost >= b.max_cost_usd:
-            reason = f"Budget: cost budget exhausted (${self.cost:.4f}/${b.max_cost_usd:.2f})"
-        elif self.active_now() >= b.timeout_s:  # time spent working; paused / waiting-for-you time is not counted
-            reason = f"Budget: active-time limit reached ({b.timeout_s}s of agent work)"
-        if reason and self.followups:
-            reason += f"; follow-ups share a lifetime ceiling of {FOLLOWUP_BUDGET_CEILING}x the run budget, start a new run to go further"
-        return reason
+        return self.policy.budget_reason(BudgetUsage(turns=self.turn_no, tokens=self.tokens, cost=self.cost,
+                                                     active_seconds=self.active_now(), has_followups=bool(self.followups)), turns=turns)
 
     async def check_stall(self) -> None:
         """Progress watchdog: no file changed and no task moved for ``stall_turns`` turns → pause and show the human the board."""
@@ -845,9 +830,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
     def stop(self) -> None:
         self.stop_requested = True
         self.wake.set()
-        for f in self.approvals.values():
-            if not f.done():
-                f.cancel()
+        self.policy.cancel_pending()
         if self.task and not self.task.done():
             self.task.cancel()
 
@@ -896,58 +879,21 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                                             f"Change what's needed and report back; don't start over.{owned}")
         self.wake.set()
 
+    @property
+    def pending_approval(self) -> dict[str, Any] | None:
+        return self.policy.pending_approval
+
     def resolve_approval(self, approval_id: str, approved: bool, reason: str, scope: str = "once") -> bool:
-        fut = self.approvals.get(approval_id)
-        if fut and not fut.done():
-            if approved and scope == "always" and self.pending_approval:
-                self.auto_approve.add(f"{self.pending_approval['agent_id']}:{self.pending_approval['kind']}")
-            fut.set_result((approved, reason))
-            return True
-        return False
+        return self.policy.resolve(approval_id, approved, reason, scope)
 
     async def request_approval(self, agent: AgentSpec, kind: str, summary: str, preview: str,
                                details: dict[str, Any] | None = None) -> tuple[bool, str]:
-        if f"{agent.id}:{kind}" in self.auto_approve:
-            await self.emit("approval_resolved", {"id": None, "approved": True, "reason": "auto-approved (always allow)",
-                                                  "agent_id": agent.id, "kind": kind, "summary": summary, "auto": True})
-            return True, "auto"
-        async with self._approval_lock:  # one approval card at a time, even when delegated teammates work in parallel
-            return await self._request_approval(agent, kind, summary, preview, details)
-
-    async def _request_approval(self, agent: AgentSpec, kind: str, summary: str, preview: str,
-                                details: dict[str, Any] | None = None) -> tuple[bool, str]:
-        if f"{agent.id}:{kind}" in self.auto_approve:  # an earlier card in the queue may have said "always"
-            return True, "auto"
-        aid = new_id()
-        fut: asyncio.Future[tuple[bool, str]] = asyncio.get_running_loop().create_future()
-        self.approvals[aid] = fut
-        self.pending_approval = {"id": aid, "agent_id": agent.id, "kind": kind, "summary": summary, "preview": preview[:6000],
-                                 "details": details or {}, "level": self.level}
-        prev_status = self.status.get(agent.id, "idle")
-        await self.set_agent_status(agent.id, "awaiting_approval", summary)
-        await self.emit("approval_requested", self.pending_approval)
-        await self.set_run_status("awaiting_user", f"Approval needed: {summary}"[:200])
-        try:
-            approved, reason = await fut
-        finally:
-            self.approvals.pop(aid, None)
-            self.pending_approval = None
-        await self.emit("approval_resolved", {"id": aid, "approved": approved, "reason": reason, "agent_id": agent.id,
-                                              "kind": kind, "summary": summary})
-        await self.set_run_status("running")
-        await self.set_agent_status(agent.id, prev_status if prev_status != "awaiting_approval" else "thinking")
-        return approved, reason
+        return await self.policy.request_approval(agent.id, kind, summary, preview, details)
 
     async def guard(self, agent: AgentSpec, kind: str, summary: str, preview: str, details: dict[str, Any] | None = None, *,
                     dangerous: bool = False) -> tuple[bool, str]:
-        """Approval gate. "ask" asks for every gated action. "auto" (Approve for me) asks only for ``dangerous`` actions:
-        dangerous edits and commands outside the project. Supervised runs still ask before writes and finishing.
-        Returns (allowed, reason-if-denied)."""
-        needs = self.level == "ask" or dangerous or (self.mode == "supervised" and kind in ("write_file", "finish"))
-        if not needs:
-            return True, ""
-        ok, reason = await self.request_approval(agent, kind, summary, preview, details)
-        return ok, ("" if ok else f"The user REJECTED {kind}: {reason or 'no reason given'}")
+        """Approval gate for one action (see PolicyGate.decide). Returns (allowed, reason-if-denied)."""
+        return await self.policy.decide(agent.id, kind, summary, preview, details, dangerous=dangerous)
 
     # ------------------------------------------------------------------ main loop
     def entry_agents(self) -> list[str]:

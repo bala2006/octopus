@@ -526,9 +526,7 @@ class ExecutionMixin:
             if revision <= self.plan_revision:
                 return
             self.plan_revision = revision
-            for future in self.approvals.values():
-                if not future.done():
-                    future.set_result((False, "Superseded by user steering"))
+            self.policy.supersede("Superseded by user steering")
             self.waiting_peers.clear()
             self.delegation_chains.clear()
             self.finished_summary = None
