@@ -3,7 +3,7 @@ PY ?= python3.11
 VENV := backend/.venv
 BIN := $(VENV)/bin
 
-.PHONY: setup dev backend frontend start test test-backend test-frontend gen-api lint clean docker
+.PHONY: setup dev backend frontend start test test-backend test-frontend gen-api lint lint-arch clean docker
 
 setup: ## Install backend (venv) + frontend deps
 	cd backend && ($(PY) -m venv .venv || python3 -m venv .venv) && .venv/bin/pip install -U pip && .venv/bin/pip install -r requirements.txt
@@ -26,6 +26,9 @@ test-backend:
 
 test-frontend:
 	cd frontend && npm run typecheck && npm test
+
+lint-arch: ## Check the layer rules (import-linter; needs requirements-dev.txt installed)
+	cd backend && .venv/bin/lint-imports
 
 gen-api: ## Regenerate typed TS client from the FastAPI OpenAPI schema
 	cd frontend && npm run gen:api

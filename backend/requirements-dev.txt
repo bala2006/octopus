@@ -1,5 +1,10 @@
-# Dev-only tooling for the visual baseline harness (scripts/visual/). Not used by the app or the test suite.
-# Install after requirements.txt:  uv pip install -r requirements.txt -r requirements-dev.txt
-# Then:                            python -m playwright install chromium
+# Development and CI tooling. Runtime dependencies stay in requirements.txt.
+# Install with: uv pip install -r requirements.txt -r requirements-dev.txt
+
+# Architecture rules (make lint-arch)
+import-linter>=2.15,<3
+
+# Visual baseline harness (scripts/visual/). Not used by the app or the test suite.
+# After installing, run: python -m playwright install chromium
 playwright==1.64.1
 pillow==13.0.0
