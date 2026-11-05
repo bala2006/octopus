@@ -1,0 +1,365 @@
+{
+  "format": 1,
+  "seed_version": "1",
+  "capture": {
+    "viewports": {
+      "1440x900": {
+        "width": 1440,
+        "height": 900
+      },
+      "1024x768": {
+        "width": 1024,
+        "height": 768
+      }
+    },
+    "device_scale_factor": 1,
+    "locale": "en-US",
+    "timezone": "UTC",
+    "color_scheme": "dark",
+    "clock": "2026-01-15T12:00:00Z",
+    "animations": "disabled",
+    "image_format": "png",
+    "browser": "chromium",
+    "browser_version": "156.0.8078.4",
+    "playwright": "1.64.1",
+    "platform": "Linux x86_64",
+    "chromium_args": [
+      "--font-render-hinting=none",
+      "--disable-lcd-text",
+      "--hide-scrollbars",
+      "--force-color-profile=srgb",
+      "--disable-gpu",
+      "--disable-partial-raster",
+      "--no-first-run",
+      "--disable-background-networking",
+      "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows"
+    ]
+  },
+  "screens": [
+    {
+      "screen": "welcome",
+      "viewport": "1440x900",
+      "route": "/",
+      "sha256": "26cfbec13ea9662d0dd320814e1c17e70d983f2b184a4f4b91a3c261897538d2",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "agent",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/agent",
+      "sha256": "5e85c1ffb6c832dc5ba63851724e4548db33804b51f4d4005257cc953e79fd34",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "floating-chat",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/agent",
+      "sha256": "18d4b5b4f41592af8b0eddd8cb785fbc0ef75add182e58000e8d84fa6e197788",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "canvas",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/canvas",
+      "sha256": "b130fb7e8311d64d22f95f4c6bfe2f8f38a10ffe25bda86745b8b3138cc1b33a",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "workspace",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/workspace",
+      "sha256": "73904574cd6889524f7621006586e657983de12968acc3a5eaf7cadc9a06c305",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "chat",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/chat",
+      "sha256": "3f145b2b9409552ab9576a2ab463bd6a9915b49691332346f8cb0bf00fd5c261",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "chat-session",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/chat/{scope}",
+      "sha256": "c77bf8240e4b45344beae183a0ff1592e091cce68d347c4f2b2ef045e673b354",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "runs-list",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/runs",
+      "sha256": "36bdaf9aab8e660e25eea49b07643d5e65214b4c98bece171297cd6e505982cf",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "run-timeline",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/runs/{complete}",
+      "sha256": "531a0460c0a33488071ba07ca61d813ae45396e6763bc3a6f7cd5d34af813a4b",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "run-approval",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/runs/{approval}",
+      "sha256": "dc40c2d538d02d4bde17ab1e6177b8359ceaaffa1a61c392334b91dc72bdbdf2",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "run-question",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/runs/{question}",
+      "sha256": "cc0e05bcfd01fcc26f01d4e0e566df95084ba052a7df540941dbe4a88fba2bbd",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "artifacts-list",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/artifacts",
+      "sha256": "0dfd6a6b72d2dfdfb13639f63c1f42280c7ddf13861e2640bb2e4b79281478a9",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "artifacts-detail",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/artifacts/{complete}",
+      "sha256": "a5712e5ff784e603b28f67a988a892e4ebd0cb1d8f57899694e96ee97a793a87",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "activity",
+      "viewport": "1440x900",
+      "route": "/activity",
+      "sha256": "eb207939b5f729baa30cf65ca19e4352b6e5162acd6f3d87088b63c0fe7e5e01",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "settings",
+      "viewport": "1440x900",
+      "route": "/settings",
+      "sha256": "6e1adce64a809b9b49aacf46b26cf1b6df2a5f2d4c411086cd444a78f29cbb8e",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "guide",
+      "viewport": "1440x900",
+      "route": "/w/{acme}/guide",
+      "sha256": "82a4579b65c964098d508201748239c6851f1ff5d2346c95373e5e1962ac52b7",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "empty-runs",
+      "viewport": "1440x900",
+      "route": "/w/{notes}/runs",
+      "sha256": "929933e87d4310b0e297554a04d82a7e5b15a0afeab8cddabd91b0087f9e1414",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "empty-agents",
+      "viewport": "1440x900",
+      "route": "/w/{empty}/canvas",
+      "sha256": "42a4be5fbb1916b310da283adea01a76f9bdde574e303d0c71201dc961e075ba",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "welcome",
+      "viewport": "1024x768",
+      "route": "/",
+      "sha256": "e28d8cdd77c9bee7899e7fb217a24bf8e7428a47c40ebeb451a0a71bea6d1151",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "agent",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/agent",
+      "sha256": "1365f4efc046ab2f9cb00aa215a62a61128718ad4bdabe86788ec8969425f15b",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "floating-chat",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/agent",
+      "sha256": "cd605df806a7e371f0b3ceb9922a6164199d9fefbad7465871a417b800392952",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "canvas",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/canvas",
+      "sha256": "c7a2f1e9490ed2708712c602d1c381d0619382d867b61daabea27277bfad735a",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "workspace",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/workspace",
+      "sha256": "c1da9d2fefc90b77fde6419440844ce635d6de39fbee0d6969ce44c99d8d8058",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "chat",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/chat",
+      "sha256": "0945699bba7045893f399d2ffe0c3007fdfbebcfd4e7cb894eca86c2bf76a5fe",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "chat-session",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/chat/{scope}",
+      "sha256": "351a37a758421cf3407eb52be3b7e9898aa54de54eb93e02e66c7e1360bb52ce",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "runs-list",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/runs",
+      "sha256": "31fbfe8ebf5f0095e7e873529fe06f9ebc9ed566a25cb39bbf7ee74d47e64c6a",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "run-timeline",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/runs/{complete}",
+      "sha256": "d207ae6087d6932c04e12d536727aec5c326b8410ea3a90e1ab661b4322bdbc0",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "run-approval",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/runs/{approval}",
+      "sha256": "79c81abb782f3d0d00b77ac3622c265b6d45a1dafe35d2780714a1109f61eb86",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "run-question",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/runs/{question}",
+      "sha256": "6cc320e76433683fb736e05901f33c6ff89b10cc8d11e4b24938b6bb0fee7d9b",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "artifacts-list",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/artifacts",
+      "sha256": "01da5546b997c25d594a085560cd31b47fe9e83038ccdc63ac6604a93b9d6f5a",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "artifacts-detail",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/artifacts/{complete}",
+      "sha256": "86f70d7194603f08a7995273e5aaae73feba53b45bc7608719fe638a9e6e5cc5",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "activity",
+      "viewport": "1024x768",
+      "route": "/activity",
+      "sha256": "3270ce7554167e277ac63b6789f9867d4c074ef3203425ca8ec745f9e345da30",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "settings",
+      "viewport": "1024x768",
+      "route": "/settings",
+      "sha256": "8dbeff9fe0e640a22f784a0981b931023c731677f3d54503e15633bbc5575147",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "guide",
+      "viewport": "1024x768",
+      "route": "/w/{acme}/guide",
+      "sha256": "94bf280f68c3bcdc6455d3fd3d108508af6cee470484b1e6be447d1fb2f50e29",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "empty-runs",
+      "viewport": "1024x768",
+      "route": "/w/{notes}/runs",
+      "sha256": "40b7c9f7b38808fc3dbfa39d5cd26668e0683e88502f7421b904141958b7dd03",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    },
+    {
+      "screen": "empty-agents",
+      "viewport": "1024x768",
+      "route": "/w/{empty}/canvas",
+      "sha256": "a6a0d6fcd352ebd2deadc9c1eeb07b79afaef893cac99ea1ee37916ce087f941",
+      "masks": [],
+      "max_changed_pixels": 0,
+      "channel_tolerance": 0
+    }
+  ]
+}
