@@ -126,7 +126,7 @@ async def test_delegated_child_inherits_scope_and_budget_through_real_assignment
         await runtime.execute(runtime.agents[aid], A.WriteFile(action="write_file", path="outside.txt", content="Denied"))
         await runtime.execute(runtime.agents[aid], A.WriteFile(action="write_file", path="src/child.txt", content="Allowed"))
     monkeypatch.setattr(runtime, "_turn", turn)
-    await runtime.owned_turn("child")
+    await runtime.execution.owned_turn("child")
     assert invocations[0].task_id == key
     assert invocations[0].write_paths == ("src",)
     assert invocations[0].max_turns == 2
@@ -160,8 +160,8 @@ async def test_exhausted_task_budget_blocks_before_another_worker_invocation(sco
     async def turn(aid):
         invocations.append(aid)
     monkeypatch.setattr(runtime, "_turn", turn)
-    await runtime.owned_turn("reviewer")
-    await runtime.owned_turn("reviewer")
+    await runtime.execution.owned_turn("reviewer")
+    await runtime.execution.owned_turn("reviewer")
     assert invocations == ["reviewer"]
     assert runtime.tasks[parent["key"]]["status"] == "blocked"
     assert runtime.task_turns[parent["key"]] == 1

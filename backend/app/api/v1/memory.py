@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
+from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.models import User, Message, Artifact, Run
 from app.models.scoped_memory import MemoryGroup, MemoryGroupMember, MemoryHead, MemoryRecord
 from app.services import scoped_memory as memory

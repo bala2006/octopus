@@ -6,7 +6,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_user
+from app.channels.deps import current_user
 from app.db.session import get_registry_db
 from app.models import User, UserRole
 from app.schemas import AgentTools, RoleIn, RoleTemplateOut

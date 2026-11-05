@@ -67,7 +67,7 @@ async def _system_prompt(role_key: str, root: Path, sf: async_sessionmaker) -> s
     agents, edges = _team(role_key)
     runtime = RunRuntime(_run(agents, edges), USER_ID, ProjectRef(workspace_id=WORKSPACE_ID, root=root, sf=sf))
     subject = runtime.agents["subject"]
-    memory = await runtime.scoped_context(subject.id)
+    memory = await runtime.execution.scoped_context(subject.id)
     system, _user = build_turn_prompts(runtime, subject, set(), [], native=NATIVE, memory_context=memory)
     return system
 

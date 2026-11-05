@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
+from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.db.base import utcnow
 from app.models import Agent, Edge, User
 from app.models.scoped_memory import MemoryHead, MemoryRecord

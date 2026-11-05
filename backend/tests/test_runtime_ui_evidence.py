@@ -25,10 +25,10 @@ async def test_ui_proof_observes_interaction_assertion_and_exact_revision(inspec
     proof = RevisionEvidence.model_validate(runtime.execution_records[-1])
     assert proof.status == ("pass" if result == "true" else "fail")
     criterion = AcceptanceCriterion(id="popup-anchor", description="Popup anchors after restore", check_kinds=("ui",), required_paths=("app.py",))
-    current = runtime.execution_manifest(runtime.root)
+    current = runtime.execution.execution_manifest(runtime.root)
     assert validate_evidence(proof, current, task_revision=1, environment=runtime._proof_environment, criterion=criterion).valid == (result == "true")
     (runtime.root / "app.py").write_text("VALUE = 2\n")
-    assert not validate_evidence(proof, runtime.execution_manifest(runtime.root), task_revision=1,
+    assert not validate_evidence(proof, runtime.execution.execution_manifest(runtime.root), task_revision=1,
                                  environment=runtime._proof_environment, criterion=criterion).valid
 
 

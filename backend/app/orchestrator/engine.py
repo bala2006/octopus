@@ -42,7 +42,7 @@ from app.orchestrator.permissions import (
 )
 from app.orchestrator.team import TeamMixin
 from app.orchestrator.workflow import WorkflowMixin
-from app.orchestrator.execution import ExecutionMixin, ACTIVE_ATTEMPT
+from app.orchestrator.execution import ACTIVE_ATTEMPT, ExecutionService, execution_field
 from app.core.evidence import redact_evidence
 from app.orchestrator.protocols import (
     DebateState, LoopDetector, ReviewState, debate_decided_externally, debate_on_message, infer_verdict,
@@ -263,7 +263,24 @@ def live_activity(text: str) -> tuple[str, str]:
     return ("thinking", "Planning next step…")
 
 
-class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
+class RunRuntime(TeamMixin, WorkflowMixin):
+    runtime_store = execution_field("runtime_store")
+    plan_revision = execution_field("plan_revision")
+    engineering_workflow = execution_field("engineering_workflow")
+    pinned_workflow = execution_field("pinned_workflow")
+    pinned_skills = execution_field("pinned_skills")
+    pinned_guidance = execution_field("pinned_guidance")
+    pinned_roles = execution_field("pinned_roles")
+    execution_records = execution_field("execution_records")
+    worker_sessions = execution_field("worker_sessions")
+    worker_session_history = execution_field("worker_session_history")
+    engineering_checkpoints = execution_field("engineering_checkpoints")
+    acceptance_nudges = execution_field("acceptance_nudges")
+    observed_checks = execution_field("observed_checks")
+    task_turns = execution_field("task_turns")
+    _proof_environment = execution_field("_proof_environment")
+    _last_manifest = execution_field("_last_manifest")
+
     def __init__(self, run: Run, user_id: str, project: ProjectRef) -> None:
         snap = run.snapshot_json or {}
         self.snapshot: dict[str, Any] = {"company": snap.get("company") or {}, "agents": list(snap.get("agents") or []),
@@ -368,14 +385,15 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.mcp_configs: dict[str, Any] = {}
         self.activity: dict[str, str] = {}
         self.policy = PolicyGate(self)
-        self.init_execution(run)
+        self.execution = ExecutionService(self)
+        self.execution.init_execution(run)
 
     # ------------------------------------------------------------------ persistence helpers
     def db(self):  # type: ignore[no-untyped-def]
         return self.sf()
 
     def fs_for(self, aid: str) -> ProjectFS:
-        root = self.worker_root(aid)
+        root = self.execution.worker_root(aid)
         key = str(root)
         if key not in self._fs:
             self._fs[key] = ProjectFS(root)
@@ -383,7 +401,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
 
     async def emit(self, type_: str, data: dict[str, Any]) -> None:
         if type_ not in ("run_status", "error", "usage_update", "agent_status", "attempt_updated"):
-            self.assert_current_attempt()
+            self.execution.assert_current_attempt()
         if type_ in ("tool_call", "tool_result", "thought", "error"):
             def filtered(value):
                 if isinstance(value, str):
@@ -398,7 +416,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
 
     def state_dict(self) -> dict[str, Any]:
         return {
-            **self.execution_state(),
+            **self.execution.execution_state(),
             "attachments": self.attachments,
             "observations": {k: [o for _, o in v] for k, v in self.observations.items()},
             "status": self.status, "done_agents": sorted(self.done_agents),
@@ -961,7 +979,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             await self.set_run_status("running")
             await self._load_memory()
         await self.load_mcp()
-        await self.prepare_execution()
+        await self.execution.prepare_execution()
         if fresh:
             await self.bootstrap()
 
@@ -978,11 +996,11 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                 self.waiting_peers.pop(sender, None)
                 self.notice(sender, "Peer wait ended; inspect the result or escalate unresolved work.", activate=True)
         if self.awaiting and not self.recovery_required:
-            await self.apply_queued_request()
+            await self.execution.apply_queued_request()
 
     async def loop_idle_step(self) -> bool:
         """Nothing is runnable. True: keep looping. False: the run was finalized and the loop ends."""
-        if await self.apply_queued_request():
+        if await self.execution.apply_queued_request():
             return True
         if self.awaiting:
             return True
@@ -1026,6 +1044,9 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
     def loop_completion_reason(self) -> str:
         open_ = self.open_tasks()
         return f"Finished with {len(open_)} open task(s): " + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) if open_ else ""
+
+    async def loop_apply_queued_request(self) -> bool:
+        return await self.execution.apply_queued_request()
 
     async def loop_after_turn(self) -> None:
         """Loop detector: the first repeat pauses the run for a human; the detector keeps the evidence."""
@@ -1243,10 +1264,10 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                                   "agent_id": agent.id, "kind": "warning"})
 
     async def turn(self, aid: str) -> None:
-        await self.owned_turn(aid)
+        await self.execution.owned_turn(aid)
 
     async def _turn(self, aid: str) -> None:
-        self.assert_current_attempt()
+        self.execution.assert_current_attempt()
         agent = self.agents[aid]
         inbox_ids = [mid for _, mid in self.mailbox.pop(aid, [])]
         obs = [o for _, o in self.observations.pop(aid, [])]
@@ -1354,7 +1375,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             await self.emit("error", {"message": f"{agent.name}: {warn}", "agent_id": aid, "kind": "warning"})
         native = self.native_tools_for(req)
         system, user = build_turn_prompts(self, agent, inbox_ids, obs, native=native,
-                                          memory_context=await self.scoped_context(aid))
+                                          memory_context=await self.execution.scoped_context(aid))
         system += (f"\n\n## Runtime identity\nYou are responding as an Octopus AI agent using the `{model}` model through `{provider}`. "
                    "If the user asks which model you are, report these configured values accurately. You do not have a physical location.")
         if extra:
@@ -1561,7 +1582,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
 
     # ------------------------------------------------------------------ action execution
     async def execute(self, agent: AgentSpec, action: Any) -> None:
-        self.assert_current_attempt()
+        self.execution.assert_current_attempt()
         context = ACTIVE_ATTEMPT.get()
         if context and context.assignment.owner != agent.id:
             raise ValueError("A worker cannot act for another agent")
@@ -1586,7 +1607,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             self.notice(agent.id, f"Action '{name}' is not available to you (tool '{tool}' disabled).", activate=True)
             await self.emit("error", {"message": f"{agent.name} tried disabled tool {tool}", "agent_id": agent.id, "kind": "permission"})
             return
-        handler = getattr(self, f"act_{name}")
+        handler = getattr(self.execution, f"act_{name}", None) or getattr(self, f"act_{name}")
         await handler(agent, action)
 
     async def deny(self, agent: AgentSpec, cid: str, tool: str, reason: str) -> None:
@@ -1596,12 +1617,12 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
 
     async def _tool_event(self, agent: AgentSpec, tool: str, args: dict[str, Any]) -> str:
         cid = new_id()
-        await self.execution_tool_start(cid, tool, args)
+        await self.execution.execution_tool_start(cid, tool, args)
         await self.emit("tool_call", {"call_id": cid, "agent_id": agent.id, "tool": tool, "args": args, "turn_no": self.turn_no})
         return cid
 
     async def _tool_result(self, agent: AgentSpec, cid: str, tool: str, ok: bool, output: str) -> None:
-        await self.execution_tool_result(agent, cid, tool, ok, output)
+        await self.execution.execution_tool_result(agent, cid, tool, ok, output)
         await self.emit("tool_result", {"call_id": cid, "agent_id": agent.id, "tool": tool, "ok": ok, "output": output[:4000]})
 
     async def reject(self, agent: AgentSpec, to_id: str | None, a: A.SendMessage, reason: str, *, retry: bool = True) -> None:
@@ -1803,7 +1824,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
     async def create_task(self, creator: str | None, fields: dict[str, Any]) -> dict[str, Any]:
         from app.core.task_contracts import TaskContract, validate_task
         constraints = self.child_task_contract(TaskContract.model_validate(fields["constraints_json"]) if fields.get("constraints_json") else None).model_copy(
-            update={"workflow_hash": self.workflow_contract().content_hash})
+            update={"workflow_hash": self.execution.workflow_contract().content_hash})
         t = {"id": new_id(), "key": f"T-{self.task_counter + 1}", "title": fields.get("title") or "Untitled task",
              "description": fields.get("description") or "", "assignee": fields.get("assignee"), "status": fields.get("status") or "todo",
              "acceptance_criteria": fields.get("acceptance_criteria") or "", "created_by": creator,
@@ -1860,7 +1881,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                     if agent.id != self.lead_agent_id:
                         self.notice(agent.id, "Only the accountable lead may change an existing task's scope, dependencies, criteria or budget.")
                         continue
-                    t["constraints_json"] = item.constraints.model_copy(update={"workflow_hash": self.workflow_contract().content_hash}).model_dump(mode="json")
+                    t["constraints_json"] = item.constraints.model_copy(update={"workflow_hash": self.execution.workflow_contract().content_hash}).model_dump(mode="json")
                 try:
                     validate_task(t, self.tasks, previous=original)
                 except ValueError as exc:
@@ -1957,7 +1978,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         from app.orchestrator.runtime_store import mutation_lock
         async with mutation_lock(self.run_id):
             context = ACTIVE_ATTEMPT.get()
-            await self.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
+            await self.execution.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
             await self._write_checked_file(agent, cid, tool, rel, old, content, note,
                                            appending=appending, partial=partial, context_line=context_line)
 
@@ -2072,7 +2093,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             from app.orchestrator.runtime_store import mutation_lock
             async with mutation_lock(self.run_id):
                 context = ACTIVE_ATTEMPT.get()
-                await self.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
+                await self.execution.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
                 fs.make_dir(rel)
         except WorkspaceError as exc:
             await self.deny(agent, cid, "create_folder", f"create_folder failed: {exc}")
@@ -2105,7 +2126,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             from app.orchestrator.runtime_store import mutation_lock
             async with mutation_lock(self.run_id):
                 context = ACTIVE_ATTEMPT.get()
-                await self.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
+                await self.execution.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
                 src, dst, moved = fs.move(src, dst)
         except WorkspaceError as exc:
             await self.deny(agent, cid, "move_file", f"move_file failed: {exc}")
@@ -2200,7 +2221,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         url, title = page_info(out)
         if (ok and a.tool in ("browser_snapshot", "browser_console_messages", "browser_click", "browser_take_screenshot")
                 and url and (url.startswith(self.preview_url()) or url.startswith(("http://localhost:", "http://127.0.0.1:")))):
-            await self.refresh_execution_evidence()
+            await self.execution.refresh_execution_evidence()
         if url:
             self.browser_pages[agent.id] = (url, title)
         else:
@@ -2288,7 +2309,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             return
         await self.set_agent_status(agent.id, "running", f"$ {a.command[:70]}")
         try:
-            res = await run_command(a.command, self.worker_root(agent.id), allow_outside=bool(plan.outside))
+            res = await run_command(a.command, self.execution.worker_root(agent.id), allow_outside=bool(plan.outside))
             ok = res.ok
             out = f"$ {a.command}\n(exit {res.exit_code}{', timed out' if res.timed_out else ''}, {res.backend})\n{res.output}"
         except SandboxError as exc:
@@ -2481,8 +2502,8 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             if current and int((current.state_json or {}).get("plan_revision", 1)) > self.plan_revision:
                 return  # A committed steer owns the next scheduler iteration.
         if self._last_manifest is not None:
-            await self.refresh_execution_evidence()
-        blockers = self.engineering_blockers()
+            await self.execution.refresh_execution_evidence()
+        blockers = self.execution.engineering_blockers()
         from app.orchestrator.quality import assess_completion
         status, reason = assess_completion(
             status, reason, workflow=self.wf, open_tasks=self.open_tasks(),

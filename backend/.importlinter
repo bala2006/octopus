@@ -23,10 +23,6 @@ forbidden_modules =
     app.models
     app.main
 ignore_imports =
-    # Known exceptions. app/core/deps.py predates this contract: it is FastAPI wiring (current user, project
-    # context) that belongs in the channels layer. Phase 2 moves it out of core and removes these two lines.
-    app.core.deps -> app.models
-    app.core.deps -> app.services.projects
     # Phase 2 slice B shims: each old module path re-exports names that moved into app.core. The shim modules import
     # core, so the forbidden contract above never sees these edges. They are listed so Phase 8 finds every shim. Removed in Phase 8.
     # removed in Phase 8

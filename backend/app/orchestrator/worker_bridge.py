@@ -172,7 +172,7 @@ class WorkerBridge:
             if self._closed or self.yielded.is_set():
                 return self._result("This attempt has yielded or closed. No action was executed.", error=True)
             try:
-                self.rt.assert_current_attempt()
+                self.rt.execution.assert_current_attempt()
                 if ACTIVE_ATTEMPT.get() is not self.attempt:
                     raise ValueError("Worker action does not belong to its pinned attempt")
             except Exception:

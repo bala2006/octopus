@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import ProjectCtx, current_user, load_project, project_ctx
+from app.channels.deps import ProjectCtx, current_user, load_project, project_ctx
 from app.db.session import close_project, get_registry_db
 from app.models import Artifact, User, Workspace
 from app.orchestrator.engine import manager

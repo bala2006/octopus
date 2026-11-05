@@ -53,12 +53,11 @@ class LiveRun(Protocol):
     observations: dict[str, Any]
     wake: asyncio.Event
     runtime_store: Any
+    execution: Any
 
     async def restore(self, run: Any) -> None: ...
 
     async def save(self) -> None: ...
-
-    async def steer_execution(self) -> None: ...
 
     async def set_run_status(self, status: str, reason: str = "") -> None: ...
 
@@ -132,7 +131,7 @@ class RunManager:
             rt = self.runtimes.get(run_id)
             if rt and rt.task and not rt.task.done() and not rt.finalized:
                 if steer:
-                    await rt.steer_execution()
+                    await rt.execution.steer_execution()
                 rt.wake.set()
                 return rt
             loaded = await self._load(run_id, project)
@@ -150,7 +149,7 @@ class RunManager:
             rt.paused = rt.recovery_required
             self.runtimes[run_id] = rt
             if steer:
-                await rt.steer_execution()
+                await rt.execution.steer_execution()
             await rt.set_run_status("paused" if rt.recovery_required else "running")
             await rt.save()
             rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
@@ -213,7 +212,7 @@ class LoopHost(Protocol):
 
     async def usage_event(self) -> None: ...
 
-    async def apply_queued_request(self) -> bool: ...
+    async def loop_apply_queued_request(self) -> bool: ...
 
     def loop_completion_reason(self) -> str: ...
 
@@ -261,7 +260,7 @@ async def run_turn_loop(host: LoopHost, *, fresh: bool) -> None:
             await host.save()
             await host.usage_event()
             if host.finished_summary is not None:
-                if await host.apply_queued_request():
+                if await host.loop_apply_queued_request():
                     continue
                 await host.finalize("completed", host.loop_completion_reason())
                 return

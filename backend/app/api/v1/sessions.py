@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_user, get_pdb, owned_company
+from app.channels.deps import current_user, get_pdb, owned_company
 from app.models import Agent, ChatSession, Message, User
 from app.schemas import MessageOut, SessionIn, SessionOut, SessionPatch
 
