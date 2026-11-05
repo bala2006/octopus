@@ -6,7 +6,8 @@ from pathlib import Path
 import platform
 from typing import TYPE_CHECKING
 
-from app.core.contracts import Assignment, ExecutionPolicy, choose_lead, classify_workflow
+from app.agents.chief import choose_lead
+from app.core.contracts import Assignment, ExecutionPolicy, classify_workflow
 from app.core.evidence import capture_manifest, record_evidence, validate_evidence, RevisionEvidence, VerificationCheck, redact_evidence
 from app.core.execution_contracts import ACTIVE_ATTEMPT, AttemptContext, SupersededAttempt  # noqa: F401 (re-exported)
 from app.orchestrator.runtime_store import RuntimeStore

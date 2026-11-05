@@ -53,7 +53,7 @@ async def continue_with(rt: RunRuntime, content: str, to_agent_id: str | None, *
     if to_agent_id in rt.agents:
         targets = [to_agent_id]
     else:  # "entry agent": the entry agent plus everyone who still owns an open task (they'd never be woken otherwise)
-        from app.core.contracts import route_target
+        from app.agents.chief import route_target
         targets = [route_target(content, [a.to_dict() for a in rt.agents.values()], rt.lead_agent_id)]
     for t in targets:
         if t != rt.lead_agent_id:

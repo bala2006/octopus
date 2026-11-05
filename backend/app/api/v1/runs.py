@@ -25,7 +25,7 @@ from app.services import run_attachments
 from app.workflows.canvas import snapshot
 from app.capabilities.workspace.project_fs import ProjectFS, WorkspaceError
 from app.orchestrator.runtime_store import RuntimeStore, Conflict
-from app.orchestrator.contracts import choose_lead, route_target
+from app.agents.chief import choose_lead, route_target
 from app.orchestrator.evidence import capture_manifest, validate_evidence, RevisionEvidence
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -88,7 +88,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
         if body.budget.model.model not in allowed_models(options):
             raise HTTPException(422, "This deployment is no longer configured. Choose a model again in Model settings.")
     company = await owned_company(body.company_id, db, user)
-    from app.orchestrator.contracts import validate_reporting, choose_lead, route_target
+    from app.agents.chief import validate_reporting, choose_lead, route_target
     try:
         validate_reporting(snapshot(company)["agents"])
         lead = choose_lead(snapshot(company)["agents"])
