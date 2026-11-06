@@ -44,7 +44,8 @@ from app.workflows.boardroom import DebateState
 from app.workflows.protocols import LoopDetector
 from app.workflows.review import ReviewState
 from app.schemas import RunBudget
-from app.orchestrator.handlers import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, tasks as task_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions, team_actions, workflow_actions
+from app.orchestrator.handlers.registry import TOOLS
+from app.orchestrator.handlers import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, tasks as task_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions
 from app.orchestrator import run_control, run_state, mailbox, board, turn_loop, lifecycle
 from app.workflows import task_board
 from app.orchestrator.handlers.messaging import DEBATE_PROTOCOL_TYPES, JUDGE_MAX_TOKENS, judge_verdict  # noqa: F401 (re-exported for existing callers)
@@ -103,31 +104,6 @@ def live_activity(text: str) -> tuple[str, str]:
     return ("thinking", "Planning next step…")
 
 
-ACTION_HANDLERS = {
-    "calculate": web_actions.act_calculate,
-    "create_agent": team_actions.act_create_agent,
-    "create_folder": file_actions.act_create_folder,
-    "delegate": delegation_actions.act_delegate,
-    "edit_file": file_actions.act_edit_file,
-    "finish": messaging_actions.act_finish,
-    "list_agents": team_actions.act_list_agents,
-    "list_files": file_actions.act_list_files,
-    "mcp_call": mcp_actions.act_mcp_call,
-    "move_file": file_actions.act_move_file,
-    "read_file": file_actions.act_read_file,
-    "remember": memory_actions.act_remember,
-    "request_user_input": messaging_actions.act_request_user_input,
-    "run_code": command_actions.act_run_code,
-    "search_project": file_actions.act_search_project,
-    "send_message": messaging_actions.act_send_message,
-    "set_track": workflow_actions.act_set_track,
-    "update_agent": team_actions.act_update_agent,
-    "update_task_board": task_actions.act_update_task_board,
-    "use_skill": skill_actions.act_use_skill,
-    "wait": messaging_actions.act_wait,
-    "web_search": web_actions.act_web_search,
-    "write_file": file_actions.act_write_file,
-}
 
 
 class RunRuntime:
@@ -474,7 +450,7 @@ class RunRuntime:
         if handler is not None:
             await handler(agent, action)
         else:
-            await ACTION_HANDLERS[name](self, agent, action)
+            await TOOLS[name](self, agent, action)
 
     async def deny(self, agent: AgentSpec, cid: str, tool: str, reason: str) -> None:
         self.notice(agent.id, reason, activate=True)
