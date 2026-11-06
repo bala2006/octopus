@@ -2,6 +2,10 @@
 
 Status: approved direction, Python first. Each phase needs its gates passed and a screenshot sign-off before it merges into the refactor branch.
 
+> **Superseded.** This plan describes the five-layer plugin refactor. The code has since moved to a kernel plus plugins
+> (`backend/app/{sdk,foundation,storage,kernel,plugins,application,channels}`). `ARCHITECTURE.md` describes the code as it is,
+> and section 10 below records what changed. Sections 2 to 9 keep the original plan and its status for reference.
+
 Branch: `refactor/plugin-architecture`, branched from `feat/global-approval-mode` at `0f31db1`. When the open stack (#73, #74, #75) merges into `main`, the branch is rebased onto `main` and the phase PRs are retargeted.
 
 Target architecture: the five-layer plugin image (Channels, Agents, Workflows, Capabilities, Octopus core), with the Bus running alongside all layers. Dashed boxes in the image are "not built yet".
@@ -388,3 +392,32 @@ The scripted golden export takes a median of 3.39 s at the Phase 0 commit (`4063
 - The `test_thinking` timing test (0.4 s idle timeout) is flaky under load.
 - Ruff warnings outside the error gate (unused imports and redefinitions in tests). They predate this branch.
 - The approval default test assumed a fresh registry database. It now checks the rule and the persistence instead. Fixed in `b79661b`.
+
+## 10. Microkernel refactor (branch `refactor/microkernel`)
+
+What changed after section 9, and what was verified.
+
+| Plan layer | Now |
+|---|---|
+| Core (`core/`) | Split by role: contracts to `sdk/` (including the project file boundary), config/logging/secrets to `foundation/`, the bus, policy gate, registry and run manager to `kernel/`. `core/ports.py` and the global capability handles are gone. |
+| Orchestrator (`orchestrator/`) | `kernel/runtime/`. Its action handlers moved into tool plugins. |
+| Capabilities (`capabilities/`) | `plugins/{providers,tools,sandbox,workspace,browser,mcp,memory,skills}`. |
+| Workflows, Agents | `plugins/workflows`, `plugins/roles`. Workflow plugins no longer import the runtime. |
+| Channels | Plugins of the `channel` slot. The routes (`api/v1`) and the WebSocket endpoint moved under `channels/`. |
+| `services/`, `db/`, `models/`, `schemas/` | `application/`, `storage/`, `storage/models/`, `sdk/schemas.py`. |
+
+Added: Manifest v2, the plugin host (lifecycle, enable and disable with dependents, saved state), service/tool/run-method registries,
+the group-commit event log, `GET/PATCH /api/v1/plugins` and Settings → Plugins.
+
+Decisions:
+
+- **The kernel and the plugins do not import each other**, and the 11 plugin packages do not import each other. import-linter
+  enforces both with no ignore list. Plugins call each other by capability name.
+- **`channels` and `application` may import plugin modules.** This was left as it is because many routes use plugin libraries
+  directly. Routes for a plugin that is switched off still run.
+- **OpenAPI component names no longer embed module paths.** The two `MemoryIn` schemas are now `AgentMemoryIn` and `ScopedMemoryIn`.
+- **Run-log goldens use one `<time>` token.** Numbered time placeholders depended on the clock resolution and made two goldens differ
+  between generations on Windows.
+
+Golden changes: the `openapi.json` golden gained the two plugin paths and the renamed schemas. The other 61 golden files, including
+every prompt, the tool list and both scripted run sequences, regenerate byte for byte after the move (the run-log goldens were regenerated once beforehand for the <time> token).

@@ -1,238 +1,350 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1130" viewBox="0 0 1100 1130" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1230" viewBox="0 0 1440 1230" font-family="Segoe UI, Helvetica, Arial, sans-serif">
   <defs>
     <style>
-      .title { font-size: 24px; font-weight: 700; fill: #1F1E1D; }
+      .title { font-size: 26px; font-weight: 700; fill: #1F1E1D; }
       .subtitle { font-size: 13px; fill: #5b5955; }
       .layer-label { font-size: 15px; font-weight: 700; fill: #1F1E1D; }
-      .layer-note { font-size: 11px; fill: #5b5955; }
-      .block-title { font-size: 13px; font-weight: 700; fill: #1F1E1D; }
-      .block-text { font-size: 11px; fill: #3d3c3a; }
+      .layer-note { font-size: 11.5px; fill: #5b5955; }
+      .bt { font-size: 12.5px; font-weight: 700; fill: #1F1E1D; }
+      .bx { font-size: 11px; fill: #3d3c3a; }
+      .sx { font-size: 10.5px; fill: #3d3c3a; }
+      .cnt { font-size: 10.5px; font-weight: 700; fill: #B5654A; }
+      .step1 { font-size: 11.5px; font-weight: 700; fill: #1F1E1D; }
+      .step2 { font-size: 10px; fill: #3d3c3a; }
       .arrow-label { font-size: 11px; fill: #5b5955; font-style: italic; }
+      .panel-title { font-size: 14px; font-weight: 700; fill: #1F1E1D; }
+      .ph { font-size: 12px; font-weight: 700; fill: #1F1E1D; }
+      .pt { font-size: 10.5px; fill: #3d3c3a; }
+      .pill { font-size: 11px; font-weight: 700; fill: #1F1E1D; }
+      .code { font-size: 10.5px; fill: #1F1E1D; font-family: Consolas, Menlo, monospace; white-space: pre; }
+      .foot { font-size: 11.5px; fill: #5b5955; }
     </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#1F1E1D"/>
     </marker>
+    <marker id="arrowSm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#66839A"/>
+    </marker>
+    <marker id="arrowBoth" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#66839A"/>
+    </marker>
   </defs>
 
-  <rect width="1100" height="1130" fill="#FAF9F5"/>
-  <text x="30" y="30" class="title">Octopus: layers and modules</text>
-  <text x="30" y="48" class="subtitle">Taken from backend/.importlinter (layer order) and the module folders. Each layer imports only the layers below it.</text>
+  <rect width="1440" height="1230" fill="#FAF9F5"/>
+  <text x="40" y="44" class="title">Octopus: a kernel and its plugins</text>
+  <text x="40" y="66" class="subtitle">Taken from backend/app and backend/.importlinter. A layer imports only the layers below it. The kernel and the plugins import neither each other nor a sibling plugin.</text>
+  <text x="40" y="84" class="subtitle">They meet through three registries the plugin host fills: services by capability name, tool actions, and methods added to a live run.</text>
 
-  <!-- 1. Presentation -->
-  <rect x="30" y="60" width="1040" height="104" rx="10" fill="#F1EEE6" stroke="#D97756" stroke-width="2"/>
-  <text x="50" y="88" class="layer-label">Presentation</text>
-  <text x="50" y="106" class="layer-note">frontend/src: React 18 and Vite.</text>
-  <text x="50" y="121" class="layer-note">Built into frontend/dist and served</text>
-  <text x="50" y="136" class="layer-note">by the web shell channel.</text>
-  <rect x="250" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
-  <text x="325" y="104" text-anchor="middle" class="block-title">Canvas</text>
-  <text x="325" y="122" text-anchor="middle" class="block-text">features/canvas</text>
-  <text x="325" y="136" text-anchor="middle" class="block-text">org chart (React Flow)</text>
-  <rect x="412" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
-  <text x="487" y="104" text-anchor="middle" class="block-title">Chat and workbench</text>
-  <text x="487" y="122" text-anchor="middle" class="block-text">features/chat, editor,</text>
-  <text x="487" y="136" text-anchor="middle" class="block-text">workspaces</text>
-  <rect x="574" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
-  <text x="649" y="104" text-anchor="middle" class="block-title">Live runs</text>
-  <text x="649" y="122" text-anchor="middle" class="block-text">features/runs</text>
-  <text x="649" y="136" text-anchor="middle" class="block-text">feed, tasks, approvals</text>
-  <rect x="736" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
-  <text x="811" y="104" text-anchor="middle" class="block-title">Artifacts and preview</text>
-  <text x="811" y="122" text-anchor="middle" class="block-text">features/artifacts</text>
-  <text x="811" y="136" text-anchor="middle" class="block-text">diffs, files, previews</text>
-  <rect x="898" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
-  <text x="973" y="104" text-anchor="middle" class="block-title">Other pages</text>
-  <text x="973" y="122" text-anchor="middle" class="block-text">settings, activity,</text>
-  <text x="973" y="136" text-anchor="middle" class="block-text">guide, onboarding</text>
+  <!-- 1. Clients -->
+  <rect x="40" y="100" width="990" height="80" rx="10" fill="#F1EEE6" stroke="#D97756" stroke-width="2"/>
+  <text x="56" y="124" class="layer-label">Clients</text>
+  <rect x="56" y="134" width="300" height="34" rx="8" fill="#FFFFFF" stroke="#D97756"/>
+  <text x="206" y="156" text-anchor="middle" class="bt">Web app (React, Vite) · Settings → Plugins</text>
+  <rect x="368" y="134" width="300" height="34" rx="8" fill="#FFFFFF" stroke="#D97756"/>
+  <text x="518" y="156" text-anchor="middle" class="bt">Terminal · start scripts · dev tools</text>
+  <rect x="680" y="134" width="334" height="34" rx="8" fill="#FFFFFF" stroke="#D97756" stroke-dasharray="4 3"/>
+  <text x="847" y="156" text-anchor="middle" class="bt">Chat apps (planned)</text>
 
-  <line x1="540" y1="164" x2="540" y2="192" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="552" y="182" class="arrow-label">HTTP and WebSocket</text>
+  <line x1="535" y1="180" x2="535" y2="204" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="547" y="198" class="arrow-label">HTTP · WebSocket</text>
 
-  <!-- 2. Channels -->
-  <rect x="30" y="194" width="1040" height="104" rx="10" fill="#EEF2E8" stroke="#6B8440" stroke-width="2"/>
-  <text x="50" y="222" class="layer-label">Channels</text>
-  <text x="50" y="240" class="layer-note">backend/app/channels: ways in</text>
-  <text x="50" y="255" class="layer-note">and out of the backend.</text>
-  <rect x="250" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
-  <text x="325" y="238" text-anchor="middle" class="block-title">REST API</text>
-  <text x="325" y="256" text-anchor="middle" class="block-text">channels/api</text>
-  <text x="325" y="270" text-anchor="middle" class="block-text">routes under /api/v1</text>
-  <rect x="412" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
-  <text x="487" y="238" text-anchor="middle" class="block-title">WebSocket</text>
-  <text x="487" y="256" text-anchor="middle" class="block-text">channels/ws</text>
-  <text x="487" y="270" text-anchor="middle" class="block-text">run and chat events</text>
-  <rect x="574" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
-  <text x="649" y="238" text-anchor="middle" class="block-title">Web shell</text>
-  <text x="649" y="256" text-anchor="middle" class="block-text">channels/web_shell</text>
-  <text x="649" y="270" text-anchor="middle" class="block-text">serves the built UI</text>
-  <rect x="736" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
-  <text x="811" y="238" text-anchor="middle" class="block-title">CLI</text>
-  <text x="811" y="256" text-anchor="middle" class="block-text">channels/cli</text>
-  <text x="811" y="270" text-anchor="middle" class="block-text">partly built</text>
-  <rect x="898" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440" stroke-dasharray="4 3"/>
-  <text x="973" y="238" text-anchor="middle" class="block-title">Chat apps</text>
-  <text x="973" y="256" text-anchor="middle" class="block-text">channels/chat_apps</text>
-  <text x="973" y="270" text-anchor="middle" class="block-text">planned, no routes yet</text>
+  <!-- 2. Composition root + channels -->
+  <rect x="40" y="206" width="990" height="116" rx="10" fill="#EEF2E8" stroke="#6B8440" stroke-width="2"/>
+  <text x="56" y="228" class="layer-label">Composition and channels</text>
+  <text x="1014" y="228" text-anchor="end" class="layer-note">main.py builds the app around the kernel. bootstrap.py is the only file that lists the built-in plugins.</text>
+  <rect x="56" y="240" width="186" height="68" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
+  <text x="149" y="262" text-anchor="middle" class="bt">channel.api</text>
+  <text x="149" y="278" text-anchor="middle" class="bx">REST under /api/v1</text>
+  <text x="149" y="293" text-anchor="middle" class="bx">routes/ · OpenAPI → TS types</text>
+  <rect x="254" y="240" width="186" height="68" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
+  <text x="347" y="262" text-anchor="middle" class="bt">channel.ws</text>
+  <text x="347" y="278" text-anchor="middle" class="bx">run and chat events</text>
+  <text x="347" y="293" text-anchor="middle" class="bx">replay, re-read after lag</text>
+  <rect x="452" y="240" width="186" height="68" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
+  <text x="545" y="262" text-anchor="middle" class="bt">channel.web_shell</text>
+  <text x="545" y="278" text-anchor="middle" class="bx">serves the built UI</text>
+  <text x="545" y="293" text-anchor="middle" class="bx">mounted last</text>
+  <rect x="650" y="240" width="186" height="68" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
+  <text x="743" y="262" text-anchor="middle" class="bt">channel.cli</text>
+  <text x="743" y="278" text-anchor="middle" class="bx">scripts, folder bridge</text>
+  <text x="743" y="293" text-anchor="middle" class="bx">partly built</text>
+  <rect x="848" y="240" width="166" height="68" rx="8" fill="#FFFFFF" stroke="#6B8440" stroke-dasharray="4 3"/>
+  <text x="931" y="262" text-anchor="middle" class="bt">channel.chat_apps</text>
+  <text x="931" y="278" text-anchor="middle" class="bx">planned, no routes</text>
 
-  <line x1="540" y1="298" x2="540" y2="326" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="552" y="316" class="arrow-label">starts runs and chats</text>
+  <line x1="535" y1="322" x2="535" y2="346" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="547" y="340" class="arrow-label">calls use cases</text>
 
-  <!-- 3. Agents -->
-  <rect x="30" y="328" width="1040" height="104" rx="10" fill="#F4F0E8" stroke="#A8893A" stroke-width="2"/>
-  <text x="50" y="356" class="layer-label">Agents</text>
-  <text x="50" y="374" class="layer-note">backend/app/agents: roles and</text>
-  <text x="50" y="389" class="layer-note">the chief's routing rules.</text>
-  <rect x="250" y="350" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
-  <text x="325" y="372" text-anchor="middle" class="block-title">Chief</text>
-  <text x="325" y="390" text-anchor="middle" class="block-text">agents/chief.py</text>
-  <text x="325" y="404" text-anchor="middle" class="block-text">lead routing</text>
-  <rect x="412" y="350" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
-  <text x="487" y="372" text-anchor="middle" class="block-title">Built-in roles</text>
-  <text x="487" y="390" text-anchor="middle" class="block-text">agents/roles</text>
-  <text x="487" y="404" text-anchor="middle" class="block-text">product, eng, design, QA</text>
-  <rect x="574" y="350" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
-  <text x="649" y="372" text-anchor="middle" class="block-title">Custom roles</text>
-  <text x="649" y="390" text-anchor="middle" class="block-text">agents/user_roles.py</text>
-  <text x="649" y="404" text-anchor="middle" class="block-text">user-defined roles</text>
+  <!-- 3. Application -->
+  <rect x="40" y="348" width="990" height="78" rx="10" fill="#F4F0E8" stroke="#A8893A" stroke-width="2"/>
+  <text x="56" y="370" class="layer-label">Application</text>
+  <text x="1014" y="370" text-anchor="end" class="layer-note">application/: what a channel asks for. Some routes also use plugin libraries directly (see Known limits).</text>
+  <rect x="56" y="380" width="142" height="34" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
+  <text x="127" y="402" text-anchor="middle" class="bt">projects</text>
+  <rect x="208" y="380" width="142" height="34" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
+  <text x="279" y="402" text-anchor="middle" class="bt">chat</text>
+  <rect x="360" y="380" width="142" height="34" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
+  <text x="431" y="402" text-anchor="middle" class="bt">editor · file items</text>
+  <rect x="512" y="380" width="142" height="34" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
+  <text x="583" y="402" text-anchor="middle" class="bt">folder dialog · paths</text>
+  <rect x="664" y="380" width="142" height="34" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
+  <text x="735" y="402" text-anchor="middle" class="bt">benchmarks</text>
 
-  <line x1="540" y1="432" x2="540" y2="460" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="552" y="450" class="arrow-label">runs the steps of a process</text>
+  <line x1="535" y1="426" x2="535" y2="450" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="547" y="444" class="arrow-label">start run · send message · resolve approval</text>
 
-  <!-- 4. Workflows -->
-  <rect x="30" y="462" width="1040" height="104" rx="10" fill="#EFEBF5" stroke="#7A65A8" stroke-width="2"/>
-  <text x="50" y="490" class="layer-label">Workflows</text>
-  <text x="50" y="508" class="layer-note">backend/app/workflows: processes</text>
-  <text x="50" y="523" class="layer-note">that span several turns.</text>
-  <rect x="250" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
-  <text x="325" y="506" text-anchor="middle" class="block-title">Company</text>
-  <text x="325" y="524" text-anchor="middle" class="block-text">workflows/company.py</text>
-  <text x="325" y="538" text-anchor="middle" class="block-text">phases and gates</text>
-  <rect x="412" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
-  <text x="487" y="506" text-anchor="middle" class="block-title">Boardroom</text>
-  <text x="487" y="524" text-anchor="middle" class="block-text">workflows/boardroom.py</text>
-  <text x="487" y="538" text-anchor="middle" class="block-text">debate protocol</text>
-  <rect x="574" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
-  <text x="649" y="506" text-anchor="middle" class="block-title">Review gates</text>
-  <text x="649" y="524" text-anchor="middle" class="block-text">workflows/review.py</text>
-  <text x="649" y="538" text-anchor="middle" class="block-text">review protocol</text>
-  <rect x="736" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
-  <text x="811" y="506" text-anchor="middle" class="block-title">Task board</text>
-  <text x="811" y="524" text-anchor="middle" class="block-text">workflows/task_board.py</text>
-  <text x="811" y="538" text-anchor="middle" class="block-text">tasks and their state</text>
-  <rect x="898" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
-  <text x="973" y="506" text-anchor="middle" class="block-title">Org and hiring</text>
-  <text x="973" y="524" text-anchor="middle" class="block-text">workflows/org.py</text>
-  <text x="973" y="538" text-anchor="middle" class="block-text">self-organizing teams</text>
+  <!-- 4. Kernel (left) and plugins (right) -->
+  <rect x="40" y="452" width="390" height="430" rx="10" fill="#E9EEF3" stroke="#66839A" stroke-width="2.5"/>
+  <text x="56" y="476" class="layer-label">Kernel</text>
+  <text x="414" y="476" text-anchor="end" class="layer-note">kernel/ · knows no plugin by name</text>
 
-  <line x1="540" y1="566" x2="540" y2="594" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="552" y="584" class="arrow-label">executes each turn</text>
+  <rect x="56" y="490" width="358" height="72" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="70" y="510" class="bt">Plugin host</text>
+  <text x="70" y="526" class="bx">validate · order by provides/requires · register · start · stop</text>
+  <text x="70" y="541" class="bx">switch on/off with dependents · saved in the plugins table</text>
+  <text x="70" y="555" class="bx">failed, blocked or degraded plugins do not stop the others</text>
 
-  <!-- 5. Orchestrator -->
-  <rect x="30" y="596" width="1040" height="104" rx="10" fill="#E9EEF3" stroke="#66839A" stroke-width="2"/>
-  <text x="50" y="624" class="layer-label">Orchestrator</text>
-  <text x="50" y="642" class="layer-note">backend/app/orchestrator: runs one</text>
-  <text x="50" y="657" class="layer-note">agent turn at a time, per run.</text>
-  <rect x="250" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
-  <text x="325" y="640" text-anchor="middle" class="block-title">Run engine</text>
-  <text x="325" y="658" text-anchor="middle" class="block-text">orchestrator/engine.py</text>
-  <text x="325" y="672" text-anchor="middle" class="block-text">one runtime per run</text>
-  <rect x="412" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
-  <text x="487" y="640" text-anchor="middle" class="block-title">Turn loop</text>
-  <text x="487" y="658" text-anchor="middle" class="block-text">turn_loop.py</text>
-  <text x="487" y="672" text-anchor="middle" class="block-text">model call, then action</text>
-  <rect x="574" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
-  <text x="649" y="640" text-anchor="middle" class="block-title">Run state</text>
-  <text x="649" y="658" text-anchor="middle" class="block-text">run_state, lifecycle,</text>
-  <text x="649" y="672" text-anchor="middle" class="block-text">mailbox, control</text>
-  <rect x="736" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
-  <text x="811" y="640" text-anchor="middle" class="block-title">Action handlers</text>
-  <text x="811" y="658" text-anchor="middle" class="block-text">orchestrator/handlers</text>
-  <text x="811" y="672" text-anchor="middle" class="block-text">files, commands, web, MCP</text>
-  <rect x="898" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
-  <text x="973" y="640" text-anchor="middle" class="block-title">Execution</text>
-  <text x="973" y="658" text-anchor="middle" class="block-text">orchestrator/execution.py</text>
-  <text x="973" y="672" text-anchor="middle" class="block-text">attempts and evidence</text>
+  <rect x="56" y="572" width="174" height="64" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="70" y="592" class="bt">Service registry</text>
+  <text x="70" y="608" class="bx">capability name → service</text>
+  <text x="70" y="622" class="bx">require() · get()</text>
+  <rect x="240" y="572" width="174" height="64" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="254" y="592" class="bt">Tool registry</text>
+  <text x="254" y="608" class="bx">action → handler</text>
+  <text x="254" y="622" class="bx">only while its plugin is on</text>
 
-  <line x1="540" y1="700" x2="540" y2="728" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="552" y="718" class="arrow-label">calls through core ports</text>
+  <rect x="56" y="646" width="358" height="46" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="70" y="666" class="bt">Run-method table</text>
+  <text x="70" y="682" class="bx">plugins add methods to every live run (rt.open_tasks, rt.publish_file)</text>
 
-  <!-- 6. Capabilities -->
-  <rect x="30" y="730" width="1040" height="104" rx="10" fill="#F4ECE6" stroke="#B5654A" stroke-width="2"/>
-  <text x="50" y="758" class="layer-label">Capabilities</text>
-  <text x="50" y="776" class="layer-note">backend/app/capabilities: what</text>
-  <text x="50" y="791" class="layer-note">the runtime uses.</text>
-  <rect x="250" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
-  <text x="325" y="774" text-anchor="middle" class="block-title">Models</text>
-  <text x="325" y="792" text-anchor="middle" class="block-text">Azure OpenAI v1,</text>
-  <text x="325" y="806" text-anchor="middle" class="block-text">LiteLLM, OpenCode</text>
-  <rect x="412" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
-  <text x="487" y="774" text-anchor="middle" class="block-title">Sandbox</text>
-  <text x="487" y="792" text-anchor="middle" class="block-text">capabilities/sandbox</text>
-  <text x="487" y="806" text-anchor="middle" class="block-text">commands, processes</text>
-  <rect x="574" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
-  <text x="649" y="774" text-anchor="middle" class="block-title">MCP and browser</text>
-  <text x="649" y="792" text-anchor="middle" class="block-text">capabilities/mcp,</text>
-  <text x="649" y="806" text-anchor="middle" class="block-text">browser (Playwright)</text>
-  <rect x="736" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
-  <text x="811" y="774" text-anchor="middle" class="block-title">Workspace</text>
-  <text x="811" y="792" text-anchor="middle" class="block-text">capabilities/workspace</text>
-  <text x="811" y="806" text-anchor="middle" class="block-text">git, preview, project files</text>
-  <rect x="898" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
-  <text x="973" y="774" text-anchor="middle" class="block-title">Storage and memory</text>
-  <text x="973" y="792" text-anchor="middle" class="block-text">repositories, scoped</text>
-  <text x="973" y="806" text-anchor="middle" class="block-text">memory, skills library</text>
+  <rect x="56" y="702" width="358" height="92" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="70" y="722" class="bt">Run supervisor and runtime</text>
+  <rect x="68" y="732" width="62" height="50" rx="6" fill="#F5F8FA" stroke="#66839A"/>
+  <text x="99" y="750" text-anchor="middle" class="step1">Prompt</text>
+  <text x="99" y="765" text-anchor="middle" class="step2">context</text>
+  <rect x="138" y="732" width="62" height="50" rx="6" fill="#F5F8FA" stroke="#66839A"/>
+  <text x="169" y="750" text-anchor="middle" class="step1">Model</text>
+  <text x="169" y="765" text-anchor="middle" class="step2">router</text>
+  <rect x="208" y="732" width="62" height="50" rx="6" fill="#F5F8FA" stroke="#66839A"/>
+  <text x="239" y="750" text-anchor="middle" class="step1">Parse</text>
+  <text x="239" y="765" text-anchor="middle" class="step2">actions</text>
+  <rect x="278" y="732" width="62" height="50" rx="6" fill="#FBEDE7" stroke="#D97756" stroke-width="1.5"/>
+  <text x="309" y="750" text-anchor="middle" class="step1">Guard</text>
+  <text x="309" y="765" text-anchor="middle" class="step2">policy</text>
+  <rect x="348" y="732" width="58" height="50" rx="6" fill="#F5F8FA" stroke="#66839A"/>
+  <text x="377" y="750" text-anchor="middle" class="step1">Tool</text>
+  <text x="377" y="765" text-anchor="middle" class="step2">registry</text>
 
-  <line x1="540" y1="834" x2="540" y2="862" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="552" y="852" class="arrow-label">contracts and events</text>
+  <rect x="56" y="804" width="174" height="66" rx="8" fill="#FFFFFF" stroke="#D97756" stroke-width="1.5"/>
+  <text x="70" y="824" class="bt">Policy gate</text>
+  <text x="70" y="840" class="bx">ask or auto, every action</text>
+  <text x="70" y="854" class="bx">approval events frozen</text>
+  <rect x="240" y="804" width="174" height="66" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="254" y="824" class="bt">Event log</text>
+  <text x="254" y="840" class="bx">group commit · replay by seq</text>
+  <text x="254" y="854" class="bx">lag flag instead of drops</text>
 
-  <!-- 7. Core -->
-  <rect x="30" y="864" width="1040" height="104" rx="10" fill="#F2F2F2" stroke="#6F6C66" stroke-width="2"/>
-  <text x="50" y="892" class="layer-label">Core</text>
-  <text x="50" y="910" class="layer-note">backend/app/core: the bottom layer.</text>
-  <text x="50" y="925" class="layer-note">Imports nothing above it.</text>
-  <rect x="250" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
-  <text x="325" y="908" text-anchor="middle" class="block-title">Event bus</text>
-  <text x="325" y="926" text-anchor="middle" class="block-text">core/bus.py</text>
-  <text x="325" y="940" text-anchor="middle" class="block-text">persist and fan out</text>
-  <rect x="412" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
-  <text x="487" y="908" text-anchor="middle" class="block-title">Policy gate</text>
-  <text x="487" y="926" text-anchor="middle" class="block-text">core/policy.py</text>
-  <text x="487" y="940" text-anchor="middle" class="block-text">approval modes</text>
-  <rect x="574" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
-  <text x="649" y="908" text-anchor="middle" class="block-title">Run manager</text>
-  <text x="649" y="926" text-anchor="middle" class="block-text">core/run_manager.py</text>
-  <text x="649" y="940" text-anchor="middle" class="block-text">run lifecycle, project</text>
-  <rect x="736" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
-  <text x="811" y="908" text-anchor="middle" class="block-title">Ports and contracts</text>
-  <text x="811" y="926" text-anchor="middle" class="block-text">core/ports.py</text>
-  <text x="811" y="940" text-anchor="middle" class="block-text">core/contracts.py</text>
-  <rect x="898" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
-  <text x="973" y="908" text-anchor="middle" class="block-title">Registry</text>
-  <text x="973" y="926" text-anchor="middle" class="block-text">core/registry.py</text>
-  <text x="973" y="940" text-anchor="middle" class="block-text">manifests, plugin catalog</text>
+  <!-- bidirectional link between kernel and plugins -->
+  <line x1="432" y1="640" x2="448" y2="640" stroke="#66839A" stroke-width="2" marker-start="url(#arrowBoth)" marker-end="url(#arrowBoth)"/>
 
-  <!-- Data and external -->
-  <rect x="30" y="998" width="1040" height="110" rx="10" fill="#FFFFFF" stroke="#8a8782" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <text x="50" y="1026" class="layer-label">Storage and external</text>
-  <text x="50" y="1044" class="layer-note">Files and services outside the code.</text>
-  <rect x="250" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
-  <text x="325" y="1042" text-anchor="middle" class="block-title">registry.db</text>
-  <text x="325" y="1060" text-anchor="middle" class="block-text">~/.octopus/</text>
-  <text x="325" y="1074" text-anchor="middle" class="block-text">keys, MCP servers, projects</text>
-  <rect x="412" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
-  <text x="487" y="1042" text-anchor="middle" class="block-title">octopus.db</text>
-  <text x="487" y="1060" text-anchor="middle" class="block-text">&lt;folder&gt;/.octopus/</text>
-  <text x="487" y="1074" text-anchor="middle" class="block-text">companies, runs, events</text>
-  <rect x="574" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
-  <text x="649" y="1042" text-anchor="middle" class="block-title">Project files</text>
-  <text x="649" y="1060" text-anchor="middle" class="block-text">&lt;folder&gt;/ (the sandbox)</text>
-  <text x="649" y="1074" text-anchor="middle" class="block-text">.octopus and .git are protected</text>
-  <rect x="736" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
-  <text x="811" y="1042" text-anchor="middle" class="block-title">Model APIs</text>
-  <text x="811" y="1060" text-anchor="middle" class="block-text">Azure OpenAI</text>
-  <text x="811" y="1074" text-anchor="middle" class="block-text">OpenCode (local CLI)</text>
-  <rect x="898" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
-  <text x="973" y="1042" text-anchor="middle" class="block-title">Local processes</text>
-  <text x="973" y="1060" text-anchor="middle" class="block-text">MCP servers, Chromium</text>
-  <text x="973" y="1074" text-anchor="middle" class="block-text">via Playwright MCP</text>
+  <rect x="450" y="452" width="580" height="430" rx="10" fill="#F4ECE6" stroke="#B5654A" stroke-width="2"/>
+  <text x="466" y="476" class="layer-label">Plugins</text>
+  <text x="1014" y="476" text-anchor="end" class="layer-note">plugins/: 11 packages, 30 plugins. Each imports only sdk, storage and foundation.</text>
+
+  <rect x="466" y="490" width="170" height="86" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="470" y="498" width="4" height="70" rx="2" fill="#B5654A"/>
+  <text x="482" y="510" class="bt">providers</text><text x="620" y="510" text-anchor="end" class="cnt">4</text>
+  <text x="482" y="527" class="sx">router (required)</text>
+  <text x="482" y="541" class="sx">Azure OpenAI v1 · LiteLLM</text>
+  <text x="482" y="555" class="sx">OpenCode (local CLI)</text>
+  <rect x="646" y="490" width="170" height="86" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="650" y="498" width="4" height="70" rx="2" fill="#B5654A"/>
+  <text x="662" y="510" class="bt">tools</text><text x="800" y="510" text-anchor="end" class="cnt">8</text>
+  <text x="662" y="527" class="sx">files · commands · web</text>
+  <text x="662" y="541" class="sx">mcp · memory · skills</text>
+  <text x="662" y="555" class="sx">messaging · delegation</text>
+  <rect x="826" y="490" width="188" height="86" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="830" y="498" width="4" height="70" rx="2" fill="#B5654A"/>
+  <text x="842" y="510" class="bt">workflows</text><text x="998" y="510" text-anchor="end" class="cnt">7</text>
+  <text x="842" y="527" class="sx">task board (required) · boardroom</text>
+  <text x="842" y="541" class="sx">review gates · org and hiring</text>
+  <text x="842" y="555" class="sx">company · team tool · workflow tool</text>
+
+  <rect x="466" y="586" width="170" height="74" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="470" y="594" width="4" height="58" rx="2" fill="#B5654A"/>
+  <text x="482" y="606" class="bt">roles</text><text x="620" y="606" text-anchor="end" class="cnt">3</text>
+  <text x="482" y="623" class="sx">built-in roles and prompts</text>
+  <text x="482" y="637" class="sx">role library (user edits)</text>
+  <text x="482" y="651" class="sx">chief (lead routing)</text>
+  <rect x="646" y="586" width="170" height="74" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="650" y="594" width="4" height="58" rx="2" fill="#B5654A"/>
+  <text x="662" y="606" class="bt">sandbox</text><text x="800" y="606" text-anchor="end" class="cnt">1</text>
+  <text x="662" y="623" class="sx">commands without a shell</text>
+  <text x="662" y="637" class="sx">managed dev servers</text>
+  <text x="662" y="651" class="sx">limits, timeouts</text>
+  <rect x="826" y="586" width="188" height="74" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="830" y="594" width="4" height="58" rx="2" fill="#B5654A"/>
+  <text x="842" y="606" class="bt">workspace</text><text x="998" y="606" text-anchor="end" class="cnt">1</text>
+  <text x="842" y="623" class="sx">worker stages and integration</text>
+  <text x="842" y="637" class="sx">syntax checks · git · worktrees</text>
+  <text x="842" y="651" class="sx">preview · local environments</text>
+
+  <rect x="466" y="670" width="170" height="74" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="470" y="678" width="4" height="58" rx="2" fill="#B5654A"/>
+  <text x="482" y="690" class="bt">skills · memory</text><text x="620" y="690" text-anchor="end" class="cnt">2</text>
+  <text x="482" y="707" class="sx">SKILL.md library, pinning</text>
+  <text x="482" y="721" class="sx">scoped, versioned notes</text>
+  <rect x="646" y="670" width="170" height="74" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="650" y="678" width="4" height="58" rx="2" fill="#B5654A"/>
+  <text x="662" y="690" class="bt">mcp · browser</text><text x="800" y="690" text-anchor="end" class="cnt">2</text>
+  <text x="662" y="707" class="sx">MCP client and worker bridge</text>
+  <text x="662" y="721" class="sx">Playwright tab per agent</text>
+  <rect x="826" y="670" width="188" height="74" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="830" y="678" width="4" height="58" rx="2" fill="#B5654A"/>
+  <text x="842" y="690" class="bt">observers</text><text x="998" y="690" text-anchor="end" class="cnt">2</text>
+  <text x="842" y="707" class="sx">currency rates (FX)</text>
+  <text x="842" y="721" class="sx">run report</text>
+
+  <rect x="466" y="754" width="548" height="116" rx="8" fill="#FFFFFF" stroke="#B5654A" stroke-dasharray="5 3"/>
+  <text x="482" y="774" class="bt">How a plugin is described</text>
+  <text x="482" y="792" class="code">Manifest(id="tool.mcp", slot="tool", version="1.0.0", sdk=">=1.0,&lt;2",</text>
+  <text x="482" y="806" class="code">         provides=("tools.mcp",), requires=("mcp.client",), optional=("browser.sessions",),</text>
+  <text x="482" y="820" class="code">         permissions=("network", "exec"), emits=("browser_action",), start="eager")</text>
+  <text x="482" y="840" class="sx">The host registers its tools and run methods, refuses it if an SDK range or a requirement does not fit,</text>
+  <text x="482" y="854" class="sx">and a test checks that code looks up only capabilities its manifest declares.</text>
+
+  <line x1="535" y1="882" x2="535" y2="908" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="547" y="900" class="arrow-label">repositories · sessions · files · processes</text>
+
+  <!-- 5. Storage, SDK, foundation -->
+  <rect x="40" y="910" width="990" height="116" rx="10" fill="#EFEBF5" stroke="#7A65A8" stroke-width="2"/>
+  <text x="56" y="932" class="layer-label">Storage, SDK and foundation</text>
+  <text x="1014" y="932" text-anchor="end" class="layer-note">The bottom of the stack. storage may import sdk and foundation; sdk and foundation import neither.</text>
+  <rect x="56" y="944" width="310" height="68" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
+  <text x="70" y="964" class="bt">storage</text>
+  <text x="70" y="980" class="bx">ORM models · sessions · Alembic · repositories</text>
+  <text x="70" y="995" class="bx">SQLite in WAL mode: registry.db, octopus.db</text>
+  <rect x="376" y="944" width="440" height="68" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
+  <text x="390" y="964" class="bt">sdk</text>
+  <text x="390" y="980" class="bx">Manifest v2 · plugin contract · RunContext · actions and tool specs</text>
+  <text x="390" y="995" class="bx">LLM types · protocol and task contracts · evidence · project file boundary</text>
+  <rect x="826" y="944" width="188" height="68" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
+  <text x="840" y="964" class="bt">foundation</text>
+  <text x="840" y="980" class="bx">settings · logging</text>
+  <text x="840" y="995" class="bx">encryption of secrets</text>
+
+  <line x1="535" y1="1026" x2="535" y2="1048" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="1050" width="990" height="92" rx="10" fill="#FFFFFF" stroke="#8a8782" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="56" y="1072" class="layer-label">Outside the code</text>
+  <rect x="56" y="1084" width="186" height="46" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="149" y="1104" text-anchor="middle" class="bt">~/.octopus/registry.db</text>
+  <text x="149" y="1120" text-anchor="middle" class="sx">keys, MCP servers, plugins</text>
+  <rect x="254" y="1084" width="186" height="46" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="347" y="1104" text-anchor="middle" class="bt">&lt;folder&gt;/.octopus/</text>
+  <text x="347" y="1120" text-anchor="middle" class="sx">companies, runs, events</text>
+  <rect x="452" y="1084" width="186" height="46" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="545" y="1104" text-anchor="middle" class="bt">Project folder</text>
+  <text x="545" y="1120" text-anchor="middle" class="sx">the agents' sandbox</text>
+  <rect x="650" y="1084" width="186" height="46" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="743" y="1104" text-anchor="middle" class="bt">Model APIs</text>
+  <text x="743" y="1120" text-anchor="middle" class="sx">Azure OpenAI · OpenCode CLI</text>
+  <rect x="848" y="1084" width="166" height="46" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="931" y="1104" text-anchor="middle" class="bt">Local processes</text>
+  <text x="931" y="1120" text-anchor="middle" class="sx">MCP servers · Chromium</text>
+
+  <text x="40" y="1170" class="foot">import-linter (make lint-arch): layers main > bootstrap > channels > application > (kernel | plugins) > storage > (sdk | foundation),</text>
+  <text x="40" y="1188" class="foot">and the 11 plugin packages are independent of each other. Plugins reach one another with deps.require("capability").</text>
+  <text x="40" y="1206" class="foot">Dashed boxes are planned or outside the code.</text>
+
+  <!-- ===================== Right column ===================== -->
+  <!-- A. lifecycle -->
+  <rect x="1060" y="100" width="350" height="268" rx="10" fill="#FFFFFF" stroke="#66839A" stroke-width="1.5"/>
+  <text x="1076" y="124" class="panel-title">Plugin lifecycle</text>
+  <g fill="#E9EEF3" stroke="#66839A">
+    <rect x="1076" y="138" width="120" height="22" rx="11"/>
+    <rect x="1076" y="166" width="120" height="22" rx="11"/>
+    <rect x="1076" y="194" width="120" height="22" rx="11"/>
+    <rect x="1076" y="222" width="120" height="22" rx="11"/>
+    <rect x="1076" y="250" width="120" height="22" rx="11" fill="#EEF2E8" stroke="#6B8440"/>
+    <rect x="1076" y="278" width="120" height="22" rx="11"/>
+  </g>
+  <text x="1136" y="153" text-anchor="middle" class="pill">validate</text>
+  <text x="1136" y="181" text-anchor="middle" class="pill">resolve order</text>
+  <text x="1136" y="209" text-anchor="middle" class="pill">register</text>
+  <text x="1136" y="237" text-anchor="middle" class="pill">start</text>
+  <text x="1136" y="265" text-anchor="middle" class="pill">ok · degraded</text>
+  <text x="1136" y="293" text-anchor="middle" class="pill">stop</text>
+  <g stroke="#66839A" stroke-width="1.5" marker-end="url(#arrowSm)">
+    <line x1="1136" y1="160" x2="1136" y2="165"/>
+    <line x1="1136" y1="188" x2="1136" y2="193"/>
+    <line x1="1136" y1="216" x2="1136" y2="221"/>
+    <line x1="1136" y1="244" x2="1136" y2="249"/>
+    <line x1="1136" y1="272" x2="1136" y2="277"/>
+  </g>
+  <text x="1206" y="153" class="pt">manifest, SDK range, graph</text>
+  <text x="1206" y="181" class="pt">providers before users</text>
+  <text x="1206" y="209" class="pt">services, tools, run methods</text>
+  <text x="1206" y="237" class="pt">eager now, lazy on first use</text>
+  <text x="1206" y="265" class="pt">health() reported in Settings</text>
+  <text x="1206" y="293" class="pt">reverse order; runs stop first</text>
+  <text x="1076" y="322" class="pt">Switching a plugin off removes what it added.</text>
+  <text x="1076" y="337" class="pt">Its dependents are listed and switched off with it</text>
+  <text x="1076" y="352" class="pt">on request. The choice is saved and applied at boot.</text>
+
+  <!-- B. Rules -->
+  <rect x="1060" y="384" width="350" height="226" rx="10" fill="#FFFFFF" stroke="#7A65A8" stroke-width="1.5"/>
+  <text x="1076" y="408" class="panel-title">What is enforced</text>
+  <text x="1076" y="430" class="ph">import-linter, no ignore list</text>
+  <text x="1086" y="446" class="pt">• layers: a lower layer never imports a higher one</text>
+  <text x="1086" y="461" class="pt">• kernel and plugins do not import each other</text>
+  <text x="1086" y="476" class="pt">• the 11 plugin packages do not import each other</text>
+  <text x="1076" y="498" class="ph">Tests</text>
+  <text x="1086" y="514" class="pt">• manifests declare every capability the code looks up</text>
+  <text x="1086" y="529" class="pt">• every capability a manifest provides is registered</text>
+  <text x="1086" y="544" class="pt">• runs complete with a tool plugin or the company</text>
+  <text x="1094" y="558" class="pt">workflow switched off</text>
+  <text x="1086" y="573" class="pt">• 62 golden files: prompts, tools, events, OpenAPI</text>
+  <text x="1086" y="590" class="pt">• required plugins refuse to be switched off</text>
+
+  <!-- C. Event log -->
+  <rect x="1060" y="626" width="350" height="176" rx="10" fill="#FFFFFF" stroke="#66839A" stroke-width="1.5"/>
+  <text x="1076" y="650" class="panel-title">Event log</text>
+  <text x="1076" y="672" class="pt">Publishers wait until their event is committed</text>
+  <text x="1076" y="687" class="pt">and delivered, so order and durability are as before.</text>
+  <text x="1076" y="707" class="pt">Events published while a write runs share one commit.</text>
+  <text x="1076" y="722" class="pt">200 events per run, 1 to 8 runs at once, SQLite:</text>
+  <text x="1076" y="737" class="ph">about 2,900 events/s, against about 1,300/s</text>
+  <text x="1076" y="752" class="ph">with one commit per event.</text>
+  <text x="1076" y="772" class="pt">A slow WebSocket client is flagged and re-reads the log</text>
+  <text x="1076" y="787" class="pt">from its last sequence number. Nothing is dropped silently.</text>
+
+  <!-- D. Known limits -->
+  <rect x="1060" y="818" width="350" height="208" rx="10" fill="#FFFFFF" stroke="#B5654A" stroke-width="1.5"/>
+  <text x="1076" y="842" class="panel-title">Known limits</text>
+  <text x="1086" y="864" class="pt">• Some routes import plugin libraries directly (git,</text>
+  <text x="1094" y="878" class="pt">org templates, sandbox processes), so those stay</text>
+  <text x="1094" y="892" class="pt">reachable with the plugin off.</text>
+  <text x="1086" y="910" class="pt">• Plugins are Python packages in this repository.</text>
+  <text x="1094" y="924" class="pt">No discovery from the environment, no separate process.</text>
+  <text x="1086" y="942" class="pt">• No per-plugin configuration schema yet.</text>
+  <text x="1086" y="960" class="pt">• Calls into a plugin are not wrapped in a timeout or</text>
+  <text x="1094" y="974" class="pt">circuit breaker. The host times start, stop and health.</text>
+  <text x="1086" y="992" class="pt">• Channels apply at the next start (routes mount once).</text>
+  <text x="1086" y="1010" class="pt">• Run recovery uses the saved run state, not the log alone.</text>
+
+  <!-- E. Legend -->
+  <rect x="1060" y="1042" width="350" height="164" rx="10" fill="#FFFFFF" stroke="#8a8782" stroke-width="1.5"/>
+  <text x="1076" y="1066" class="panel-title">Legend</text>
+  <rect x="1076" y="1078" width="34" height="20" rx="5" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="1122" y="1092" class="pt">Fixed part of the kernel</text>
+  <rect x="1076" y="1106" width="34" height="20" rx="5" fill="#FFFFFF" stroke="#B5654A"/>
+  <rect x="1080" y="1110" width="4" height="12" rx="2" fill="#B5654A"/>
+  <text x="1122" y="1120" class="pt">Plugin package; the number is how many plugins it holds</text>
+  <rect x="1076" y="1134" width="34" height="20" rx="5" fill="#FFFFFF" stroke="#8a8782" stroke-dasharray="4 3"/>
+  <text x="1122" y="1148" class="pt">Planned, or outside the code</text>
+  <line x1="1076" y1="1172" x2="1110" y2="1172" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="1122" y="1176" class="pt">A layer calls the layer below it</text>
+  <line x1="1076" y1="1194" x2="1110" y2="1194" stroke="#66839A" stroke-width="2" marker-start="url(#arrowBoth)" marker-end="url(#arrowBoth)"/>
+  <text x="1122" y="1198" class="pt">Kernel and plugins meet through the host's registries</text>
 </svg>

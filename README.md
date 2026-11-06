@@ -162,10 +162,11 @@ flowchart LR
   subgraph API["FastAPI (local)"]
     REST["REST /api/v1<br/>(OpenAPI → TS types)"]
     WS["WebSockets<br/>runs · chats"]
-    ORC["Orchestrator<br/>one runtime per run"]
-    BUS["Event bus<br/>persist + fan-out"]
+    ORC["Kernel<br/>one runtime per run"]
+    BUS["Event log<br/>group commit + fan-out"]
+    PLG["Plugins<br/>providers · tools · workflows · roles"]
     LLM["Azure OpenAI v1"]
-    TOOLS["Tools<br/>files · sandbox · MCP · browser"]
+    TOOLS["Tool plugins<br/>files · sandbox · MCP · browser"]
   end
   PW["Playwright MCP<br/>127.0.0.1"]
   REG[("~/.octopus/registry.db<br/>keys · MCP · projects")]
@@ -176,17 +177,18 @@ flowchart LR
   REST --> ORC
   WS <--> BUS
   ORC --> BUS --> PDB
-  ORC --> LLM
-  ORC --> TOOLS --> DIR
+  ORC --> PLG
+  PLG --> LLM
+  PLG --> TOOLS --> DIR
   TOOLS --> PW
   REST --> REG & PDB
 ```
 
-Agents reply with a validated JSON action schema. The server only delivers messages along channels, and every action goes through the permission gate. Details (the orchestrator loop, protocols, continuation, pricing and the security model) are in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+Agents reply with a validated JSON action schema. The server only delivers messages along channels, and every action goes through the permission gate. Octopus is a small kernel plus plugins; each one can be switched off in **Settings → Plugins**. Details (the kernel, the plugin host, the run loop, protocols, the event log and the security model) are in **[ARCHITECTURE.md](ARCHITECTURE.md)**, and the guide for writing a plugin is **[docs/plugins.md](docs/plugins.md)**.
 
 ```
 octopus/
-├─ backend/app/{api,core,db,models,schemas,services,orchestrator,llm,tools,prompts}
+├─ backend/app/{sdk,foundation,storage,kernel,plugins,application,channels}   main.py and bootstrap.py compose them
 │  ├─ migrations/{registry,project}   Alembic (applied automatically)
 │  └─ tests/                          pytest: routing, protocols, limits, security, MCP, teams, scripted company runs, continuation
 ├─ frontend/src/{components,features/{canvas,chat,runs,artifacts,settings,workspaces,guide,onboarding},hooks,stores,lib,types}
@@ -196,7 +198,8 @@ octopus/
 ## Development
 
 ```bash
-make test-backend     # pytest (68 tests)
+make test-backend     # pytest
+make lint-arch        # import-linter: layers and plugin independence
 make test-frontend    # tsc strict + vitest
 make gen-api          # regenerate the typed API client after changing backend schemas
 ```

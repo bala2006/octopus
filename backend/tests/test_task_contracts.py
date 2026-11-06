@@ -15,6 +15,7 @@ from app.sdk.contracts import Assignment, ExecutionPolicy
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
 from app.sdk.task_contracts import TaskContract, validate_task
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, start_run, wait_status
+from test_runtime_recovery_regressions import inspection_runtime  # noqa: F401 (a pytest fixture is imported by name)
 
 
 def test_graph_and_terminal_transitions_reject_invalid_state():
@@ -82,7 +83,7 @@ async def test_task_scope_blocks_outside_files_and_arbitrary_shell(client, works
 
 
 @pytest_asyncio.fixture
-async def scoped_manager(inspection_runtime):
+async def scoped_manager(inspection_runtime):  # noqa: F811
     runtime = inspection_runtime
     child = AgentSpec.from_dict(agent("child", "Child", reports_to="reviewer"), "generic")
     runtime.agents["child"] = child
