@@ -76,7 +76,7 @@ in `ask` the change waits for approval before it is saved to the company, and in
 - **Review** (`workflows/review.py`). A reviewer answers a request with a verdict and comments.
 - **Loop detection** (`workflows/protocols.py`, `LoopDetector`). Shared `Verdict` type, plus detection of agents that
   repeat the same question. Escalation is handled by the run.
-- **Task board.** The task state (`workflows/task_board.py`) is in workflows. The blackboard, the nudging and the task action handler (`orchestrator/handlers/tasks.py`) stay in the orchestrator. `workflows/tasks.py` only discovers developer commands from project manifests.
+- **Task board.** The task state, the `update_task_board` handler and the task rows (through `TaskRepository` in `db/repositories.py`) are in `workflows/task_board.py`. The blackboard and the nudging stay in `orchestrator/board.py`, because they drive run behavior. `workflows/tasks.py` only discovers developer commands from project manifests.
 
 ## 6. Company workflow, org and roles
 
@@ -118,7 +118,7 @@ in `ask` the change waits for approval before it is saved to the company, and in
 
 Every component has a manifest (`core/manifest.py`): an id such as `capability.sandbox`, a layer, a version, the
 capabilities it provides and requires, and a status (`built`, `partly`, or `planned`). `core/registry.py` checks
-dependencies, detects cycles and gives the start order. `core/builtin.py` is the catalog of 33 built-in manifests. The
+dependencies, detects cycles and gives the start order. `core/builtin.py` is the catalog of 44 built-in manifests: 33 components and 11 tool families (`tool.*`). The
 registry table stores enabled state and version. Nothing reads that table yet.
 
 The frontend mirrors this. `frontend/src/plugins/registry.ts` lists pages and navigation entries, and `routes.tsx`

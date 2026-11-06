@@ -338,40 +338,51 @@ Planned after Phase 8, with its own plan. The golden files from Phase 0 are the 
 
 ## 9. Status on this branch
 
-Module paths in sections 2 to 6 are the plan's targets. Where the code differs, this section records it. Each gate is
-checked against the commit that adds this section.
+Sections 2 to 6 show the plan's target paths. This section records what the code does now.
 
-| Phase | State | Notes |
-|---|---|---|
-| 0 Baseline | Partly | Golden files (62), visual harness, 36-PNG baseline outside the repo. The exit needs your sign-off on the screenshot set (O3, O4), which is pending. |
-| 1 Core and rules | Done | Manifests, registry, 33-entry catalog, `0006_plugins`, import-linter. |
-| 2 Kernel | Done | `engine.py` is 652 lines (target under 800). Policy gate, contracts, run manager, execution service and handler modules are in place. Mixins are removed in Phase 5. The exit's kill-switch and restart-recovery tests exist and pass: `test_limits.py` (pause, resume, step mode, stop), `test_managed_commands.py` (timeout and stop), `test_opencode.py` (stop cancels, proxy pause), `test_runtime_store.py` (recovery does not replay, needs acknowledgement), and `test_runtime_recovery_regressions.py`. 47 selected tests pass. |
-| 3 Capabilities | Partly | Models, workspace, sandbox, browser, MCP, memory, skills and tools are moved into `app/capabilities/`. The engine imports no capability module (import-linter checks it). Action dispatch moved from `engine.py` into the family-grouped registry `orchestrator/handlers/registry.py` (23 actions, 11 families); the goldens are unchanged. Not done: each family as a `ToolPlugin` with its own manifest, storage repositories, and handler modules still import capability modules directly. |
-| 4 Agents | Done | Role plugins (`agents/roles`), user roles (`agents/user_roles.py`), chief (`agents/chief.py`). The custom role group includes `ceo`, `moderator`, `proposer` and `roles_org` (42 roles). This grouping is not confirmed. |
-| 5 Workflows | Partly | Debate (`boardroom.py`), review (`review.py`), company workflow, org and hiring are done. `TeamMixin` and `WorkflowMixin` are now services (`OrgService`, `CompanyWorkflow`). Routing moved to `workflows/routing.py` (`orchestrator/permissions.py` is removed). Task state moved to `workflows/task_board.py`. Not done: the `UpdateTaskBoard` handler and the blackboard stay in the orchestrator, and `workflows/tasks.py` is command discovery, not the board. |
-| 6 Channels | Partly | API, WebSocket, web shell and CLI plugins; chat apps are a `planned` placeholder. Not done: the start scripts are not moved into `channels/cli`. The exit needs G7 on all three start paths, which is not verified. |
-| 7 Frontend | Partly | `frontend/src/plugins/registry.ts` drives the routes. The exit needs G6 green, which is not met (five run-detail screens differ). |
-| 8 Hardening | Partly | Shims removed, import-linter runs with no ignore list, no dead modules found, `ARCHITECTURE.md` rewritten, `docs/plugins.md` added. The exit needs all gates green, which is not met (G6 red, G7 partial). |
+### Decisions
 
-Gate results on this branch:
+- **Phase 0 baseline:** accepted as the reference by the maintainer. Three run screens do not match it and are parked (see G6).
+- **Phase 4 custom role group:** confirmed. The four named groups are fixed, and every other built-in role goes to the custom group.
+- **O1:** removal of `DirectoryPicker.tsx` and `project_memory.py` (from #74) confirmed. No references remain in this branch.
+- **O2:** CD publishing is unchanged. It runs after a successful CI run on `main`, on version tags, and on manual dispatch.
+- **O3:** screenshot PNGs stay outside the repo at `/projects/sandbox/visual-baseline`, kept as a CI artifact.
+- **Phase 6 dev scripts:** they stay in `scripts/`, and the start scripts stay at the repo root. This is a recorded deviation from the plan.
+- **Retargeting PR #76:** it moves to `main` after #75 merges.
+- **G7 live check:** the maintainer runs the start paths on their own machine.
 
-- G1 backend: 520 passed, 2 skipped. `tests/test_thinking.py::test_long_call_that_keeps_streaming_is_not_cut_off` failed
-  once in six full runs since the mixin change. It uses a 0.4 s idle timeout and passes when run alone. The failure is a timing flake, not a
-  regression.
-- G2 golden: all 62 files regenerate with no diff. Two changes were approved before this section: the additive `plugins`
-  table, and the streamed-status counting in `call_llm_result` (`dff75c1`), which lowers how often the live "Writing…"
-  label updates.
-- G3 import-linter: 3 contracts kept, 0 ignored.
-- G4 frontend: typecheck clean, 109 of 109 tests, production build succeeds.
-- G5 OpenAPI: golden `openapi.json` unchanged. `npm run gen:api` reproduces `api.gen.ts` with no diff.
-- G6 screenshots: 33 of 36 captures match the baseline when captured with the baseline's Chromium (156.0.8078.4, headless shell `chromium_headless_shell-1248`). Playwright's default build (157) gave five differing run screens; the wrong browser explains those. Three still differ, the same way on every capture here: `run-approval` at 1440x900 and 1024x768, and `run-timeline` at 1024x768. The differing pixels are the background tint of an agent row that the run view highlights for four seconds after it changes (`bg-steel/5`, `TeamView.tsx`). Every capture here omits that tint, including captures from the baseline commit (`701641a`), so the baseline was taken under a timing this environment does not reproduce. Decision pending.
-- G7 start path: the app boots in-process with the real lifespan (migrations and capability install). The UI returns
-  200, the OpenAPI schema lists 112 paths, and sampled API routes return 200. No live server was started from the sandbox
-  shell. Scripted runs are covered by the test suite.
+### Phases
 
-Timing (scripted golden export, median of three runs, from commit `4063c76` and the current branch): 3.39 s before and
-3.44 s after. The difference is within noise. The before commit still has the wall-clock status cadence that
-`dff75c1` replaced.
+| Phase | State | Done | Still open |
+|---|---|---|---|
+| 0 Baseline | Done, parked item | Golden files (62), visual harness, baseline of 36 PNGs. Baseline accepted by the maintainer. | G6: three run screens (see below). |
+| 1 Core and rules | Done | Manifests, registry, catalog of 44 entries (33 components, 11 tool families), migration `0006_plugins`, import-linter, `make lint-arch`. | The registry is not read at startup. Manifests have no events, config or lifecycle fields. |
+| 2 Kernel | Done | `engine.py` is 652 lines (target under 800). Policy gate, contracts, run manager, execution service, handler modules. Kill-switch and restart-recovery tests exist and pass (47 selected). | None. |
+| 3 Capabilities | Partly | Models, workspace, sandbox, browser, MCP, memory, skills and tools are in `app/capabilities/`. The engine imports no capability module (import-linter). Action dispatch is a family-grouped registry (`handlers/registry.py`). Each family is a `ToolPlugin` with its own catalog manifest (11 families). The first storage repository is `TaskRepository` (`app/db/repositories.py`). | Storage repositories for the other tables: about 49 modules still use sessions directly (API 14, orchestrator 11, capabilities 10, workflows 6, services 3, core 3, channels 1, agents 1). Handler modules still import capability modules directly. |
+| 4 Agents | Done | Role plugins (`agents/roles`), user roles (`agents/user_roles.py`), chief (`agents/chief.py`). Custom group confirmed. | None. |
+| 5 Workflows | Done, with two notes | Debate (`boardroom.py`), review (`review.py`), company workflow (`CompanyWorkflow`), org and hiring (`OrgService`). Mixins are gone. Routing is in `workflows/routing.py`. Task state, the `UpdateTaskBoard` handler and task persistence are in `workflows/task_board.py`. | Notes: the blackboard and nudging stay in `orchestrator/board.py` because they drive run behavior. `workflows/tasks.py` is command discovery, not the board. Workflows import orchestrator types, which import-linter does not check. |
+| 6 Channels | Partly | API, WebSocket, web shell and CLI channels. `chat_apps` is a `planned` manifest with no routes. `main.py` mounts the channels. | The start scripts and dev scripts stay where they are (decision). G7 on the three start paths is run by the maintainer. |
+| 7 Frontend | Partly | `frontend/src/plugins/registry.ts` builds the routes. Typed client in sync (G5). | G6 is not fully green (see below). |
+| 8 Hardening | Partly | Shims removed. import-linter runs three contracts with no ignore list. `ARCHITECTURE.md` and `docs/plugins.md` updated. Timing recorded. | G6 (three screens) and G7 (live start paths). Plan sections 2 to 6 still show target paths. |
 
-Open items: O1 (confirm the #74 removals), O2 (GHCR publish on merge to `main`), O3 (where the PNG baseline is stored),
-and O4 (per-screen thresholds, which the G6 result depends on).
+### Gates at `b79661b`
+
+- **G1 backend:** 520 passed, 2 skipped. The ruff error gate is clean. One timing test (`test_thinking`) failed once in six full runs, and it passes alone.
+- **G2 golden:** all 62 files regenerate with no diff. The approved changes are the `plugins` table (`0006`) and the status-count change in `dff75c1`.
+- **G3 import-linter:** 3 contracts kept, 0 ignored.
+- **G4 frontend:** typecheck clean, 109 of 109 tests, production build. Last run at `ed16da4`. No frontend source has changed since.
+- **G5 OpenAPI:** the golden `openapi.json` is unchanged. `npm run gen:api` reproduces `api.gen.ts` with no diff.
+- **G6 screenshots:** 33 of 36 captures match the baseline when captured with the baseline's browser (Chromium 156.0.8078.4, the `chromium_headless_shell-1248` build). The harness takes `--chromium` or `OCTOPUS_VISUAL_CHROMIUM`. Playwright's default browser (157) renders the run screens differently, which explains the earlier failures.
+  - Still different, on every capture here: `run-approval` at 1440x900 and 1024x768, and `run-timeline` at 1024x768. The difference is a background tint on one agent row that the run view highlights for four seconds after it changes (`bg-steel/5`, `TeamView.tsx`). Every capture here omits the tint, including captures from the baseline commit `701641a`, so the baseline was taken under a timing this environment does not reproduce.
+  - **Parked by the maintainer.** The options (threshold, or replacing the baseline for those three) are still open.
+- **G7 start path:** the app boots in-process with the real lifespan (migrations and capability install). The UI returns 200, OpenAPI lists 112 paths, and sampled API routes return 200. No live server was run from the sandbox. The maintainer runs `make start` (and `make dev`) and reports the result.
+
+### Timing
+
+The scripted golden export takes a median of 3.39 s at the Phase 0 commit (`4063c76`) and 3.44 s on this branch. That difference is within noise.
+
+### Known issues
+
+- The `test_thinking` timing test (0.4 s idle timeout) is flaky under load.
+- Ruff warnings outside the error gate (unused imports and redefinitions in tests). They predate this branch.
+- The approval default test assumed a fresh registry database. It now checks the rule and the persistence instead. Fixed in `b79661b`.
