@@ -11,13 +11,14 @@ loaded with the ``use_skill`` tool when needed.
 """
 from __future__ import annotations
 
+from app.db.repositories import UserSkillRepository
+
 import re
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 BUILTIN_DIR = Path(__file__).resolve().parents[2] / "skills"
@@ -98,9 +99,8 @@ def project_skills(root: Path) -> dict[str, Skill]:
 
 
 async def user_rows(rdb: AsyncSession, user_id: str) -> list[Any]:
-    from app.models import UserSkill
 
-    return list((await rdb.execute(select(UserSkill).where(UserSkill.user_id == user_id))).scalars().all())
+    return await UserSkillRepository(rdb).for_user(user_id)
 
 
 def from_row(row: Any) -> Skill:

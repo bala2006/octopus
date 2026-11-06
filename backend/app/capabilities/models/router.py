@@ -5,16 +5,15 @@ import asyncio
 import random
 from collections.abc import AsyncIterator, Callable
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import ProviderKeyRepository
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import decrypt_secret
 from app.capabilities.models.base import LLMChunk, LLMError, LLMProvider, LLMRequest
 from app.capabilities.models.azure_v1 import AzureV1Provider, azure_v1_target
 from app.capabilities.models.litellm_provider import LiteLLMProvider
-from app.models import ProviderKey
 
 log = get_logger("llm")
 
@@ -49,10 +48,10 @@ async def resolve_credentials(db: AsyncSession, user_id: str, provider: str) -> 
     ``db`` must be a *registry* session.
     """
     s = get_settings()
-    row = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user_id, ProviderKey.provider == provider))).scalar_one_or_none()
+    row = await ProviderKeyRepository(db).get(user_id, provider)
     if row is None and provider == "azure":  # credentials entered on the old "Azure AI Foundry" card
         for legacy in LEGACY_AZURE_ROWS:
-            row = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user_id, ProviderKey.provider == legacy))).scalar_one_or_none()
+            row = await ProviderKeyRepository(db).get(user_id, legacy)
             if row is not None:
                 break
     key = decrypt_secret(row.encrypted_key) if row and row.encrypted_key else None

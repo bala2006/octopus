@@ -8,8 +8,8 @@ import time
 from typing import Any
 
 from fastapi import WebSocket
-from sqlalchemy import delete, select
 
+from app.db.repositories import AgentMemoryRepository, AgentRepository, ChatSessionRepository, CompanyRepository, MessageRepository
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
 from app.core.config import get_settings
@@ -72,26 +72,25 @@ class ChatConnection:
 
     async def _context(self) -> tuple[ChatSession, Agent, Company]:
         async with self.sf() as db:
-            s = await db.get(ChatSession, self.session_id)
+            s = await ChatSessionRepository(db).get(self.session_id)
             if s is None or s.agent_id is None:
                 raise LLMError("This session has no agent", retryable=False)
-            agent = await db.get(Agent, s.agent_id)
-            company = await db.get(Company, s.company_id)
+            agent = await AgentRepository(db).get(s.agent_id)
+            company = await CompanyRepository(db).get(s.company_id)
             if agent is None or company is None:
                 raise LLMError("Agent no longer exists", retryable=False)
             return s, agent, company
 
     async def regenerate(self) -> None:
         async with self.sf() as db:
-            msgs = (await db.execute(select(Message).where(Message.session_id == self.session_id, Message.run_id.is_(None))
-                                     .order_by(Message.created_at.desc()).limit(10))).scalars().all()
+            msgs = await MessageRepository(db).chat_for_session(self.session_id, newest_first=True, limit=10)
             last_user = next((m for m in msgs if m.sender == "user"), None)
             if last_user is None:
                 await self.send("error", {"message": "Nothing to regenerate"})
                 return
             removed = [m.id for m in msgs if m.sender == "agent" and m.created_at >= last_user.created_at]
             if removed:
-                await db.execute(delete(Message).where(Message.id.in_(removed)))
+                await MessageRepository(db).delete_ids(removed)
                 await db.commit()
         for mid in removed:
             await self.send("message_deleted", {"id": mid})
@@ -106,9 +105,9 @@ class ChatConnection:
         async with self.sf() as db:
             m = Message(id=new_id(), session_id=self.session_id, sender="user", to_agent_id=agent.id, type="chat", content=full,
                         meta_json={"attachments": att_meta, "display": content}, read=True, created_at=utcnow())
-            db.add(m)
+            MessageRepository(db).add(m)
             if s.title in ("New chat", "") and content:
-                s2 = await db.get(ChatSession, self.session_id)
+                s2 = await ChatSessionRepository(db).get(self.session_id)
                 if s2:
                     s2.title = content[:60]
             await db.commit()
@@ -117,8 +116,7 @@ class ChatConnection:
 
     async def _history(self, agent: Agent) -> list[dict[str, str]]:
         async with self.sf() as db:
-            msgs = (await db.execute(select(Message).where(Message.session_id == self.session_id, Message.run_id.is_(None))
-                                     .order_by(Message.created_at))).scalars().all()
+            msgs = await MessageRepository(db).chat_for_session(self.session_id)
         conv = [{"role": "user" if m.sender == "user" else "assistant", "content": m.content} for m in msgs if m.type in ("chat", "answer")]
         if len(conv) > HISTORY_VERBATIM:
             older = conv[:-HISTORY_VERBATIM]
@@ -132,7 +130,7 @@ class ChatConnection:
     async def generate(self) -> None:
         s, agent, company = await self._context()
         async with self.sf() as db:
-            mem = (await db.execute(select(AgentMemory).where(AgentMemory.agent_id == agent.id))).scalars().all()
+            mem = await AgentMemoryRepository(db).for_agent(agent.id)
         memory = {r.key: r.value for r in mem}
         tools = agent.tools_json or {}
         mgr = next((x for x in company.agents if x.id == agent.reports_to), None)
@@ -216,7 +214,7 @@ class ChatConnection:
         async with self.sf() as db:
             m = Message(id=mid, session_id=self.session_id, sender="agent", from_agent_id=agent.id, type="chat",
                         content=text or "_(stopped)_", meta_json=meta, read=True, created_at=utcnow())
-            db.add(m)
+            MessageRepository(db).add(m)
             await db.commit()
         await self.send("stream_end", {"message": msg_out(m)})
 
@@ -241,11 +239,11 @@ class ChatConnection:
                 if not key:
                     return "error: key required"
                 async with self.sf() as db:
-                    row = (await db.execute(select(AgentMemory).where(AgentMemory.agent_id == agent.id, AgentMemory.key == key))).scalar_one_or_none()
+                    row = await AgentMemoryRepository(db).by_key(agent.id, key)
                     if row:
                         row.value = value
                     else:
-                        db.add(AgentMemory(agent_id=agent.id, key=key, value=value))
+                        AgentMemoryRepository(db).add(AgentMemory(agent_id=agent.id, key=key, value=value))
                     await db.commit()
                 memory[key] = value
                 return f"saved '{key}'"

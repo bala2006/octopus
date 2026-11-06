@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import CompanyRepository, UserRepository, WorkspaceRepository
 from app.core.config import get_settings
 from app.core.security import decode_access_token, hash_password
 from app.db.base import new_id, utcnow
@@ -19,15 +19,15 @@ from app.models import Company, User, Workspace
 
 async def get_or_create_single_user(db: AsyncSession) -> User:
     s = get_settings()
-    user = (await db.execute(select(User).where(User.email == s.single_user_email))).scalar_one_or_none()
+    user = await UserRepository(db).by_email(s.single_user_email)
     if user is None:
         user = User(email=s.single_user_email, password_hash=hash_password(new_id()))
-        db.add(user)
+        UserRepository(db).add(user)
         try:
             await db.commit()
         except IntegrityError:  # a concurrent first request created it a moment ago
             await db.rollback()
-            return (await db.execute(select(User).where(User.email == s.single_user_email))).scalar_one()
+            return await UserRepository(db).by_email(s.single_user_email, required=True)
         await db.refresh(user)
     return user
 
@@ -43,7 +43,7 @@ async def resolve_user(db: AsyncSession, token: str | None) -> User | None:
     if token:
         uid = decode_access_token(token)
         if uid:
-            user = await db.get(User, uid)
+            user = await UserRepository(db).get(uid)
             if user:
                 return user
     if get_settings().single_user_mode:
@@ -71,7 +71,7 @@ class ProjectCtx:
 
 
 async def load_project(workspace_id: str, user: User, rdb: AsyncSession, *, touch: bool = False) -> ProjectCtx:
-    ws = await rdb.get(Workspace, workspace_id)
+    ws = await WorkspaceRepository(rdb).get(workspace_id)
     if ws is None or ws.user_id != user.id:
         raise HTTPException(404, "Workspace not found")
     root = Path(ws.path)
@@ -97,7 +97,7 @@ async def get_pdb(ctx: ProjectCtx = Depends(project_ctx)) -> AsyncIterator[Async
 
 
 async def owned_company(company_id: str, db: AsyncSession, user: User) -> Company:
-    company = await db.get(Company, company_id)
+    company = await CompanyRepository(db).get(company_id)
     if company is None or company.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Company not found")
     return company

@@ -12,9 +12,9 @@ import re
 from dataclasses import replace
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import UserRoleRepository
 from app.prompts.roles import RoleTemplate, _tools, all_roles
 
 CATEGORIES = ["Leadership", "Product", "Design", "Engineering", "Quality", "Operations", "Security", "Research", "Data",
@@ -63,9 +63,8 @@ def _apply(base: RoleTemplate | None, row: Any) -> RoleTemplate:
 
 
 async def user_rows(rdb: AsyncSession, user_id: str) -> list[Any]:
-    from app.models import UserRole
 
-    return list((await rdb.execute(select(UserRole).where(UserRole.user_id == user_id))).scalars().all())
+    return await UserRoleRepository(rdb).for_user(user_id)
 
 
 def merge(rows: list[Any]) -> dict[str, RoleTemplate]:

@@ -21,6 +21,7 @@ from collections import Counter
 from typing import Any
 
 
+from app.db.repositories import CompanyRepository, RunRepository
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.policy import PolicyGate
@@ -685,13 +686,12 @@ class RunRuntime:
 
 async def _load_run(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
     """Read a run row and its owner's user id from the project database."""
-    from app.models import Company
 
     async with project.sf() as db:
-        run = await db.get(Run, run_id)
+        run = await RunRepository(db).get(run_id)
         if run is None:
             return None
-        company = await db.get(Company, run.company_id)
+        company = await CompanyRepository(db).get(run.company_id)
         return run, company.user_id if company else ""
 
 
