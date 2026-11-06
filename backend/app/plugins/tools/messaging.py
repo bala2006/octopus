@@ -6,18 +6,18 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from app.storage.session import registry_factory
-from app.plugins.providers.base import LLMError, LLMRequest
-from app.plugins.providers.router import prepare_request, stream_with_retry
+from app.sdk.llm import LLMError, LLMRequest
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec, clip
+from app.sdk.agents import AgentSpec
+from app.sdk.text import clip
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT
-from app.sdk.states import OPEN_TASK_STATES
-from app.plugins.workflows.routing import allowed_recipients, find_channel, rejection_reason, EdgeSpec
-from app.plugins.workflows.boardroom import DebateState, debate_decided_externally, debate_on_message
-from app.plugins.workflows.review import ReviewState, infer_verdict, review_on_request, review_on_result
+from app.sdk.task_contracts import OPEN_TASK_STATES
+from app.sdk.routing import allowed_recipients, find_channel, rejection_reason, EdgeSpec
+from app.sdk.protocols import DebateState
+from app.sdk.protocols import ReviewState
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
 DEBATE_PROTOCOL_TYPES = {"proposal", "critique", "objection", "agreement", "decision"}
@@ -34,7 +34,7 @@ def judge_verdict(text: str) -> bool | None:
     return True if t[0] == "YES" else False if t[0] == "NO" else None
 
 
-async def reject(rt: RunRuntime, agent: AgentSpec, to_id: str | None, a: A.SendMessage, reason: str, *, retry: bool = True) -> None:
+async def reject(rt: RunContext, agent: AgentSpec, to_id: str | None, a: A.SendMessage, reason: str, *, retry: bool = True) -> None:
     """``retry=False`` for loop / channel-limit rejections: the agent sees the notice next time it is woken, but the
         rejection itself does not buy it another turn (that just turned a loop into a spin)."""
     rt.rejections += 1
@@ -43,7 +43,7 @@ async def reject(rt: RunRuntime, agent: AgentSpec, to_id: str | None, a: A.SendM
                                          "reason": reason, "content": a.content[:300]})
 
 
-async def act_send_message(rt: RunRuntime, agent: AgentSpec, a: A.SendMessage) -> None:
+async def act_send_message(rt: RunContext, agent: AgentSpec, a: A.SendMessage) -> None:
     to = a.to.strip()
     if to.lower() in ("all", "everyone", "broadcast", "team", "@all"):
         if a.type == "question":
@@ -65,7 +65,7 @@ async def act_send_message(rt: RunRuntime, agent: AgentSpec, a: A.SendMessage) -
     await rt._send_one(agent, tid, a)
 
 
-async def _send_one(rt: RunRuntime, agent: AgentSpec, tid: str, a: A.SendMessage) -> None:
+async def _send_one(rt: RunContext, agent: AgentSpec, tid: str, a: A.SendMessage) -> None:
     if not rt.agents[tid].active:
         await rt.reject(agent, tid, a, f"{rt.names[tid]} is inactive (deactivated). Use list_agents to find an active teammate.")
         return
@@ -90,9 +90,11 @@ async def _send_one(rt: RunRuntime, agent: AgentSpec, tid: str, a: A.SendMessage
     notices: dict[str, str] = {}
     protocol_event: dict[str, Any] | None = None
     activating = False
-    if edge.type == "debate" and a.type in DEBATE_PROTOCOL_TYPES:
+    debate = rt.services.get("workflow.debate")  # None when the boardroom plugin is disabled: the channel still carries messages
+    review = rt.services.get("workflow.review")
+    if edge.type == "debate" and a.type in DEBATE_PROTOCOL_TYPES and debate is not None:
         st = rt.debates.get(edge.id) or DebateState(edge.id, [edge.source, edge.target], max_rounds=int(cfg.get("max_rounds", 4)))
-        v = debate_on_message(st, agent.id, a.type, content)
+        v = debate.debate_on_message(st, agent.id, a.type, content)
         if not v.accept:
             await rt.reject(agent, tid, a, v.reason)
             return
@@ -103,15 +105,15 @@ async def _send_one(rt: RunRuntime, agent: AgentSpec, tid: str, a: A.SendMessage
         if st.status == "consensus" and protocol_event:
             rt.decide(f"Consensus ({rt.names[edge.source]} ↔ {rt.names[edge.target]}): {st.outcome[:240]}", agent.id)
     elif a.type in ("review_request", "review_result"):
-        if edge.type == "review":
+        if edge.type == "review" and review is not None:
             author, reviewer = (agent.id, tid) if a.type == "review_request" else (tid, agent.id)
             key = f"{edge.id}:{author}"
             rst = rt.reviews.get(key) or ReviewState(edge.id, author, reviewer, max_revisions=int(cfg.get("max_revisions", 3)))
             if a.type == "review_request":
-                v = review_on_request(rst)
+                v = review.review_on_request(rst)
             else:
-                verdict = a.verdict or infer_verdict(content)
-                v = review_on_result(rst, verdict, a.comments)
+                verdict = a.verdict or review.infer_verdict(content)
+                v = review.review_on_result(rst, verdict, a.comments)
                 meta.update(verdict=verdict, comments=a.comments)
             if not v.accept:
                 await rt.reject(agent, tid, a, v.reason)
@@ -121,14 +123,14 @@ async def _send_one(rt: RunRuntime, agent: AgentSpec, tid: str, a: A.SendMessage
             activating = bool(v.event and v.event.get("result") == "max_revisions")
             meta["review"] = {"revisions": rst.revisions, "max_revisions": rst.max_revisions, "status": rst.status}
         elif a.type == "review_result":
-            meta.update(verdict=a.verdict or infer_verdict(content), comments=a.comments)
+            meta.update(verdict=a.verdict or (review.infer_verdict(content) if review is not None else "request_changes"), comments=a.comments)
         if a.comments:
             content += "\n\n" + "\n".join(f"{i}. {c}" for i, c in enumerate(a.comments, 1))
     if cfg.get("condition") and not await rt.condition_met(agent, edge, a):
         await rt.reject(agent, tid, a, f"Channel condition not met: \"{cfg['condition']}\".")
         return
     if a.type == "question":
-        from app.kernel.runtime.runtime_store import Conflict
+        from app.sdk.execution_contracts import Conflict
         try:
             consultation_id = await rt.runtime_store.consult(agent.id, tid, rt.plan_revision, content)
         except Conflict as exc:
@@ -157,7 +159,7 @@ async def _send_one(rt: RunRuntime, agent: AgentSpec, tid: str, a: A.SendMessage
                                       "count": rt.edge_counts[edge.id], "max_turns": max_turns})
     if a.type == "decision":
         for d in rt.debates.values():
-            if tid in d.participants and debate_decided_externally(d, content):
+            if tid in d.participants and debate is not None and debate.debate_decided_externally(d, content):
                 await rt.emit("protocol", {"kind": "debate", "result": "decided", "edge_id": d.edge_id, "state": d.to_dict()})
         rt.decide(f"Decision by {agent.name}: {content.splitlines()[0][:240]}", agent.id)
     if a.type == "decision" or (protocol_event and protocol_event.get("result") not in (None, "requested", "round")):
@@ -169,7 +171,7 @@ async def _send_one(rt: RunRuntime, agent: AgentSpec, tid: str, a: A.SendMessage
         rt.notice(pid, text, activate=activating)
 
 
-async def condition_met(rt: RunRuntime, agent: AgentSpec, edge: EdgeSpec, a: A.SendMessage) -> bool:
+async def condition_met(rt: RunContext, agent: AgentSpec, edge: EdgeSpec, a: A.SendMessage) -> bool:
     """Evaluate a natural-language edge condition with a tiny LLM judge call (mock: always satisfied)."""
     cond = edge.config.get("condition", "")
     provider, model = rt.model_for(agent)
@@ -183,10 +185,11 @@ async def condition_met(rt: RunRuntime, agent: AgentSpec, edge: EdgeSpec, a: A.S
                                     f"Message ({a.type}): {clip(a.content, 6000)}\n\nIs the condition satisfied?"}],
         metadata={"kind": "chat", "scripted_reply": "YES"})
     try:
+        models = rt.services.require("models.router")
         async with registry_factory()() as rdb:
-            req, _ = await prepare_request(rdb, rt.user_id, req)
+            req, _ = await models.prepare_request(rdb, rt.user_id, req)
         out = ""
-        async for ch in stream_with_retry(req, retries=1):
+        async for ch in models.stream_with_retry(req, retries=1):
             out += ch.delta
             if ch.usage:
                 rt.add_usage(agent.id, ch.usage)
@@ -201,7 +204,7 @@ async def condition_met(rt: RunRuntime, agent: AgentSpec, edge: EdgeSpec, a: A.S
     return False
 
 
-async def act_request_user_input(rt: RunRuntime, agent: AgentSpec, a: A.RequestUserInput) -> None:
+async def act_request_user_input(rt: RunContext, agent: AgentSpec, a: A.RequestUserInput) -> None:
     options = [o.model_dump() for o in a.options]
     rec = await rt.post_message(sender="agent", from_id=agent.id, to_id=None, type_="question", content=a.question,
                                   meta={"awaiting_input": True, "options": options, "allow_other": True}, deliver=False)
@@ -209,7 +212,7 @@ async def act_request_user_input(rt: RunRuntime, agent: AgentSpec, a: A.RequestU
     await rt.set_agent_status(agent.id, "waiting")
 
 
-def finish_refusal(rt: RunRuntime, agent: AgentSpec) -> str | None:
+def finish_refusal(rt: RunContext, agent: AgentSpec) -> str | None:
     """Verify before done (MAST: missing/incomplete verification is a top cause of multi-agent failure). An agent that
         can run code or open a browser, finishing the run or a delegated task while code changed unexercised or a file
         fails its automatic check, is sent back once with what to check. Asking again finishes (it may be unverifiable)."""
@@ -240,7 +243,7 @@ def finish_refusal(rt: RunRuntime, agent: AgentSpec) -> str | None:
             "what you checked and what you saw. (If it really can't be verified here, call `finish` again and say so.)")
 
 
-async def wf_finish_refusal(rt: RunRuntime, agent: AgentSpec, a: A.Finish) -> str | None:
+async def wf_finish_refusal(rt: RunContext, agent: AgentSpec, a: A.Finish) -> str | None:
     """Workflow rules for `finish`: the head accepts at the end; a phase owner closes its phase (gate checked)."""
     if not rt.wf_active():
         return None
@@ -269,7 +272,7 @@ async def wf_finish_refusal(rt: RunRuntime, agent: AgentSpec, a: A.Finish) -> st
     return None
 
 
-async def act_finish(rt: RunRuntime, agent: AgentSpec, a: A.Finish) -> None:
+async def act_finish(rt: RunContext, agent: AgentSpec, a: A.Finish) -> None:
     rt._bounced_finish = None
     was_phase_owner = rt.wf_owner_of_active(agent.id)
     context = ACTIVE_ATTEMPT.get()
@@ -318,5 +321,5 @@ async def act_finish(rt: RunRuntime, agent: AgentSpec, a: A.Finish) -> None:
         await rt.emit("agent_finished", {"agent_id": agent.id, "summary": a.summary})
 
 
-async def act_wait(rt: RunRuntime, agent: AgentSpec, a: A.Wait) -> None:
+async def act_wait(rt: RunContext, agent: AgentSpec, a: A.Wait) -> None:
     return None

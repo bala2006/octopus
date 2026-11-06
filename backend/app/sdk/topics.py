@@ -1,16 +1,11 @@
-"""Typed run-event topics and a typed wrapper over the existing run event bus.
+"""Typed run-event topics. The values are wire names.
 
-The topic values are wire names. WebSocket clients and the persisted run log depend on them, so each value must
-match what the orchestrator package and api/ws.py send. Nothing here changes behavior: the wrapper forwards
-every call to the EventBus it was given.
+WebSocket clients and the persisted run log depend on them, so each value must match what the kernel, the plugins and the
+WebSocket channel send. A test scans the backend for emitted names and checks that every one is a RunTopic.
 """
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
 from enum import StrEnum
-from typing import Any, Protocol
 
 
 class RunTopic(StrEnum):
@@ -57,43 +52,5 @@ class RunTopic(StrEnum):
     REPLAY_DONE = "replay_done"
 
 
-# Live only, never persisted. Must equal EPHEMERAL in orchestrator/bus.py (a test checks this).
+# Live only, never persisted.
 EPHEMERAL_TOPICS: frozenset[RunTopic] = frozenset({RunTopic.TOKEN_STREAM, RunTopic.THINKING_STREAM})
-
-SessionFactoryLike = Callable[[], AbstractAsyncContextManager[Any]]
-
-
-class RunEventBus(Protocol):
-    """Structural type of orchestrator.bus.EventBus. Core names this shape instead of importing the class,
-    because app.core may not import app.orchestrator."""
-
-    def subscribe(self, run_id: str) -> asyncio.Queue[dict[str, Any]]: ...
-
-    def unsubscribe(self, run_id: str, q: asyncio.Queue[dict[str, Any]]) -> None: ...
-
-    def relay(self, event: dict[str, Any]) -> None: ...
-
-    async def publish(self, run_id: str, type_: str, data: dict[str, Any], sf: SessionFactoryLike) -> dict[str, Any]: ...
-
-
-class TypedRunBus:
-    """Typed view of an existing EventBus. It keeps no state and forwards each call unchanged.
-
-    The composition root builds it, for example TypedRunBus(orchestrator.bus.bus). The only added check is in
-    publish(): the topic must be a known RunTopic, and an unknown name raises ValueError before anything is sent.
-    """
-
-    def __init__(self, inner: RunEventBus) -> None:
-        self._inner = inner
-
-    def subscribe(self, run_id: str) -> asyncio.Queue[dict[str, Any]]:
-        return self._inner.subscribe(run_id)
-
-    def unsubscribe(self, run_id: str, q: asyncio.Queue[dict[str, Any]]) -> None:
-        self._inner.unsubscribe(run_id, q)
-
-    def relay(self, event: dict[str, Any]) -> None:
-        self._inner.relay(event)
-
-    async def publish(self, run_id: str, topic: RunTopic, data: dict[str, Any], sf: SessionFactoryLike) -> dict[str, Any]:
-        return await self._inner.publish(run_id, RunTopic(topic).value, data, sf)

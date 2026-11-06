@@ -12,7 +12,7 @@ import posixpath
 from fastapi import HTTPException
 from fastapi.responses import Response
 
-from app.plugins.workspace.project_fs import MAX_FILE_BYTES, ProjectFS, WorkspaceError
+from app.sdk.projectfs import MAX_FILE_BYTES, ProjectFS, WorkspaceError
 
 SAFE_MIME_PREFIXES = ("text/", "image/", "font/", "audio/", "video/")
 SAFE_MIMES = {"application/javascript", "application/json", "application/wasm", "application/xml", "application/pdf",

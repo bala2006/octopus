@@ -27,11 +27,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec, clip
+from app.sdk.agents import AgentSpec
+from app.sdk.text import clip
 from app.plugins.workflows.director import profile_goal, quality_brief, specialist_bonus
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 WORK = ".octopus/work"
 MAX_GATE_BOUNCES = 2
@@ -116,10 +117,10 @@ def can_staff(agents: list[AgentSpec], head: AgentSpec | None) -> bool:
 
 
 class CompanyWorkflow:
-    """Runs the company workflow for one run. ``self.rt`` is the RunRuntime; the state lives in ``self.rt.wf``
+    """Runs the company workflow for one run. ``self.rt`` is the RunContext; the state lives in ``self.rt.wf``
     (persisted in the run state)."""
 
-    def __init__(self, rt: RunRuntime) -> None:
+    def __init__(self, rt: RunContext) -> None:
         self.rt = rt
 
     # ------------------------------------------------------------ state

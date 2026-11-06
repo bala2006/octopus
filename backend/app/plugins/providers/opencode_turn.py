@@ -4,27 +4,26 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from app.plugins.providers.base import Usage
+from app.sdk.llm import Usage
 from app.sdk import actions as A
-from app.kernel.runtime.context import build_turn_prompts
 from app.sdk.evidence import redact_evidence
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT
-from app.plugins.mcp.worker_bridge import WorkerBridge
-from app.plugins.skills.contracts import content_hash
+from app.plugins.providers.deps import deps
+from app.sdk.contracts import content_hash
 from app.plugins.providers.opencode import OpenCodeError, OpenCodeSession
 
 if TYPE_CHECKING:
-    from app.kernel.runtime.context import AgentSpec
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.agents import AgentSpec
+    from app.sdk.run import RunContext
 
 
-def _prompt_blocks(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], observations: list[dict], bridge: WorkerBridge,
+def _prompt_blocks(rt: RunContext, agent: AgentSpec, inbox: list[dict], observations: list[dict], bridge: Any,
                    memory_context: str) -> list[dict]:
     provider, model = rt.model_for(agent)
-    system, user = build_turn_prompts(rt, agent, {message["id"] for message in inbox}, observations,
-                                      native=True, memory_context=memory_context)
+    system, user = rt.build_turn_prompts(agent, {message["id"] for message in inbox}, observations,
+                                         native=True, memory_context=memory_context)
     system += (f"\n\n## Octopus execution boundary\nYou are {agent.name}, model `{model}` through `{provider}`. "
         f"Act only through the `{bridge.name}` MCP server. It exposes your Octopus-granted tools and applies the current "
         "assignment policy. Do not use OpenCode's own shell, filesystem, subagent, skill, external MCP, or question tools. "
@@ -40,7 +39,7 @@ def _prompt_blocks(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], observat
     return blocks
 
 
-async def opencode_turn(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], observations: list[dict]) -> None:
+async def opencode_turn(rt: RunContext, agent: AgentSpec, inbox: list[dict], observations: list[dict]) -> None:
     context = ACTIVE_ATTEMPT.get()
     if context is None or context.assignment.owner != agent.id:
         raise OpenCodeError("OpenCode needs an owned current agent attempt")
@@ -105,7 +104,7 @@ async def opencode_turn(rt: RunRuntime, agent: AgentSpec, inbox: list[dict], obs
             if cost.get("currency") == "USD":
                 session_cost = float(cost.get("amount", session_cost))
 
-    async with WorkerBridge(rt, agent) as bridge:
+    async with deps.require("mcp.bridge").WorkerBridge(rt, agent) as bridge:
         async with OpenCodeSession(root, update_event, permission) as session:
             await session.open(prior_session, model, effort, False, mcp_servers=[bridge.config()])
             rt.worker_sessions[agent.id] = {"session_id": session.session_id, "signature": signature, "state": "running", "cost_usd": accumulated_cost}

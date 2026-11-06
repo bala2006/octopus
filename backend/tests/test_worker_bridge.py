@@ -1,3 +1,5 @@
+from app.kernel.current import current
+from app.kernel.runtime.context import build_turn_prompts
 import asyncio
 from types import SimpleNamespace
 
@@ -6,8 +8,8 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from app.plugins.tools import specs as T
-from app.kernel.runtime.context import AgentSpec
+from app.sdk import toolspecs as T
+from app.sdk.agents import AgentSpec
 from app.sdk.contracts import Assignment, ExecutionPolicy
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
 from app.plugins.mcp.worker_bridge import WorkerBridge
@@ -23,6 +25,7 @@ def node(aid="worker", **kwargs):
 class FakeRuntime:
     def __init__(self, root, agent=None):
         self.root = root
+        self.services = current().services
         self.agent = agent or node()
         self.company_name = "Octopus"
         self.goal = "Inspect the requested source"
@@ -55,6 +58,9 @@ class FakeRuntime:
         self.journal_n = 0
         self.seen = {}
         self.seen_turn = {}
+
+    def build_turn_prompts(self, agent, inbox_ids, observations, *, native, memory_context):
+        return build_turn_prompts(self, agent, inbox_ids, observations, native=native, memory_context=memory_context)
 
     def context(self):
         assignment = Assignment(run_id="run", owner=self.agent.id, lead="lead", provider="opencode", model=self.agent.model,

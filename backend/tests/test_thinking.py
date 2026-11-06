@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from app.plugins.providers.azure_v1 import AzureV1Provider, _body, _dropped
-from app.plugins.providers.base import LLMChunk, LLMRequest
+from app.sdk.llm import LLMChunk, LLMRequest
 from app.plugins.providers.router import set_provider_override
 from conftest import NativeScriptedProvider, agent, events, make_company, start_run, wait_status
 

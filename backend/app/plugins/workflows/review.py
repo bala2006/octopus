@@ -2,32 +2,11 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field
-from typing import Any
 
-from app.plugins.workflows.protocols import Verdict
+from app.sdk.protocols import ReviewState, Verdict
 
 
 # ------------------------------------------------------------------ review
-@dataclass
-class ReviewState:
-    edge_id: str
-    author: str
-    reviewer: str
-    max_revisions: int = 3
-    status: str = "idle"  # idle | pending | changes_requested | approved | max_revisions
-    revisions: int = 0
-    cycles: int = 0
-    history: list[dict[str, Any]] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> ReviewState:
-        return cls(**d)
-
-
 def infer_verdict(content: str) -> str:
     c = content.lower()
     if re.search(r"request(ed)?[ _]changes|needs? (work|changes)|not approved|reject", c):

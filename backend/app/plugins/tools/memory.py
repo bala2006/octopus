@@ -5,15 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
-async def act_remember(rt: RunRuntime, agent: AgentSpec, a: A.Remember) -> None:
+async def act_remember(rt: RunContext, agent: AgentSpec, a: A.Remember) -> None:
     cid = await rt._tool_event(agent, "remember", {"key": a.key, "scope": a.scope})
-    from app.plugins.memory import scoped as memory
+    memory = rt.services.require("memory.scoped")
     actor = memory.Actor(rt.user_id, rt.company_id, agent.id)
     target = (memory.Target("project", rt.company_id) if a.scope == "project" else
               memory.Target("chat", rt.run_id) if a.scope == "chat" else

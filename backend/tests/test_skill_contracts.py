@@ -2,8 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from app.plugins.skills.library import Skill
-from app.plugins.skills.contracts import ContractError, SkillBundle, pin_project_guidance, pin_skill_bundle, workflow_spec
+from app.sdk.skill_contracts import Skill
+from app.sdk.contracts import ContractError
+from app.sdk.skill_contracts import SkillBundle, workflow_spec
+from app.plugins.skills.contracts import pin_project_guidance, pin_skill_bundle
 
 
 def make_bundle(root: Path, *, capabilities: str = "read") -> Skill:

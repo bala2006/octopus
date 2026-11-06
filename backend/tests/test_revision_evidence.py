@@ -5,7 +5,7 @@ import pytest
 from app.sdk import evidence as CORE_EVIDENCE
 from app.plugins.workspace.manifests import capture_manifest
 from app.sdk import evidence as E
-from app.plugins.skills.contracts import ContractError
+from app.sdk.contracts import ContractError
 
 
 ENV = {"python": "3.12", "lockfile": "known-lock"}

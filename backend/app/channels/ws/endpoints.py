@@ -28,8 +28,8 @@ from app.storage.repositories import ChatSessionRepository, CompanyRepository, R
 from app.channels.deps import load_project, resolve_user
 from app.foundation.logging import get_logger
 from app.storage.session import registry_factory
-from app.kernel.eventlog import bus
-from app.kernel.runtime.engine import ProjectRef, manager
+from app.kernel.current import current
+from app.kernel.run_manager import ProjectRef
 from app.application.chat import ChatConnection
 
 router = APIRouter()
@@ -42,7 +42,7 @@ async def _auth(ws: WebSocket, workspace_id: str):  # type: ignore[no-untyped-de
         if user is None:
             return None, None
         try:
-            ctx = await load_project(workspace_id, user, rdb)
+            ctx = await load_project(workspace_id, user, rdb, kernel=ws.app.state.kernel)
         except HTTPException:
             return user, None
     return user, ctx
@@ -67,6 +67,8 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
     except ValueError:
         last_seq = 0
 
+    bus = ctx.kernel.eventlog
+    manager = ctx.kernel.runs
     queue = bus.subscribe(run_id)
     sent_seq = last_seq
 
@@ -150,7 +152,7 @@ async def browser_socket(ws: WebSocket, workspace_id: str, run_id: str, agent_id
             await ws.close(code=4404)
             return
     try:
-        await browser_live.serve(ws, run_id, agent_id, run_live=lambda: manager.get(run_id) is not None)
+        await browser_live.serve(ws, run_id, agent_id, run_live=lambda: ctx.kernel.runs.get(run_id) is not None)
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
@@ -162,6 +164,7 @@ async def handle_client(msg: dict[str, Any], run_id: str, project: ProjectRef, *
     kind = msg.get("type")
     if kind in (None, "pong"):
         return
+    kernel = ctx.kernel if ctx is not None else current()
     if kind in ("interject", "user_message", "continue"):
         from uuid import uuid4
         from app.channels.api.routes.runs import queue_request
@@ -176,11 +179,11 @@ async def handle_client(msg: dict[str, Any], run_id: str, project: ProjectRef, *
             async with project.sf() as db:
                 await queue_request(run_id, body, db, user, ctx)
         except (ValueError, HTTPException, ValidationError) as exc:
-            await bus.publish(run_id, "error", {"message": str(getattr(exc, "detail", exc)), "kind": "client"}, project.sf)
+            await kernel.eventlog.publish(run_id, "error", {"message": str(getattr(exc, "detail", exc)), "kind": "client"}, project.sf)
         return
-    rt = await manager.ensure(run_id, project)
+    rt = await kernel.runs.ensure(run_id, project)
     if rt is None:
-        await bus.publish(run_id, "error", {"message": "Run is not active", "kind": "client"}, project.sf)
+        await kernel.eventlog.publish(run_id, "error", {"message": "Run is not active", "kind": "client"}, project.sf)
         return
     if kind == "control":
         action = msg.get("action")

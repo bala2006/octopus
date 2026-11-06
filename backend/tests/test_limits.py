@@ -6,7 +6,7 @@ import itertools
 import random
 
 from app.plugins.providers.router import set_provider_override
-from app.plugins.workflows.protocols import LoopDetector
+from app.kernel.runtime.loopguard import LoopDetector
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status
 
 

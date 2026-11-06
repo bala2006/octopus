@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from app.plugins.workspace import stages as W
-from app.plugins.skills.contracts import ContractError
+from app.sdk.contracts import ContractError
 
 
 def project(tmp_path):

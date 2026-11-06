@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.storage.base import utcnow
 from app.storage.models.runtime_records import Consultation, ExecutionEvidence, RunRequest, TaskAttempt
 from app.storage.models.scoped_memory import MemoryGroup, MemoryGroupMember, MemoryHead, MemoryRecord
-from app.storage.models import Agent, AgentMemory, Artifact, ChatSession, Company, Edge, McpServer, Message, ProviderKey, Run, RunEvent, Task, User, UserRole, UserSkill, UserTemplate, Workspace
+from app.storage.models import Agent, AgentMemory, Artifact, ChatSession, Company, Edge, McpServer, Message, PluginState, ProviderKey, Run, RunEvent, Task, User, UserRole, UserSkill, UserTemplate, Workspace
 
 
 # ---------------------------------------------------------------- project database
@@ -476,6 +476,21 @@ class WorkspaceRepository:
     async def by_path(self, user_id: str, path: str) -> Workspace | None:
         return (await self.rdb.execute(select(Workspace).where(
             Workspace.user_id == user_id, Workspace.path == path))).scalar_one_or_none()
+
+
+class PluginStateRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def all(self) -> dict[str, PluginState]:
+        return {row.id: row for row in (await self.db.execute(select(PluginState))).scalars().all()}
+
+    async def set(self, plugin_id: str, *, enabled: bool, version: str) -> None:
+        row = await self.db.get(PluginState, plugin_id)
+        if row is None:
+            self.db.add(PluginState(id=plugin_id, enabled=enabled, version=version))
+        else:
+            row.enabled, row.version = enabled, version
 
 
 class ProviderKeyRepository:

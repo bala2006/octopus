@@ -1,4 +1,4 @@
-"""Debate and review protocol state machines, plus loop detection.
+"""Loop detection: agents going round in circles.
 
 All state is JSON-serialisable so runs can be persisted and resumed.
 """
@@ -8,14 +8,6 @@ import difflib
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
-
-
-@dataclass
-class Verdict:
-    accept: bool
-    notices: dict[str, str] = field(default_factory=dict)  # agent_id -> notice
-    reason: str = ""
-    event: dict[str, Any] | None = None
 
 
 # ------------------------------------------------------------------ loop detection

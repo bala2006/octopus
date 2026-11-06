@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from app.plugins.workspace.project_fs import ProjectFS
+from app.sdk.projectfs import ProjectFS
 from app.sdk import evidence as _core
 from app.sdk.evidence import ArtifactManifest
 

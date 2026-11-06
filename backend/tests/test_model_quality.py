@@ -7,11 +7,13 @@ from pathlib import Path
 
 from app.plugins.providers import router
 from app.plugins.providers.azure_v1 import _body
-from app.plugins.providers.base import LLMChunk, LLMRequest, Usage
+from app.sdk.llm import LLMChunk, LLMRequest, Usage
 from app.plugins.providers.router import prepare_request, set_provider_override
 from app.sdk.actions import MAX_ACTIONS, parse_envelope
-from app.kernel.runtime.context import TOOL_RESULT_CHARS, build_user_prompt, fmt_msg
-from app.kernel.runtime.engine import head_tail, judge_verdict
+from app.sdk.text import TOOL_RESULT_CHARS
+from app.kernel.runtime.context import build_user_prompt, fmt_msg
+from app.kernel.runtime.turn_loop import head_tail
+from app.plugins.tools.messaging import judge_verdict
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status
 
 
@@ -37,7 +39,7 @@ def test_reasoning_headroom_scales_with_effort() -> None:
 
 
 def test_long_tool_results_and_messages_are_marked_not_silently_cut() -> None:
-    from app.kernel.runtime.context import AgentSpec
+    from app.sdk.agents import AgentSpec
 
     a = AgentSpec.from_dict({"id": "a", "name": "Ann"}, "generic")
     big = "x" * (TOOL_RESULT_CHARS + 5000)

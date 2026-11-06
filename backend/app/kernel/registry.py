@@ -1,7 +1,7 @@
-"""Plugin registry: validates an explicit list of manifests, orders enabled plugins for start, and tracks enabled state.
+"""Plugin registry: validates a list of manifests, orders plugins for start, and tracks enabled state.
 
-Pure Python. The registry does no I/O and holds no global state. The caller passes the manifests in. Enabled
-state lives only in this object until a later phase reads the plugins table.
+Pure Python. The registry does no I/O and holds no global state. The caller passes the manifests in; the plugin host
+(app.kernel.host) keeps its enabled state in sync with the plugins table.
 """
 from __future__ import annotations
 
@@ -117,6 +117,10 @@ class PluginRegistry:
     def disable(self, plugin_id: str) -> None:
         self._require(plugin_id)
         self._disabled.add(plugin_id)
+
+    def all_in_start_order(self) -> tuple[Manifest, ...]:
+        """Every registered plugin, enabled or not, providers before the plugins that need them."""
+        return tuple(self._manifests[pid] for pid in _dependency_order(self._manifests, scope="registered"))
 
     def ordered_for_start(self) -> tuple[Manifest, ...]:
         """Enabled plugins, providers first. Raises if an enabled plugin needs something only a disabled plugin provides."""

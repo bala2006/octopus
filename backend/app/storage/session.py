@@ -13,7 +13,8 @@ from pathlib import Path
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
-from app.foundation.config import PROJECT_DIRNAME, get_settings
+from app.foundation.config import get_settings
+from app.sdk.paths import PROJECT_DIRNAME
 
 SessionFactory = async_sessionmaker[AsyncSession]
 

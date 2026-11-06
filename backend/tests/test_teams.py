@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from app.plugins.providers.base import LLMChunk, Usage
+from app.sdk.llm import LLMChunk, Usage
 from app.plugins.providers.router import set_provider_override
 from fakes.fake_provider import FakeProvider
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status

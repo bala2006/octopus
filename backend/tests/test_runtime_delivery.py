@@ -13,7 +13,7 @@ from app.storage.session import registry_factory
 from app.plugins.providers.router import set_provider_override
 from app.storage.models import Run, User
 from app.storage.models.runtime_records import RunRequest, TaskAttempt
-from app.kernel.runtime.engine import ProjectRef
+from app.kernel.run_manager import ProjectRef
 from conftest import NativeScriptedProvider, agent, events, make_company, start_run, wait_status
 
 

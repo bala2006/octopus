@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.plugins.workspace.project_fs import ProjectFS, WorkspaceError
+from app.sdk.projectfs import ProjectFS, WorkspaceError
 
 MAX_GUIDANCE_CHARS = 16000
 

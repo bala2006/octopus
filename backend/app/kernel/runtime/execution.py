@@ -7,16 +7,17 @@ import platform
 from typing import TYPE_CHECKING
 
 from app.storage.repositories import RunRepository
-from app.plugins.roles.chief import choose_lead
 from app.sdk.contracts import Assignment, ExecutionPolicy, classify_workflow
 from app.sdk.evidence import capture_manifest, record_evidence, validate_evidence, RevisionEvidence, VerificationCheck, redact_evidence
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT, AttemptContext, SupersededAttempt  # noqa: F401 (re-exported)
 from app.kernel.runtime.runtime_store import RuntimeStore
-from app.plugins.workspace.project_fs import ProjectFS
+from app.sdk.paths import VERIFIABLE_EXT
+from app.sdk.projectfs import ProjectFS
 
 if TYPE_CHECKING:
     from app.kernel.runtime.engine import RunRuntime
-from app.plugins.skills.contracts import pin_skill_bundle, pin_project_guidance, workflow_spec, WorkflowSpec, WorkflowStep, content_hash
+from app.sdk.skill_contracts import workflow_spec, WorkflowSpec, WorkflowStep
+from app.sdk.contracts import content_hash
 
 
 class ExecutionService:
@@ -31,9 +32,9 @@ class ExecutionService:
 
     def init_execution(self, run) -> None:
         saved = run.state_json or {}
-        self.runtime_store = RuntimeStore(self.rt.sf, self.rt.run_id)
+        self.runtime_store = RuntimeStore(self.rt.sf, self.rt.run_id, self.rt.kernel.eventlog)
         self.plan_revision = int(saved.get("plan_revision", 1))
-        self.rt.lead_agent_id = choose_lead([a.to_dict() for a in self.rt.agents.values()], saved.get("lead_agent_id"))
+        self.rt.lead_agent_id = self.rt.services.require("roles.lead").choose_lead([a.to_dict() for a in self.rt.agents.values()], saved.get("lead_agent_id"))
         self.rt.initial_target = saved.get("initial_target", self.rt.lead_agent_id)
         self.rt.initial_client_id = saved.get("initial_client_id")
         self.rt.initial_content_hash = saved.get("initial_content_hash")
@@ -103,37 +104,39 @@ class ExecutionService:
     async def prepare_execution(self) -> None:
         if self.rt.budget.execution_mode == "restricted":
             raise ValueError("Restricted execution is not supported by this host runner. No invocation was started. Configure a verified restricted runner first.")
-        if not self.pinned_guidance:
-            self.pinned_guidance = (await asyncio.to_thread(pin_project_guidance, self.rt.root)).model_dump(mode="json")
+        skills_service = self.rt.services.get("skills.library")
+        if not self.pinned_guidance and skills_service is not None:
+            self.pinned_guidance = (await asyncio.to_thread(skills_service.pin_project_guidance, self.rt.root)).model_dump(mode="json")
         if not self.pinned_roles:
             from dataclasses import asdict
             self.pinned_roles = {key: asdict(role) for key, role in self.rt.roles.items()}
         else:
-            from app.plugins.roles.prompts import RoleTemplate
-            self.rt.roles = {key: RoleTemplate(**data) for key, data in self.pinned_roles.items()}
+            role_template = self.rt.services.require("roles.builtin").RoleTemplate
+            self.rt.roles = {key: role_template(**data) for key, data in self.pinned_roles.items()}
         if not self.pinned_skills:
             for name, skill in self.rt.skills.items():
                 # Pin instruction content now. Only reviewed built-in bundles can become validators.
                 source = self.skill_directory(name, skill.source)
                 try:
-                    bundle = await asyncio.to_thread(pin_skill_bundle, skill, source, reviewed=skill.source == "builtin")
+                    bundle = await asyncio.to_thread(skills_service.pin_skill_bundle, skill, source, reviewed=skill.source == "builtin")
                     self.pinned_skills[name] = bundle.model_dump(mode="json")
                 except ValueError as exc:
                     await self.rt.emit("error", {"kind": "skill", "message": f"Skill {name} was not loaded: {exc}"})
             self.rt.skills = {name: skill for name, skill in self.rt.skills.items() if name in self.pinned_skills}
         else:
-            from app.plugins.skills.library import Skill
+            from app.sdk.skill_contracts import Skill
             self.rt.skills = {name: Skill(name=name, description=data["description"], body=data["body"], source=data["origin"])
                            for name, data in self.pinned_skills.items()}
         self._last_manifest = await asyncio.to_thread(self.execution_manifest, self.rt.root)
-        from app.plugins.memory import scoped as memory
-        await memory.import_legacy(self.rt.sf, memory.Actor(self.rt.user_id, self.rt.company_id), self.rt.root)
+        memory = self.rt.services.get("memory.scoped")
+        if memory is not None:
+            await memory.import_legacy(self.rt.sf, memory.Actor(self.rt.user_id, self.rt.company_id), self.rt.root)
         await self.rt.save()
 
     def skill_directory(self, name: str, source: str) -> Path | None:
-        if source == "builtin":
-            from app.plugins.skills.library import BUILTIN_DIR
-            path = BUILTIN_DIR / name
+        skills_service = self.rt.services.get("skills.library")
+        if source == "builtin" and skills_service is not None:
+            path = skills_service.BUILTIN_DIR / name
             return path if path.is_dir() else None
         if source != "project":
             return None
@@ -144,7 +147,9 @@ class ExecutionService:
         return None
 
     async def scoped_context(self, agent_id: str) -> str:
-        from app.plugins.memory import scoped as memory
+        memory = self.rt.services.get("memory.scoped")
+        if memory is None:
+            return ""
         try:
             value = await memory.runtime_context(self.rt.sf, self.rt.user_id, self.rt.company_id, agent_id, self.rt.run_id)
         except memory.MemoryDenied:
@@ -166,16 +171,16 @@ class ExecutionService:
         await self.rt.save()
 
     async def act_recall_context(self, agent, action) -> None:
-        from app.plugins.memory import scoped as memory
+        memory = self.rt.services.get("memory.scoped")
         cid = await self.rt._tool_event(agent, "recall_context", {"message_ids": action.message_ids, "memory_id": action.memory_id, "query": action.query})
         allowed = [m for m in self.rt.history if (m["id"] in action.message_ids or action.query and action.query.casefold() in m["content"].casefold()) and
                    (agent.id in (m["from"], m["to"]) or (m["to"] is None and m["from"] is None))]
         out = [{"id": m["id"], "content": m["content"], "type": m["type"], "turn": m["turn"]} for m in allowed[-20:]]
-        if action.query:
+        if action.query and memory is not None:
             matches = await memory.context(self.rt.sf, memory.Actor(self.rt.user_id, self.rt.company_id, agent.id),
                 run_id=self.rt.run_id, include_proposed=True, query=action.query, limit=20)
             out.extend({"id": item.id, "version": item.version, "content": item.content, "scope": item.scope} for item in matches)
-        if action.memory_id:
+        if action.memory_id and memory is not None:
             try:
                 item = await memory.get(self.rt.sf, memory.Actor(self.rt.user_id, self.rt.company_id, agent.id), action.memory_id)
                 out.append({"id": item.id, "version": item.version, "content": item.content})
@@ -241,16 +246,17 @@ class ExecutionService:
         # accountable lead use the canonical tree, one turn at a time.
         staged = aid != self.rt.lead_agent_id and not self.rt.wf_owner_of_active(aid)
         if staged and (agent.tools.get("file_write", True) or agent.tools.get("terminal")):
-            from app.plugins.workspace.stages import create_stage
-            context.workspace, stage_base = await asyncio.to_thread(create_stage, self.rt.root, self.rt.run_id, attempt_id)
+            context.workspace, stage_base = await asyncio.to_thread(self.rt.services.require("workspace.stages").create_stage, self.rt.root, self.rt.run_id, attempt_id)
         token = ACTIVE_ATTEMPT.set(context)
         status, result = "completed", {}
         try:
             await self.rt._turn(aid)
             if staged and stage_base is not None and assignment.revision == self.plan_revision:
-                from app.plugins.workspace.stages import integrate, integration_status, WorkspaceConflict
+                stages = self.rt.services.require("workspace.stages")
+                integrate, integration_status = stages.integrate, stages.integration_status
+                from app.sdk.contracts import WorkspaceConflict
                 try:
-                    from app.kernel.runtime.runtime_store import mutation_lock
+                    from app.sdk.execution_contracts import mutation_lock
                     async with mutation_lock(self.rt.run_id):
                         await self.assert_durable_revision(assignment.revision)
                         changed = await asyncio.to_thread(integrate, context.workspace, self.rt.root, stage_base,
@@ -308,7 +314,7 @@ class ExecutionService:
     def assert_current_attempt(self) -> None:
         context = ACTIVE_ATTEMPT.get()
         if self.rt.stop_requested:
-            from app.kernel.runtime.engine import StopRun
+            from app.kernel.run_manager import StopRun
             raise StopRun()
         if context and context.assignment.revision != self.plan_revision:
             raise SupersededAttempt()
@@ -528,7 +534,6 @@ class ExecutionService:
             for aid in self.rt.agents:
                 self.rt.mailbox.pop(aid, None)
                 self.rt.observations.pop(aid, None)
-            from app.kernel.runtime.engine import VERIFIABLE_EXT
             self.rt.unverified.update({f.path: self.rt.turn_no for f in (await asyncio.to_thread(self.execution_manifest, self.rt.root)).files
                                     if f.path.rsplit(".", 1)[-1].lower() in VERIFIABLE_EXT})
             await self.rt.save()
@@ -543,7 +548,6 @@ class ExecutionService:
             new = {f.path: f.sha256 for f in current.files}
             for path in old.keys() | new.keys():
                 if old.get(path) != new.get(path):
-                    from app.kernel.runtime.engine import VERIFIABLE_EXT
                     if path.rsplit(".", 1)[-1].lower() in VERIFIABLE_EXT:
                         self.rt.unverified[path] = self.rt.turn_no
         self._last_manifest = current

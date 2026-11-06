@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.storage.repositories import CompanyRepository
 from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.storage.base import new_id
-from app.plugins.providers.base import LLMError
+from app.sdk.llm import LLMError
 from app.storage.models import Company, User
 from app.sdk.schemas import AgentIn, CanvasExport, CanvasOut, CanvasState, CompanyIn, CompanyOut, CompanyPatch, DepartmentSummary, EdgeIn, GenerateCompanyIn, GenerateCompanyOut, InstantiateTemplateIn, TemplateOut, UserTemplateIn
 from app.plugins.workflows.canvas import agent_out, canvas_out, company_out, departments_of, edge_out, sync_canvas

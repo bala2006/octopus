@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter
 
 
+from app.plugins.observers.deps import deps
 from app.storage.repositories import ArtifactRepository, MessageRepository, RunEventRepository, RunRepository, TaskRepository
 from app.storage.session import SessionFactory
 from app.storage.models import Artifact, Run
@@ -63,7 +64,8 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
 
     wf = state.get("workflow") or {}
     if wf.get("phases"):
-        from app.plugins.workflows.company import PHASES
+        company = deps.get("workflow.company")
+        PHASES = company.PHASES if company is not None else {}
 
         out += [f"## Workflow ({wf.get('track') or 'intake only'} track)", "", "| Phase | Owner | Status | Fix rounds | Summary |", "|---|---|---|---|---|"]
         for p in wf["phases"]:

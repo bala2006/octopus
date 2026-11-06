@@ -19,7 +19,9 @@ from app.storage.models import Agent, Artifact, Company, Run, RunEvent
 from app.sdk import actions as A
 from app.plugins.providers import opencode_turn as adapter
 from app.sdk.contracts import Assignment, ExecutionPolicy
-from app.kernel.runtime.engine import ProjectRef, RunRuntime, manager
+from app.kernel.run_manager import ProjectRef
+from app.kernel.runtime.engine import RunRuntime
+from app.kernel.current import current
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
 from app.plugins.providers import opencode
 from app.plugins.memory.scoped import Actor, MemoryDenied, Target, get, owner_put, put
@@ -235,7 +237,7 @@ async def test_acknowledged_request_retry_resumes_and_starts_fresh_opencode_sess
     request_id = queued.json()["id"]
     paused = await wait_status(client, workspace, run["id"], statuses={"paused"}, timeout=15)
     assert paused["state"]["recovery_required"]
-    runtime = manager.get(run["id"])
+    runtime = current().runs.get(run["id"])
     assert runtime.paused
     old_session = runtime.worker_sessions["lead"]["session_id"]
     for _ in range(150):

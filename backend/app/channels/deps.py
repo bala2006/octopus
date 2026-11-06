@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.storage.repositories import CompanyRepository, UserRepository, WorkspaceRepository
 from app.foundation.config import get_settings
+from app.kernel.core import Kernel
+from app.kernel.current import current
 from app.foundation.security import decode_access_token, hash_password
 from app.storage.base import new_id, utcnow
 from app.storage.session import SessionFactory, get_registry_db, project_factory
@@ -64,13 +66,14 @@ class ProjectCtx:
     root: Path
     sf: SessionFactory
     user: User
+    kernel: Kernel
 
     @property
     def key(self) -> str:
         return str(self.root)
 
 
-async def load_project(workspace_id: str, user: User, rdb: AsyncSession, *, touch: bool = False) -> ProjectCtx:
+async def load_project(workspace_id: str, user: User, rdb: AsyncSession, *, touch: bool = False, kernel: Kernel | None = None) -> ProjectCtx:
     ws = await WorkspaceRepository(rdb).get(workspace_id)
     if ws is None or ws.user_id != user.id:
         raise HTTPException(404, "Workspace not found")
@@ -84,11 +87,11 @@ async def load_project(workspace_id: str, user: User, rdb: AsyncSession, *, touc
         ws.last_opened_at = utcnow()
         await rdb.commit()
     sf = await project_factory(str(root), root)
-    return ProjectCtx(workspace=ws, root=root, sf=sf, user=user)
+    return ProjectCtx(workspace=ws, root=root, sf=sf, user=user, kernel=kernel if kernel is not None else current())
 
 
-async def project_ctx(workspace_id: str, user: User = Depends(current_user), rdb: AsyncSession = Depends(get_registry_db)) -> ProjectCtx:
-    return await load_project(workspace_id, user, rdb)
+async def project_ctx(workspace_id: str, request: Request, user: User = Depends(current_user), rdb: AsyncSession = Depends(get_registry_db)) -> ProjectCtx:
+    return await load_project(workspace_id, user, rdb, kernel=request.app.state.kernel)
 
 
 async def get_pdb(ctx: ProjectCtx = Depends(project_ctx)) -> AsyncIterator[AsyncSession]:

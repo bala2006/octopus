@@ -16,7 +16,7 @@ from app.storage.session import get_registry_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.application import editor
 from app.application import file_items
-from app.plugins.workspace.project_fs import MAX_LIST, ProjectFS, WorkspaceError
+from app.sdk.projectfs import MAX_LIST, ProjectFS, WorkspaceError
 
 router = APIRouter(prefix="/editor", tags=["project editor"])
 

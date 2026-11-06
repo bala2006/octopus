@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import asyncio
-from weakref import WeakValueDictionary
 from datetime import timedelta
 from typing import Any
 
@@ -15,26 +13,7 @@ from app.storage.session import SessionFactory
 from app.storage.models import Run, RunEvent
 from app.storage.models.runtime_records import RunRequest, TaskAttempt, ExecutionEvidence, Consultation
 from app.sdk.contracts import Assignment
-
-
-class Conflict(ValueError):
-    pass
-
-
-_mutation_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
-
-
-def mutation_lock(run_id: str) -> asyncio.Lock:
-    """Serialize steering with canonical writes in this backend process. Database CAS still guards durable state.
-
-    Weak entries do not retain completed runs or locks bound to a closed test event loop.
-    Call from the application's event loop, before entering filesystem worker threads.
-    """
-    lock = _mutation_locks.get(run_id)
-    if lock is None:
-        lock = asyncio.Lock()
-        _mutation_locks[run_id] = lock
-    return lock
+from app.sdk.execution_contracts import Conflict, mutation_lock
 
 
 def request_out(row: RunRequest) -> dict[str, Any]:
@@ -50,14 +29,16 @@ def event(db, run_id: str, kind: str, payload: dict) -> RunEvent:
 
 
 class RuntimeStore:
-    def __init__(self, sf: SessionFactory, run_id: str):
+    def __init__(self, sf: SessionFactory, run_id: str, eventlog: Any | None = None):
         self.sf, self.run_id = sf, run_id
+        self._eventlog = eventlog
 
     async def commit(self, db) -> None:
         rows = [row for row in db.new if isinstance(row, RunEvent)]
         await db.flush()
         await db.commit()
-        from app.kernel.eventlog import bus
+        from app.kernel.current import current
+        bus = self._eventlog if self._eventlog is not None else current().eventlog
         for row in rows:
             bus.relay({"run_id": row.run_id, "type": row.type, "data": row.payload_json,
                        "seq": row.id, "ts": row.created_at.isoformat()})

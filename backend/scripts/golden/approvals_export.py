@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from app.kernel.policy import PolicyGate
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 from app.plugins.workflows.org import OrgService
 from scripts.golden.canon import dump_json
 

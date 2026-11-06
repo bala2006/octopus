@@ -17,7 +17,7 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from app.foundation.config import PROJECT_DIRNAME
+from app.sdk.paths import PROJECT_DIRNAME
 from app.sdk.paths import IGNORED_DIRS, SECRET_ALLOW, SECRET_PATTERNS, is_secret  # noqa: F401 (re-exported)
 
 MAX_FILE_BYTES = 1_000_000

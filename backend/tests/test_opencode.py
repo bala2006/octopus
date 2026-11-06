@@ -5,7 +5,7 @@ import pytest
 
 from app.foundation.config import get_settings
 from app.plugins.providers import opencode
-from app.kernel.eventlog import bus
+from app.kernel.current import current
 from conftest import agent, make_company, run_messages, start_run, wait_status
 
 
@@ -61,7 +61,7 @@ for line in sys.stdin:
 async def test_proxy_default_streaming_and_followup(client, workspace, installed_cli):
     cid = await make_company(client, workspace, [agent("a", "OpenCode", entry=True)], [])
     run = await start_run(client, workspace, cid, "Hello")
-    queue = bus.subscribe(run["id"])
+    queue = current().eventlog.subscribe(run["id"])
     final = await wait_status(client, workspace, run["id"])
     assert final["status"] == "completed", final
     assert final["tokens_used"] == 17
@@ -70,7 +70,7 @@ async def test_proxy_default_streaming_and_followup(client, workspace, installed
     streamed = []
     while not queue.empty():
         streamed.append(queue.get_nowait())
-    bus.unsubscribe(run["id"], queue)
+    current().eventlog.unsubscribe(run["id"], queue)
     assert [e["data"]["delta"] for e in streamed if e["type"] == "token_stream"] == ["ANSWER:Hello"]
     response = await client.post(f"/api/v1/w/{workspace['id']}/runs/{run['id']}/continue", json={"content": "Again"})
     assert response.status_code == 202, response.text

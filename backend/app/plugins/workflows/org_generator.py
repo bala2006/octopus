@@ -12,10 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.foundation.config import get_settings
 from app.storage.base import new_id
-from app.plugins.providers.base import LLMError, LLMRequest
-from app.plugins.providers.router import prepare_request, stream_with_retry
+from app.sdk.llm import LLMError, LLMRequest
 from app.sdk.actions import _extract_json
-from app.plugins.roles.prompts import agent_from_role, all_roles
+from app.plugins.workflows.deps import deps
 from app.plugins.workflows.canvas import department_color
 from app.plugins.workflows.templates import layout_departments, wire_org
 
@@ -76,9 +75,9 @@ Reply with ONLY this JSON:
 
 
 def _person_agent(p: PersonSpec, *, department: str, is_manager: bool, entry: bool = False) -> dict[str, Any]:
-    roles = all_roles()
+    roles = deps.require("roles.builtin").all_roles()
     key = p.role_template if p.role_template in roles else ("department_head" if is_manager else "specialist")
-    a = agent_from_role(key, name=p.name, entry=entry, department=department, is_manager=is_manager, role=p.role)
+    a = deps.require("roles.builtin").agent_from_role(key, name=p.name, entry=entry, department=department, is_manager=is_manager, role=p.role)
     if p.description:
         a["description"] = p.description
     if p.system_prompt.strip():
@@ -133,12 +132,12 @@ async def generate_org(rdb: AsyncSession, user_id: str, prompt: str, max_agents:
     """Return (spec, source, warning). Raises LLMError when no model is connected or its design is unusable."""
     s = get_settings()
     req = LLMRequest(provider=provider or s.default_provider, model=model or s.default_model, temperature=0.3, max_tokens=6000, json_mode=True,
-                     messages=[{"role": "system", "content": DESIGNER_PROMPT.format(roles=", ".join(sorted(all_roles())), max_agents=max_agents)},
+                     messages=[{"role": "system", "content": DESIGNER_PROMPT.format(roles=", ".join(sorted(deps.require("roles.builtin").all_roles())), max_agents=max_agents)},
                                {"role": "user", "content": prompt}], metadata={"kind": "summary"})
-    req, warn = await prepare_request(rdb, user_id, req)
+    req, warn = await deps.require("models.router").prepare_request(rdb, user_id, req)
     text = ""
     try:
-        async for ch in stream_with_retry(req):
+        async for ch in deps.require("models.router").stream_with_retry(req):
             text += ch.delta
         spec = OrgSpec.model_validate(_extract_json(text))
     except (ValueError, ValidationError) as exc:

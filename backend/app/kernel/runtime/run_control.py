@@ -11,7 +11,7 @@ from app.kernel.run_manager import StopRun, run_turn_loop
 from app.storage.base import utcnow
 from app.storage.repositories import RunRepository
 from app.storage.models import Run
-from app.kernel.runtime.context import clip
+from app.sdk.text import clip
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.kernel.runtime.engine import RunRuntime

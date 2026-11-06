@@ -9,7 +9,6 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-PROJECT_DIRNAME = ".octopus"
 
 
 def _default_roots() -> list[str]:
@@ -107,6 +106,10 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     gemini_api_key: str | None = None
+
+    def allowed_roots(self) -> list[Path]:
+        """The folders projects may live in, resolved."""
+        return [Path(r).expanduser().resolve() for r in self.workspace_allowed_roots]
 
     @property
     def registry_database_url(self) -> str:

@@ -6,7 +6,7 @@ import struct
 import zlib
 from typing import Any
 
-from app.plugins.providers.base import LLMRequest, with_images
+from app.sdk.llm import LLMRequest, with_images
 from app.plugins.providers.router import set_provider_override
 from conftest import ScriptedProvider, agent, make_company, run_messages, start_run, wait_status
 

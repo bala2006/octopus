@@ -6,10 +6,10 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from app.plugins.providers.base import LLMChunk, LLMRequest
+from app.sdk.llm import LLMChunk, LLMRequest
 from app.plugins.providers.router import set_provider_override
 from fakes.fake_provider import FakeProvider
-from app.plugins.workspace.project_fs import ProjectFS
+from app.sdk.projectfs import ProjectFS
 from conftest import NativeScriptedProvider, ScriptedProvider, agent, edge, env, events, make_company, run_messages, start_run, wait_status
 
 TEAM = [agent("a", "Ann", entry=True), agent("b", "Ben"), agent("c", "Cy")]

@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.foundation.config import PROJECT_DIRNAME, get_settings
+from app.foundation.config import get_settings
+from app.sdk.paths import PROJECT_DIRNAME
 from app.storage.base import new_id
 
 FORBIDDEN_DIRS = {"/", "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root", "/run", "/sbin", "/sys", "/usr", "/var"}
@@ -31,7 +32,7 @@ class ProjectPathError(ValueError):
 
 
 def allowed_roots() -> list[Path]:
-    return [Path(r).expanduser().resolve() for r in get_settings().workspace_allowed_roots]
+    return get_settings().allowed_roots()
 
 
 def validate_project_dir(raw: str, *, must_exist: bool = True, any_root: bool = False) -> Path:

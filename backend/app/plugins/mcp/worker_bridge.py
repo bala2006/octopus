@@ -15,14 +15,14 @@ from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, Response
 import uvicorn
 
-from app.plugins.tools import specs as T
+from app.sdk import toolspecs as T
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT
 from app.sdk.evidence import redact_evidence
-from app.plugins.providers.base import ToolCall
+from app.sdk.llm import ToolCall
 
 if TYPE_CHECKING:
-    from app.kernel.runtime.context import AgentSpec
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.agents import AgentSpec
+    from app.sdk.run import RunContext
 
 MAX_REQUEST_BYTES = 1_500_000
 SUPPORTED_PROTOCOLS = {"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
@@ -36,7 +36,7 @@ class _LoopbackServer(uvicorn.Server):
 
 
 class WorkerBridge:
-    def __init__(self, runtime: RunRuntime, agent: AgentSpec):
+    def __init__(self, runtime: RunContext, agent: AgentSpec):
         self.rt, self.agent = runtime, agent
         self.attempt = ACTIVE_ATTEMPT.get()
         if self.attempt is None or self.attempt.assignment.owner != agent.id:

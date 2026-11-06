@@ -1,48 +1,36 @@
 # Layer rules for import-linter. Run with `make lint-arch`, or `cd backend && .venv/bin/lint-imports`.
 #
-# Layers, from the top: channels > agents > workflows > orchestrator > capabilities > core.
-# Contracts below keep the lower layers from importing the upper ones. None of them uses ignore_imports.
-
+# main > channels > application > (kernel | plugins) > storage > (sdk | foundation)
+# A plugin imports only the SDK, storage and foundation. The kernel does the same, so neither knows the other:
+# they meet through the service registry, the tool registry and the run-method table.
 [importlinter]
 root_package = app
+exclude_type_checking_imports = True
 
-[importlinter:contract:core-imports-nothing-above]
-name = Core does not import the layers above it
-type = forbidden
-source_modules =
-    app.core
-forbidden_modules =
-    app.api
-    app.orchestrator
-    app.services
-    app.llm
-    app.tools
-    app.prompts
-    app.skills
-    app.models
+[importlinter:contract:layers]
+name = Octopus layers
+type = layers
+layers =
     app.main
-    app.capabilities
-
-# Agents (app/agents) sit above core and below channels. They may use prompts, services.roles and core, but not the
-# orchestrator, the API, or channels.
-[importlinter:contract:agents-stay-below-orchestrator-api-channels]
-name = Agents do not import the orchestrator, the API, or channels
-type = forbidden
-source_modules =
-    app.agents
-forbidden_modules =
-    app.orchestrator
-    app.api
+    app.bootstrap
     app.channels
+    app.application
+    app.kernel | app.plugins
+    app.storage
+    app.sdk | app.foundation
 
-# The run engine reaches models, the project filesystem and skills through core ports (app.core.ports).
-# Indirect imports are allowed: the handler modules it dispatches to still import capability modules (the tool
-# families are not yet ToolPlugins, see docs/architecture/refactor-plan.md).
-[importlinter:contract:engine-imports-no-capability-directly]
-name = The run engine imports no capability module directly
-type = forbidden
-source_modules =
-    app.orchestrator.engine
-forbidden_modules =
-    app.capabilities
-allow_indirect_imports = true
+[importlinter:contract:plugins-are-independent]
+name = Plugin packages do not import each other
+type = independence
+modules =
+    app.plugins.browser
+    app.plugins.mcp
+    app.plugins.memory
+    app.plugins.observers
+    app.plugins.providers
+    app.plugins.roles
+    app.plugins.sandbox
+    app.plugins.skills
+    app.plugins.tools
+    app.plugins.workflows
+    app.plugins.workspace

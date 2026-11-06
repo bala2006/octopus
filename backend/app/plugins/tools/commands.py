@@ -5,14 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
-from app.plugins.sandbox.commands import SandboxError, analyze_command, run_command
+from app.sdk.agents import AgentSpec
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
-async def act_run_code(rt: RunRuntime, agent: AgentSpec, a: A.RunCode) -> None:
+async def act_run_code(rt: RunContext, agent: AgentSpec, a: A.RunCode) -> None:
+    sandbox = rt.services.require("sandbox.exec")
+    SandboxError, analyze_command, run_command = sandbox.SandboxError, sandbox.analyze_command, sandbox.run_command
     rt.mark_work(agent.id)
     cid = await rt._tool_event(agent, "run_code", {"command": a.command, "covered_paths": a.covered_paths,
                                                     "criterion_ids": a.criterion_ids, "whole_project": a.whole_project})

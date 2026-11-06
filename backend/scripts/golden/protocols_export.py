@@ -6,9 +6,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.plugins.workflows.boardroom import DebateState, debate_decided_externally, debate_on_message
-from app.plugins.workflows.protocols import Verdict
-from app.plugins.workflows.review import ReviewState, infer_verdict, review_on_request, review_on_result
+from app.sdk.protocols import DebateState
+from app.plugins.workflows.boardroom import debate_decided_externally, debate_on_message
+from app.sdk.protocols import Verdict
+from app.sdk.protocols import ReviewState
+from app.plugins.workflows.review import infer_verdict, review_on_request, review_on_result
 from scripts.golden.canon import dump_json
 
 ALICE, BOB = "alice", "bob"

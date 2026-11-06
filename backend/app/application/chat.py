@@ -13,11 +13,12 @@ from app.storage.repositories import AgentMemoryRepository, AgentRepository, Cha
 from app.storage.base import new_id, utcnow
 from app.storage.session import SessionFactory, registry_factory
 from app.foundation.config import get_settings
-from app.plugins.providers.base import LLMError, LLMRequest, effective_max_tokens
-from app.kernel.runtime.roles import role_category
+from app.sdk.llm import LLMError, LLMRequest, effective_max_tokens
+from app.sdk.agents import role_category
 from app.plugins.providers.router import prepare_request, stream_with_retry
 from app.storage.models import Agent, AgentMemory, ChatSession, Company, Message
-from app.kernel.runtime.context import clip, render_template, rolling_summary
+from app.sdk.text import clip
+from app.kernel.runtime.context import render_template, rolling_summary
 from app.plugins.tools import basic
 
 TOOL_RE = re.compile(r"^\s*```tool\s*(\{.*?\})\s*```", re.S)

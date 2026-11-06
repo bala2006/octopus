@@ -32,6 +32,7 @@ from typing import Any
 
 from app.foundation.config import get_settings
 from app.foundation.logging import get_logger
+from app.plugins.browser.deps import deps
 
 log = get_logger("browser")
 
@@ -278,9 +279,8 @@ class BrowserService:
             self.status, self.verified = "server_ready", False
             log.info("browser_server_started", url=self.url, browser=self._browser_arg())
         try:
-            from app.plugins.mcp.client import McpConfig, list_tools
-
-            listed = await list_tools(McpConfig(id=SERVER_ID, name=SERVER_NAME, transport="http", url=self.url))
+            mcp = deps.require("mcp.client")
+            listed = await mcp.list_tools(mcp.McpConfig(id=SERVER_ID, name=SERVER_NAME, transport="http", url=self.url))
             order = {n: i for i, n in enumerate(PREFERRED)}
             self.tools = sorted(listed, key=lambda t: order.get(t["name"], 99))
         except Exception as exc:  # tool listing is informative only

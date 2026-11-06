@@ -17,46 +17,37 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import types
 from collections import Counter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 
-from app.storage.repositories import CompanyRepository, RunRepository
 from app.foundation.config import get_settings
 from app.foundation.logging import get_logger
+from app.kernel.current import current
 from app.kernel.policy import PolicyGate
-from app.kernel.run_manager import ACTIVE_STATES, ProjectRef, RunManager, StopRun, run_turn_loop  # noqa: F401 (ACTIVE_STATES is imported from here by the API)
-from app.storage.base import new_id
-from app.sdk.llm import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMOutputTruncated, LLMRequest, LLMResult
-from app.kernel.runtime.roles import role_category
-from app.kernel import ports
-from app.storage.models import Message, Run, Task
-from app.sdk import actions as A
-from app.kernel.eventlog import bus
-from app.kernel.runtime.context import AgentSpec
-from app.plugins.workflows.routing import EdgeSpec
-from app.sdk.approval_modes import normalize_mode
-from app.plugins.workflows.org import OrgService
-from app.plugins.workflows.company import CompanyWorkflow
-from app.sdk.execution_contracts import ACTIVE_ATTEMPT
+from app.kernel.run_manager import ProjectRef
+from app.kernel.runtime import board, lifecycle, mailbox, run_control, run_state, turn_loop
+from app.kernel.runtime.context import build_turn_prompts
 from app.kernel.runtime.execution import ExecutionService, execution_field
+from app.kernel.runtime.loopguard import LoopDetector
+from app.kernel.runtime.nullflow import NullFlow, NullOrg
+from app.sdk import actions as A
+from app.sdk.agents import AgentSpec, role_category
+from app.sdk.approval_modes import normalize_mode
 from app.sdk.evidence import redact_evidence
-from app.plugins.workflows.boardroom import DebateState
-from app.plugins.workflows.protocols import LoopDetector
-from app.plugins.workflows.review import ReviewState
+from app.sdk.execution_contracts import ACTIVE_ATTEMPT, mutation_lock
+from app.sdk.llm import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMOutputTruncated, LLMRequest, LLMResult
+from app.sdk.projectfs import ProjectFS
+from app.sdk.protocols import DebateState, ReviewState
+from app.sdk.routing import EdgeSpec
 from app.sdk.schemas import RunBudget
-from app.kernel.tools import TOOLS
-from app.plugins.tools import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions
-from app.kernel.runtime import run_control, run_state, mailbox, board, turn_loop, lifecycle
-from app.plugins.workflows import task_board
-from app.plugins.tools.messaging import DEBATE_PROTOCOL_TYPES, JUDGE_MAX_TOKENS, judge_verdict  # noqa: F401 (re-exported for existing callers)
-from app.sdk.states import OPEN_TASK_STATES  # noqa: F401 (re-exported for existing callers)
-from app.kernel.runtime.run_control import MAX_SELF_TURNS  # noqa: F401 (re-exported for existing callers)
-from app.kernel.runtime.run_state import JOURNAL_MAX  # noqa: F401 (re-exported for existing callers)
-from app.kernel.runtime.mailbox import MAX_REDELIVERIES  # noqa: F401 (re-exported for existing callers)
-from app.kernel.runtime.board import DIGEST_LINES  # noqa: F401 (re-exported for existing callers)
-from app.plugins.tools.files import READ_PAGE_CHARS, apply_edits, loose_match, closest_region, numbered_excerpt, VERIFIABLE_EXT  # noqa: F401 (re-exported for existing callers)
-from app.kernel.runtime.turn_loop import head_tail, ROUND_WARNINGS, KEEP_FULL_ROUNDS, OLD_ROUND_CHARS, COMPACT_MARK, _shorten, compact_rounds  # noqa: F401 (re-exported for existing callers)
+from app.storage.base import new_id
+from app.storage.models import Message, Run, Task
+from app.storage.repositories import CompanyRepository, RunRepository
+
+if TYPE_CHECKING:  # pragma: no cover
+    from app.kernel.core import Kernel
 
 
 log = get_logger("orchestrator")
@@ -125,9 +116,12 @@ class RunRuntime:
     _proof_environment = execution_field("_proof_environment")
     _last_manifest = execution_field("_last_manifest")
 
-    def __init__(self, run: Run, user_id: str, project: ProjectRef) -> None:
-        self.org = OrgService(self)
-        self.flow = CompanyWorkflow(self)
+    def __init__(self, run: Run, user_id: str, project: ProjectRef, *, kernel: Kernel | None = None) -> None:
+        self.kernel = kernel if kernel is not None else current()
+        self.services = self.kernel.services
+        org, flow = self.services.get("workflow.org"), self.services.get("workflow.company")
+        self.org = org.OrgService(self) if org is not None else NullOrg()  # a disabled workflow plugin leaves a neutral stand-in
+        self.flow = flow.CompanyWorkflow(self) if flow is not None else NullFlow()
         snap = run.snapshot_json or {}
         self.snapshot: dict[str, Any] = {"company": snap.get("company") or {}, "agents": list(snap.get("agents") or []),
                                          "edges": list(snap.get("edges") or []), "departments": dict(snap.get("departments") or {})}
@@ -205,10 +199,9 @@ class RunRuntime:
         self.tokens = run.tokens_used or 0
         self.cost = run.cost_usd or 0.0
         self.active_seconds = 0.0
-        from app.plugins.roles.prompts import all_roles
-
-        self.roles = all_roles()  # replaced by the owner's role library in load_roles()
-        self.skills: dict[str, Any] = ports.handles().builtin_skills()  # + the owner's and the project's skills in load_roles()
+        builtin_roles, skills = self.services.get("roles.builtin"), self.services.get("skills.library")
+        self.roles = builtin_roles.all_roles() if builtin_roles is not None else {}  # replaced by the owner's role library in load_roles()
+        self.skills: dict[str, Any] = skills.builtin_skills() if skills is not None else {}  # + the owner's and the project's skills in load_roles()
         self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
         self.wf: dict[str, Any] | None = None  # the workflow's state (orchestrator/workflow.py); None = free-form run
         # verify-before-finish: code changed since anything was last run / opened in the browser
@@ -237,11 +230,32 @@ class RunRuntime:
     def db(self):  # type: ignore[no-untyped-def]
         return self.sf()
 
+    def __getattr__(self, name: str) -> Any:
+        """Methods that enabled plugins registered for every run (HostApi.add_run_methods)."""
+        if name.startswith("__") or "kernel" not in self.__dict__:
+            raise AttributeError(name)
+        method = self.kernel.run_methods.get(name)
+        if method is None:
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r} (no enabled plugin provides it)")
+        return types.MethodType(method, self)
+
+    def tool_available(self, name: str) -> bool:
+        """Can an action of this name run? The kernel's own actions always can; plugin actions while their plugin is enabled."""
+        return getattr(self.execution, f"act_{name}", None) is not None or self.kernel.tools.has(name)
+
+    def mutation_lock(self) -> asyncio.Lock:
+        return mutation_lock(self.run_id)
+
+    def build_turn_prompts(self, agent: AgentSpec, inbox_ids: set[str], observations: list[dict[str, Any]], *, native: bool,
+                           memory_context: str) -> tuple[str, str]:
+        """The system and user prompt of one turn. Every worker backend (native tools, JSON envelope, OpenCode) uses the same."""
+        return build_turn_prompts(self, agent, inbox_ids, observations, native=native, memory_context=memory_context)
+
     def fs_for(self, aid: str) -> Any:
         root = self.execution.worker_root(aid)
         key = str(root)
         if key not in self._fs:
-            self._fs[key] = ports.handles().project_fs(root)
+            self._fs[key] = ProjectFS(root)
         return self._fs[key]
 
     async def emit(self, type_: str, data: dict[str, Any]) -> None:
@@ -257,7 +271,7 @@ class RunRuntime:
                     return {key: filtered(item) for key, item in value.items()}
                 return value
             data = filtered(data)
-        await bus.publish(self.run_id, type_, data, self.sf)
+        await self.kernel.eventlog.publish(self.run_id, type_, data, self.sf)
 
     @staticmethod
     def _rec(m: Message) -> dict[str, Any]:
@@ -309,7 +323,7 @@ class RunRuntime:
 
         async def _consume() -> None:
             nonlocal buf, last, speaking, tool_buf, think_buf, think_last, fresh_call, streamed_since_status
-            async for chunk in ports.handles().stream_llm(req):
+            async for chunk in self.services.require("models.router").stream_with_retry(req):
                 if idle is not None:  # output is flowing: push the inactivity deadline out (never past the run's budget)
                     left = remaining - (time.monotonic() - t_start)
                     if left <= 0:
@@ -448,10 +462,15 @@ class RunRuntime:
             await self.emit("error", {"message": f"{agent.name} tried disabled tool {tool}", "agent_id": agent.id, "kind": "permission"})
             return
         handler = getattr(self.execution, f"act_{name}", None)
-        if handler is not None:
-            await handler(agent, action)
+        if handler is None:
+            handler = self.kernel.tools.handler(name)
+            if handler is None:
+                self.notice(agent.id, f"Action '{name}' is not available: the plugin that provides it is disabled.", activate=True)
+                await self.emit("error", {"message": f"{agent.name} used '{name}', whose plugin is disabled", "agent_id": agent.id, "kind": "permission"})
+                return
+            await handler(self, agent, action)
         else:
-            await TOOLS[name](self, agent, action)
+            await handler(agent, action)
 
     async def deny(self, agent: AgentSpec, cid: str, tool: str, reason: str) -> None:
         self.notice(agent.id, reason, activate=True)
@@ -468,19 +487,7 @@ class RunRuntime:
         await self.execution.execution_tool_result(agent, cid, tool, ok, output)
         await self.emit("tool_result", {"call_id": cid, "agent_id": agent.id, "tool": tool, "ok": ok, "output": output[:4000]})
 
-    # Methods that moved to the handler and runtime modules. Each name is that module's function bound as
-    # a method, so self.<name>(...) keeps working for every caller.
-    # handlers.messaging
-    reject = messaging_actions.reject
-    act_send_message = messaging_actions.act_send_message
-    _send_one = messaging_actions._send_one
-    condition_met = messaging_actions.condition_met
-    act_request_user_input = messaging_actions.act_request_user_input
-    finish_refusal = messaging_actions.finish_refusal
-    wf_finish_refusal = messaging_actions.wf_finish_refusal
-    act_finish = messaging_actions.act_finish
-    act_wait = messaging_actions.act_wait
-
+    # Methods of the run engine's own modules, bound as methods. Plugins add theirs through the run-method table (see __getattr__).
     # run_control
     next_runnable = run_control.next_runnable
     active_now = run_control.active_now
@@ -530,29 +537,10 @@ class RunRuntime:
     efficiency = board.efficiency
     file_lock = board.file_lock
     mark_progress = board.mark_progress
-    open_tasks = task_board.open_tasks
-    task_ready = task_board.task_ready
-    task_line = task_board.task_line
-    open_task_owners = task_board.open_task_owners
     nudge_open_tasks = board.nudge_open_tasks
     resolve_agent = board.resolve_agent
     blackboard = board.blackboard
     turn_context = board.turn_context
-
-    # handlers.files
-    act_search_project = file_actions.act_search_project
-    act_write_file = file_actions.act_write_file
-    act_edit_file = file_actions.act_edit_file
-    commit_file = file_actions.commit_file
-    _commit_file = file_actions._commit_file
-    _write_checked_file = file_actions._write_checked_file
-    publish_file = file_actions.publish_file
-    check_written = file_actions.check_written
-    written_by_octopus = file_actions.written_by_octopus
-    act_create_folder = file_actions.act_create_folder
-    act_move_file = file_actions.act_move_file
-    act_read_file = file_actions.act_read_file
-    act_list_files = file_actions.act_list_files
 
     # turn_loop
     effort_for = turn_loop.effort_for
@@ -576,115 +564,7 @@ class RunRuntime:
     finalize = lifecycle.finalize
     _finalize = lifecycle._finalize
 
-    # handlers.delegation
-    brief_text = delegation_actions.brief_text
-    act_delegate = delegation_actions.act_delegate
-    delegate = delegation_actions.delegate
-
-    # handlers.tasks
-    link_task = task_board.link_task
-    child_task_contract = task_board.child_task_contract
-    create_task = task_board.create_task
-    save_task = task_board.save_task
-    act_update_task_board = task_board.act_update_task_board
-
-    # handlers.mcp
-    load_mcp = mcp_actions.load_mcp
-    act_mcp_call = mcp_actions.act_mcp_call
-
-    # handlers.browser
-    _browser_action = browser_actions._browser_action
-
-    # handlers.commands
-    act_run_code = command_actions.act_run_code
-
-    # handlers.web
-    act_calculate = web_actions.act_calculate
-    act_web_search = web_actions.act_web_search
-
-    # handlers.memory
-    act_remember = memory_actions.act_remember
-
-    # handlers.skills
-    act_use_skill = skill_actions.act_use_skill
-
-    # Delegation to the workflow services. The methods live on OrgService and CompanyWorkflow.
-    # OrgService (self.org)
-    def manages(self, *args, **kwargs):
-        return self.org.manages(*args, **kwargs)
-
-    def _snapshot_agent(self, *args, **kwargs):
-        return self.org._snapshot_agent(*args, **kwargs)
-
-    async def _team_guard(self, *args, **kwargs):
-        return await self.org._team_guard(*args, **kwargs)
-
-    async def _persist_team(self, *args, **kwargs):
-        return await self.org._persist_team(*args, **kwargs)
-
-    async def act_list_agents(self, *args, **kwargs):
-        return await self.org.act_list_agents(*args, **kwargs)
-
-    async def act_create_agent(self, *args, **kwargs):
-        return await self.org.act_create_agent(*args, **kwargs)
-
-    async def act_update_agent(self, *args, **kwargs):
-        return await self.org.act_update_agent(*args, **kwargs)
-
-    # CompanyWorkflow (self.flow)
-    def wf_active(self, *args, **kwargs):
-        return self.flow.wf_active(*args, **kwargs)
-
-    def wf_phase(self, *args, **kwargs):
-        return self.flow.wf_phase(*args, **kwargs)
-
-    def wf_enabled_for_run(self, *args, **kwargs):
-        return self.flow.wf_enabled_for_run(*args, **kwargs)
-
-    def wf_tool_exclusions(self, *args, **kwargs):
-        return self.flow.wf_tool_exclusions(*args, **kwargs)
-
-    def wf_owner_of_active(self, *args, **kwargs):
-        return self.flow.wf_owner_of_active(*args, **kwargs)
-
-    async def wf_emit(self, *args, **kwargs):
-        return await self.flow.wf_emit(*args, **kwargs)
-
-    def wf_view(self, *args, **kwargs):
-        return self.flow.wf_view(*args, **kwargs)
-
-    def wf_blackboard(self, *args, **kwargs):
-        return self.flow.wf_blackboard(*args, **kwargs)
-
-    def wf_init(self, *args, **kwargs):
-        return self.flow.wf_init(*args, **kwargs)
-
-    def wf_intake_note(self, *args, **kwargs):
-        return self.flow.wf_intake_note(*args, **kwargs)
-
-    async def act_set_track(self, *args, **kwargs):
-        return await self.flow.act_set_track(*args, **kwargs)
-
-    async def wf_advance(self, *args, **kwargs):
-        return await self.flow.wf_advance(*args, **kwargs)
-
-    async def wf_start(self, *args, **kwargs):
-        return await self.flow.wf_start(*args, **kwargs)
-
-    def wf_brief(self, *args, **kwargs):
-        return self.flow.wf_brief(*args, **kwargs)
-
-    def wf_gate(self, *args, **kwargs):
-        return self.flow.wf_gate(*args, **kwargs)
-
-    async def wf_on_finish(self, *args, **kwargs):
-        return await self.flow.wf_on_finish(*args, **kwargs)
-
-    async def nudge_workflow(self, *args, **kwargs):
-        return await self.flow.nudge_workflow(*args, **kwargs)
-
-
-async def _load_run(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
+async def load_run(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
     """Read a run row and its owner's user id from the project database."""
 
     async with project.sf() as db:
@@ -693,9 +573,6 @@ async def _load_run(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
             return None
         company = await CompanyRepository(db).get(run.company_id)
         return run, company.user_id if company else ""
-
-
-manager = RunManager(create=RunRuntime, load=_load_run)
 
 
 def default_budget() -> dict[str, Any]:

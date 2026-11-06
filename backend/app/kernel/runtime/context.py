@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from app.plugins.providers.base import effective_max_tokens
+from app.sdk.agents import AgentSpec
+from app.sdk.text import TOOL_RESULT_CHARS, clip
 from app.sdk.actions import schema_doc
-from app.plugins.workflows.routing import EdgeSpec, allowed_recipients
-from app.plugins.skills import library as SK
-from app.plugins.roles.library import resolve_prompt
+from app.sdk.routing import EdgeSpec, allowed_recipients
 
 if TYPE_CHECKING:
     from app.kernel.runtime.engine import RunRuntime
@@ -24,62 +22,9 @@ EDGE_MEANING = {
 
 MSG_TYPES = ("task, question, answer, proposal, critique, agreement, objection, decision, "
              "review_request, review_result, status_update, final_report")
-# Model-facing size limits (see docs/MODEL_QUALITY_AUDIT.md). Every cut is marked so the model knows it saw only part.
-# gpt-6-luna reads up to 922k input tokens, so these are generous; they only guard against pathological inputs.
-TOOL_RESULT_CHARS = 60_000   # one tool result / notice in the prompt (~15k tokens)
+# Model-facing size limits (see docs/MODEL_QUALITY_AUDIT.md). TOOL_RESULT_CHARS and clip() live in app.sdk.text.
 RECENT_MSG_CHARS = 8_000     # each message in the "recent conversation" window
 SUMMARY_CHARS = 16_000       # extractive summary of older messages
-
-
-def clip(text: str, limit: int, hint: str = "") -> str:
-    """Cut ``text`` to ``limit`` chars with an explicit marker (never a silent cut)."""
-    if len(text) <= limit:
-        return text
-    return text[:limit] + f"\n…[truncated: showing {limit:,} of {len(text):,} characters{'; ' + hint if hint else ''}]"
-
-
-@dataclass
-class AgentSpec:
-    id: str
-    name: str
-    role: str
-    description: str
-    system_prompt: str
-    provider: str
-    model: str
-    temperature: float
-    max_tokens: int
-    tools: dict[str, bool]
-    behavior: dict[str, Any]
-    is_entry: bool
-    color: str
-    category: str = "generic"
-    department: str = ""
-    is_manager: bool = False
-    reports_to: str | None = None
-    active: bool = True
-    created_by: str | None = None
-    avatar: str = ""
-    memory: dict[str, str] = field(default_factory=dict)
-    mcp: list[dict[str, Any]] = field(default_factory=list)  # [{id, name, tools}]
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any], category: str) -> AgentSpec:
-        return cls(id=d["id"], name=d["name"], role=d.get("role", ""), description=d.get("description", ""),
-                   system_prompt=d.get("system_prompt", ""), provider=d.get("provider", "azure"), model=d.get("model", "gpt-6-luna"),
-                   temperature=float(d.get("temperature", 0.4)), max_tokens=effective_max_tokens(d.get("max_tokens")),
-                   tools=d.get("tools") or {}, behavior=d.get("behavior") or {}, is_entry=bool(d.get("is_entry")),
-                   color=d.get("color", "#6366f1"), category=category, department=d.get("department") or "",
-                   is_manager=bool(d.get("is_manager")), reports_to=d.get("reports_to"), active=d.get("active", True) is not False,
-                   created_by=d.get("created_by"), avatar=d.get("avatar") or "")
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise back to the AgentOut-like shape stored in run snapshots."""
-        return {"id": self.id, "name": self.name, "role": self.role, "description": self.description, "system_prompt": self.system_prompt,
-                "provider": self.provider, "model": self.model, "temperature": self.temperature, "max_tokens": self.max_tokens,
-                "tools": self.tools, "behavior": self.behavior, "is_entry": self.is_entry, "color": self.color, "avatar": self.avatar,
-                "department": self.department, "is_manager": self.is_manager, "reports_to": self.reports_to, "active": self.active,
-                "created_by": self.created_by}
 
 
 def render_template(text: str, variables: dict[str, str]) -> str:
@@ -292,11 +237,13 @@ def build_user_prompt(*, agent: AgentSpec, history: list[dict[str, Any]], inbox_
 def build_turn_prompts(runtime: RunRuntime, agent: AgentSpec, inbox_ids: set[str], observations: list[dict[str, Any]],
                        *, native: bool, memory_context: str) -> tuple[str, str]:
     """The same role, instructions and selected context apply to every worker backend."""
+    library = runtime.services.get("roles.library")  # without it an agent runs on its own prompt
+    skills = runtime.services.get("skills.library")
     system = build_system_prompt(agent, company=runtime.company_name, goal=runtime.goal, agents=runtime.agents,
         edges=runtime.edges, status=runtime.status, preview_url=runtime.preview_url(), native=native,
-        role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, runtime.roles),
-        skills_text=SK.prompt_section(runtime.skills, str(agent.behavior.get("template_key") or ""),
-                                     list(agent.behavior.get("skills") or [])))
+        role_prompt=library.resolve_prompt(agent.behavior, agent.system_prompt, runtime.roles) if library is not None else None,
+        skills_text=skills.prompt_section(runtime.skills, str(agent.behavior.get("template_key") or ""),
+                                          list(agent.behavior.get("skills") or [])) if skills is not None else "")
     system += runtime.pinned_guidance.get("content", "") + memory_context + runtime.execution.engineering_brief()
     user = build_user_prompt(agent=agent, history=runtime.history, inbox_ids=inbox_ids, observations=observations,
         blackboard=runtime.blackboard(), names=runtime.names, recent_n=runtime.budget.context_recent,

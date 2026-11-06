@@ -12,12 +12,8 @@ from typing import Iterator
 from pydantic import Field
 
 from app.sdk.evidence import ArtifactManifest, ExcludedFile, FileDigest, MAX_DIRECTORIES, MAX_FILES, MAX_TEXT_BYTES, MAX_TOTAL_BYTES
-from app.plugins.skills.contracts import Contract, ContractError, content_hash
-from app.plugins.workspace.project_fs import IGNORED_DIRS, ProjectFS, WorkspaceError, is_secret
-
-
-class WorkspaceConflict(ContractError):
-    pass
+from app.sdk.contracts import Contract, ContractError, WorkspaceConflict, content_hash
+from app.sdk.projectfs import IGNORED_DIRS, ProjectFS, WorkspaceError, is_secret
 
 
 class StageRecord(Contract):

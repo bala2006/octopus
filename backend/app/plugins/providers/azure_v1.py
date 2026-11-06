@@ -19,7 +19,8 @@ from typing import Any
 
 import httpx
 
-from app.plugins.providers.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, estimate_tokens, output_cap, with_images, chat_continuation, chat_tools, ChatToolAccumulator
+from app.sdk.llm import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, ToolCall, Usage, output_cap, with_images
+from app.plugins.providers.base import estimate_tokens, chat_continuation, chat_tools, ChatToolAccumulator
 
 ApiStyle = str  # "responses" | "chat"
 _PROTECTED = {"model", "input", "messages", "stream", "tools", "tool_choice"}  # never auto-dropped

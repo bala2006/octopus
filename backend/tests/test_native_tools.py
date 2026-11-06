@@ -8,11 +8,11 @@ import httpx
 import pytest
 
 from app.plugins.providers.azure_v1 import AzureV1Provider, _body, supports_native_tools
-from app.plugins.providers.base import LLMRequest
+from app.sdk.llm import LLMRequest
 from app.plugins.providers.router import set_provider_override
 from app.sdk.actions import Edit, EditFile, parse_envelope
-from app.kernel.runtime.engine import apply_edits
-from app.plugins.tools.specs import parse_tool_call, tool_specs
+from app.plugins.tools.files import apply_edits
+from app.sdk.toolspecs import parse_tool_call, tool_specs
 from conftest import NativeScriptedProvider, ScriptedProvider, agent, edge, env, events, make_company, run_messages, start_run, wait_status
 
 

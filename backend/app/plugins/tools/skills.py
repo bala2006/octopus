@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
-async def act_use_skill(rt: RunRuntime, agent: AgentSpec, a: A.UseSkill) -> None:
+async def act_use_skill(rt: RunContext, agent: AgentSpec, a: A.UseSkill) -> None:
     cid = await rt._tool_event(agent, "use_skill", {"name": a.name})
     key = a.name.strip().lower()
     sk = rt.skills.get(key) or next((s for s in rt.skills.values() if key in s.name), None)

@@ -9,7 +9,7 @@ import pytest
 from app.plugins.workspace.git import commit, stage, status
 from app.plugins.workspace.tasks import discover
 from app.plugins.skills.guidance import load
-from app.plugins.workspace.project_fs import WorkspaceError
+from app.sdk.projectfs import WorkspaceError
 
 
 def git(root: Path, *args: str) -> str:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app.plugins.providers.router import set_provider_override
-from app.kernel.runtime.engine import MAX_SELF_TURNS
+from app.kernel.runtime.run_control import MAX_SELF_TURNS
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status
 
 TEAM = [agent("ceo", "Cleo", entry=True, role="CEO"), agent("dev", "Dev", role="Engineer")]

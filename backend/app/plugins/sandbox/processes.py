@@ -10,7 +10,7 @@ from typing import Literal
 
 from app.foundation.config import get_settings
 from app.plugins.sandbox.commands import SandboxError, _resolve_exe, command_environment, parse_command, stop_process
-from app.plugins.workspace.project_fs import ProjectFS, WorkspaceError
+from app.sdk.projectfs import ProjectFS, WorkspaceError
 
 MAX_LOG_CHARS = 24_000
 MAX_SERVERS = 8

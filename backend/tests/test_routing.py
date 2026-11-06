@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app.plugins.providers.router import set_provider_override
-from app.plugins.workflows.routing import EdgeSpec, allowed_recipients, find_channel, rejection_reason
+from app.sdk.routing import EdgeSpec, allowed_recipients, find_channel, rejection_reason
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status
 
 

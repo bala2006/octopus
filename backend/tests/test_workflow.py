@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.plugins.providers.router import set_provider_override
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 from app.plugins.workflows.company import PHASES, can_staff, pick_owner
 from conftest import NativeScriptedProvider, agent, events, make_company, run_messages, start_run, wait_status
 

@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 from app.storage.repositories import ArtifactRepository, MessageRepository, RunRepository, TaskRepository
 from app.storage.models import Run
-from app.plugins.workflows.boardroom import DebateState
-from app.plugins.workflows.protocols import LoopDetector
-from app.plugins.workflows.review import ReviewState
+from app.sdk.protocols import DebateState
+from app.kernel.runtime.loopguard import LoopDetector
+from app.sdk.protocols import ReviewState
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.kernel.runtime.engine import RunRuntime

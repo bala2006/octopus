@@ -10,7 +10,7 @@ from app.plugins.providers.router import set_provider_override
 from app.storage.models import Agent, Task
 from app.storage.models.runtime_records import TaskAttempt
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 from app.sdk.contracts import Assignment, ExecutionPolicy
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
 from app.sdk.task_contracts import TaskContract, validate_task

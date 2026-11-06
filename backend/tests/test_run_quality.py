@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.plugins.providers.base import LLMRequest
+from app.sdk.llm import LLMRequest
 from app.plugins.providers.router import set_provider_override
 from app.kernel.runtime import engine as E
+from app.plugins.tools.files import apply_edits
 from app.kernel.runtime.context import build_system_prompt
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status
 
@@ -60,14 +61,14 @@ def test_missed_edit_shows_where_the_text_probably_is() -> None:
     text = "\n".join(f"line {i}" for i in range(100)) + "\nfunction shoot(target) {\n  score += 10;\n}\n"
     old = "function shoot(target) {\n  score += 5;\n}"
     try:
-        E.apply_edits(text, [E.A.Edit(old_string=old, new_string="x")])
+        apply_edits(text, [E.A.Edit(old_string=old, new_string="x")])
     except ValueError as exc:
         msg = str(exc)
     assert "old_string not found" in msg and "score += 10;" in msg and "101  function shoot(target) {" in msg
 
 
 def test_system_prompt_steers_toward_one_owner_and_sequencing() -> None:
-    from app.kernel.runtime.context import AgentSpec
+    from app.sdk.agents import AgentSpec
 
     a = AgentSpec.from_dict(agent("a", "Ann", entry=True), "generic")
     p = build_system_prompt(a, company="Co", goal="g", agents={"a": a}, edges=[])

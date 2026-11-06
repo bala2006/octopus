@@ -10,8 +10,8 @@ from uuid import uuid4
 from pathlib import Path
 from typing import Any
 
-from app.foundation.config import PROJECT_DIRNAME
-from app.application.files import MAX_IMAGE_BYTES, image_mime
+from app.sdk.paths import PROJECT_DIRNAME
+from app.kernel.runtime.uploads import MAX_IMAGE_BYTES, image_mime
 
 MAX_FILES = 5
 MAX_IMAGES = 4

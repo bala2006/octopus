@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-from app.plugins.providers.base import LLMChunk, LLMError, LLMRequest
+from app.sdk.llm import LLMChunk, LLMError, LLMRequest
 from app.plugins.providers.router import set_provider_override
 from conftest import ScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status
 

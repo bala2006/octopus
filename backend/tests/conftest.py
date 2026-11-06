@@ -33,7 +33,7 @@ import pytest_asyncio  # noqa: E402
 
 from app.foundation.config import get_settings  # noqa: E402
 from app.storage.migrate import upgrade_registry  # noqa: E402
-from app.plugins.providers.base import LLMChunk, LLMRequest, Usage  # noqa: E402
+from app.sdk.llm import LLMChunk, LLMRequest, Usage  # noqa: E402
 from app.plugins.providers.router import set_provider_override  # noqa: E402
 from app.main import app  # noqa: E402
 from fakes.fake_provider import FakeProvider  # noqa: E402
@@ -87,7 +87,7 @@ class NativeScriptedProvider:
         return True
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        from app.plugins.providers.base import ToolCall
+        from app.sdk.llm import ToolCall
 
         ctx = req.metadata.get("turn_context")
         if ctx is None:

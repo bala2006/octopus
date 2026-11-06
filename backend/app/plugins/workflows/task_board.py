@@ -11,28 +11,28 @@ from app.sdk.execution_contracts import ACTIVE_ATTEMPT
 from app.storage.base import new_id
 from app.storage.repositories import TaskRepository
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
-from app.sdk.states import OPEN_TASK_STATES
-from app.plugins.workflows.routing import find_channel
+from app.sdk.agents import AgentSpec
+from app.sdk.task_contracts import OPEN_TASK_STATES
+from app.sdk.routing import find_channel
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
-def open_tasks(rt: RunRuntime) -> list[dict[str, Any]]:
+def open_tasks(rt: RunContext) -> list[dict[str, Any]]:
     return [t for t in rt.tasks.values() if t["status"] in OPEN_TASK_STATES]
 
 
-def task_ready(rt: RunRuntime, task: dict[str, Any]) -> bool:
+def task_ready(rt: RunContext, task: dict[str, Any]) -> bool:
     from app.sdk.task_contracts import dependency_blockers
     return task["status"] != "blocked" and not dependency_blockers(task, rt.tasks)
 
 
-def task_line(rt: RunRuntime, t: dict[str, Any]) -> str:
+def task_line(rt: RunContext, t: dict[str, Any]) -> str:
     return f"{t['key']} [{t['status']}] {t['title']} (assignee: {rt.names.get(t['assignee'] or '', 'unassigned')})"
 
 
-def open_task_owners(rt: RunRuntime) -> list[str]:
+def open_task_owners(rt: RunContext) -> list[str]:
     owners: list[str] = []
     for t in rt.open_tasks():
         a = t["assignee"]
@@ -41,7 +41,7 @@ def open_task_owners(rt: RunRuntime) -> list[str]:
     return owners
 
 
-async def link_task(rt: RunRuntime, creator: str, assignee: str, task_key: str | None, content: str) -> str:
+async def link_task(rt: RunContext, creator: str, assignee: str, task_key: str | None, content: str) -> str:
     from app.sdk.task_contracts import contract
     if task_key and task_key not in rt.tasks:
         raise ValueError("Unknown task; create its owned contract before delegating it")
@@ -64,7 +64,7 @@ async def link_task(rt: RunRuntime, creator: str, assignee: str, task_key: str |
     return t["key"]
 
 
-def child_task_contract(rt: RunRuntime, proposed=None):
+def child_task_contract(rt: RunContext, proposed=None):
     from app.sdk.task_contracts import TaskContract, contract, permits_path
     parent = ACTIVE_ATTEMPT.get()
     if not parent or not parent.assignment.task_id:
@@ -76,7 +76,7 @@ def child_task_contract(rt: RunRuntime, proposed=None):
     return proposed
 
 
-async def create_task(rt: RunRuntime, creator: str | None, fields: dict[str, Any]) -> dict[str, Any]:
+async def create_task(rt: RunContext, creator: str | None, fields: dict[str, Any]) -> dict[str, Any]:
     from app.sdk.task_contracts import TaskContract, validate_task
     constraints = rt.child_task_contract(TaskContract.model_validate(fields["constraints_json"]) if fields.get("constraints_json") else None).model_copy(
         update={"workflow_hash": rt.execution.workflow_contract().content_hash})
@@ -92,7 +92,7 @@ async def create_task(rt: RunRuntime, creator: str | None, fields: dict[str, Any
     return t
 
 
-async def save_task(rt: RunRuntime, t: dict[str, Any], new: bool = False) -> None:
+async def save_task(rt: RunContext, t: dict[str, Any], new: bool = False) -> None:
     async with rt.db() as db:
         repo = TaskRepository(db)
         if new:
@@ -103,7 +103,7 @@ async def save_task(rt: RunRuntime, t: dict[str, Any], new: bool = False) -> Non
     await rt.emit("task_updated", {"task": {**t, "assignee_agent_id": t["assignee"], "run_id": rt.run_id}})
 
 
-async def act_update_task_board(rt: RunRuntime, agent: AgentSpec, a: A.UpdateTaskBoard) -> None:
+async def act_update_task_board(rt: RunContext, agent: AgentSpec, a: A.UpdateTaskBoard) -> None:
     from app.sdk.task_contracts import validate_task
     cid = await rt._tool_event(agent, "update_task_board", {"count": len(a.tasks)})
     changed = []

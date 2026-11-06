@@ -12,7 +12,6 @@ from app.storage.base import utcnow
 from app.storage.session import registry_factory
 from app.storage.repositories import RunRepository
 from app.sdk.schemas import RunBudget
-from app.plugins.skills import library as SK
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.kernel.runtime.engine import RunRuntime
@@ -52,7 +51,7 @@ async def continue_with(rt: RunRuntime, content: str, to_agent_id: str | None, *
     if to_agent_id in rt.agents:
         targets = [to_agent_id]
     else:  # "entry agent": the entry agent plus everyone who still owns an open task (they'd never be woken otherwise)
-        from app.plugins.roles.chief import route_target
+        route_target = rt.services.require("roles.lead").route_target
         targets = [route_target(content, [a.to_dict() for a in rt.agents.values()], rt.lead_agent_id)]
     for t in targets:
         if t != rt.lead_agent_id:
@@ -118,18 +117,19 @@ def preview_url(rt: RunRuntime) -> str:
 
 async def load_roles(rt: RunRuntime) -> None:
     """The run owner's role library (built-in roles + their edits + their own roles): linked agents' prompts come from it."""
-    from app.plugins.roles.library import effective_roles
-
+    library, skills = rt.services.get("roles.library"), rt.services.get("skills.library")
     try:
         async with registry_factory()() as rdb:
-            rt.roles = await effective_roles(rdb, rt.user_id)
-            rt.skills = await SK.effective_skills(rdb, rt.user_id, rt.root)
+            if library is not None:
+                rt.roles = await library.effective_roles(rdb, rt.user_id)
+            if skills is not None:
+                rt.skills = await skills.effective_skills(rdb, rt.user_id, rt.root)
     except Exception as exc:  # noqa: BLE001 - built-in roles and skills still work
         log.warning("roles_not_loaded", error=str(exc)[:200])
 
 
 async def finalize(rt: RunRuntime, status: str, reason: str) -> None:
-    from app.kernel.runtime.runtime_store import mutation_lock
+    from app.sdk.execution_contracts import mutation_lock
     async with mutation_lock(rt.run_id):
         await rt._finalize(status, reason)
 
@@ -162,21 +162,20 @@ async def _finalize(rt: RunRuntime, status: str, reason: str) -> None:
             status=status, halt_reason=reason[:200], summary=summary, ended_at=utcnow(),
             tokens_used=rt.tokens, cost_usd=round(rt.cost, 6), turns=rt.turn_no, state_json=rt.state_dict())
         await db.commit()
-    from app.plugins.browser.service import browser
-    from app.plugins.observers.report import build_report  # local import avoids a cycle
+    sessions, reports = rt.services.get("browser.sessions"), rt.services.get("reports.build")
+    if sessions is not None:
+        await sessions.browser.close_run(rt.run_id)
 
-    await browser.close_run(rt.run_id)
-
-    try:
-        report = await build_report(rt.run_id, rt.sf)
-        async with rt.db() as db:
-            await RunRepository(db).update(rt.run_id, report_md=report)
-            await db.commit()
-    except Exception:  # pragma: no cover
-        log.exception("report_failed", run_id=rt.run_id)
+    if reports is not None:
+        try:
+            report = await reports.build_report(rt.run_id, rt.sf)
+            async with rt.db() as db:
+                await RunRepository(db).update(rt.run_id, report_md=report)
+                await db.commit()
+        except Exception:  # pragma: no cover
+            log.exception("report_failed", run_id=rt.run_id)
     rt.run_status = status
     await rt.usage_event()
     await rt.emit("run_status", {"status": status, "reason": reason, "summary": summary, "final": True})
-    from app.kernel.runtime.engine import manager  # engine imports this module; import at call time
-    if manager.get(rt.run_id) is rt:
-        manager.forget(rt.run_id)
+    if rt.kernel.runs.get(rt.run_id) is rt:
+        rt.kernel.runs.forget(rt.run_id)

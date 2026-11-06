@@ -5,19 +5,20 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from app.foundation.config import PROJECT_DIRNAME
+from app.sdk.paths import PROJECT_DIRNAME, VERIFIABLE_EXT
 from app.foundation.logging import get_logger
 from app.storage.base import new_id, utcnow
 from app.storage.repositories import ArtifactRepository
 from app.storage.models import Artifact
 from app.sdk import actions as A
-from app.kernel.runtime.context import TOOL_RESULT_CHARS, AgentSpec
+from app.sdk.text import TOOL_RESULT_CHARS
+from app.sdk.agents import AgentSpec
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT
 from app.sdk.approval_modes import is_dangerous_edit
-from app.plugins.workspace.project_fs import WorkspaceError
+from app.sdk.projectfs import WorkspaceError
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 log = get_logger("orchestrator")
 
@@ -121,10 +122,9 @@ def numbered_excerpt(text: str, line: int, before: int = 3, after: int = 12) -> 
 
 
 # code an agent can run or open: finishing with changes to these that nothing exercised is sent back once to verify
-VERIFIABLE_EXT = {"py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "html", "htm", "go", "rs", "java", "rb", "php", "sh"}  # tool rounds left in a turn at which the agent is told to wrap up
 
 
-async def act_search_project(rt: RunRuntime, agent: AgentSpec, a: A.SearchProject) -> None:
+async def act_search_project(rt: RunContext, agent: AgentSpec, a: A.SearchProject) -> None:
     cid = await rt._tool_event(agent, "search_project", {"query": a.query, "path_prefix": a.path_prefix})
     await rt.set_agent_status(agent.id, "reading", f"Searching for {a.query[:40]}…")
     try:
@@ -140,7 +140,7 @@ async def act_search_project(rt: RunRuntime, agent: AgentSpec, a: A.SearchProjec
     await rt._tool_result(agent, cid, "search_project", ok, out[:2000])
 
 
-async def act_write_file(rt: RunRuntime, agent: AgentSpec, a: A.WriteFile) -> None:
+async def act_write_file(rt: RunContext, agent: AgentSpec, a: A.WriteFile) -> None:
     cid = await rt._tool_event(agent, "write_file", {"path": a.path, "bytes": len(a.content), "note": a.note})
     fs = rt.fs_for(agent.id)
     try:
@@ -154,7 +154,7 @@ async def act_write_file(rt: RunRuntime, agent: AgentSpec, a: A.WriteFile) -> No
     await rt.commit_file(agent, cid, "write_file", rel, old, content, a.note, appending=appending, partial=a.partial)
 
 
-async def act_edit_file(rt: RunRuntime, agent: AgentSpec, a: A.EditFile) -> None:
+async def act_edit_file(rt: RunContext, agent: AgentSpec, a: A.EditFile) -> None:
     """Targeted change: each edit replaces exact existing text. All edits apply, or none do."""
     cid = await rt._tool_event(agent, "edit_file", {"path": a.path, "edits": len(a.edits), "note": a.note})
     fs = rt.fs_for(agent.id)
@@ -175,7 +175,7 @@ async def act_edit_file(rt: RunRuntime, agent: AgentSpec, a: A.EditFile) -> None
     await rt.commit_file(agent, cid, "edit_file", rel, old, content, a.note, context_line=first_line)
 
 
-async def commit_file(rt: RunRuntime, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
+async def commit_file(rt: RunContext, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
                       appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
     """Permission gate, write, version history, events and the agent's confirmation, shared by write_file / edit_file.
         One writer per path at a time (parallel delegations may touch the same file)."""
@@ -184,7 +184,7 @@ async def commit_file(rt: RunRuntime, agent: AgentSpec, cid: str, tool: str, rel
                                 context_line=context_line)
 
 
-async def _commit_file(rt: RunRuntime, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
+async def _commit_file(rt: RunContext, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
                        appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
     fs = rt.fs_for(agent.id)
     if rt.engineering_workflow == "fix" and rt.budget.verify_before_finish and not any(
@@ -208,7 +208,7 @@ async def _commit_file(rt: RunRuntime, agent: AgentSpec, cid: str, tool: str, re
         await rt.deny(agent, cid, tool, reason)
         return
     await rt.set_agent_status(agent.id, "writing", f"{'Editing' if tool == 'edit_file' else 'Appending to' if appending else 'Saving'} {rel}…")
-    from app.kernel.runtime.runtime_store import mutation_lock
+    from app.sdk.execution_contracts import mutation_lock
     async with mutation_lock(rt.run_id):
         context = ACTIVE_ATTEMPT.get()
         await rt.execution.assert_durable_revision(context.assignment.revision if context else rt.plan_revision)
@@ -216,7 +216,7 @@ async def _commit_file(rt: RunRuntime, agent: AgentSpec, cid: str, tool: str, re
                                        appending=appending, partial=partial, context_line=context_line)
 
 
-async def _write_checked_file(rt: RunRuntime, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str,
+async def _write_checked_file(rt: RunContext, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str,
                               note: str, *, appending: bool, partial: bool,
                               context_line: int | None) -> None:
     fs = rt.fs_for(agent.id)
@@ -236,7 +236,7 @@ async def _write_checked_file(rt: RunRuntime, agent: AgentSpec, cid: str, tool: 
                             appending=appending, partial=partial, context_line=context_line)
 
 
-async def publish_file(rt: RunRuntime, agent: AgentSpec, rel: str, old: str | None, content: str, note: str, *,
+async def publish_file(rt: RunContext, agent: AgentSpec, rel: str, old: str | None, content: str, note: str, *,
                        tool: str = "write_file", cid: str | None = None,
                        appending: bool = False, partial: bool = False, context_line: int | None = None,
                        deleted: bool = False) -> None:
@@ -287,12 +287,13 @@ async def publish_file(rt: RunRuntime, agent: AgentSpec, rel: str, old: str | No
         await rt._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}")
 
 
-async def check_written(rt: RunRuntime, rel: str, content: str) -> str | None:
+async def check_written(rt: RunContext, rel: str, content: str) -> str | None:
     """Syntax-check a file right after it was written (services/checks.py); remembered until a later write fixes it."""
-    from app.plugins.workspace.checks import check_file
-
+    checks = rt.services.get("workspace.checks")
+    if checks is None:  # the workspace plugin is disabled: no automatic checks
+        return None
     try:
-        problem = await check_file(rel, content)
+        problem = await checks.check_file(rel, content)
     except Exception as exc:  # noqa: BLE001 - a checker bug must never fail the write
         log.warning("file_check_failed", path=rel, error=str(exc)[:200])
         return None
@@ -303,13 +304,13 @@ async def check_written(rt: RunRuntime, rel: str, content: str) -> str | None:
     return problem
 
 
-async def written_by_octopus(rt: RunRuntime, rel: str) -> bool:
+async def written_by_octopus(rt: RunContext, rel: str) -> bool:
     """Did any run in this project ever write ``rel``? (Otherwise it is the user's own file.)"""
     async with rt.db() as db:
         return await ArtifactRepository(db).path_exists(rel)
 
 
-async def act_create_folder(rt: RunRuntime, agent: AgentSpec, a: A.CreateFolder) -> None:
+async def act_create_folder(rt: RunContext, agent: AgentSpec, a: A.CreateFolder) -> None:
     cid = await rt._tool_event(agent, "create_folder", {"path": a.path})
     fs = rt.fs_for(agent.id)
     try:
@@ -328,7 +329,7 @@ async def act_create_folder(rt: RunRuntime, agent: AgentSpec, a: A.CreateFolder)
         await rt.deny(agent, cid, "create_folder", reason)
         return
     try:
-        from app.kernel.runtime.runtime_store import mutation_lock
+        from app.sdk.execution_contracts import mutation_lock
         async with mutation_lock(rt.run_id):
             context = ACTIVE_ATTEMPT.get()
             await rt.execution.assert_durable_revision(context.assignment.revision if context else rt.plan_revision)
@@ -345,7 +346,7 @@ async def act_create_folder(rt: RunRuntime, agent: AgentSpec, a: A.CreateFolder)
     await rt._tool_result(agent, cid, "create_folder", True, f"{rel}/")
 
 
-async def act_move_file(rt: RunRuntime, agent: AgentSpec, a: A.MoveFile) -> None:
+async def act_move_file(rt: RunContext, agent: AgentSpec, a: A.MoveFile) -> None:
     cid = await rt._tool_event(agent, "move_file", {"source": a.source, "destination": a.destination})
     fs = rt.fs_for(agent.id)
     try:
@@ -362,7 +363,7 @@ async def act_move_file(rt: RunRuntime, agent: AgentSpec, a: A.MoveFile) -> None
         return
     await rt.set_agent_status(agent.id, "writing", f"Moving {src} → {dst}…")
     try:
-        from app.kernel.runtime.runtime_store import mutation_lock
+        from app.sdk.execution_contracts import mutation_lock
         async with mutation_lock(rt.run_id):
             context = ACTIVE_ATTEMPT.get()
             await rt.execution.assert_durable_revision(context.assignment.revision if context else rt.plan_revision)
@@ -387,7 +388,7 @@ async def act_move_file(rt: RunRuntime, agent: AgentSpec, a: A.MoveFile) -> None
     await rt._tool_result(agent, cid, "move_file", True, f"{src} → {dst}")
 
 
-async def act_read_file(rt: RunRuntime, agent: AgentSpec, a: A.ReadFile) -> None:
+async def act_read_file(rt: RunContext, agent: AgentSpec, a: A.ReadFile) -> None:
     cid = await rt._tool_event(agent, "read_file", {"path": a.path})
     await rt.set_agent_status(agent.id, "reading", f"Reading {a.path}…")
     try:
@@ -405,7 +406,7 @@ async def act_read_file(rt: RunRuntime, agent: AgentSpec, a: A.ReadFile) -> None
     await rt._tool_result(agent, cid, "read_file", ok, content[:1000])
 
 
-async def act_list_files(rt: RunRuntime, agent: AgentSpec, a: A.ListFiles) -> None:
+async def act_list_files(rt: RunContext, agent: AgentSpec, a: A.ListFiles) -> None:
     cid = await rt._tool_event(agent, "list_files", {"prefix": a.prefix})
     await rt.set_agent_status(agent.id, "reading", f"Listing {a.prefix or 'project'} files…")
     try:

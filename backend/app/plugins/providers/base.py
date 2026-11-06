@@ -1,11 +1,10 @@
-"""Provider-agnostic LLM interface: the provider protocol. The contract types live in app.core.llm and are
-re-exported here so provider modules keep their imports."""
+"""Helpers shared by the model providers: the provider protocol and the Chat Completions translations."""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
-from app.sdk.llm import MODEL_MAX_OUTPUT_TOKENS, CODE_AGENT_MAX_TOKENS, DEFAULT_AGENT_MAX_TOKENS, LEGACY_MAX_TOKENS, LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, LLMResult, MAX_AGENT_MAX_TOKENS, ToolCall, Usage, effective_max_tokens, output_cap, with_images
+from app.sdk.llm import LLMChunk, LLMRequest, ToolCall
 
 
 class LLMProvider(Protocol):

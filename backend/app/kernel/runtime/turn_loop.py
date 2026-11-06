@@ -9,12 +9,13 @@ from typing import TYPE_CHECKING, Any
 from app.foundation.config import get_settings
 from app.kernel.run_manager import StopRun
 from app.storage.session import registry_factory
-from app.plugins.providers.base import LLMError, LLMOutputTruncated, LLMRequest, ToolCall
-from app.plugins.providers.router import prepare_request, get_provider
+from app.sdk.llm import LLMError, LLMOutputTruncated, LLMRequest, ToolCall
 from app.storage.repositories import MessageRepository
 from app.sdk import actions as A
-from app.plugins.tools import specs as T
-from app.kernel.runtime.context import AgentSpec, build_turn_prompts, TOOL_RESULT_CHARS, clip
+from app.sdk import toolspecs as T
+from app.sdk.agents import AgentSpec
+from app.kernel.runtime.context import build_turn_prompts
+from app.sdk.text import TOOL_RESULT_CHARS, clip
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -117,9 +118,15 @@ async def _turn(rt: RunRuntime, aid: str) -> None:
     await rt.set_agent_status(aid, "thinking", f"Reading {len(inbox_ids)} new message(s)…" if inbox_ids else "Reviewing results…")
     inbox_set = set(inbox_ids)
     inbox = [m for m in rt.history if m["id"] in inbox_set]
-    if rt.model_for(agent)[0] == "opencode":
-        from app.plugins.providers.opencode_turn import opencode_turn
-        await opencode_turn(rt, agent, inbox, obs)
+    provider_name = rt.model_for(agent)[0]
+    if provider_name == "opencode":  # an agent backend plugin runs the whole turn
+        backend = rt.services.get("models.turn_opencode")
+        if backend is None:
+            await rt.set_agent_status(aid, "error")
+            await rt.emit("error", {"message": f"{agent.name}: the OpenCode plugin is disabled (Settings → Plugins)", "agent_id": aid, "kind": "llm"})
+            await rt.requeue(aid, inbox_ids)
+            return
+        await backend(rt, agent, inbox, obs)
         await rt.end_turn(aid)
         return
     try:
@@ -195,7 +202,7 @@ async def build_request(rt: RunRuntime, agent: AgentSpec, inbox_ids: set[str], o
                      metadata={"kind": "orchestrator", "turn_context": rt.turn_context(agent, inbox, obs),
                                "cache_key": f"octopus-{rt.run_id[:18]}-{agent.id}"[:64]})
     async with registry_factory()() as rdb:
-        req, warn = await prepare_request(rdb, rt.user_id, req)
+        req, warn = await rt.services.require("models.router").prepare_request(rdb, rt.user_id, req)
     if req.provider != provider or req.model != model:
         raise LLMError(f"Configured node model {provider}/{model} is unavailable; choose a connected model. No replacement model was invoked.", retryable=False)
     if warn and aid not in rt.warned:
@@ -221,7 +228,7 @@ def native_tools_for(rt: RunRuntime, req: LLMRequest) -> bool:
     """Use the model's own function calling when the provider supports it (Azure Responses API); otherwise the JSON envelope."""
     if not get_settings().native_tools:
         return False
-    check = getattr(get_provider(req.provider, req), "supports_native_tools", None)
+    check = getattr(rt.services.require("models.router").get_provider(req.provider, req), "supports_native_tools", None)
     return bool(check and check(req))
 
 
@@ -230,7 +237,7 @@ async def native_turn(rt: RunRuntime, agent: AgentSpec, req: LLMRequest, *, excl
         (or ends the turn with wait / finish / a question for the user). Errors are returned to the model as tool results."""
     aid = agent.id
     specs, mcp_map = T.tool_specs(agent.tools, agent.mcp)
-    req.tools = [t for t in specs if t["name"] not in exclude]
+    req.tools = [t for t in specs if t["name"] not in exclude and rt.tool_available("mcp_call" if t["name"] in mcp_map else t["name"])]
     req.json_mode = False
     req.continuation = []
     return await rt._tool_loop(agent, req, mcp_map)

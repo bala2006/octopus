@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from app.plugins.providers.azure_v1 import AzureV1Provider
-from app.plugins.providers.base import LLMChunk, LLMOutputTruncated, LLMRequest, Usage
+from app.sdk.llm import LLMChunk, LLMOutputTruncated, LLMRequest, Usage
 from app.plugins.providers.router import set_provider_override
 from app.sdk.actions import WriteFile, parse_envelope
 from app.plugins.roles.prompts import agent_from_role
@@ -84,7 +84,7 @@ async def test_agents_use_the_models_full_output_budget(client, workspace) -> No
 
 def test_output_cap_never_exceeds_the_model_limit() -> None:
     from app.plugins.providers.azure_v1 import _body
-    from app.plugins.providers.base import effective_max_tokens, output_cap
+    from app.sdk.llm import effective_max_tokens, output_cap
 
     req = LLMRequest(provider="azure", model="gpt-6-luna", messages=[], max_tokens=128_000, extra={"reasoning_effort": "xhigh"})
     assert _body(req, "responses", set())["max_output_tokens"] == 128_000, "headroom never pushes past the model maximum"

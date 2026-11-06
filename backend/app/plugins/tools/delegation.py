@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
-from app.plugins.workflows.routing import allowed_recipients, find_channel, rejection_reason
+from app.sdk.agents import AgentSpec
+from app.sdk.routing import allowed_recipients, find_channel, rejection_reason
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
-def brief_text(rt: RunRuntime, delegator: AgentSpec, a: A.Delegate) -> str:
+def brief_text(rt: RunContext, delegator: AgentSpec, a: A.Delegate) -> str:
     parts = [f"Objective: {a.objective.strip()}"]
     if a.deliverable.strip():
         parts.append(f"Deliverable: {a.deliverable.strip()}")
@@ -23,11 +23,11 @@ def brief_text(rt: RunRuntime, delegator: AgentSpec, a: A.Delegate) -> str:
     return "\n".join(parts)
 
 
-async def act_delegate(rt: RunRuntime, agent: AgentSpec, a: A.Delegate) -> None:  # JSON-envelope path
+async def act_delegate(rt: RunContext, agent: AgentSpec, a: A.Delegate) -> None:  # JSON-envelope path
     rt.notice(agent.id, await rt.delegate(agent, a))
 
 
-async def delegate(rt: RunRuntime, agent: AgentSpec, a: A.Delegate) -> str:
+async def delegate(rt: RunContext, agent: AgentSpec, a: A.Delegate) -> str:
     """Hand work to a teammate over a delegate channel. Inside a native tool loop the teammate's sub-turn runs right away
         and its result is returned; otherwise (JSON envelope, or depth/cycle limits) it becomes a task message."""
     tid = rt.resolve_agent(a.to)

@@ -10,7 +10,7 @@ import pytest
 from app.foundation.security import hash_password, verify_password
 from app.plugins.providers.router import set_provider_override
 from app.plugins.sandbox.commands import SandboxError, parse_command, run_command
-from app.plugins.workspace.project_fs import ProjectFS, WorkspaceError, normalize_path
+from app.sdk.projectfs import ProjectFS, WorkspaceError, normalize_path
 from conftest import ScriptedProvider, agent, env, events, make_company, start_run, wait_status
 
 

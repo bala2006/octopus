@@ -12,12 +12,12 @@ from app.channels.deps import current_user
 from app.foundation.security import decrypt_secret, encrypt_secret, mask_secret
 from app.storage.base import utcnow
 from app.storage.session import get_registry_db
-from app.plugins.providers.base import LLMError, LLMRequest
+from app.sdk.llm import LLMError, LLMRequest
 from app.plugins.providers.router import LEGACY_AZURE_ROWS, PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
 from app.storage.models import McpServer, ProviderKey, User
 from app.sdk.approval_modes import normalize_mode
 from app.sdk.schemas import ApprovalModeIn, ApprovalModeOut, BrowserStatusOut, BrowserTestOut, FxRateOut, McpServerIn, McpServerOut, McpToolOut, ParsedFileOut, ProviderInfo, ProviderKeyIn, ProviderKeyOut, ProviderOptions, SettingsOut, TestProviderIn, TestProviderOut
-from app.application.files import UnsupportedFile, parse_file, parse_image
+from app.kernel.runtime.uploads import UnsupportedFile, parse_file, parse_image
 from app.plugins.providers.opencode import OpenCodeStatus, discover
 from app.plugins.mcp.client import McpConfig, McpError, list_tools
 

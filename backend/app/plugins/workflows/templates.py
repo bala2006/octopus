@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.storage.base import new_id
-from app.plugins.roles.prompts import agent_from_role, all_roles
+from app.plugins.workflows.deps import deps
 from app.plugins.workflows.canvas import department_color
 
 DEFAULT_EDGE_CONFIG = {"max_turns": 20, "handoff_instructions": "", "condition": "", "max_rounds": 4, "max_revisions": 3}
@@ -376,7 +376,7 @@ def build_from_template(t: CompanyTemplate) -> tuple[list[dict[str, Any]], list[
         for member, is_mgr in [(dept.manager, True)] + [(m, False) for m in dept.members]:
             aid = new_id()
             ids[member.key] = aid
-            a = agent_from_role(member.role_key, name=member.name, entry=member.entry, x=member.x or 0, y=member.y or 0,
+            a = deps.require("roles.builtin").agent_from_role(member.role_key, name=member.name, entry=member.entry, x=member.x or 0, y=member.y or 0,
                                 department=dept.name, is_manager=is_mgr, role=member.role)
             a["id"] = aid
             a["_local"] = member.key
@@ -421,7 +421,7 @@ def summarize_departments(agents: list[dict[str, Any]], meta: dict[str, Any] | N
 
 
 def template_summary(t: CompanyTemplate) -> dict[str, Any]:
-    roles = all_roles()
+    roles = deps.require("roles.builtin").all_roles()
     depts = []
     for d in t.departments:
         depts.append({"name": d.name, "color": d.color or department_color(d.name),
@@ -434,7 +434,7 @@ def template_summary(t: CompanyTemplate) -> dict[str, Any]:
 
 def workflow_ready(agents: list[dict[str, Any]]) -> bool:
     """Can this team run the defined workflow (a head, a builder, and someone else to test or review)?"""
-    from app.kernel.runtime.context import AgentSpec
+    from app.sdk.agents import AgentSpec
     from app.plugins.workflows.company import can_staff
 
     specs = [AgentSpec.from_dict({**a, "id": a.get("id") or str(i)}, "generic") for i, a in enumerate(agents)]

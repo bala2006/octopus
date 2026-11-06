@@ -6,8 +6,8 @@ import hashlib
 import os
 from pathlib import Path
 
-from app.plugins.sandbox.commands import command_environment
-from app.plugins.workspace.project_fs import IGNORED_DIRS, ProjectFS, WorkspaceError
+from app.plugins.workspace.deps import deps
+from app.sdk.projectfs import IGNORED_DIRS, ProjectFS, WorkspaceError
 
 MAX_GIT_BYTES = 250_000
 _operation_locks: dict[str, asyncio.Lock] = {}
@@ -21,6 +21,11 @@ def visible_path(fs: ProjectFS, path: str) -> None:
     rel, _ = fs.resolve(path)
     if any(part.lower() in IGNORED_DIRS for part in Path(rel).parts):
         raise WorkspaceError("This path is hidden from Git review. Use your Git client to inspect and commit it explicitly.")
+
+
+def command_environment(root: Path, developer: bool = False) -> dict[str, str]:
+    """The scrubbed environment for a command in ``root``, from the sandbox plugin."""
+    return deps.require("sandbox.exec").command_environment(root, developer=developer)
 
 
 async def git(root: Path, *args: str, developer: bool = False) -> str:

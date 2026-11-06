@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-from app.plugins.workspace.project_fs import IGNORED_DIRS, ProjectFS, WorkspaceError
+from app.sdk.projectfs import IGNORED_DIRS, ProjectFS, WorkspaceError
 
 MAX_MANIFEST_BYTES = 100_000
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_:-]{0,99}$")

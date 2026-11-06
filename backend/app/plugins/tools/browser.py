@@ -7,18 +7,21 @@ from typing import TYPE_CHECKING
 from app.foundation.config import get_settings
 from app.foundation.logging import get_logger
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 log = get_logger("orchestrator")
 
 
-async def _browser_action(rt: RunRuntime, agent: AgentSpec, cid: str, a: A.McpCall, ok: bool, out: str) -> None:
+async def _browser_action(rt: RunContext, agent: AgentSpec, cid: str, a: A.McpCall, ok: bool, out: str) -> None:
     """Record what the agent did in its browser tab and what the tab showed afterwards (the run's Browser view)."""
-    from app.plugins.browser import frames as browser_frames
-    from app.plugins.browser.service import browser, page_info
+    sessions = rt.services.get("browser.sessions")
+    if sessions is None:  # the browser plugin is disabled: nothing to record
+        return
+    browser, page_info = sessions.browser, sessions.page_info
+    browser_frames = rt.services.require("browser.frames")
 
     url, title = page_info(out)
     if (ok and a.tool in ("browser_snapshot", "browser_console_messages", "browser_click", "browser_take_screenshot")

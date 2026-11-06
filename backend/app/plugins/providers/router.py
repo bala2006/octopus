@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import random
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,9 +12,8 @@ from app.storage.repositories import ProviderKeyRepository
 from app.foundation.config import get_settings
 from app.foundation.logging import get_logger
 from app.foundation.security import decrypt_secret
-from app.plugins.providers.base import LLMChunk, LLMError, LLMProvider, LLMRequest
-from app.plugins.providers.azure_v1 import AzureV1Provider, azure_v1_target
-from app.plugins.providers.litellm_provider import LiteLLMProvider
+from app.sdk.llm import LLMChunk, LLMError, LLMRequest
+from app.plugins.providers.base import LLMProvider
 
 log = get_logger("llm")
 
@@ -34,12 +34,39 @@ def set_provider_override(provider: LLMProvider | None) -> None:
     _override = provider
 
 
+@dataclass(frozen=True)
+class _Registered:
+    name: str
+    priority: int
+    accepts: Callable[[str, LLMRequest | None], bool]
+    factory: Callable[[], LLMProvider]
+
+
+_registered: list[_Registered] = []
+
+
+def register_provider(name: str, accepts: Callable[[str, LLMRequest | None], bool], factory: Callable[[], LLMProvider], *, priority: int = 50) -> None:
+    """Add a model provider plugin. The lowest ``priority`` whose ``accepts(provider_name, request)`` is true serves the request."""
+    unregister_provider(name)
+    _registered.append(_Registered(name, priority, accepts, factory))
+    _registered.sort(key=lambda r: r.priority)
+
+
+def unregister_provider(name: str) -> None:
+    _registered[:] = [r for r in _registered if r.name != name]
+
+
+def registered_providers() -> list[str]:
+    return [r.name for r in _registered]
+
+
 def get_provider(name: str, req: LLMRequest | None = None) -> LLMProvider:
     if _override is not None:
         return _override
-    if name == "azure" and req is not None and azure_v1_target(req.base_url, req.extra) is not None:
-        return AzureV1Provider()  # Azure OpenAI v1 API (Responses / Chat Completions), no api-version needed
-    return LiteLLMProvider()
+    for entry in _registered:
+        if entry.accepts(name, req):
+            return entry.factory()
+    raise LLMError("No model provider plugin is enabled. Enable one in Settings → Plugins.", retryable=False)
 
 
 async def resolve_credentials(db: AsyncSession, user_id: str, provider: str) -> tuple[str | None, str | None, dict]:

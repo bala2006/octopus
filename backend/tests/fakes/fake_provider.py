@@ -13,7 +13,8 @@ import os
 import re
 from collections.abc import AsyncIterator
 
-from app.plugins.providers.base import LLMChunk, LLMRequest, Usage, estimate_tokens
+from app.sdk.llm import LLMChunk, LLMRequest, Usage
+from app.plugins.providers.base import estimate_tokens
 from fakes.scripted_policy import decide
 
 

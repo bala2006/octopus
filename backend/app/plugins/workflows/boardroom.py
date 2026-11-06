@@ -1,42 +1,10 @@
 """Debate (boardroom) protocol: when a discussion is settled, who is next, and how the room decides."""
 from __future__ import annotations
 
-import math
-from dataclasses import asdict, dataclass, field
-from typing import Any
-
-from app.plugins.workflows.protocols import Verdict
+from app.sdk.protocols import DebateState, Verdict
 
 
 # ------------------------------------------------------------------ debate
-@dataclass
-class DebateState:
-    edge_id: str
-    participants: list[str]
-    max_rounds: int = 4
-    status: str = "open"  # open | consensus | decided | max_rounds
-    messages: int = 0
-    agreed: list[str] = field(default_factory=list)
-    topic: str = ""
-    history: list[dict[str, str]] = field(default_factory=list)
-    outcome: str = ""
-    number: int = 1
-
-    @property
-    def rounds(self) -> int:
-        return math.ceil(self.messages / 2)
-
-    def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d["rounds"] = self.rounds
-        return d
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> DebateState:
-        d = {k: v for k, v in d.items() if k != "rounds"}
-        return cls(**d)
-
-
 def debate_on_message(st: DebateState, sender: str, mtype: str, content: str) -> Verdict:
     """Apply a message to the debate. Consensus requires *both* participants to emit `agreement`
     after the latest proposal/objection (explicit, not heuristic)."""

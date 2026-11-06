@@ -16,7 +16,8 @@ from app.storage.migrate import upgrade_project
 from app.storage.session import make_engine, project_url
 from app.storage.models import Agent, Company, Run
 from app.kernel.runtime.context import build_turn_prompts
-from app.kernel.runtime.engine import ProjectRef, RunRuntime
+from app.kernel.run_manager import ProjectRef
+from app.kernel.runtime.engine import RunRuntime
 from app.plugins.roles.prompts import agent_from_role, all_roles
 
 GOAL = "Build a small todo web app"

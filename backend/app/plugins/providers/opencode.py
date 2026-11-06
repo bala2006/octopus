@@ -18,7 +18,12 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel, Field, ValidationError
 
 from app.foundation.config import get_settings
-from app.plugins.sandbox.commands import stop_process
+from app.plugins.providers.deps import deps
+
+
+async def stop_process(proc: "asyncio.subprocess.Process") -> None:
+    """End a child process and its tree, using the sandbox plugin's implementation."""
+    await deps.require("sandbox.exec").stop_process(proc)
 
 
 class OpenCodeError(Exception):

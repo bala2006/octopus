@@ -1,7 +1,7 @@
 """Settings → Roles: edit built-in roles, restore defaults, create roles of your own; linked agents follow the library."""
 from __future__ import annotations
 
-from app.plugins.providers.base import LLMRequest
+from app.sdk.llm import LLMRequest
 from app.plugins.providers.router import set_provider_override
 from app.plugins.roles.prompts import all_roles
 from app.plugins.roles.library import category_of, linked, resolve_prompt

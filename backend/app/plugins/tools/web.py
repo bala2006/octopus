@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 from app.plugins.tools import basic
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
-async def act_calculate(rt: RunRuntime, agent: AgentSpec, a: A.Calculate) -> None:
+async def act_calculate(rt: RunContext, agent: AgentSpec, a: A.Calculate) -> None:
     cid = await rt._tool_event(agent, "calculate", {"expression": a.expression})
     try:
         out, ok = basic.calculate(a.expression), True
@@ -22,7 +22,7 @@ async def act_calculate(rt: RunRuntime, agent: AgentSpec, a: A.Calculate) -> Non
     await rt._tool_result(agent, cid, "calculate", ok, out)
 
 
-async def act_web_search(rt: RunRuntime, agent: AgentSpec, a: A.WebSearch) -> None:
+async def act_web_search(rt: RunContext, agent: AgentSpec, a: A.WebSearch) -> None:
     cid = await rt._tool_event(agent, "web_search", {"query": a.query})
     ok, reason = await rt.guard(agent, "web_search", f"{agent.name} wants to search the web", a.query, {"query": a.query})
     if not ok:

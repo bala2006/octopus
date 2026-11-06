@@ -12,7 +12,8 @@ from app.storage.base import ProjectBase
 from app.storage.session import make_engine
 from app.plugins.providers.router import set_provider_override
 from app.storage.models import Company, Run
-from app.kernel.runtime.engine import ProjectRef, RunRuntime
+from app.kernel.run_manager import ProjectRef
+from app.kernel.runtime.engine import RunRuntime
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status
 from test_engineering_workflows import WorkflowProgram
 

@@ -7,8 +7,9 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.foundation.config import get_settings
 from app.plugins.workspace import git as git_review
-from app.plugins.workspace.project_fs import WorkspaceError
+from app.sdk.projectfs import WorkspaceError
 
 
 def _environment_file(root: Path) -> Path:
@@ -119,8 +120,7 @@ async def create_worktree(root: Path, base_branch: str, workspace_id: str) -> tu
     resolved_parent = parent.resolve()
     if resolved_parent == root.resolve() or root.resolve() in resolved_parent.parents or root.parent.resolve() not in resolved_parent.parents:
         raise WorkspaceError("Could not choose a safe sibling folder for this worktree.")
-    from app.application.projects import allowed_roots
-    if not any(resolved_parent == allowed or allowed in resolved_parent.parents for allowed in allowed_roots()):
+    if not any(resolved_parent == allowed or allowed in resolved_parent.parents for allowed in get_settings().allowed_roots()):
         raise WorkspaceError("The local worktree must stay inside Octopus' shared local folders.")
     parent.mkdir(parents=True, exist_ok=True)
     target = parent / f"{safe_stem}-{stamp}-{suffix}"

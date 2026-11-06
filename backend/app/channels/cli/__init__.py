@@ -7,9 +7,11 @@ repo-root ``scripts/`` folder: ``bench.py``, ``evaluate_runtime.py``, ``folder_b
 """
 from __future__ import annotations
 
-from app.channels import catalog_manifest
 from app.sdk.manifest import Manifest
+from app.channels import Channel
 
 
-class CliChannel:
-    manifest: Manifest = catalog_manifest("channel.cli")
+class CliChannel(Channel):
+    manifest = Manifest(id="channel.cli", slot="channel", kind="cli", version="1.0.0", title="Command line",
+                       description="The start scripts and developer tools. They call the same HTTP API as the web app.",
+                       provides=("cli.dev",), requires=("http.api",), status="partly")

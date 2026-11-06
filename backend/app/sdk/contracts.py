@@ -13,6 +13,10 @@ class ContractError(ValueError):
     pass
 
 
+class WorkspaceConflict(ContractError):
+    """The project changed under a worker stage, or an integration was refused."""
+
+
 class Contract(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

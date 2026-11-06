@@ -13,7 +13,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.storage.base import ProjectBase, RegistryBase, new_id, utcnow
-from app.plugins.providers.base import DEFAULT_AGENT_MAX_TOKENS
+from app.sdk.llm import DEFAULT_AGENT_MAX_TOKENS
 
 
 
@@ -121,6 +121,16 @@ class UserSkill(RegistryBase):
     body: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class PluginState(RegistryBase):
+    """Enabled state and installed version of a plugin. The plugin host reads it at start-up and writes it when a plugin is toggled."""
+
+    __tablename__ = "plugins"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    version: Mapped[str] = mapped_column(String(40))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 
 
 # ====================================================================== project

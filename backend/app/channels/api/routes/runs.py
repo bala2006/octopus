@@ -15,13 +15,16 @@ from pydantic import BaseModel, ConfigDict
 from app.storage.repositories import ArtifactRepository, ChatSessionRepository, CompanyRepository, MessageRepository, RunEventRepository, RunRepository, TaskRepository
 from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.storage.models import Artifact, ChatSession, Message, Run, RunEvent, Task, User
-from app.kernel.runtime.engine import ACTIVE_STATES, OPEN_TASK_STATES, ProjectRef, RunRuntime, manager
+from app.kernel.run_manager import ACTIVE_STATES, ProjectRef
+from app.kernel.runtime.engine import RunRuntime
+from app.sdk.task_contracts import OPEN_TASK_STATES
 from app.sdk.schemas import ApprovalIn, ArtifactContentOut, ArtifactOut, InterjectIn, MessageOut, RevertIn, RunCreate, RunDetail, RunEventOut, RunOut, RunOutcome, TaskOut
 from app.sdk.approval_modes import normalize_mode
 from app.kernel.runtime import attachments as run_attachments
 from app.plugins.workflows.canvas import snapshot
-from app.plugins.workspace.project_fs import ProjectFS, WorkspaceError
-from app.kernel.runtime.runtime_store import RuntimeStore, Conflict
+from app.sdk.projectfs import ProjectFS, WorkspaceError
+from app.kernel.runtime.runtime_store import RuntimeStore
+from app.sdk.execution_contracts import Conflict
 from app.plugins.roles.chief import choose_lead, route_target
 from app.plugins.workspace.manifests import capture_manifest
 from app.sdk.evidence import validate_evidence, RevisionEvidence
@@ -57,7 +60,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
                 raise HTTPException(409, "The initial request ID was already used for different content")
             await db.commit()
             if existing.started_at is None:
-                await manager.start(existing.id, ref(ctx))
+                await ctx.kernel.runs.start(existing.id, ref(ctx))
             return existing
     from app.foundation.config import get_settings
     from app.sdk.schemas import RunModel
@@ -124,7 +127,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
         raise HTTPException(422, f"Attachment rejected: {exc}") from exc
     await db.commit()
     await db.refresh(run)
-    await manager.start(run.id, ref(ctx))
+    await ctx.kernel.runs.start(run.id, ref(ctx))
     return run
 
 
@@ -155,7 +158,8 @@ async def run_outcomes(db: AsyncSession, run_ids: list[str]) -> dict[str, RunOut
 
 
 @router.get("", response_model=list[RunOut])
-async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[RunOut]:
+async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                    ctx: ProjectCtx = Depends(project_ctx)) -> list[RunOut]:
     if company_id:
         await owned_company(company_id, db, user)
     runs = await RunRepository(db).recent(company_id)
@@ -163,7 +167,7 @@ async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(ge
     result = []
     for r in runs:
         o = RunOut.model_validate(r)
-        rt = manager.get(r.id)
+        rt = ctx.kernel.runs.get(r.id)
         if rt is not None:  # live counters are fresher than the row
             o.status, o.turns, o.tokens_used, o.cost_usd = rt.run_status, rt.turn_no, rt.tokens, round(rt.cost, 6)
         o.outcome = outcomes[r.id]
@@ -175,9 +179,10 @@ async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(ge
 
 
 @router.get("/{run_id}", response_model=RunDetail)
-async def get_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> Run:
+async def get_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
+                  ctx: ProjectCtx = Depends(project_ctx)) -> Run:
     run = await owned_run(run_id, db, user)
-    rt = manager.get(run_id)
+    rt = ctx.kernel.runs.get(run_id)
     if rt is not None:  # live state is fresher than the persisted row; take all of it from the runtime so it's consistent
         run.state_json = rt.state_dict()
         run.status = rt.run_status
@@ -189,7 +194,7 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User =
 async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                      ctx: ProjectCtx = Depends(project_ctx)) -> None:
     run = await owned_run(run_id, db, user)
-    if run.status in ACTIVE_STATES and manager.get(run_id):
+    if run.status in ACTIVE_STATES and ctx.kernel.runs.get(run_id):
         raise HTTPException(409, "Stop the run before deleting it")
     await db.delete(run)
     await db.commit()
@@ -201,7 +206,7 @@ async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: Use
 
 async def _runtime(run_id: str, db: AsyncSession, user: User, ctx: ProjectCtx) -> RunRuntime:
     await owned_run(run_id, db, user)
-    rt = await manager.ensure(run_id, ref(ctx))
+    rt = await ctx.kernel.runs.ensure(run_id, ref(ctx))
     if rt is None:
         raise HTTPException(409, "Run is not active")
     return rt
@@ -257,20 +262,20 @@ async def queue_request(run_id: str, body: InterjectIn, db: AsyncSession, user: 
     run = await owned_run(run_id, db, user)
     if not body.client_request_id:
         raise HTTPException(422, "A client_request_id is required for durable delivery")
-    runtime = manager.get(run_id)
+    runtime = ctx.kernel.runs.get(run_id)
     agents = [agent.to_dict() for agent in runtime.agents.values()] if runtime else (run.snapshot_json or {}).get("agents", [])
     try:
         lead = choose_lead(agents, (run.state_json or {}).get("lead_agent_id"))
         target = route_target(body.content, agents, lead, body.to_agent_id)
         attachments = await asyncio.to_thread(stored_request_attachments, ctx, run_id, body)
-        result, created = await RuntimeStore(ctx.sf, run_id).enqueue(client_id=body.client_request_id,
+        result, created = await RuntimeStore(ctx.sf, run_id, ctx.kernel.eventlog).enqueue(client_id=body.client_request_id,
             content=body.content, target=target, attachments=attachments, kind="steer" if body.delivery == "steer" else "queue")
     except Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(422, str(exc)) from exc
     if created or result["state"] == "queued":
-        await manager.notify_requests(run_id, ref(ctx), steer=result["kind"] == "steer")
+        await ctx.kernel.runs.notify_requests(run_id, ref(ctx), steer=result["kind"] == "steer")
     return result
 
 
@@ -284,7 +289,7 @@ async def post_request(run_id: str, body: InterjectIn, db: AsyncSession = Depend
 async def queued_requests(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                           ctx: ProjectCtx = Depends(project_ctx)) -> list[dict]:
     await owned_run(run_id, db, user)
-    return await RuntimeStore(ctx.sf, run_id).requests()
+    return await RuntimeStore(ctx.sf, run_id, ctx.kernel.eventlog).requests()
 
 
 @router.delete("/{run_id}/requests/{request_id}", status_code=204, response_class=Response)
@@ -292,7 +297,7 @@ async def remove_request(run_id: str, request_id: str, db: AsyncSession = Depend
                          ctx: ProjectCtx = Depends(project_ctx)) -> Response:
     await owned_run(run_id, db, user)
     try:
-        await RuntimeStore(ctx.sf, run_id).cancel_request(request_id)
+        await RuntimeStore(ctx.sf, run_id, ctx.kernel.eventlog).cancel_request(request_id)
     except Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
     return Response(status_code=204)
@@ -303,17 +308,17 @@ async def steer_request(run_id: str, request_id: str, db: AsyncSession = Depends
                         ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     await owned_run(run_id, db, user)
     try:
-        record, changed = await RuntimeStore(ctx.sf, run_id).steer_request(request_id)
+        record, changed = await RuntimeStore(ctx.sf, run_id, ctx.kernel.eventlog).steer_request(request_id)
     except Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
     if changed or record["state"] == "queued":
-        await manager.notify_requests(run_id, ref(ctx), steer=True)
+        await ctx.kernel.runs.notify_requests(run_id, ref(ctx), steer=True)
     return record
 
 
 async def execution_summary(run_id: str, ctx: ProjectCtx, run: Run) -> dict:
-    store = RuntimeStore(ctx.sf, run_id)
-    runtime = manager.get(run_id)
+    store = RuntimeStore(ctx.sf, run_id, ctx.kernel.eventlog)
+    runtime = ctx.kernel.runs.get(run_id)
     if runtime is None:
         await store.recover()  # Marks uncertain invocations only. Never dispatches a prompt.
     if runtime is None:
@@ -362,14 +367,14 @@ async def recover_request(run_id: str, request_id: str, body: RequestRecovery, d
                           user: User = Depends(current_user), ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     await owned_run(run_id, db, user)
     try:
-        record = await RuntimeStore(ctx.sf, run_id).recover_request(request_id, body.action, acknowledged=body.acknowledge_side_effects)
+        record = await RuntimeStore(ctx.sf, run_id, ctx.kernel.eventlog).recover_request(request_id, body.action, acknowledged=body.acknowledge_side_effects)
     except Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
-    runtime = manager.get(run_id)
+    runtime = ctx.kernel.runs.get(run_id)
     if runtime:
         await runtime.execution.adopt_recovery()
     if body.action == "retry":
-        await manager.notify_requests(run_id, ref(ctx))
+        await ctx.kernel.runs.notify_requests(run_id, ref(ctx))
     return record
 
 
@@ -378,10 +383,10 @@ async def recover_execution(run_id: str, body: ExecutionRecovery, db: AsyncSessi
                             user: User = Depends(current_user), ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     run = await owned_run(run_id, db, user)
     try:
-        await RuntimeStore(ctx.sf, run_id).acknowledge_recovery(body.action, acknowledged=body.acknowledge_side_effects)
+        await RuntimeStore(ctx.sf, run_id, ctx.kernel.eventlog).acknowledge_recovery(body.action, acknowledged=body.acknowledge_side_effects)
     except Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
-    runtime = manager.get(run_id)
+    runtime = ctx.kernel.runs.get(run_id)
     if runtime:
         # Stop before reconciling: adopting the cleared state can resume the loop, which must not start another turn.
         if body.action == "cancel":

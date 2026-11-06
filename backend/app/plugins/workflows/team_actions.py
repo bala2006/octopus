@@ -6,16 +6,16 @@ from typing import TYPE_CHECKING, Any
 
 from app.storage.base import new_id
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
-from app.plugins.workflows.routing import allowed_recipients, EdgeSpec
-from app.kernel.runtime.roles import role_category
+from app.sdk.agents import AgentSpec
+from app.sdk.routing import allowed_recipients, EdgeSpec
+from app.sdk.agents import role_category
 from app.plugins.workflows.org import _edge, _tool_map, EDITABLE_BEHAVIOR
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
-async def act_list_agents(rt: RunRuntime, agent: AgentSpec, a: A.ListAgents) -> None:
+async def act_list_agents(rt: RunContext, agent: AgentSpec, a: A.ListAgents) -> None:
     cid = await rt._tool_event(agent, "list_agents", {"department": a.department})
     await rt.set_agent_status(agent.id, "reading", "Checking the team…")
     mine = allowed_recipients(rt.edges, agent.id)
@@ -37,8 +37,8 @@ async def act_list_agents(rt: RunRuntime, agent: AgentSpec, a: A.ListAgents) -> 
     await rt._tool_result(agent, cid, "list_agents", True, out)
 
 
-async def act_create_agent(rt: RunRuntime, agent: AgentSpec, a: A.CreateAgent) -> None:
-    from app.plugins.roles.prompts import agent_from_role, all_roles
+async def act_create_agent(rt: RunContext, agent: AgentSpec, a: A.CreateAgent) -> None:
+    from app.plugins.workflows.deps import deps
     from app.plugins.workflows.canvas import department_color
 
     cid = await rt._tool_event(agent, "create_agent", {"name": a.name, "role": a.role, "department": a.department})
@@ -53,10 +53,10 @@ async def act_create_agent(rt: RunRuntime, agent: AgentSpec, a: A.CreateAgent) -
     if manager_id != agent.id and not rt.manages(agent.id, manager_id):
         await rt.deny(agent, cid, "create_agent", f"{rt.names[manager_id]} is not in your part of the org; hires must report to you or someone you manage.")
         return
-    roles = all_roles()
+    roles = deps.require("roles.builtin").all_roles()
     key = a.role_template if a.role_template in roles else ("department_head" if a.is_manager else "specialist")
     department = (a.department or ("" if a.is_manager else rt.agents[manager_id].department)).strip() or a.role
-    base = agent_from_role(key, name=name, role=a.role, department=department, is_manager=a.is_manager)
+    base = deps.require("roles.builtin").agent_from_role(key, name=name, role=a.role, department=department, is_manager=a.is_manager)
 
     requested = _tool_map(a.tools)
     tools: dict[str, Any] = dict(base["tools"])
@@ -130,7 +130,7 @@ async def act_create_agent(rt: RunRuntime, agent: AgentSpec, a: A.CreateAgent) -
         await rt._send_one(sender, spec.id, A.SendMessage(action="send_message", to=spec.name, type="task", content=a.brief))
 
 
-async def act_update_agent(rt: RunRuntime, agent: AgentSpec, a: A.UpdateAgent) -> None:
+async def act_update_agent(rt: RunContext, agent: AgentSpec, a: A.UpdateAgent) -> None:
     tgt = a.target.strip()
     target_id = agent.id if tgt.lower() in ("self", "me", "myself", agent.name.lower()) else rt.resolve_agent(tgt)
     cid = await rt._tool_event(agent, "update_agent", {"target": tgt, "fields": sorted(a.changes.model_dump(exclude_none=True))})

@@ -14,28 +14,20 @@ from __future__ import annotations
 from app.storage.repositories import UserSkillRepository
 
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.sdk.skill_contracts import Skill
+
 BUILTIN_DIR = Path(__file__).resolve().parent / "builtin"
 PROJECT_DIRS = (".octopus/skills", ".agents/skills", ".claude/skills")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 MAX_BODY = 40_000
 ROLE_SKILLS_SHOWN = 8
-
-
-@dataclass(frozen=True)
-class Skill:
-    name: str
-    description: str
-    body: str
-    roles: tuple[str, ...] = field(default_factory=tuple)
-    phases: tuple[str, ...] = field(default_factory=tuple)
-    source: str = "builtin"  # builtin | modified | custom | project
 
 
 def _csv(v: str) -> tuple[str, ...]:

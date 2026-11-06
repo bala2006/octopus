@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING, Any
 
 from app.storage.base import new_id, utcnow
 from app.storage.repositories import AgentRepository, CompanyRepository, EdgeRepository
-from app.plugins.providers.base import DEFAULT_AGENT_MAX_TOKENS
+from app.sdk.llm import DEFAULT_AGENT_MAX_TOKENS
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 EDGE_CFG = {"max_turns": 20, "handoff_instructions": "", "condition": "", "max_rounds": 4, "max_revisions": 3}
 EDITABLE_BEHAVIOR = {"assertiveness", "creativity", "strictness", "debate_style", "max_autonomous_turns"}
@@ -42,9 +42,9 @@ def _edge(src: str, dst: str, etype: str, bidi: bool, label: str) -> dict[str, A
 
 
 class OrgService:
-    """Team management for one run. ``self.rt`` is the RunRuntime that owns the agents and the company."""
+    """Team management for one run. ``self.rt`` is the RunContext that owns the agents and the company."""
 
-    def __init__(self, rt: RunRuntime) -> None:
+    def __init__(self, rt: RunContext) -> None:
         self.rt = rt
 
     # ------------------------------------------------------------------ helpers

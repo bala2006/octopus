@@ -16,7 +16,8 @@ from app.storage.session import make_engine
 from app.storage.models import Company, Run, User
 from app.storage.models.runtime_records import Consultation, RunRequest, TaskAttempt
 from app.sdk.contracts import Assignment, ExecutionPolicy
-from app.kernel.runtime.runtime_store import RuntimeStore, Conflict, mutation_lock
+from app.kernel.runtime.runtime_store import RuntimeStore
+from app.sdk.execution_contracts import Conflict, mutation_lock
 
 
 @pytest_asyncio.fixture
@@ -123,7 +124,8 @@ async def test_steering_waits_for_canonical_mutation_boundary(durable):
 
 @pytest.mark.asyncio
 async def test_stale_runtime_save_cannot_lower_persisted_plan_revision(durable):
-    from app.kernel.runtime.engine import ProjectRef, RunRuntime
+    from app.kernel.run_manager import ProjectRef
+    from app.kernel.runtime.engine import RunRuntime
     store, sf, root = durable
     async with sf() as db:
         saved = await db.get(Run, "r")
@@ -173,11 +175,11 @@ async def test_consultation_cycle_one_wait_and_expiry(durable):
 async def durable_client(durable, monkeypatch):
     from app.channels.api.routes.runs import router
     from app.channels.deps import current_user, get_pdb, project_ctx
-    from app.kernel.runtime.engine import manager
+    from app.kernel.current import current
     store, sf, root = durable
     async def notify(*_, **__):
         pass  # API persistence test must never launch a model.
-    monkeypatch.setattr(manager, "notify_requests", notify, raising=False)
+    monkeypatch.setattr(current().runs, "notify_requests", notify, raising=False)
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/w/{workspace_id}")
     async def pdb():
@@ -185,7 +187,7 @@ async def durable_client(durable, monkeypatch):
             yield db
     app.dependency_overrides[get_pdb] = pdb
     app.dependency_overrides[current_user] = lambda: User(id="owner", email="owner@test", password_hash="unused")
-    app.dependency_overrides[project_ctx] = lambda: SimpleNamespace(sf=sf, root=root, workspace=SimpleNamespace(id="ws"))
+    app.dependency_overrides[project_ctx] = lambda: SimpleNamespace(sf=sf, root=root, workspace=SimpleNamespace(id="ws"), kernel=current())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         yield client
 

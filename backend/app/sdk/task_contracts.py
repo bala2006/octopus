@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.sdk.evidence import AcceptanceCriterion
 
 
+OPEN_TASK_STATES = {"todo", "in_progress", "in_review", "blocked"}
 TaskState = Literal["todo", "in_progress", "in_review", "done", "blocked", "cancelled"]
 TRANSITIONS = {
     "todo": {"todo", "in_progress", "in_review", "done", "blocked", "cancelled"},

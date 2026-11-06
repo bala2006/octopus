@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.foundation.config import get_settings
+from app.plugins.sandbox.deps import deps
 
 ALLOWED_PREFIXES: list[list[str]] = [
     ["python"], ["python3"], ["node"], ["pytest"], ["npm", "test"], ["npm", "run"], ["npm", "ci"], ["npm", "install"],
@@ -199,6 +200,13 @@ async def _unshare_available() -> bool:
     return _UNSHARE_OK
 
 
+
+def environment_directory(cwd: Path) -> Path | None:
+    """The local Python environment the user selected for this project. Needs the workspace plugin; without it, none."""
+    environments = deps.get("workspace.environments")
+    return environments.environment_directory(cwd) if environments is not None else None
+
+
 def command_environment(cwd: Path, *, developer: bool = False) -> dict[str, str]:
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(cwd), "PYTHONDONTWRITEBYTECODE": "1",
            "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
@@ -210,7 +218,6 @@ def command_environment(cwd: Path, *, developer: bool = False) -> dict[str, str]
     for key in ("JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT", "FLUTTER_ROOT", "DART_SDK", "PUB_CACHE", "GRADLE_USER_HOME"):
         if key in os.environ:
             env[key] = os.environ[key]
-    from app.plugins.workspace.worktrees import environment_directory
     venv = environment_directory(cwd)
     if venv:
         scripts = venv / ("Scripts" if os.name == "nt" else "bin")
@@ -295,7 +302,6 @@ async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: i
 async def _run_docker(argv: list[str], cwd: Path, timeout: int, memory_mb: int) -> ExecResult:
     s = get_settings()
     local_env_args: list[str] = []
-    from app.plugins.workspace.worktrees import environment_directory
     venv = environment_directory(cwd)
     if venv:
         env_rel = venv.relative_to(cwd.resolve()).as_posix()

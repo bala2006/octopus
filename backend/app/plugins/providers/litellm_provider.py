@@ -5,7 +5,8 @@ from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
 
-from app.plugins.providers.base import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, estimate_tokens, output_cap, with_images, chat_continuation, chat_tools, ChatToolAccumulator
+from app.sdk.llm import LLMChunk, LLMError, LLMOutputTruncated, LLMRequest, Usage, output_cap, with_images
+from app.plugins.providers.base import estimate_tokens, chat_continuation, chat_tools, ChatToolAccumulator
 from app.plugins.providers.azure_v1 import legacy_api_base
 
 PREFIX = {

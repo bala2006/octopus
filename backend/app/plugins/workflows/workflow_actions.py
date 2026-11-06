@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.sdk import actions as A
-from app.kernel.runtime.context import AgentSpec
+from app.sdk.agents import AgentSpec
 from app.plugins.workflows.company import PHASES, TRACKS, pick_owner
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.kernel.runtime.engine import RunRuntime
+    from app.sdk.run import RunContext
 
 
-async def act_set_track(rt: RunRuntime, agent: AgentSpec, a: A.SetTrack) -> None:
+async def act_set_track(rt: RunContext, agent: AgentSpec, a: A.SetTrack) -> None:
     cid = await rt._tool_event(agent, "set_track", {"track": a.track, "research": a.research})
     ph = rt.wf_phase()
     if not (ph and ph["key"] == "intake" and agent.is_entry):

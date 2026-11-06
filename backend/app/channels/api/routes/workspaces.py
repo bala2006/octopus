@@ -11,12 +11,11 @@ from app.storage.repositories import ArtifactRepository, WorkspaceRepository
 from app.channels.deps import ProjectCtx, current_user, load_project, project_ctx
 from app.storage.session import close_project, get_registry_db
 from app.storage.models import User, Workspace
-from app.kernel.runtime.engine import manager
 from app.sdk.schemas import BrowseOut, DirEntryOut, FileContentOut, FileNode, MkdirIn, NativeDialogOut, NativeOpenIn, NativeOpenOut, NativePickOut, ProjectTreeOut, WorkspaceIn, WorkspaceOut, WorkspacePatch
 from app.foundation.config import get_settings
 from app.application import hostpaths, native_dialog
 from app.application.projects import ProjectPathError, allowed_roots, browse, init_project, make_dir, rename_project, validate_project_dir
-from app.plugins.workspace.project_fs import ProjectFS, WorkspaceError
+from app.sdk.projectfs import ProjectFS, WorkspaceError
 
 router = APIRouter(tags=["workspaces"])
 
@@ -162,12 +161,12 @@ async def patch_workspace(workspace_id: str, body: WorkspacePatch, db: AsyncSess
 
 
 @router.delete("/workspaces/{workspace_id}", status_code=204, response_class=Response, response_model=None)
-async def forget_workspace(workspace_id: str, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> None:
+async def forget_workspace(workspace_id: str, request: Request, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> None:
     """Remove the project from Octopus' list. The directory and its .octopus data are left untouched."""
     w = await WorkspaceRepository(db).get(workspace_id)
     if w is None or w.user_id != user.id:
         raise HTTPException(404, "Workspace not found")
-    if manager.active_for(Path(w.path)):
+    if request.app.state.kernel.runs.active_for(Path(w.path)):
         raise HTTPException(409, "Stop this project's active runs first")
     from app.plugins.sandbox.processes import commands, servers
     if servers.status(str(Path(w.path)))["status"] == "running":
@@ -185,7 +184,7 @@ async def project_tree(ctx: ProjectCtx = Depends(project_ctx)) -> ProjectTreeOut
     """The project folder as the agents see it (``.git``, dependency folders and secrets hidden), plus the agents'
     working documents from ``.octopus/work/`` (``area="work"``). The rest of ``.octopus`` stays hidden."""
     files = await project_files(ctx)
-    from app.plugins.workspace.project_fs import MAX_LIST
+    from app.sdk.projectfs import MAX_LIST
 
     return ProjectTreeOut(root=str(ctx.root), name=ctx.root.name, files=files, truncated=len(files) >= MAX_LIST)
 
