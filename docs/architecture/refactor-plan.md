@@ -343,15 +343,15 @@ checked against the commit that adds this section.
 
 | Phase | State | Notes |
 |---|---|---|
-| 0 Baseline | Done | Golden files (62), visual harness, 36-PNG baseline outside the repo. Screenshot sign-off is pending (O3, O4). |
+| 0 Baseline | Partly | Golden files (62), visual harness, 36-PNG baseline outside the repo. The exit needs your sign-off on the screenshot set (O3, O4), which is pending. |
 | 1 Core and rules | Done | Manifests, registry, 33-entry catalog, `0006_plugins`, import-linter. |
-| 2 Kernel | Done | `engine.py` is 652 lines (target under 800). Policy gate, contracts, run manager, execution service and handler modules are in place. Mixins are removed in Phase 5. |
+| 2 Kernel | Done, verification pending | `engine.py` is 652 lines (target under 800). Policy gate, contracts, run manager, execution service and handler modules are in place. Mixins are removed in Phase 5. The exit also names kill-switch and restart-recovery tests, which I have not checked specifically. |
 | 3 Capabilities | Partly | Models, workspace, sandbox, browser, MCP, memory, skills and tools are moved into `app/capabilities/`. The engine imports no capability module (import-linter checks it). Not done: each action as a `ToolPlugin`, registry-based tool dispatch, and storage repositories. Handler modules still import capabilities directly. |
 | 4 Agents | Done | Role plugins (`agents/roles`), user roles (`agents/user_roles.py`), chief (`agents/chief.py`). The custom role group includes `ceo`, `moderator`, `proposer` and `roles_org` (42 roles). This grouping is not confirmed. |
 | 5 Workflows | Partly | Debate (`boardroom.py`), review (`review.py`), company workflow, org and hiring are done. `TeamMixin` and `WorkflowMixin` are now services (`OrgService`, `CompanyWorkflow`). Not done: the task board stays in `orchestrator/board.py`, and routing (`find_channel`) stays in `orchestrator/permissions.py`. `workflows/tasks.py` is command discovery. |
-| 6 Channels | Done | API, WebSocket, web shell and CLI plugins; chat apps are a `planned` placeholder. The start scripts and Makefile targets are unchanged, and the scripts are not moved into `channels/cli`. |
-| 7 Frontend | Done | `frontend/src/plugins/registry.ts` drives the routes. G6 is not green (see below). |
-| 8 Hardening | Done | Shims removed and import-linter runs with no ignore list. No dead modules found. `ARCHITECTURE.md` rewritten. `docs/plugins.md` added. |
+| 6 Channels | Partly | API, WebSocket, web shell and CLI plugins; chat apps are a `planned` placeholder. Not done: the start scripts are not moved into `channels/cli`. The exit needs G7 on all three start paths, which is not verified. |
+| 7 Frontend | Partly | `frontend/src/plugins/registry.ts` drives the routes. The exit needs G6 green, which is not met (five run-detail screens differ). |
+| 8 Hardening | Partly | Shims removed, import-linter runs with no ignore list, no dead modules found, `ARCHITECTURE.md` rewritten, `docs/plugins.md` added. The exit needs all gates green, which is not met (G6 red, G7 partial). |
 
 Gate results on this branch:
 
