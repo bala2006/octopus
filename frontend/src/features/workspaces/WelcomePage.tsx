@@ -13,7 +13,8 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
-import { qk, useWorkspaces } from "@/hooks/queries";
+import { qk, useSettings, useWorkspaces } from "@/hooks/queries";
+import { APPROVAL_MODES, approvalModeOf } from "@/lib/meta";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -61,19 +62,8 @@ export function WelcomePage() {
     store.preferences[preferenceKey] ??
     store.preferences.home ??
     defaultComposerSettings;
-  const permissionCaption =
-    project?.default_permission === "danger"
-      ? "Full access. Edits run without approval."
-      : project?.default_permission === "read_only"
-        ? "Read only. No edits or commands."
-        : project?.default_permission === "plan"
-          ? "Your team proposes changes before writing files."
-          : "Edits and commands need your approval.";
-  const approvalMode = preferences.approvalMode ?? "ask";
-  const caption =
-    project?.default_permission === "ask" && approvalMode === "auto"
-      ? "Safe project edits and sandboxed commands are approved automatically; external tools still need approval."
-      : permissionCaption;
+  const settings = useSettings();
+  const caption = APPROVAL_MODES[approvalModeOf(settings.data?.approval_mode)].caption;
   const continuePrompt = async () => {
     if (!project || !store.homeDraft.trim() || attachments.uploading || creatingWorktree) return;
     let targetWorkspaceId = project.id;
@@ -187,12 +177,7 @@ export function WelcomePage() {
                     <button type="button" className="composer-add-item" onClick={() => { setAdding(false); folder.openPicker(); }}><FolderOpen /><span>New project</span><small>Choose a local folder and name your project</small></button>
                   </PopoverContent>
                 </Popover>
-                <ApprovalModePicker
-                  value={approvalMode}
-                  disabled={!project || project.default_permission !== "ask"}
-                  label={!project ? "Choose a project" : project.default_permission === "danger" ? "Danger mode" : project.default_permission === "plan" ? "Plan mode" : project.default_permission === "read_only" ? "Read only" : undefined}
-                  onChange={(approvalMode) => store.configure(preferenceKey, { ...preferences, approvalMode })}
-                />
+                <ApprovalModePicker />
                 <span className="home-project-current"><Folder />{project?.name ?? "No project"}</span>
                 <span className="flex-1" />
                 <ModelPicker

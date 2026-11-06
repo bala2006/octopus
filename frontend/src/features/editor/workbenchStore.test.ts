@@ -40,7 +40,6 @@ describe("home prompt handoff", () => {
     ).toEqual({
       model: { provider: "azure", model: "my-deployment" },
       reasoning_effort: "high",
-      approvalMode: "ask",
       engineering_workflow: "auto",
     });
     expect(
@@ -51,7 +50,6 @@ describe("home prompt handoff", () => {
     ).toEqual({
       model: null,
       reasoning_effort: "default",
-      approvalMode: "ask",
       engineering_workflow: "auto",
     });
   });

@@ -287,7 +287,6 @@ class AgentChanges(BaseModel):
     max_tokens: int | None = Field(None, ge=256, le=128_000)  # answer budget per turn (raise it for large files)
     tools: ToolSpec | None = None
     behavior: dict[str, Any] | None = None
-    permission_level: Literal["read_only", "plan", "ask", "danger"] | None = None
 
 
 class UpdateAgent(BaseModel):
@@ -468,7 +467,7 @@ def schema_doc(enabled_tools: dict[str, Any], mcp_servers: list[dict[str, Any]] 
         lines.append('{"action":"create_folder","path":"src/components"}  (organise the project into folders)')
         lines.append('{"action":"move_file","source":"old/path.ext","destination":"new/folder/path.ext"}  (move or rename a file or a whole folder)')
     if tool_enabled(enabled_tools, "terminal"):
-        lines.append('{"action":"run_code","command":"python -m unittest discover -s tests -v"}  (sandboxed terminal, one command, no shell; allowlisted: python, node, npm test, pytest; any command and shell operators at danger level)')
+        lines.append('{"action":"run_code","command":"python -m unittest discover -s tests -v"}  (sandboxed terminal, one command, no shell; allowlisted: python, node, npm test, pytest; no shell operators; paths outside the project need approval)')
     if tool_enabled(enabled_tools, "web_search"):
         lines.append('{"action":"web_search","query":"..."}')
     if tool_enabled(enabled_tools, "calculator"):

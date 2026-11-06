@@ -1,9 +1,9 @@
 import * as React from "react";
 import { tone } from "@/lib/palette";
 import { AlertTriangle, RotateCcw, type LucideIcon } from "lucide-react";
-import { AVATARS, PERMISSIONS, statusMeta } from "@/lib/meta";
+import { APPROVAL_MODES, AVATARS, approvalModeOf, statusMeta } from "@/lib/meta";
 import { cn, initials } from "@/lib/utils";
-import type { PermissionLevel } from "@/types";
+import type { ApprovalMode } from "@/types";
 import { Button } from "./ui/button";
 import { Tip } from "./ui/overlays";
 
@@ -60,13 +60,13 @@ export function StatusPill({ status, activity, compact }: { status?: string; act
   );
 }
 
-export function PermissionBadge({ level, className }: { level: PermissionLevel; className?: string }) {
-  const p = PERMISSIONS[level] ?? PERMISSIONS.ask;
-  const Icon = p.icon;
+/** Read-only label for the approval mode a run was started with. */
+export function ApprovalModeBadge({ mode, className }: { mode: ApprovalMode; className?: string }) {
+  const meta = APPROVAL_MODES[approvalModeOf(mode)];
   return (
-    <Tip content={<div className="max-w-[240px]"><div className="font-medium">{p.label}</div><div className="text-muted-foreground">{p.description}</div></div>}>
-      <span className={cn("inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] font-medium", p.tone, className)}>
-        <Icon className="h-3 w-3" />{p.short}
+    <Tip content={<div className="max-w-[240px]"><div className="font-medium">{meta.label}</div><div className="text-muted-foreground">{meta.description}</div></div>}>
+      <span className={cn("inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] font-medium", className)}>
+        {meta.label}
       </span>
     </Tip>
   );

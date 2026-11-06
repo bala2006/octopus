@@ -60,7 +60,6 @@ class AgentSpec:
     active: bool = True
     created_by: str | None = None
     avatar: str = ""
-    permission_level: str = "inherit"
     memory: dict[str, str] = field(default_factory=dict)
     mcp: list[dict[str, Any]] = field(default_factory=list)  # [{id, name, tools}]
 
@@ -72,7 +71,7 @@ class AgentSpec:
                    tools=d.get("tools") or {}, behavior=d.get("behavior") or {}, is_entry=bool(d.get("is_entry")),
                    color=d.get("color", "#6366f1"), category=category, department=d.get("department") or "",
                    is_manager=bool(d.get("is_manager")), reports_to=d.get("reports_to"), active=d.get("active", True) is not False,
-                   created_by=d.get("created_by"), avatar=d.get("avatar") or "", permission_level=d.get("permission_level") or "inherit")
+                   created_by=d.get("created_by"), avatar=d.get("avatar") or "")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise back to the AgentOut-like shape stored in run snapshots."""
@@ -80,7 +79,7 @@ class AgentSpec:
                 "provider": self.provider, "model": self.model, "temperature": self.temperature, "max_tokens": self.max_tokens,
                 "tools": self.tools, "behavior": self.behavior, "is_entry": self.is_entry, "color": self.color, "avatar": self.avatar,
                 "department": self.department, "is_manager": self.is_manager, "reports_to": self.reports_to, "active": self.active,
-                "created_by": self.created_by, "permission_level": self.permission_level}
+                "created_by": self.created_by}
 
 
 def render_template(text: str, variables: dict[str, str]) -> str:

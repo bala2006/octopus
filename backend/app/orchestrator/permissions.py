@@ -88,15 +88,22 @@ def inbound_senders(edges: list[EdgeSpec], agent_id: str) -> set[str]:
     return s
 
 
-# ---------------------------------------------------------------- permission levels
-LEVEL_ORDER = {"read_only": 0, "plan": 1, "ask": 2, "auto": 3, "danger": 4}
-LEVEL_LABEL = {"read_only": "read-only", "plan": "plan", "ask": "ask", "auto": "auto", "danger": "danger"}
-DANGEROUS = {"write_file", "run_code", "mcp_call"}
+# ---------------------------------------------------------------- approval modes
+# One global setting per user. "ask" asks before every command, edit, external tool, web search and team change.
+# "auto" (Approve for me) runs commands and edits without asking, except the cases below.
+APPROVAL_MODES = ("ask", "auto")
+# Edits under these prefixes ask even in "auto": CI workflows run code without the user watching.
+DANGEROUS_EDIT_PREFIXES = (".github/workflows/",)
 
 
-def effective_level(run_level: str, agent_level: str | None) -> str:
-    """The run's level caps everything; an agent override can only be *more* restrictive."""
-    run_level = run_level if run_level in LEVEL_ORDER else "ask"
-    if not agent_level or agent_level == "inherit" or agent_level not in LEVEL_ORDER:
-        return run_level
-    return min(run_level, agent_level, key=LEVEL_ORDER.__getitem__)
+def normalize_mode(value: str | None) -> str:
+    """Anything other than "auto" is "ask". Legacy values (read_only, plan, danger) therefore become "ask"."""
+    return "auto" if value == "auto" else "ask"
+
+
+def is_dangerous_edit(rel: str, *, move: bool = False) -> bool:
+    """Dangerous edits ask in "auto" mode: every move or rename, and edits to CI workflow files."""
+    if move:
+        return True
+    path = rel.replace("\\", "/").lstrip("/").lower()
+    return any(path.startswith(prefix) for prefix in DANGEROUS_EDIT_PREFIXES)

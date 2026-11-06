@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contextGoal, modePermission } from "./agentContext";
+import { contextGoal } from "./agentContext";
 
 describe("agent editor context", () => {
   it("keeps instructions and explicitly identified unsaved selection context", () => {
@@ -28,12 +28,5 @@ describe("agent editor context", () => {
     expect(goal.length).toBeLessThanOrEqual(20000);
     expect(goal).toContain("Context truncated");
     expect(contextGoal("  Fix a bug  ", [])).toBe("Fix a bug");
-  });
-  it("does not escalate project permissions when choosing an agent mode", () => {
-    expect(modePermission("agent", "read_only")).toBe("read_only");
-    expect(modePermission("agent", "plan")).toBe("plan");
-    expect(modePermission("ask", "danger")).toBe("read_only");
-    expect(modePermission("plan", "danger")).toBe("plan");
-    expect(modePermission("agent", "ask")).toBe("ask");
   });
 });

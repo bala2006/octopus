@@ -15,7 +15,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import ProjectBase, RegistryBase, new_id, utcnow
 from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
 
-PERMISSION_LEVELS = ("read_only", "plan", "ask", "danger")
 
 
 # ====================================================================== registry
@@ -25,6 +24,7 @@ class User(RegistryBase):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    approval_mode: Mapped[str] = mapped_column(String(10), default="ask")  # global setting: "ask" or "auto" (Approve for me)
 
 
 class Workspace(RegistryBase):
@@ -36,7 +36,6 @@ class Workspace(RegistryBase):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     path: Mapped[str] = mapped_column(String(1000))
-    default_permission: Mapped[str] = mapped_column(String(20), default="ask")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_opened_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -156,7 +155,6 @@ class Agent(ProjectBase):
     max_tokens: Mapped[int] = mapped_column(Integer, default=DEFAULT_AGENT_MAX_TOKENS)
     tools_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     behavior_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    permission_level: Mapped[str] = mapped_column(String(20), default="inherit")  # inherit | read_only | plan | ask | danger
     department: Mapped[str] = mapped_column(String(80), default="")
     is_manager: Mapped[bool] = mapped_column(Boolean, default=False)
     reports_to: Mapped[str | None] = mapped_column(String(36), nullable=True)  # manager agent id
@@ -270,7 +268,6 @@ class Artifact(ProjectBase):
     content: Mapped[str] = mapped_column(Text, default="")
     previous_content: Mapped[str | None] = mapped_column(Text, nullable=True)  # file content before v1 (pre-existing file)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    planned: Mapped[bool] = mapped_column(Boolean, default=False)  # plan mode: written to the shadow dir, not the project
     deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     author_agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     change_note: Mapped[str] = mapped_column(Text, default="")
@@ -288,7 +285,7 @@ class AgentMemory(ProjectBase):
 
 
 __all__ = [
-    "PERMISSION_LEVELS", "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate", "UserRole", "UserSkill",
+    "User", "Workspace", "ProviderKey", "McpServer", "UserTemplate", "UserRole", "UserSkill",
     "Company", "Agent", "Edge", "ChatSession", "Run", "Message", "RunEvent", "Task", "Artifact", "AgentMemory",
 ]
 

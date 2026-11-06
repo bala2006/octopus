@@ -44,12 +44,8 @@ async def test_managed_command_timeout_stop_permissions_and_shutdown(client, wor
     timed = await wait_command(client, base, lambda result: result["status"] == "exited")
     assert timed["timed_out"] and timed["exit_code"] != 0
     assert (await client.post(f"{base}/current", json={"command": "python wait.py"})).status_code == 200
-    await client.patch(f"/api/v1/workspaces/{workspace['id']}", json={"default_permission": "read_only"})
-    assert (await client.post(f"{base}/input", json={"text": "forbidden"})).status_code == 403
     stopped = (await client.delete(f"{base}/current")).json()
     assert stopped["status"] == "exited" and not stopped["timed_out"]
-    assert (await client.post(f"{base}/current", json={"command": "python wait.py"})).status_code == 403
-    await client.patch(f"/api/v1/workspaces/{workspace['id']}", json={"default_permission": "ask"})
     assert (await client.post(f"{base}/current", json={"command": "python wait.py"})).status_code == 200
     await commands.shutdown()
     assert commands.status(str(root))["status"] == "idle"

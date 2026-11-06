@@ -5,7 +5,7 @@ import { appendStream } from "./streamView";
 
 export interface ToolCall { call_id: string; agent_id: string; tool: string; args: Record<string, unknown>; ok?: boolean; output?: string; turn_no?: number; seq?: number }
 export interface LiveTask { key: string; title: string; status: string; assignee_agent_id?: string | null; description?: string; acceptance_criteria?: string; constraints_json?: { dependencies?: string[]; write_paths?: string[]; max_turns?: number } }
-export interface LiveArtifact { id: string; path: string; version: number; author_agent_id?: string | null; change_note?: string; planned?: boolean; created?: boolean; deleted?: boolean; size?: number; lines?: number; previous_lines?: number; created_at?: string }
+export interface LiveArtifact { id: string; path: string; version: number; author_agent_id?: string | null; change_note?: string; created?: boolean; deleted?: boolean; size?: number; lines?: number; previous_lines?: number; created_at?: string }
 export interface TimelineItem { seq: number; type: string; ts?: string; agent_id?: string | null; label: string; tone: "msg" | "protocol" | "file" | "tool" | "status" | "error" | "approval" | "org" }
 export interface OrgEvent { seq: number; kind: "created" | "updated"; by: string; agent_id: string; name: string; role?: string; department?: string; summary?: string; reason?: string; self?: boolean; persisted?: boolean; ts?: string }
 export type FeedMessage = MessageOut & { _seq?: number };
@@ -168,7 +168,7 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
     case "artifact_updated": {
       const a = d.artifact as LiveArtifact;
       return { ...next, artifacts: { ...s.artifacts, [a.path]: a },
-        timeline: push({ type: e.type, agent_id: a.author_agent_id, tone: "file", label: `${n(a.author_agent_id)} ${a.planned ? "planned" : a.version === 1 && a.created ? "created" : "updated"} ${a.path} v${a.version}` }) };
+        timeline: push({ type: e.type, agent_id: a.author_agent_id, tone: "file", label: `${n(a.author_agent_id)} ${a.version === 1 && a.created ? "created" : "updated"} ${a.path} v${a.version}` }) };
     }
     case "run_continued":
       return { ...next, status: "running", summary: "", timeline: push({ type: e.type, tone: "status", label: `Continued: ${clip(d.content, 60)}` }) };

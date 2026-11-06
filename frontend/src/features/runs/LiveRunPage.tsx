@@ -11,8 +11,8 @@ import { RUN_STATUS } from "@/lib/meta";
 import { cn, download } from "@/lib/utils";
 import { useRun, useWorkspaceId } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
-import type { AgentOut, EdgeOut, PermissionLevel } from "@/types";
-import { AgentAvatar, ConnectionDot, EmptyState, PermissionBadge } from "@/components/common";
+import type { AgentOut, EdgeOut } from "@/types";
+import { AgentAvatar, ApprovalModeBadge, ConnectionDot, EmptyState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Badge, Textarea } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
@@ -105,7 +105,7 @@ export default function LiveRunPage() {
             <h1 className="truncate text-sm font-semibold" title={r.goal}>{r.goal}</h1>
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span className="capitalize">{r.mode}</span>·<PermissionBadge level={r.permission_level as PermissionLevel} />
+            <span className="capitalize">{r.mode}</span>·<ApprovalModeBadge mode={r.permission_level} />
             {(liveState.reason && status !== "running") && <span className="truncate text-warning">{liveState.reason}</span>}
             <ConnectionDot state={conn} />
           </div>

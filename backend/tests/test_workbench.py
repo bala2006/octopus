@@ -80,10 +80,9 @@ def test_tasks_handle_invalid_and_oversized_manifests_and_external_symlinks(tmp_
 
 
 @pytest.mark.asyncio
-async def test_task_discovery_is_allowed_in_read_only_projects(client, workspace):
+async def test_task_discovery_lists_package_scripts(client, workspace):
     root = Path(workspace["path"])
     (root / "package.json").write_text('{"scripts":{"test":"echo test"}}')
-    await client.patch(f"/api/v1/workspaces/{workspace['id']}", json={"default_permission": "read_only"})
     response = await client.get(f"/api/v1/w/{workspace['id']}/editor/tasks")
     assert response.status_code == 200
     assert response.json()["tasks"][0]["command"] == 'npm run "test"'
@@ -139,7 +138,7 @@ async def test_ui_commit_does_not_execute_repository_hooks(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_commit_endpoint_permission_and_index_validation(client, workspace):
+async def test_commit_endpoint_validates_the_index(client, workspace):
     root = Path(workspace["path"])
     repository(root)
     (root / "app.txt").write_text("hello")
@@ -147,9 +146,6 @@ async def test_commit_endpoint_permission_and_index_validation(client, workspace
     base = f"/api/v1/w/{workspace['id']}/editor/git"
     current = (await client.get(base)).json()
     body = {"message": "From workbench", "expected_index": current["index_revision"]}
-    await client.patch(f"/api/v1/workspaces/{workspace['id']}", json={"default_permission": "plan"})
-    assert (await client.post(base + "/commit", json=body)).status_code == 403
-    await client.patch(f"/api/v1/workspaces/{workspace['id']}", json={"default_permission": "ask"})
     assert (await client.post(base + "/commit", json={**body, "expected_index": "bad"})).status_code == 422
     result = await client.post(base + "/commit", json=body)
     assert result.status_code == 200, result.text

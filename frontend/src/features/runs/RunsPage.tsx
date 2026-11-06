@@ -7,8 +7,8 @@ import { api, fetchRaw, unwrap } from "@/lib/api";
 import { cn, download, formatTokens, timeAgo, duration } from "@/lib/utils";
 import { useMoney } from "@/lib/money";
 import { qk, useCompanyId, useRuns, useWorkspaceId } from "@/hooks/queries";
-import type { PermissionLevel, RunOut } from "@/types";
-import { EmptyState, LoadingRows, PermissionBadge } from "@/components/common";
+import type { RunOut } from "@/types";
+import { ApprovalModeBadge, EmptyState, LoadingRows } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/surfaces";
 import { Badge, Input } from "@/components/ui/primitives";
@@ -42,8 +42,7 @@ export default function RunsPage() {
   });
   const rerun = useMutation({
     mutationFn: (r: RunOut) => unwrap(api.POST("/api/v1/w/{workspace_id}/runs", { params: { path: { workspace_id: w } }, body: {
-      company_id: r.company_id, goal: r.goal, mode: r.mode as "autonomous" | "step" | "supervised", approval_mode: "ask",
-      permission_level: r.permission_level as PermissionLevel, budget: r.budget as never } })),
+      company_id: r.company_id, goal: r.goal, mode: r.mode as "autonomous" | "step" | "supervised", budget: r.budget as never } })),
     onSuccess: (r) => { refresh(); nav(`/w/${w}/runs/${r.id}`); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -140,7 +139,7 @@ function RunRow({ r, w, onDelete, onStop, onRerun, onReport }: { r: RunOut; w: s
           </div>
         )}
       </Link>
-      <PermissionBadge level={r.permission_level as PermissionLevel} />
+      <ApprovalModeBadge mode={r.permission_level} />
       <div className="shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} turns · {formatTokens(r.tokens_used)} tok · {money(r.cost_usd)}</div>
       {/* always reachable (keyboard and touch); dimmed until the row is hovered or focused */}
       <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" aria-label="Conversation actions">

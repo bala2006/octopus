@@ -28,7 +28,7 @@ const destinations = [
     hint: "Review changes and file history",
     to: "artifacts",
   },
-  { name: "Settings", hint: "Models, permissions, and tools", to: "settings" },
+  { name: "Settings", hint: "Models and tools", to: "settings" },
   { name: "Guide", hint: "Learn Octopus", to: "guide" },
 ];
 

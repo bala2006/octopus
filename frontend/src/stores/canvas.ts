@@ -199,7 +199,7 @@ export const useCanvas = create<CanvasState>()((set, get) => {
             system_prompt: r.system_prompt, provider: "azure", model: "gpt-6-luna", temperature: 0.4, max_tokens: 128000,
             tools: { ...r.tools, manage_team: isManager || !!r.tools.manage_team },
             behavior: { assertiveness: 0.5, creativity: 0.5, strictness: 0.5, debate_style: "balanced", max_autonomous_turns: isManager ? 20 : 14, template_key: r.key, prompt_linked: true, extra_instructions: "", reasoning_effort: "default" },
-            permission_level: "inherit", department: spec.name, is_manager: isManager, reports_to: reportsTo, active: true, created_by: null, is_entry: false,
+            department: spec.name, is_manager: isManager, reports_to: reportsTo, active: true, created_by: null, is_entry: false,
             ...defaults,
           },
         };
@@ -285,7 +285,7 @@ export const useCanvas = create<CanvasState>()((set, get) => {
           system_prompt: tpl.system_prompt ?? "", provider: "azure", model: "gpt-6-luna", temperature: 0.4, max_tokens: 128000,
           tools: tpl.tools ?? { file_read: true, file_write: true, list_files: true, terminal: false, web_search: false, calculator: true, ask_user: false, send_message: true, manage_team: false, browser: true, mcp_servers: [] },
           behavior: { assertiveness: 0.5, creativity: 0.5, strictness: 0.5, debate_style: "balanced", max_autonomous_turns: 12, template_key: tpl.key ?? "", prompt_linked: !!tpl.key, extra_instructions: "", reasoning_effort: "default" },
-          permission_level: "inherit", is_entry: n.length === 0, department: "", is_manager: !!tpl.tools?.manage_team, reports_to: null, active: true, created_by: null,
+          is_entry: n.length === 0, department: "", is_manager: !!tpl.tools?.manage_team, reports_to: null, active: true, created_by: null,
           ...defaults,
         },
       };

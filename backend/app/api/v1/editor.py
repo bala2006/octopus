@@ -191,8 +191,6 @@ async def project_tasks(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 @router.post("/git/commit", response_model=GitCommitResult)
 async def git_commit(body: GitCommit, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     from app.services import git_review
-    if ctx.workspace.default_permission in ("read_only", "plan"):
-        raise HTTPException(403, "Committing changes is disabled in read-only and plan mode.")
     try:
         async with git_review.operation_lock(ctx.root):
             return await git_review.commit(ctx.root, body.message, body.expected_index)
@@ -203,8 +201,6 @@ async def git_commit(body: GitCommit, ctx: ProjectCtx = Depends(project_ctx)) ->
 @router.post("/git/stage", response_model=GitStatus)
 async def git_stage(body: GitStage, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     from app.services import git_review
-    if ctx.workspace.default_permission in ("read_only", "plan"):
-        raise HTTPException(403, "Staging changes is disabled in read-only and plan mode.")
     try:
         async with git_review.operation_lock(ctx.root):
             return await git_review.stage(ctx.root, body.path, body.staged)
@@ -255,7 +251,7 @@ async def create_local_worktree(body: LocalWorktreeIn, ctx: ProjectCtx = Depends
         async with git_review.operation_lock(ctx.root):
             path, branch = await local_environment.create_worktree(ctx.root, body.base_branch, ctx.workspace.id)
             validate_project_dir(str(path.parent))
-            opened = await _register(path, f"{ctx.workspace.name} · {branch}", ctx.workspace.default_permission, db, ctx.user)
+            opened = await _register(path, f"{ctx.workspace.name} · {branch}", db, ctx.user)
             return {"workspace": opened, "branch": branch, "display_path": hostpaths.to_host(str(path))}
     except (WorkspaceError, ProjectPathError, OSError, TimeoutError) as exc:
         raise HTTPException(400, str(exc) or "The local worktree could not be created.") from exc
@@ -290,10 +286,8 @@ async def server_status(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 async def start_server(body: StartServer, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     from app.services.processes import servers
     from app.tools.sandbox import SandboxError
-    if ctx.workspace.default_permission in ("read_only", "plan"):
-        raise HTTPException(403, "Development servers are disabled in read-only and plan mode.")
     try:
-        return await servers.start(ctx.key, ctx.root, body.command, danger=ctx.workspace.default_permission == "danger", directory=body.directory)
+        return await servers.start(ctx.key, ctx.root, body.command, directory=body.directory)
     except (SandboxError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -307,10 +301,8 @@ async def stop_server(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 @router.post("/command", response_model=CommandResult)
 async def command(body: CommandIn, ctx: ProjectCtx = Depends(project_ctx)) -> CommandResult:
     from app.tools.sandbox import SandboxError, run_command
-    if ctx.workspace.default_permission in ("read_only", "plan"):
-        raise HTTPException(403, "Commands are disabled in read-only and plan mode. Change the project permission in Settings to run commands.")
     try:
-        result = await run_command(body.command, ctx.root, danger=ctx.workspace.default_permission == "danger", timeout=60)
+        result = await run_command(body.command, ctx.root, timeout=60)
         return CommandResult(**result.__dict__)
     except (SandboxError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -326,10 +318,8 @@ async def current_command(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 async def start_command(body: StartCommand, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     from app.services.processes import commands
     from app.tools.sandbox import SandboxError
-    if ctx.workspace.default_permission in ("read_only", "plan"):
-        raise HTTPException(403, "Commands are disabled in read-only and plan mode.")
     try:
-        return await commands.start(ctx.key, ctx.root, body.command, danger=ctx.workspace.default_permission == "danger", timeout=body.timeout_seconds, directory=body.directory)
+        return await commands.start(ctx.key, ctx.root, body.command, timeout=body.timeout_seconds, directory=body.directory)
     except (SandboxError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -344,8 +334,6 @@ async def stop_command(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 async def command_input(body: CommandInput, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     from app.services.processes import commands
     from app.tools.sandbox import SandboxError
-    if ctx.workspace.default_permission in ("read_only", "plan"):
-        raise HTTPException(403, "Command input is disabled in read-only and plan mode.")
     try:
         return await commands.send(ctx.key, body.text)
     except (SandboxError, OSError) as exc:

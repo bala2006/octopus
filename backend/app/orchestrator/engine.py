@@ -38,7 +38,7 @@ from app.orchestrator import tools as T
 from app.orchestrator.bus import bus
 from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_turn_prompts, clip
 from app.orchestrator.permissions import (
-    EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
+    EdgeSpec, allowed_recipients, find_channel, is_dangerous_edit, normalize_mode, rejection_reason,
 )
 from app.orchestrator.team import TeamMixin
 from app.orchestrator.workflow import WorkflowMixin
@@ -51,7 +51,7 @@ from app.orchestrator.protocols import (
 from app.schemas import RunBudget
 from app.tools import basic
 from app.services import skills as SK
-from app.tools.sandbox import SandboxError, parse_command, run_command
+from app.tools.sandbox import SandboxError, analyze_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError
 
 log = get_logger("orchestrator")
@@ -288,7 +288,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.company_id = run.company_id
         self.project = project
         self.sf = project.sf
-        self.level = run.permission_level or "ask"
+        self.level = normalize_mode(run.permission_level)
         self.run_id = run.id
         self.session_id = run.session_id
         self.user_id = user_id
@@ -383,12 +383,10 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.finalized = False
         self.task: asyncio.Task[None] | None = None
         self.root = project.root
-        self._fs: dict[tuple[bool, bool], ProjectFS] = {}
+        self._fs: dict[str, ProjectFS] = {}
         self.mcp_configs: dict[str, Any] = {}
         self.auto_approve: set[str] = set()  # "agent_id:kind" approved with scope=always
         self.activity: dict[str, str] = {}
-        agent_levels = {a["id"]: a.get("permission_level") for a in snap.get("agents", [])}
-        self.levels = {aid: effective_level(self.level, agent_levels.get(aid)) for aid in self.agents}
         self.init_execution(run)
 
     # ------------------------------------------------------------------ persistence helpers
@@ -396,12 +394,10 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         return self.sf()
 
     def fs_for(self, aid: str) -> ProjectFS:
-        level = self.levels.get(aid, self.level)
         root = self.worker_root(aid)
-        key = (level == "plan", level == "danger", str(root))
+        key = str(root)
         if key not in self._fs:
-            shadow = self.root / PROJECT_DIRNAME / "plans" / self.run_id if key[0] else None
-            self._fs[key] = ProjectFS(root, shadow=shadow, allow_secrets=key[1])
+            self._fs[key] = ProjectFS(root)
         return self._fs[key]
 
     async def emit(self, type_: str, data: dict[str, Any]) -> None:
@@ -434,7 +430,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             "decisions": self.decisions, "user_notes": self.user_notes, "followups": self.followups, "agent_state": self.agent_state,
             "active_seconds": round(self.active_seconds, 2), "awaiting": self.awaiting,
             "pending_approval": self.pending_approval, "rejections": self.rejections,
-            "auto_approve": sorted(self.auto_approve), "levels": self.levels, "activity": self.activity,
+            "auto_approve": sorted(self.auto_approve), "activity": self.activity,
             "budget_base": self.budget_base,
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
@@ -926,7 +922,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         fut: asyncio.Future[tuple[bool, str]] = asyncio.get_running_loop().create_future()
         self.approvals[aid] = fut
         self.pending_approval = {"id": aid, "agent_id": agent.id, "kind": kind, "summary": summary, "preview": preview[:6000],
-                                 "details": details or {}, "level": self.levels.get(agent.id, self.level)}
+                                 "details": details or {}, "level": self.level}
         prev_status = self.status.get(agent.id, "idle")
         await self.set_agent_status(agent.id, "awaiting_approval", summary)
         await self.emit("approval_requested", self.pending_approval)
@@ -942,24 +938,12 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         await self.set_agent_status(agent.id, prev_status if prev_status != "awaiting_approval" else "thinking")
         return approved, reason
 
-    async def guard(self, agent: AgentSpec, kind: str, summary: str, preview: str, details: dict[str, Any] | None = None) -> tuple[bool, str]:
-        """Permission gate for dangerous actions. Returns (allowed, reason-if-denied)."""
-        level = self.levels.get(agent.id, self.level)
-        context = ACTIVE_ATTEMPT.get()
-        if context:
-            level = effective_level(level, context.assignment.policy.permission)
-        if kind == "web_search":
-            if level != "ask":
-                return True, ""
-            ok, reason = await self.request_approval(agent, kind, summary, preview, details)
-            return ok, ("" if ok else f"The user REJECTED {kind}: {reason or 'no reason given'}")
-        if level == "read_only":
-            return False, f"Your permission level is read-only: {kind} is not allowed. Describe the change instead."
-        if level == "plan":
-            if kind == "write_file":
-                return True, ""  # goes to the plan shadow directory
-            return False, f"Plan mode: {kind} is not allowed. Write your proposed changes with write_file (they are saved as a plan)."
-        needs = level == "ask" or (level == "auto" and kind == "mcp_call") or (self.mode == "supervised" and kind in ("write_file", "finish"))
+    async def guard(self, agent: AgentSpec, kind: str, summary: str, preview: str, details: dict[str, Any] | None = None, *,
+                    dangerous: bool = False) -> tuple[bool, str]:
+        """Approval gate. "ask" asks for every gated action. "auto" (Approve for me) asks only for ``dangerous`` actions:
+        dangerous edits and commands outside the project. Supervised runs still ask before writes and finishing.
+        Returns (allowed, reason-if-denied)."""
+        needs = self.level == "ask" or dangerous or (self.mode == "supervised" and kind in ("write_file", "finish"))
         if not needs:
             return True, ""
         ok, reason = await self.request_approval(agent, kind, summary, preview, details)
@@ -2049,10 +2033,10 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             self.notice(agent.id, f"{rel} unchanged ({'nothing to append' if appending else 'identical content'}).")
             await self._tool_result(agent, cid, tool, True, "unchanged")
             return
-        planned = fs.shadow is not None
         action = "edit" if tool == "edit_file" else "append to" if appending and old is not None else ("create" if old is None else "modify")
         ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to {action} {rel}",
-                                      content, {"path": rel, "old": (old or "")[:20000], "new": content[:20000], "note": note})
+                                      content, {"path": rel, "old": (old or "")[:20000], "new": content[:20000], "note": note},
+                                      dangerous=is_dangerous_edit(rel))
         if not ok:
             await self.deny(agent, cid, tool, reason)
             return
@@ -2061,11 +2045,11 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         async with mutation_lock(self.run_id):
             context = ACTIVE_ATTEMPT.get()
             await self.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
-            await self._write_checked_file(agent, cid, tool, rel, old, content, note, planned=planned,
+            await self._write_checked_file(agent, cid, tool, rel, old, content, note,
                                            appending=appending, partial=partial, context_line=context_line)
 
     async def _write_checked_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str,
-                                  note: str, *, planned: bool, appending: bool, partial: bool,
+                                  note: str, *, appending: bool, partial: bool,
                                   context_line: int | None) -> None:
         fs = self.fs_for(agent.id)
         try:
@@ -2080,31 +2064,30 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             self.notice(agent.id, f"Staged {rel}; integration and canonical verification are pending.", activate=partial)
             await self._tool_result(agent, cid, tool, True, f"Staged {rel}; not yet applied to the project")
             return
-        await self.publish_file(agent, rel, old, content, note, planned=planned, tool=tool, cid=cid,
+        await self.publish_file(agent, rel, old, content, note, tool=tool, cid=cid,
                                 appending=appending, partial=partial, context_line=context_line)
 
     async def publish_file(self, agent: AgentSpec, rel: str, old: str | None, content: str, note: str, *,
-                           planned: bool, tool: str = "write_file", cid: str | None = None,
+                           tool: str = "write_file", cid: str | None = None,
                            appending: bool = False, partial: bool = False, context_line: int | None = None,
                            deleted: bool = False) -> None:
-        fs = self.fs_for(agent.id)
         self.mark_progress()
         if not rel.startswith(PROJECT_DIRNAME + "/"):  # a deliverable (not a working doc)
             self.mark_work(agent.id)
-            if rel.rsplit(".", 1)[-1].lower() in VERIFIABLE_EXT and not planned:
+            if rel.rsplit(".", 1)[-1].lower() in VERIFIABLE_EXT:
                 self.unverified[rel] = self.turn_no
             if self.first_deliverable_turn is None:
                 self.first_deliverable_turn = self.turn_no
         prev = self.artifacts.get(rel)
-        if old is not None and prev is None and not planned and not await self.written_by_octopus(rel):
-            # never silently overwrite the user's own file (whatever the permission level): say so, loudly
+        if old is not None and prev is None and not await self.written_by_octopus(rel):
+            # never silently overwrite the user's own file (whatever the approval mode): say so, loudly
             await self.emit("error", {"kind": "warning", "agent_id": agent.id, "path": rel, "message": (
                 f"{agent.name} changed {rel}, a file that existed before Octopus touched it. "
                 "The original is kept: revert it from Artifacts → Run changes.")})
         version = (prev or {}).get("version", 0) + 1
         art = Artifact(id=new_id(), run_id=self.run_id, path=rel, content=content, version=version, author_agent_id=agent.id,
-                       change_note=note[:1000], planned=planned, deleted=deleted, created_at=utcnow(),
-                       previous_content=(fs.original(rel) if planned else old) if prev is None else None)
+                       change_note=note[:1000], deleted=deleted, created_at=utcnow(),
+                       previous_content=old if prev is None else None)
         async with self.db() as db:
             db.add(art)
             await db.commit()
@@ -2113,14 +2096,14 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.artifacts[rel] = {"version": version, "author": agent.id, "note": note, "deleted": deleted}
         await self.emit("artifact_updated", {"artifact": {"id": art.id, "run_id": self.run_id, "path": rel, "version": version,
                                                           "author_agent_id": agent.id, "change_note": note, "size": len(content),
-                                                          "planned": planned, "deleted": deleted, "created": old is None and not deleted, "appended": appending,
+                                                          "deleted": deleted, "created": old is None and not deleted, "appended": appending,
                                                           "edited": tool == "edit_file", "lines": added, "previous_lines": removed,
                                                           "created_at": art.created_at.isoformat()}})
-        verb = "Deleted" if deleted else "Planned" if planned else ("Created" if old is None else "Edited" if tool == "edit_file" else "Appended to" if appending else "Updated")
+        verb = "Deleted" if deleted else ("Created" if old is None else "Edited" if tool == "edit_file" else "Appended to" if appending else "Updated")
         self.log(agent.id, f"{verb.lower()} {rel} (v{version})" + (f": {note[:200]}" if note else ""))
         await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
                                 content=f"{verb} `{rel}` (v{version})" + (f": {note}" if note else ""),
-                                meta={"path": rel, "version": version, "artifact_id": art.id, "planned": planned, "deleted": deleted}, deliver=False)
+                                meta={"path": rel, "version": version, "artifact_id": art.id, "deleted": deleted}, deliver=False)
         size_note = (f" It now has {added} lines; append the next part now (mode \"append\")." if partial
                      else f" It now has {added} lines." if appending else "")
         if context_line is not None:  # show the edited region so the agent can check the result without re-reading the file
@@ -2129,11 +2112,10 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             self.broken_files.pop(rel, None)
         problem = None if partial or deleted else await self.check_written(rel, content)
         self.notice(agent.id, f"{verb} {rel} (v{version}).{size_note}"
-                    + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else "")
                     + (f"\n\nAUTOMATIC CHECK FAILED for {rel}:\n{problem}\nFix this before anything else." if problem else ""),
                     activate=partial or bool(problem))
         if cid is not None:
-            await self._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
+            await self._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}")
 
     async def check_written(self, rel: str, content: str) -> str | None:
         """Syntax-check a file right after it was written (services/checks.py); remembered until a later write fixes it."""
@@ -2168,7 +2150,8 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             await self._tool_result(agent, cid, "create_folder", True, "exists")
             return
         ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to create the folder {rel}/", f"mkdir {rel}",
-                                      {"path": rel + "/", "old": "", "new": "", "note": a.note or "new folder"})
+                                      {"path": rel + "/", "old": "", "new": "", "note": a.note or "new folder"},
+                                      dangerous=is_dangerous_edit(rel))
         if not ok:
             await self.deny(agent, cid, "create_folder", reason)
             return
@@ -2181,12 +2164,11 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         except WorkspaceError as exc:
             await self.deny(agent, cid, "create_folder", f"create_folder failed: {exc}")
             return
-        planned = fs.shadow is not None
         self.mark_progress()
         await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
-                                content=f"{'Planned' if planned else 'Created'} folder `{rel}/`" + (f": {a.note}" if a.note else ""),
-                                meta={"path": rel + "/", "folder": True, "planned": planned}, deliver=False)
-        await self.emit("folder_created", {"path": rel, "agent_id": agent.id, "planned": planned})
+                                content=f"Created folder `{rel}/`" + (f": {a.note}" if a.note else ""),
+                                meta={"path": rel + "/", "folder": True}, deliver=False)
+        await self.emit("folder_created", {"path": rel, "agent_id": agent.id})
         self.notice(agent.id, f"Created folder {rel}/.")
         await self._tool_result(agent, cid, "create_folder", True, f"{rel}/")
 
@@ -2200,7 +2182,8 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
             await self.deny(agent, cid, "move_file", f"move_file failed: {exc}")
             return
         ok, reason = await self.guard(agent, "write_file", f"{agent.name} wants to move {src} → {dst}", f"mv {src} {dst}",
-                                      {"path": f"{src} → {dst}", "old": "", "new": "", "note": a.note or "move / rename"})
+                                      {"path": f"{src} → {dst}", "old": "", "new": "", "note": a.note or "move / rename"},
+                                      dangerous=is_dangerous_edit(src, move=True))
         if not ok:
             await self.deny(agent, cid, "move_file", reason)
             return
@@ -2331,9 +2314,7 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         granted = {m["name"].lower(): m["id"] for m in agent.mcp}
         sid = granted.get(a.server.lower())
         if sid == SERVER_ID:  # built-in browser: one persistent, in-memory tab per agent
-            level = self.levels.get(agent.id, self.level)
-            mutating_browser_tools = {"browser_click", "browser_type", "browser_fill_form", "browser_file_upload", "browser_press_key", "browser_evaluate", "browser_select_option", "browser_handle_dialog"}
-            needs_browser_approval = level == "ask" or (level == "auto" and a.tool in mutating_browser_tools)
+            needs_browser_approval = self.level == "ask"
             if needs_browser_approval:
                 ok, reason = await self.guard(
                     agent,
@@ -2345,9 +2326,6 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
                 if not ok:
                     await self.deny(agent, cid, "mcp_call", reason)
                     return
-            if level == "read_only" and a.tool in ("browser_fill_form", "browser_type", "browser_file_upload"):
-                await self.deny(agent, cid, "mcp_call", "Read-only mode: you may look at pages but not fill in forms.")
-                return
             await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
             self.mark_work(agent.id)
             ok, out = await browser.call(self.run_id, agent.id, a.tool, a.arguments)
@@ -2385,20 +2363,19 @@ class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
         self.mark_work(agent.id)
         cid = await self._tool_event(agent, "run_code", {"command": a.command, "covered_paths": a.covered_paths,
                                                         "criterion_ids": a.criterion_ids, "whole_project": a.whole_project})
-        level = self.levels.get(agent.id, self.level)
         try:
-            parse_command(a.command, danger=level == "danger")
+            plan = analyze_command(a.command)
         except SandboxError as exc:
             await self.deny(agent, cid, "run_code", f"Command rejected by sandbox: {exc}")
             return
         ok, reason = await self.guard(agent, "run_code", f"{agent.name} wants to run `{a.command[:80]}`", a.command,
-                                      {"command": a.command, "cwd": "."})
+                                      {"command": a.command, "cwd": ".", "outside": plan.outside}, dangerous=bool(plan.outside))
         if not ok:
             await self.deny(agent, cid, "run_code", reason)
             return
         await self.set_agent_status(agent.id, "running", f"$ {a.command[:70]}")
         try:
-            res = await run_command(a.command, self.worker_root(agent.id), danger=level == "danger")
+            res = await run_command(a.command, self.worker_root(agent.id), allow_outside=bool(plan.outside))
             ok = res.ok
             out = f"$ {a.command}\n(exit {res.exit_code}{', timed out' if res.timed_out else ''}, {res.backend})\n{res.output}"
         except SandboxError as exc:

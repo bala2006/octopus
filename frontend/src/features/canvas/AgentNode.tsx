@@ -3,10 +3,9 @@ import { tone } from "@/lib/palette";
 import { Handle, NodeToolbar, Position, type NodeProps } from "@xyflow/react";
 import { Brain, Crown, Flag, MessageSquare, Moon, Plug, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
-import { MESSAGE_TYPE_LABEL, PERMISSIONS, TOOLS, statusMeta } from "@/lib/meta";
+import { MESSAGE_TYPE_LABEL, TOOLS, statusMeta } from "@/lib/meta";
 import { cn, formatTokens } from "@/lib/utils";
 import { deptColor, useCanvas, type AgentNode as AgentNodeT } from "@/stores/canvas";
-import type { PermissionLevel } from "@/types";
 import { Tip } from "@/components/ui/overlays";
 import { useEditable, useLive } from "./live";
 import { NodeQuickConfig } from "./NodeQuickConfig";
@@ -30,7 +29,6 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
   const last = live?.lastMessage[id];
   const tools = TOOLS.filter((t) => (data.tools as Record<string, unknown>)?.[t.key]);
   const mcpCount = ((data.tools as { mcp_servers?: string[] })?.mcp_servers ?? []).length;
-  const perm = data.permission_level && data.permission_level !== "inherit" ? PERMISSIONS[data.permission_level as PermissionLevel] : null;
   const departments = useCanvas((s) => s.departments);
   const creatorName = useCanvas((s) => (data.created_by ? s.nodes.find((n) => n.id === data.created_by)?.data.name : undefined));
   const inactive = data.active === false;
@@ -94,7 +92,6 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
         <div className="space-y-2 px-3 pb-3">
           <div className="flex flex-wrap items-center gap-1">
             <span className="max-w-[140px] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground" title={runModel}>{runModel}</span>
-            {perm && <Tip content={`Permission: ${perm.label}`}><span className={cn("rounded bg-muted p-0.5", perm.tone)}><perm.icon className="h-3 w-3" /></span></Tip>}
             <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
               {tools.slice(0, 6).map((t) => (
                 <Tip key={t.key} content={t.label}><span className={cn("rounded p-0.5", t.danger && "text-warning/90")}><t.icon className="h-3 w-3" /></span></Tip>

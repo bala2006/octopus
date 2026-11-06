@@ -4,10 +4,10 @@ import {
   ArrowLeft, ArrowRight, BookOpen, Building2, Cloud, Crown, FileCode2, FolderOpen, History, Keyboard, LayoutTemplate, MessagesSquare, Network,
   Play, Plug, Settings2, ShieldCheck, Sparkles, type LucideIcon,
 } from "lucide-react";
-import { EDGE_TYPES, PERMISSIONS } from "@/lib/meta";
+import { APPROVAL_MODES, EDGE_TYPES } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/stores/app";
-import type { EdgeType, PermissionLevel } from "@/types";
+import type { ApprovalMode, EdgeType } from "@/types";
 
 interface Section { id: string; title: string; icon: LucideIcon; body: React.ReactNode }
 
@@ -205,20 +205,16 @@ function ChannelTable() {
   );
 }
 
-function PermissionLadder() {
-  const order: PermissionLevel[] = ["read_only", "plan", "ask", "danger"];
+function ApprovalModes() {
+  const order: ApprovalMode[] = ["ask", "auto"];
   return (
-    <div className="grid gap-2 sm:grid-cols-4">
-      {order.map((k, i) => {
-        const p = PERMISSIONS[k];
-        return (
-          <div key={k} className="relative rounded-xl border border-border bg-card p-3">
-            <div className="mb-1 h-1 rounded-full bg-gradient-to-r from-olive to-terracotta" style={{ width: `${25 * (i + 1)}%` }} />
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-foreground"><p.icon className={cn("h-3.5 w-3.5", p.tone)} />{p.short}</div>
-            <p className="mt-1 text-[11.5px] leading-snug">{p.description}</p>
-          </div>
-        );
-      })}
+    <div className="grid gap-2 sm:grid-cols-2">
+      {order.map((k) => (
+        <div key={k} className="rounded-xl border border-border bg-card p-3">
+          <div className="text-sm font-semibold text-foreground">{APPROVAL_MODES[k].label}</div>
+          <p className="mt-1 text-[11.5px] leading-snug">{APPROVAL_MODES[k].description}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -270,7 +266,7 @@ const SECTIONS: Section[] = [
       <p>Use <b>New file</b> or <b>New folder</b> to add files and folders. The selected text file can be renamed, moved, or deleted after saving. Deletion offers <b>Undo</b>. If another editor or agent changes a file, saving opens a comparison before you choose which version to keep.</p>
       <p><b>Ctrl+K</b> opens files and pages. <b>Ctrl+Shift+F</b> searches saved file contents and jumps to a matching line. On macOS, use Command instead of Ctrl.</p>
       <p><b>Preview</b> shows HTML, Markdown, images, and PDFs. In <b>Commands → Dev server</b>, start your app's server, read its live output, and open its preview. Servers stay active when you navigate away. The header indicator returns you to the controls.</p>
-      <p><b>Git changes</b> shows file patches with working and staged views. Stage or unstage individual files after review. Use <b>Commands</b> for builds, tests, and Git commands, subject to project permissions and a timeout of up to 60 seconds. Use a system terminal for interactive tools.</p>
+      <p><b>Git changes</b> shows file patches with working and staged views. Stage or unstage individual files after review. Use <b>Commands</b> for builds, tests, and Git commands, subject to the approval mode and a timeout of up to 60 seconds. Use a system terminal for interactive tools.</p>
       <p>Open tabs and unfinished edits recover from the browser's local storage after a reload. If recovery storage is unavailable, Octopus shows a warning so you can save your files.</p>
     </>,
   },
@@ -348,7 +344,8 @@ const SECTIONS: Section[] = [
     id: "runs", title: "Work with your team", icon: Play,
     body: <>
       <p>Send a message in <b>Conversation</b> (for example <i>"Build a todo app with login"</i>). The orchestrator chooses who should help and routes work through your team's communication channels. Follow up in the same conversation to steer or extend the work.</p>
-      <PermissionLadder />
+      <p>Pick how Octopus handles actions with the approval control under the message box. The choice applies to the next run you start.</p>
+      <ApprovalModes />
       <p>While your team works, you see who is thinking, messages moving between agents, and files being written. You can open Team activity for the full collaboration view.
         Click the <b>tokens / cost</b> meter for the exact usage Azure reported: uncached input, cached input, cache writes and output (reasoning
         included), each with its cost. If an agent needs your approval, the team pauses and a <b>Needs you</b> badge appears in the top bar. You can pause, send a message to the team, or stop their work at any time.</p>
@@ -359,8 +356,7 @@ const SECTIONS: Section[] = [
     id: "artifacts", title: "Review the results", icon: FileCode2,
     body: <>
       <p><b>Artifacts</b> lists every file the team created or changed, with a diff for each version and the final report. <b>Project files</b> shows the
-        whole folder and updates live while your team works. <b>Preview</b> runs HTML apps with their CSS, JS and images, and renders Markdown, images and PDFs. In <b>Plan</b> mode nothing touches your
-        project until you apply the plan here. You can also download everything as a zip.</p>
+        whole folder and updates live while your team works. <b>Preview</b> runs HTML apps with their CSS, JS and images, and renders Markdown, images and PDFs. You can also download everything as a zip.</p>
       <Shot name="artifacts" alt="Artifacts page with files and diffs" />
     </>,
   },
@@ -389,7 +385,7 @@ const SECTIONS: Section[] = [
     body: <Tips items={[
       <>Agents are sandboxed to the project folder, including terminal commands.</>,
       <>Every run has limits: turns, tokens, cost and time. You'll find them under <i>Limits</i> in the Run dialog.</>,
-      <>The permission badge in the top bar shows the project's default level. Change it in <b>Settings › Project</b>.</>,
+      <>The approval control under the message box shows how Octopus handles actions: <b>Ask for permission</b> or <b>Approve for me</b>.</>,
       <>API keys are encrypted on your machine and never sent back to the browser.</>,
     ]} />,
   },

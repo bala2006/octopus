@@ -1,10 +1,10 @@
 import {
   Bot, Brain, Bug, ClipboardList, Code, Container, Crown, DraftingCompass, Eye, Gavel, GitPullRequest, Layout, Lightbulb,
   Palette, PenLine, Server, ShieldAlert, Sparkles, Terminal, Wrench, MessageSquareText, Hourglass, ShieldQuestion, CircleCheck,
-  CircleAlert, Moon, FileSearch, FolderTree, FilePen, Calculator, Globe, UserRoundSearch, Send, Plug, Lock, ListChecks, Hand, Flame, UsersRound, Search, Crown as CrownIcon,
+  CircleAlert, Moon, FileSearch, FolderTree, FilePen, Calculator, Globe, UserRoundSearch, Send, Plug, UsersRound, Search, Crown as CrownIcon,
   type LucideIcon,
 } from "lucide-react";
-import type { AgentStatus, EdgeType, PermissionLevel } from "@/types";
+import type { AgentStatus, ApprovalMode, EdgeType } from "@/types";
 
 export const AVATARS: Record<string, LucideIcon> = {
   crown: Crown, "clipboard-list": ClipboardList, "drafting-compass": DraftingCompass, layout: Layout, server: Server, bug: Bug,
@@ -40,19 +40,27 @@ export const EDGE_TYPES: Record<EdgeType, EdgeMeta> = {
   consult: { label: "Consult", color: "#C9A04A", dash: "1 4", description: "Ask-only: questions and answers." },
 };
 
-export interface PermMeta { label: string; short: string; description: string; icon: LucideIcon; tone: string }
-export const PERMISSIONS: Record<PermissionLevel, PermMeta> = {
-  read_only: { label: "Read only", short: "Read", description: "Agents can read and discuss. No writes, commands or MCP calls.", icon: Lock, tone: "text-steel" },
-  plan: { label: "Plan", short: "Plan", description: "Agents write proposed changes to a plan (.octopus/plans). Your project stays untouched until you apply it.", icon: ListChecks, tone: "text-olive" },
-  ask: { label: "Ask for dangerous actions", short: "Ask", description: "Reading is free. Writing files, running commands and MCP calls need your approval.", icon: Hand, tone: "text-warning" },
-  danger: { label: "Danger mode", short: "Danger", description: "Everything auto-approved, network allowed for commands. Still sandboxed to the project directory.", icon: Flame, tone: "text-destructive" },
+export interface ApprovalModeMeta { label: string; description: string; caption: string }
+export const APPROVAL_MODES: Record<ApprovalMode, ApprovalModeMeta> = {
+  ask: {
+    label: "Ask for permission",
+    description: "Octopus asks before every command, file change, external tool, web search and team change.",
+    caption: "Octopus asks before edits, commands and other actions.",
+  },
+  auto: {
+    label: "Approve for me",
+    description: "Octopus runs commands, edits, external tools and web searches without asking. It still asks before dangerous edits (moves, renames, CI workflow files) and before commands that run outside this project folder.",
+    caption: "Octopus approves edits, commands and tools. It still asks before risky ones.",
+  },
 };
+/** The server stores one of two modes. Any other value (legacy data) is treated as "ask". */
+export const approvalModeOf = (value?: string | null): ApprovalMode => (value === "auto" ? "auto" : "ask");
 
 export interface ToolMeta { key: "file_read" | "file_write" | "list_files" | "terminal" | "web_search" | "calculator" | "ask_user" | "send_message" | "manage_team" | "browser"; label: string; icon: LucideIcon; hint: string; danger?: boolean }
 export const TOOLS: ToolMeta[] = [
   { key: "file_read", label: "Read files", icon: FileSearch, hint: "read_file inside the project" },
   { key: "list_files", label: "List files", icon: FolderTree, hint: "Browse the project tree" },
-  { key: "file_write", label: "Write files", icon: FilePen, hint: "Create / modify files (subject to permission level)", danger: true },
+  { key: "file_write", label: "Write files", icon: FilePen, hint: "Create / modify files (follows the approval mode)", danger: true },
   { key: "terminal", label: "Terminal", icon: Terminal, hint: "Run sandboxed commands (python, node, npm test, pytest…)", danger: true },
   { key: "web_search", label: "Web search", icon: Search, hint: "Keyless web search" },
   { key: "browser", label: "Browser", icon: Globe, hint: "A real browser tab (Playwright, run by Octopus): open the project preview, click, type, read console errors" },

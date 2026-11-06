@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Editor, { DiffEditor } from "@monaco-editor/react";
 import { toast } from "sonner";
 import {
-  ChevronRight, Download, Eye, FileCode2, FilePlus2, FilePen, FolderClosed, FolderOpen, GitCompare, History, ListChecks, Loader2, RotateCcw, Search,
+  ChevronRight, Download, Eye, FileCode2, FilePlus2, FilePen, FolderClosed, FolderOpen, GitCompare, History, Loader2, RotateCcw, Search,
   ExternalLink, Code2, FolderTree, Bot, NotebookPen,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
@@ -21,7 +21,7 @@ import { Badge, Input } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 
 type Source = "run" | "project";
-interface TreeNode { name: string; path: string; children: Map<string, TreeNode>; file?: { path: string; badge?: "created" | "modified" | "planned" | "deleted"; versions?: number; area?: "project" | "work"; generated?: boolean } }
+interface TreeNode { name: string; path: string; children: Map<string, TreeNode>; file?: { path: string; badge?: "created" | "modified" | "deleted"; versions?: number; area?: "project" | "work"; generated?: boolean } }
 
 function buildTree(files: TreeNode["file"][]): TreeNode {
   const root: TreeNode = { name: "", path: "", children: new Map() };
@@ -74,7 +74,7 @@ export default function ArtifactsPage() {
   }, [arts.data]);
   const files = React.useMemo(() => {
     const list = source === "run"
-      ? [...byPath.entries()].map(([path, vs]) => ({ path, versions: vs.length, badge: vs[vs.length - 1].deleted ? ("deleted" as const) : vs[vs.length - 1].planned ? ("planned" as const) : undefined }))
+      ? [...byPath.entries()].map(([path, vs]) => ({ path, versions: vs.length, badge: vs[vs.length - 1].deleted ? ("deleted" as const) : undefined }))
       : (project.data?.files ?? []).map((f) => ({ path: f.path, area: f.area, generated: f.generated, badge: byPath.has(f.path) ? ("modified" as const) : undefined }));
     return list.filter((f) => f.path.toLowerCase().includes(q.toLowerCase()));
   }, [source, byPath, project.data, q]);
@@ -89,7 +89,6 @@ export default function ArtifactsPage() {
   const versions = selected ? byPath.get(selected) ?? [] : [];
   const latest = versions[versions.length - 1];
   const shownVersion = version ?? latest?.version ?? null;
-  const planned = latest?.planned;
   const deleted = source === "run" && versions.find((item) => item.version === shownVersion)?.deleted;
   React.useEffect(() => { if (deleted && mode === "preview") setMode("diff"); }, [deleted, mode]);
 
@@ -112,11 +111,6 @@ export default function ArtifactsPage() {
     mutationFn: (to: number) => unwrap(api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/artifacts/revert", { params: { path: { workspace_id: w, run_id: selectedRun } }, body: { path: selected!, to_version: to } })),
     onSuccess: (r) => { toast.success(r.status === "deleted" ? `Deleted ${r.path} (it did not exist before the run)` : `Restored ${r.path}`); qc.invalidateQueries({ queryKey: qk.files(w) }); qc.invalidateQueries({ queryKey: ["file"] }); },
   });
-  const [applying, setApplying] = React.useState(false);
-  const apply = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/plans/apply", { params: { path: { workspace_id: w, run_id: selectedRun } } })),
-    onSuccess: (r) => { toast.success(`Applied ${r.applied.length} planned file(s) to the project`); qc.invalidateQueries({ queryKey: qk.files(w) }); },
-  });
   const zip = async () => {
     const url = source === "run" ? `/api/v1/w/${w}/runs/${selectedRun}/artifacts.zip` : `/api/v1/w/${w}/files.zip`;
     const t = toast.loading("Preparing ZIP…");
@@ -130,7 +124,6 @@ export default function ArtifactsPage() {
   const kind = previewKind(selected);
   const previewBase = source === "run" ? `/api/v1/w/${w}/runs/${selectedRun}/preview/` : `/api/v1/w/${w}/preview/`;
   const previewUrl = selected ? `${previewBase}${selected.split("/").map(encodeURIComponent).join("/")}` : "";
-  const hasPlanned = (arts.data ?? []).some((a) => a.planned);
 
   return (
     <div className="artifacts-layout flex h-full min-h-0 flex-col">
@@ -143,7 +136,6 @@ export default function ArtifactsPage() {
             options={(runs.data ?? []).map((r) => ({ value: r.id, label: `${r.goal.slice(0, 48)}`, hint: `${r.status} · ${timeAgo(r.created_at)}` }))} placeholder="Select a run" />
         )}
         <div className="ml-auto flex items-center gap-1.5">
-          {source === "run" && hasPlanned && <Button size="sm" variant="secondary" onClick={() => setApplying(true)}><ListChecks />Apply plan to project</Button>}
           <Button size="sm" variant="ghost" onClick={() => void zip()} disabled={source === "run" && !selectedRun}><Download />Download ZIP</Button>
         </div>
       </div>
@@ -187,7 +179,6 @@ export default function ArtifactsPage() {
                 <span className="truncate font-mono text-xs">{selected}</span>
                 <Button size="sm" variant="ghost" disabled={latest?.deleted} onClick={() => nav(`/w/${w}/workspace?file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
                 {deleted && <Badge variant="outline">Deleted</Badge>}
-                {planned && <Badge>planned</Badge>}
                 {source === "run" && shownVersion !== null && <Badge variant="outline">v{shownVersion}{latest && shownVersion !== latest.version ? ` of ${latest.version}` : ""}</Badge>}
                 <div className="ml-auto flex items-center gap-1">
                   <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
@@ -259,21 +250,17 @@ export default function ArtifactsPage() {
                 );
               })}
             </ol>
-            {!planned && (
-              <div className="space-y-1.5 border-t border-border p-3">
-                <div className="text-[11px] font-medium text-muted-foreground">Restore in project</div>
-                {shownVersion !== null && shownVersion !== latest?.version && <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(shownVersion)}><RotateCcw />Restore v{shownVersion}</Button>}
-                <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(0)}><RotateCcw />Revert to before this run</Button>
-              </div>
-            )}
+            <div className="space-y-1.5 border-t border-border p-3">
+              <div className="text-[11px] font-medium text-muted-foreground">Restore in project</div>
+              {shownVersion !== null && shownVersion !== latest?.version && <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(shownVersion)}><RotateCcw />Restore v{shownVersion}</Button>}
+              <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(0)}><RotateCcw />Revert to before this run</Button>
+            </div>
           </aside>
         )}
       </div>
       <ConfirmDialog open={revertTo !== null} onOpenChange={(o) => !o && setRevertTo(null)} title={revertTo === 0 ? `Revert ${selected}?` : `Restore v${revertTo}?`} destructive confirmLabel="Restore"
         description={revertTo === 0 ? "The file is restored to its content before the run (or deleted if the run created it)." : "The project file is overwritten with this version."}
         onConfirm={() => revertTo !== null && revert.mutate(revertTo)} />
-      <ConfirmDialog open={applying} onOpenChange={setApplying} title="Apply the planned changes?" confirmLabel="Apply to project"
-        description="Every file planned by this plan-mode run is written into your project directory." onConfirm={() => apply.mutate()} />
     </div>
   );
 }
@@ -288,11 +275,11 @@ function TreeItem({ node, depth, selected, onSelect }: { node: TreeNode; depth: 
   const pad = { paddingLeft: 8 + depth * 12 };
   if (node.file) {
     const f = node.file;
-    const Icon = f.badge === "planned" ? FilePen : f.versions === 1 ? FilePlus2 : FileCode2;
+    const Icon = f.versions === 1 ? FilePlus2 : FileCode2;
     return (
-      <button role="treeitem" aria-selected={selected === node.path} aria-label={`${node.name}${f.versions && f.versions > 1 ? `, ${f.versions} versions` : ""}${f.badge === "planned" ? ", planned" : ""}`} onClick={() => onSelect(node.path)} style={pad}
+      <button role="treeitem" aria-selected={selected === node.path} aria-label={`${node.name}${f.versions && f.versions > 1 ? `, ${f.versions} versions` : ""}`} onClick={() => onSelect(node.path)} style={pad}
         className={cn("flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left transition", selected === node.path ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground")}>
-        <Icon className={cn("h-3.5 w-3.5 shrink-0", f.badge === "planned" ? "text-steel" : f.badge === "modified" ? "text-terracotta" : "text-olive/80")} />
+        <Icon className={cn("h-3.5 w-3.5 shrink-0", f.badge === "modified" ? "text-terracotta" : "text-olive/80")} />
         <span className="truncate">{node.name}</span>
         {f.badge === "deleted" && <span className="ml-auto text-[10px] text-destructive">Deleted</span>}
         {f.versions && f.versions > 1 && <Tip content={`${f.versions} versions`}><span className="ml-auto rounded bg-muted px-1 text-[10px] tabular-nums">{f.versions}</span></Tip>}

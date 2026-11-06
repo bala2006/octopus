@@ -1,4 +1,4 @@
-"""Project sandbox, path traversal, command sandbox and permission levels (read_only / plan / ask / danger)."""
+"""Project sandbox, path traversal, command sandbox and approval modes (ask / auto)."""
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +11,7 @@ from app.core.security import hash_password, verify_password
 from app.llm.router import set_provider_override
 from app.tools.sandbox import SandboxError, parse_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError, normalize_path
-from conftest import ScriptedProvider, agent, edge, env, events, make_company, start_run, wait_status
+from conftest import ScriptedProvider, agent, env, events, make_company, start_run, wait_status
 
 
 def test_long_passwords_hash_and_verify_with_bcrypt5() -> None:
@@ -57,22 +57,16 @@ def test_symlink_escape_blocked(tmp_path: Path) -> None:
     assert not (outside / "new.txt").exists()
 
 
-def test_secrets_blocked_unless_danger(tmp_path: Path) -> None:
+def test_secrets_are_always_blocked(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("KEY=1")
     (tmp_path / ".env.example").write_text("KEY=")
     with pytest.raises(WorkspaceError):
         ProjectFS(tmp_path).read(".env")
     assert ProjectFS(tmp_path).read(".env.example") == "KEY="
-    assert ProjectFS(tmp_path, allow_secrets=True).read(".env") == "KEY=1"
     assert ".env" not in ProjectFS(tmp_path).list()
 
 
-def test_plan_shadow(tmp_path: Path) -> None:
-    (tmp_path / "a.txt").write_text("orig")
-    fs = ProjectFS(tmp_path, shadow=tmp_path / ".octopus" / "plans" / "r1")
-    fs.write("a.txt", "planned")
-    assert (tmp_path / "a.txt").read_text() == "orig"
-    assert fs.read("a.txt") == "planned"
+
 
 
 @pytest.mark.parametrize("cmd", ["rm -rf .", "python -c 'print(1)'", "ls; cat /etc/passwd", "cat ../x", "python ../evil.py",
@@ -88,24 +82,24 @@ def test_command_paths_cannot_bypass_checks_with_windows_separators(argument: st
         parse_command(f"python {argument}")
 
 
-def test_danger_allows_more_and_shell_ops_via_sh() -> None:
-    assert parse_command("bash -c ls".replace("-c ls", "--version"), danger=True)[0] == "bash"
-    if os.name == "posix":
-        assert parse_command("ls && rm x", danger=True) == ["sh", "-c", "ls && rm x"]
-    else:
-        with pytest.raises(SandboxError, match="not supported on this platform"):
-            parse_command("ls && rm x", danger=True)
-    with pytest.raises(SandboxError):  # the path checks still apply to every word
-        parse_command("ls && cat /etc/passwd", danger=True)
-    with pytest.raises(SandboxError):
-        parse_command("ls && rm x")
+
 
 
 @pytest.mark.parametrize("cmd", ['node -e "const f = (a, b) => a && b || a > b; console.log(f(1, 2))"',
                                  "python3 -c 'import sys\nif 1 < 2: print(\"ok | fine; done\")'"])
 def test_operators_inside_quotes_are_not_shell_ops(cmd: str) -> None:
-    argv = parse_command(cmd, danger=True)
-    assert argv[0] in ("node", "python3") and len(argv) == 3
+    from app.tools.sandbox import shell_operators
+
+    assert shell_operators(cmd) == []  # the operators are data, so the only rule left is inline code, which is refused
+    with pytest.raises(SandboxError, match="Inline code"):
+        parse_command(cmd)
+
+
+def test_shell_operators_are_never_allowed() -> None:
+    with pytest.raises(SandboxError, match="Shell operators"):
+        parse_command("ls && rm x")
+    with pytest.raises(SandboxError, match="Shell operators"):
+        parse_command("cat a.txt | wc -l")
 
 
 def test_unquoted_operators_detected() -> None:
@@ -117,13 +111,7 @@ def test_unquoted_operators_detected() -> None:
     assert shell_operators("echo $(ls)") == ["$("]
 
 
-async def test_danger_shell_command_runs(tmp_path: Path) -> None:
-    (tmp_path / "a.txt").write_text("one\ntwo\n")
-    if os.name == "posix":
-        res = await run_command("cat a.txt | wc -l && echo done", tmp_path, danger=True)
-        assert res.ok and "2" in res.output and "done" in res.output
-    res = await run_command('node -e "const f = (a) => a > 1 && a < 3; console.log(f(2))"', tmp_path, danger=True)
-    assert res.ok and "true" in res.output
+
 
 
 async def test_sandbox_timeout_and_cwd(tmp_path: Path) -> None:
@@ -151,15 +139,18 @@ async def test_command_output_is_bounded_and_keeps_start_and_end(tmp_path: Path)
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows batch launcher behavior")
 async def test_windows_sdk_launcher_resolves_and_preserves_quoted_arguments(tmp_path: Path, monkeypatch) -> None:
+    import app.tools.sandbox as sandbox
+
     launcher = tmp_path / "sdk-probe.cmd"
     launcher.write_text('@echo off\necho ARG=%~1\n')
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
-    result = await run_command('sdk-probe "hello world"', tmp_path, danger=True)
+    monkeypatch.setattr(sandbox, "ALLOWED_PREFIXES", [["sdk-probe"]])
+    result = await run_command('sdk-probe "hello world"', tmp_path)
     assert result.ok and "ARG=hello world" in result.output
     with pytest.raises(SandboxError, match="batch launchers"):
-        await run_command('sdk-probe "hello&unexpected"', tmp_path, danger=True)
+        await run_command('sdk-probe "hello&unexpected"', tmp_path)
     with pytest.raises(SandboxError, match="batch launchers"):
-        await run_command('sdk-probe "%USERPROFILE%"', tmp_path, danger=True)
+        await run_command('sdk-probe "%USERPROFILE%"', tmp_path)
 
 
 def _writer_company() -> tuple[list, list]:
@@ -175,26 +166,10 @@ async def _run_writer(client, workspace, level: str, extra_actions=()):  # type:
     return await start_run(client, workspace, cid, permission_level=level)
 
 
-async def test_read_only_blocks_writes(client, workspace) -> None:
-    run = await _run_writer(client, workspace, "read_only")
-    await wait_status(client, workspace, run["id"])
-    assert not (Path(workspace["path"]) / "out.txt").exists()
-    errs = [e["payload"]["message"] for e in await events(client, workspace, run["id"], "error")]
-    assert any("read-only" in m for m in errs)
 
 
-async def test_plan_mode_writes_to_shadow_and_apply(client, workspace) -> None:
-    run = await _run_writer(client, workspace, "plan", [{"action": "run_code", "command": "python -V"}])
-    await wait_status(client, workspace, run["id"])
-    root = Path(workspace["path"])
-    assert not (root / "out.txt").exists()
-    assert (root / ".octopus" / "plans" / run["id"] / "out.txt").read_text() == "hello"
-    arts = (await client.get(f"/api/v1/w/{workspace['id']}/runs/{run['id']}/artifacts")).json()
-    assert arts[0]["planned"] is True
-    errs = [e["payload"]["message"] for e in await events(client, workspace, run["id"], "error")]
-    assert any("Plan mode" in m for m in errs), "terminal is not allowed in plan mode"
-    r = await client.post(f"/api/v1/w/{workspace['id']}/runs/{run['id']}/plans/apply")
-    assert r.json()["applied"] == ["out.txt"] and (root / "out.txt").read_text() == "hello"
+
+
 
 
 async def test_ask_mode_requires_approval_and_always_allow(client, workspace) -> None:
@@ -231,14 +206,7 @@ async def test_ask_mode_requires_approval_and_always_allow(client, workspace) ->
     assert auto, "third write was auto-approved by 'always allow'"
 
 
-async def test_agent_level_cannot_exceed_run_level(client, workspace) -> None:
-    agents = [agent("w", "Wes", entry=True, permission_level="danger")]
-    cid = await make_company(client, workspace, agents, [])
-    set_provider_override(ScriptedProvider({"Wes": [env({"action": "write_file", "path": "z.txt", "content": "z"}),
-                                                    env({"action": "finish", "summary": "x"})]}))
-    run = await start_run(client, workspace, cid, permission_level="read_only")
-    await wait_status(client, workspace, run["id"])
-    assert not (Path(workspace["path"]) / "z.txt").exists()
+
 
 
 async def test_agent_cannot_touch_octopus_dir(client, workspace) -> None:

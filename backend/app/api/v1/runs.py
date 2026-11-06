@@ -20,6 +20,7 @@ from app.schemas import (
     ApprovalIn, ArtifactContentOut, ArtifactOut, InterjectIn, MessageOut, RevertIn, RunCreate, RunDetail, RunEventOut, RunOut,
     RunOutcome, TaskOut,
 )
+from app.orchestrator.permissions import normalize_mode
 from app.services import run_attachments
 from app.services.canvas import snapshot
 from app.tools.workspace import ProjectFS, WorkspaceError
@@ -111,9 +112,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
         db.add(s)
         await db.flush()
         session_id = s.id
-    permission_level = body.permission_level or ctx.workspace.default_permission
-    if permission_level == "ask" and body.approval_mode == "auto":
-        permission_level = "auto"
+    permission_level = normalize_mode(user.approval_mode)  # the user's global setting, recorded on the run
     run = Run(company_id=company.id, session_id=session_id, goal=body.goal, mode=body.mode, status="queued",
               permission_level=permission_level,
               budget_json=body.budget.model_dump(), snapshot_json=snapshot(company), state_json={"attachments": []})
@@ -456,7 +455,7 @@ async def report(run_id: str, download: bool = False, db: AsyncSession = Depends
 
 # ---------------- artifacts (versioned changes made by agents in a run)
 def _art_out(a: Artifact) -> ArtifactOut:
-    return ArtifactOut(id=a.id, run_id=a.run_id, path=a.path, version=a.version, planned=a.planned, author_agent_id=a.author_agent_id,
+    return ArtifactOut(id=a.id, run_id=a.run_id, path=a.path, version=a.version, author_agent_id=a.author_agent_id,
                        change_note=a.change_note, created_at=a.created_at, size=len(a.content), deleted=a.deleted)
 
 
@@ -500,8 +499,6 @@ async def revert_artifact(run_id: str, body: RevertIn, db: AsyncSession = Depend
     rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id, Artifact.path == body.path).order_by(Artifact.version))).scalars().all()
     if not rows:
         raise HTTPException(404, "Artifact not found")
-    if rows[-1].planned:
-        raise HTTPException(409, "Planned files never touched the project; nothing to revert")
     fs = ProjectFS(ctx.root)
     try:
         rel, full = fs.resolve(body.path)
@@ -521,25 +518,6 @@ async def revert_artifact(run_id: str, body: RevertIn, db: AsyncSession = Depend
         return {"status": "deleted", "path": rel}
     fs.write(rel, target.content)
     return {"status": "restored", "path": rel}
-
-
-@router.post("/{run_id}/plans/apply", status_code=200)
-async def apply_plan(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
-                     ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, list[str]]:
-    """Apply every file planned in a plan-mode run to the real project."""
-    run = await owned_run(run_id, db, user)
-    if run.status in ACTIVE_STATES and manager.get(run_id):
-        raise HTTPException(409, "Wait for the run to finish before applying its plan")
-    rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id, Artifact.planned.is_(True)).order_by(Artifact.path, Artifact.version))).scalars().all()
-    latest: dict[str, Artifact] = {}
-    for a in rows:
-        latest[a.path] = a
-    fs = ProjectFS(ctx.root)
-    applied = []
-    for p, a in latest.items():
-        fs.write(p, a.content)
-        applied.append(p)
-    return {"applied": applied}
 
 
 @router.get("/{run_id}/artifacts.zip")
@@ -594,11 +572,9 @@ async def run_attachment(run_id: str, name: str, db: AsyncSession = Depends(get_
 @router.get("/{run_id}/preview/{path:path}")
 async def preview(run_id: str, path: str, request: Request, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                   ctx: ProjectCtx = Depends(project_ctx)) -> Response:
-    """Serve the project as this run left it (plan shadow first) for the sandboxed live preview."""
-    from app.core.config import PROJECT_DIRNAME
+    """Serve the project as it is on disk, for the sandboxed live preview."""
     from app.services.preview import serve
 
-    run = await owned_run(run_id, db, user)
-    shadow = ctx.root / PROJECT_DIRNAME / "plans" / run_id if run.permission_level == "plan" else None
-    fs = ProjectFS(ctx.root, shadow=shadow if shadow and shadow.is_dir() else None)
+    await owned_run(run_id, db, user)
+    fs = ProjectFS(ctx.root)
     return serve(fs, path, f"{str(request.base_url).rstrip('/')}/api/v1/w/{ctx.workspace.id}/runs/{run_id}/preview/")

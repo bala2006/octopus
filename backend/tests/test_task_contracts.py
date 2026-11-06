@@ -89,7 +89,6 @@ async def scoped_manager(inspection_runtime):
     runtime.agents["child"] = child
     runtime.names["child"] = "Child"
     runtime.status["child"] = "idle"
-    runtime.levels["child"] = "danger"
     runtime.agents["reviewer"].is_manager = True
     async with runtime.db() as db, db.begin():
         db.add(Agent(id="child", company_id="co", name="Child"))
@@ -103,7 +102,7 @@ def parent_attempt(runtime, parent):
     contract = TaskContract.model_validate(parent["constraints_json"])
     assignment = Assignment(run_id="run", owner="reviewer", lead="lead", task_id=parent["key"], provider="azure",
                             model="gpt-6-luna", original_goal=runtime.goal, write_paths=contract.write_paths,
-                            max_turns=contract.max_turns, policy=ExecutionPolicy(permission="danger"))
+                            max_turns=contract.max_turns, policy=ExecutionPolicy())
     token = ACTIVE_ATTEMPT.set(AttemptContext("parent-attempt", assignment))
     try:
         yield

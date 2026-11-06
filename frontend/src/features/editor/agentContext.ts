@@ -1,6 +1,3 @@
-import type { PermissionLevel } from "@/types";
-
-export type AgentMode = "agent" | "plan" | "ask";
 export interface CodeContext {
   path: string;
   content?: string;
@@ -31,13 +28,4 @@ export function contextGoal(
         : "");
   }
   return result;
-}
-
-export function modePermission(
-  mode: AgentMode,
-  project: PermissionLevel,
-): PermissionLevel {
-  if (project === "read_only" || mode === "ask") return "read_only";
-  if (project === "plan" || mode === "plan") return "plan";
-  return project;
 }
