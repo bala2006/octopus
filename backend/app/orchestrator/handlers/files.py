@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from sqlalchemy import select
 from typing import TYPE_CHECKING
 
 from app.core.config import PROJECT_DIRNAME
 from app.core.logging import get_logger
 from app.db.base import new_id, utcnow
+from app.db.repositories import ArtifactRepository
 from app.models import Artifact
 from app.orchestrator import actions as A
 from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec
@@ -258,7 +258,7 @@ async def publish_file(rt: RunRuntime, agent: AgentSpec, rel: str, old: str | No
                    change_note=note[:1000], deleted=deleted, created_at=utcnow(),
                    previous_content=old if prev is None else None)
     async with rt.db() as db:
-        db.add(art)
+        ArtifactRepository(db).add(art)
         await db.commit()
     added = 0 if deleted else content.count("\n") + 1
     removed = (old or "").count("\n") + 1 if old else 0
@@ -306,7 +306,7 @@ async def check_written(rt: RunRuntime, rel: str, content: str) -> str | None:
 async def written_by_octopus(rt: RunRuntime, rel: str) -> bool:
     """Did any run in this project ever write ``rel``? (Otherwise it is the user's own file.)"""
     async with rt.db() as db:
-        return (await db.execute(select(Artifact.id).where(Artifact.path == rel).limit(1))).first() is not None
+        return await ArtifactRepository(db).path_exists(rel)
 
 
 async def act_create_folder(rt: RunRuntime, agent: AgentSpec, a: A.CreateFolder) -> None:

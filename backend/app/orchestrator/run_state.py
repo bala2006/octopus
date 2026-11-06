@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import Counter
-from sqlalchemy import func, or_, update, select
+from sqlalchemy import func, or_
 from typing import TYPE_CHECKING, Any
 
-from app.models import Run, Artifact, Message, Task
+from app.db.repositories import ArtifactRepository, MessageRepository, RunRepository, TaskRepository
+from app.models import Run
 from app.workflows.boardroom import DebateState
 from app.workflows.protocols import LoopDetector
 from app.workflows.review import ReviewState
@@ -52,9 +53,9 @@ async def save(rt: RunRuntime) -> None:
         values["snapshot_json"] = rt.snapshot
         rt.snapshot_dirty = False
     async with rt.db() as db:
-        await db.execute(update(Run).where(Run.id == rt.run_id,
+        await RunRepository(db).update(rt.run_id,
             or_(func.json_extract(Run.state_json, "$.plan_revision").is_(None),
-                func.json_extract(Run.state_json, "$.plan_revision") <= rt.plan_revision)).values(**values))
+                func.json_extract(Run.state_json, "$.plan_revision") <= rt.plan_revision), **values)
         await db.commit()
 
 
@@ -96,16 +97,16 @@ async def restore(rt: RunRuntime, run: Run) -> None:
     rt.metrics = Counter({k: int(m.get(k, 0)) for k in ("turns", "work_turns", "delegations", "parallel_delegations")})
     rt.first_deliverable_turn = m.get("first_deliverable_turn")
     async with rt.db() as db:
-        msgs = (await db.execute(select(Message).where(Message.run_id == rt.run_id).order_by(Message.created_at))).scalars().all()
+        msgs = await MessageRepository(db).for_run(rt.run_id)
         for m in msgs:
             rec = rt._rec(m)
             rt.history.append(rec)
             if not m.read and m.to_agent_id in rt.agents:
                 rt.seq += 1
                 rt.mailbox.setdefault(m.to_agent_id, []).append((rt.seq, m.id))
-        for t in (await db.execute(select(Task).where(Task.run_id == rt.run_id))).scalars().all():
+        for t in await TaskRepository(db).for_run(rt.run_id):
             rt.tasks[t.key] = rt._task_dict(t)
-        for a in (await db.execute(select(Artifact).where(Artifact.run_id == rt.run_id).order_by(Artifact.version))).scalars().all():
+        for a in await ArtifactRepository(db).for_run(rt.run_id):
             rt.artifacts[a.path] = {"version": a.version, "author": a.author_agent_id, "note": a.change_note, "deleted": a.deleted}
     for aid, obs in st.get("observations", {}).items():
         for o in obs:
@@ -129,7 +130,7 @@ async def set_run_status(rt: RunRuntime, status: str, reason: str = "") -> None:
     if reason:
         values["halt_reason"] = reason[:200]
     async with rt.db() as db:
-        await db.execute(update(Run).where(Run.id == rt.run_id).values(**values))
+        await RunRepository(db).update(rt.run_id, **values)
         await db.commit()
     await rt.emit("run_status", {"status": status, "reason": reason, "awaiting": rt.awaiting,
                                    "pending_approval": rt.pending_approval})

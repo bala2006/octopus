@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import update
 from typing import TYPE_CHECKING, Any
 
 from app.db.base import new_id, utcnow
+from app.db.repositories import MessageRepository
 from app.models import Message
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -37,7 +37,7 @@ async def post_message(rt: RunRuntime, *, sender: str, from_id: str | None, to_i
                 to_agent_id=to_id, edge_id=edge_id, type=type_, content=content, meta_json=meta or {},
                 turn_no=rt.turn_no, read=not (deliver and to_id in rt.agents), created_at=utcnow())
     async with rt.db() as db:
-        db.add(m)
+        MessageRepository(db).add(m)
         await db.commit()
     rec = rt._rec(m)
     rt.history.append(rec)
@@ -70,6 +70,6 @@ async def requeue(rt: RunRuntime, aid: str, inbox_ids: list[str]) -> bool:
         rt.redeliveries[mid] += 1
         rt.deliver(aid, mid)
     async with rt.db() as db:
-        await db.execute(update(Message).where(Message.id.in_(again)).values(read=False))
+        await MessageRepository(db).set_read(again, False)
         await db.commit()
     return True

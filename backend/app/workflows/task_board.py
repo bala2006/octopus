@@ -93,11 +93,13 @@ async def create_task(rt: RunRuntime, creator: str | None, fields: dict[str, Any
 
 
 async def save_task(rt: RunRuntime, t: dict[str, Any], new: bool = False) -> None:
-    repo = TaskRepository(rt.db)
-    if new:
-        await repo.insert(rt.run_id, t)
-    else:
-        await repo.update(t)
+    async with rt.db() as db:
+        repo = TaskRepository(db)
+        if new:
+            await repo.insert(rt.run_id, t)
+        else:
+            await repo.update(t)
+        await db.commit()
     await rt.emit("task_updated", {"task": {**t, "assignee_agent_id": t["assignee"], "run_id": rt.run_id}})
 
 

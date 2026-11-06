@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import SessionFactory
+from app.db.repositories import RunEventRepository
 from app.models import RunEvent
 
 EPHEMERAL = {"token_stream", "thinking_stream"}  # live-only; the finished thought is persisted as "thought"
@@ -44,7 +45,7 @@ class EventBus:
             async with self._locks[run_id]:
                 async with sf() as db:
                     row = RunEvent(run_id=run_id, type=type_, payload_json=data)
-                    db.add(row)
+                    RunEventRepository(db).add(row)
                     await db.commit()
                     event["seq"] = row.id
         for q in list(self._subs.get(run_id, ())):

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from sqlalchemy import update
 from typing import TYPE_CHECKING, Any
 
 from app.core.config import get_settings
@@ -12,7 +11,7 @@ from app.core.run_manager import StopRun
 from app.db.session import registry_factory
 from app.capabilities.models.base import LLMError, LLMOutputTruncated, LLMRequest, ToolCall
 from app.capabilities.models.router import prepare_request, get_provider
-from app.models import Message
+from app.db.repositories import MessageRepository
 from app.orchestrator import actions as A
 from app.capabilities.tools import specs as T
 from app.orchestrator.context import AgentSpec, build_turn_prompts, TOOL_RESULT_CHARS, clip
@@ -101,7 +100,7 @@ async def _turn(rt: RunRuntime, aid: str) -> None:
     rt.self_turns[aid] = 0 if inbox_ids else rt.self_turns[aid] + 1
     if inbox_ids:
         async with rt.db() as db:
-            await db.execute(update(Message).where(Message.id.in_(inbox_ids)).values(read=True))
+            await MessageRepository(db).set_read(inbox_ids, True)
             await db.commit()
     max_auto = int(agent.behavior.get("max_autonomous_turns", 12))
     if rt.agent_turns[aid] >= max_auto:  # checked BEFORE counting: a skipped turn costs no budget and is visible

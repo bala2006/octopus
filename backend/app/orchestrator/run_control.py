@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from sqlalchemy import update
 from typing import TYPE_CHECKING, Any
 
 from app.core.policy import BudgetUsage
 from app.core.run_manager import StopRun, run_turn_loop
 from app.db.base import utcnow
+from app.db.repositories import RunRepository
 from app.models import Run
 from app.orchestrator.context import clip
 
@@ -158,7 +158,7 @@ def loop_has_active_agents(rt: RunRuntime) -> bool:
 
 async def loop_mark_started(rt: RunRuntime) -> None:
     async with rt.db() as db:
-        await db.execute(update(Run).where(Run.id == rt.run_id, Run.started_at.is_(None)).values(started_at=utcnow()))
+        await RunRepository(db).update(rt.run_id, Run.started_at.is_(None), started_at=utcnow())
         await db.commit()
 
 

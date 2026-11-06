@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections import Counter
-from sqlalchemy import update
 from typing import TYPE_CHECKING, Any
 
 from app.core.config import get_settings
@@ -11,7 +10,7 @@ from app.core.logging import get_logger
 from app.core.policy import FOLLOWUP_BUDGET_CEILING
 from app.db.base import utcnow
 from app.db.session import registry_factory
-from app.models import Run
+from app.db.repositories import RunRepository
 from app.schemas import RunBudget
 from app.capabilities.skills import library as SK
 
@@ -43,7 +42,7 @@ async def continue_with(rt: RunRuntime, content: str, to_agent_id: str | None, *
         rt.budget.max_cost_usd = round(min(rt.cost + base.max_cost_usd, base.max_cost_usd * ceil), 6)
     rt.budget.timeout_s = min(86400, int(rt.active_seconds) + base.timeout_s, base.timeout_s * ceil)
     async with rt.db() as db:
-        await db.execute(update(Run).where(Run.id == rt.run_id).values(ended_at=None, halt_reason="", budget_json=rt.budget.model_dump()))
+        await RunRepository(db).update(rt.run_id, ended_at=None, halt_reason="", budget_json=rt.budget.model_dump())
         await db.commit()
     rt.self_turns = Counter()
     rt.nudged = {}
@@ -139,7 +138,7 @@ async def _finalize(rt: RunRuntime, status: str, reason: str) -> None:
     if rt.finalized:
         return
     async with rt.db() as db:
-        current = await db.get(Run, rt.run_id)
+        current = await RunRepository(db).get(rt.run_id)
         if current and int((current.state_json or {}).get("plan_revision", 1)) > rt.plan_revision:
             return  # A committed steer owns the next scheduler iteration.
     if rt._last_manifest is not None:
@@ -159,9 +158,9 @@ async def _finalize(rt: RunRuntime, status: str, reason: str) -> None:
         await rt.set_agent_status(aid, final)
     summary = rt.finished_summary or reason
     async with rt.db() as db:
-        await db.execute(update(Run).where(Run.id == rt.run_id).values(
+        await RunRepository(db).update(rt.run_id,
             status=status, halt_reason=reason[:200], summary=summary, ended_at=utcnow(),
-            tokens_used=rt.tokens, cost_usd=round(rt.cost, 6), turns=rt.turn_no, state_json=rt.state_dict()))
+            tokens_used=rt.tokens, cost_usd=round(rt.cost, 6), turns=rt.turn_no, state_json=rt.state_dict())
         await db.commit()
     from app.capabilities.browser.service import browser
     from app.services.report import build_report  # local import avoids a cycle
@@ -171,7 +170,7 @@ async def _finalize(rt: RunRuntime, status: str, reason: str) -> None:
     try:
         report = await build_report(rt.run_id, rt.sf)
         async with rt.db() as db:
-            await db.execute(update(Run).where(Run.id == rt.run_id).values(report_md=report))
+            await RunRepository(db).update(rt.run_id, report_md=report)
             await db.commit()
     except Exception:  # pragma: no cover
         log.exception("report_failed", run_id=rt.run_id)

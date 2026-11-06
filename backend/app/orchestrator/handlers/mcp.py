@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
 from typing import TYPE_CHECKING
 
 from app.core.config import get_settings
+from app.db.repositories import McpServerRepository
 from app.db.session import registry_factory
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
@@ -17,7 +17,6 @@ if TYPE_CHECKING:  # pragma: no cover
 async def load_mcp(rt: RunRuntime) -> None:
     """Resolve MCP servers granted to each agent (only the run owner's registered, enabled servers)."""
     await rt.load_roles()
-    from app.models import McpServer
     from app.capabilities.mcp.client import McpConfig
 
     from app.capabilities.browser.service import SERVER_ID, SERVER_NAME, browser
@@ -25,8 +24,7 @@ async def load_mcp(rt: RunRuntime) -> None:
     wanted = {sid for a in rt.agents.values() for sid in (a.tools.get("mcp_servers") or [])}
     if wanted:
         async with registry_factory()() as rdb:
-            rows = (await rdb.execute(select(McpServer).where(McpServer.id.in_(wanted), McpServer.user_id == rt.user_id,
-                                                              McpServer.enabled.is_(True)))).scalars().all()
+            rows = await McpServerRepository(rdb).enabled_for_user(wanted, rt.user_id)
         rt.mcp_configs = {r.id: McpConfig.from_row(r) for r in rows}
     for a in rt.agents.values():
         a.mcp = [{"id": c.id, "name": c.name, "tools": c.tools} for sid in (a.tools.get("mcp_servers") or [])

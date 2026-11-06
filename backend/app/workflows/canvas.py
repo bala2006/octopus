@@ -4,10 +4,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import new_id, utcnow
+from app.db.repositories import AgentRepository, EdgeRepository
 from app.models import Agent, Company, Edge
 from app.schemas import AgentBehavior, AgentIn, AgentOut, AgentTools, CanvasOut, CompanyOut, DepartmentMeta, EdgeConfig, EdgeIn, EdgeOut
 
@@ -118,7 +118,7 @@ async def sync_canvas(db: AsyncSession, company: Company, agents: list[AgentIn],
         if aid not in incoming_ids:
             company.agents.remove(a)
     # guard against ids belonging to other companies
-    foreign = (await db.execute(select(Agent.id).where(Agent.id.in_(incoming_ids), Agent.company_id != company.id))).scalars().all()
+    foreign = await AgentRepository(db).foreign_ids(incoming_ids, company.id)
     if foreign:
         raise HTTPException(409, "Agent id belongs to another company")
     for data in agents:
@@ -134,7 +134,7 @@ async def sync_canvas(db: AsyncSession, company: Company, agents: list[AgentIn],
         if eid not in incoming_edges:
             company.edges.remove(e)
     await db.flush()  # make sure agents exist before FK'd edges
-    foreign_e = (await db.execute(select(Edge.id).where(Edge.id.in_(list(incoming_edges)), Edge.company_id != company.id))).scalars().all()
+    foreign_e = await EdgeRepository(db).foreign_ids(list(incoming_edges), company.id)
     if foreign_e:
         raise HTTPException(409, "Edge id belongs to another company")
     for eid, data in incoming_edges.items():

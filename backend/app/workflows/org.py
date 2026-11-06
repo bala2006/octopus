@@ -14,9 +14,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
 
 from app.db.base import new_id, utcnow
+from app.db.repositories import AgentRepository, CompanyRepository, EdgeRepository
 from app.capabilities.models.base import DEFAULT_AGENT_MAX_TOKENS
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
@@ -79,16 +79,16 @@ class OrgService:
     async def _persist_team(self, *, new_agents: list[dict[str, Any]] | None = None, new_edges: list[dict[str, Any]] | None = None,
                             updates: dict[str, dict[str, Any]] | None = None) -> bool:
         """Write hires / edits back to the company (the canvas reflects them) and bump its revision."""
-        from app.models import Agent as AgentRow, Company, Edge as EdgeRow
+        from app.models import Agent as AgentRow, Edge as EdgeRow
 
         async with self.rt.db() as db:
-            company = await db.get(Company, self.rt.company_id)
+            company = await CompanyRepository(db).get(self.rt.company_id)
             if company is None:
                 return False
-            existing = set((await db.execute(select(AgentRow.id).where(AgentRow.company_id == self.rt.company_id))).scalars())
+            existing = await AgentRepository(db).ids_in_company(self.rt.company_id)
             new_ids = {a["id"] for a in new_agents or []}
             for a in new_agents or []:
-                db.add(AgentRow(
+                AgentRepository(db).add(AgentRow(
                     id=a["id"], company_id=self.rt.company_id, name=a["name"], role=a["role"], description=a.get("description", ""),
                     avatar=a.get("avatar", ""), color=a.get("color", "#6366f1"), system_prompt=a.get("system_prompt", ""),
                     provider=a["provider"], model=a["model"], temperature=a.get("temperature", 0.4), max_tokens=a.get("max_tokens") or DEFAULT_AGENT_MAX_TOKENS,
@@ -101,10 +101,10 @@ class OrgService:
             await db.flush()
             for e in new_edges or []:
                 if e["source_agent_id"] in existing and e["target_agent_id"] in existing:
-                    db.add(EdgeRow(id=e["id"], company_id=self.rt.company_id, source_agent_id=e["source_agent_id"], target_agent_id=e["target_agent_id"],
+                    EdgeRepository(db).add(EdgeRow(id=e["id"], company_id=self.rt.company_id, source_agent_id=e["source_agent_id"], target_agent_id=e["target_agent_id"],
                                    bidirectional=e["bidirectional"], type=e["type"], label=e.get("label", ""), config_json=e.get("config") or {}))
             for aid, fields in (updates or {}).items():
-                row = await db.get(AgentRow, aid)
+                row = await AgentRepository(db).get(aid)
                 if row is None or row.company_id != self.rt.company_id:
                     continue
                 for k, v in fields.items():
