@@ -87,6 +87,6 @@ Do not write a second approval path. Add a test for the approval path of each ne
 ## 7. What plugins cannot do yet
 
 - They cannot be enabled or disabled at runtime. The `plugins` table stores that state, but nothing reads it.
-- Tool families are not separate plugins. The action handlers in `app/orchestrator/handlers/` still import capability
-  modules directly, and the action dispatch table is still in `engine.py`.
+- Tool families are not separate plugins. Actions are grouped by family in `app/orchestrator/handlers/registry.py`, and
+  the handlers still import capability modules directly.
 - Third-party code cannot be loaded. A plugin is code in this repository.

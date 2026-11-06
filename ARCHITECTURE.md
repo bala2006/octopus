@@ -54,7 +54,7 @@ Each turn:
    messaging, tasks, delegation, team, workflow.
 5. Messages are routed to mailboxes, and events are persisted and published on the bus. The loop repeats until the run finishes or waits for the user.
 
-Run bookkeeping lives in `run_state.py`, `run_control.py`, `mailbox.py`, `board.py` and `lifecycle.py`.
+Run bookkeeping lives in `run_state.py`, `run_control.py`, `mailbox.py`, `board.py` (blackboard and nudging) and `lifecycle.py`.
 
 ## 4. Approvals
 
@@ -69,14 +69,14 @@ in `ask` the change waits for approval before it is saved to the company, and in
 
 ## 5. Routing and protocols
 
-- **Routing** (`orchestrator/permissions.py`, `find_channel`). A message travels on the edge that matches its direction
+- **Routing** (`workflows/routing.py`, `find_channel`). A message travels on the edge that matches its direction
   and type. Debate edges carry only debate types. If no edge fits, the message is rejected server-side, and the sender
   gets a notice that explains why (`no channel`, `one-way`, `wrong type`).
 - **Debate** (`workflows/boardroom.py`). Decides when a discussion is settled and who speaks next.
 - **Review** (`workflows/review.py`). A reviewer answers a request with a verdict and comments.
 - **Loop detection** (`workflows/protocols.py`, `LoopDetector`). Shared `Verdict` type, plus detection of agents that
   repeat the same question. Escalation is handled by the run.
-- **Task board** (`orchestrator/board.py`). Still in the orchestrator. `workflows/tasks.py` only discovers developer commands from project manifests.
+- **Task board.** The task state (`workflows/task_board.py`) is in workflows. The blackboard, the nudging and the task action handler (`orchestrator/handlers/tasks.py`) stay in the orchestrator. `workflows/tasks.py` only discovers developer commands from project manifests.
 
 ## 6. Company workflow, org and roles
 
@@ -128,10 +128,9 @@ builds the router from it. The paths and element tree match the earlier `App.tsx
 
 These are the parts of the target design that are not in code yet:
 
-- Tool families are not `ToolPlugin`s. The handlers in `orchestrator/handlers/` import capability modules directly, and
-  the action dispatch table still lives in `engine.py`.
-- Routing (`find_channel`) is still in `orchestrator/permissions.py`, not in `workflows/org.py`.
-- The task board (`orchestrator/board.py`) is still in the orchestrator, not in `workflows/`.
+- Tool families are not `ToolPlugin` objects. Actions are grouped by family in `orchestrator/handlers/registry.py`, and the engine dispatches through that registry. The handlers still import capability modules directly.
+- Storage repositories are not done. The orchestrator and workflows still use SQLAlchemy sessions directly.
+- The task action handler and the blackboard stay in the orchestrator. Only the task state moved to `workflows/task_board.py`.
 - `set_track` is handled by `CompanyWorkflow`, not by the chief plugin.
 - The registry table is written but not read. Plugins cannot be enabled or disabled at runtime.
 
