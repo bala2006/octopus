@@ -50,3 +50,14 @@ same output directory. Each run uses its own projects directory.
 
 - Baselines depend on the Chromium build and the OS font rendering. Regenerate them on the CI image, not on a laptop.
 - `run-question` at 1024x768 still differs between some runs (see the commit message for the last measurement).
+
+## Browser used for the baseline
+
+The baseline was captured with Chromium 156.0.8078.4, the headless shell in Playwright's cache (`chromium_headless_shell-1248`). Playwright's default build in the sandbox is 157, and it renders the run screens differently. Pass the 156 build with `--chromium` or `OCTOPUS_VISUAL_CHROMIUM`:
+
+```bash
+OCTOPUS_VISUAL_CHROMIUM=/root/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell \
+  backend/.venv/bin/python scripts/visual/capture.py --out <dir>
+```
+
+With that build, 33 of 36 captures match the baseline. The three that differ are listed in the plan's status section (section 9).

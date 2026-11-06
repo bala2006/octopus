@@ -364,12 +364,7 @@ Gate results on this branch:
 - G3 import-linter: 3 contracts kept, 0 ignored.
 - G4 frontend: typecheck clean, 109 of 109 tests, production build succeeds.
 - G5 OpenAPI: golden `openapi.json` unchanged. `npm run gen:api` reproduces `api.gen.ts` with no diff.
-- G6 screenshots: 31 of 36 captures match the baseline. Five run-detail captures differ: `run-timeline` at both
-  viewports, `run-approval` at 1440x900, and `run-question` at both viewports. The same build gives different PNGs
-  across captures (for example, one capture matched the baseline exactly and another did not), so these screens are
-  non-deterministic. `run-timeline` at 1024x768 differs in both captures, and its cause is not yet known. The
-  frontend changed only in `App.tsx` and the plugin registry, so the component code is unchanged. Sign-off or a
-  per-screen threshold is needed (O4).
+- G6 screenshots: 33 of 36 captures match the baseline when captured with the baseline's Chromium (156.0.8078.4, headless shell `chromium_headless_shell-1248`). Playwright's default build (157) gave five differing run screens; the wrong browser explains those. Three still differ, the same way on every capture here: `run-approval` at 1440x900 and 1024x768, and `run-timeline` at 1024x768. The differing pixels are the background tint of an agent row that the run view highlights for four seconds after it changes (`bg-steel/5`, `TeamView.tsx`). Every capture here omits that tint, including captures from the baseline commit (`701641a`), so the baseline was taken under a timing this environment does not reproduce. Decision pending.
 - G7 start path: the app boots in-process with the real lifespan (migrations and capability install). The UI returns
   200, the OpenAPI schema lists 112 paths, and sampled API routes return 200. No live server was started from the sandbox
   shell. Scripted runs are covered by the test suite.

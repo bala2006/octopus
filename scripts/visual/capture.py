@@ -342,7 +342,8 @@ def run(args: argparse.Namespace) -> int:
         selected = [s for s in SCREENS if not args.only or s.name in args.only]
         results: list[dict] = []
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(args=CHROMIUM_ARGS)
+            launch_options = {"executable_path": str(args.chromium)} if args.chromium else {}
+            browser = pw.chromium.launch(args=CHROMIUM_ARGS, **launch_options)
             try:
                 for vp_name, size in VIEWPORTS.items():
                     (out / vp_name).mkdir(parents=True, exist_ok=True)
@@ -399,6 +400,9 @@ def main() -> None:
     parser.add_argument("--projects-root", type=Path, default=None,
                         help="directory for the seeded projects (default: a new temporary directory per run)")
     parser.add_argument("--only", nargs="+", metavar="SCREEN", help="capture only these screens (debugging)")
+    parser.add_argument("--chromium", type=Path, default=os.environ.get("OCTOPUS_VISUAL_CHROMIUM") or None,
+                        help="Chromium executable to use. The baseline was made with Chromium 156.0.8078.4 "
+                             "(Playwright cache: chromium-1248). Default: Playwright's own build.")
     parser.add_argument("--keep-work", action="store_true", help="keep the temporary OCTOPUS_HOME for inspection")
     args = parser.parse_args()
     try:
