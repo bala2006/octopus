@@ -47,10 +47,14 @@ def test_shell_operators_and_inline_code_are_never_allowed() -> None:
 
 
 async def test_global_setting_defaults_to_ask_and_persists(client) -> None:
-    assert (await client.get("/api/v1/settings")).json()["approval_mode"] == "ask"
+    # The registry database is shared by the whole test session, so the stored value depends on the tests that ran
+    # before. The default is the rule in normalize_mode; the API checks only persistence and rejection.
+    assert normalize_mode(None) == "ask" and normalize_mode("") == "ask"
     r = await client.put("/api/v1/settings/approval-mode", json={"approval_mode": "auto"})
     assert r.status_code == 200 and r.json() == {"approval_mode": "auto"}
     assert (await client.get("/api/v1/settings")).json()["approval_mode"] == "auto"
+    await client.put("/api/v1/settings/approval-mode", json={"approval_mode": "ask"})
+    assert (await client.get("/api/v1/settings")).json()["approval_mode"] == "ask"
     assert (await client.put("/api/v1/settings/approval-mode", json={"approval_mode": "danger"})).status_code == 422
 
 

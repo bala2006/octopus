@@ -6,11 +6,16 @@ memory, skills, messaging, delegation, tasks, team, workflow). Moved from ACTION
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+
+from app.core.builtin import BUILTIN_MANIFESTS
+from app.core.manifest import Manifest
 
 from app.orchestrator.handlers import commands as command_actions, delegation as delegation_actions
 from app.orchestrator.handlers import files as file_actions, mcp as mcp_actions, memory as memory_actions
-from app.orchestrator.handlers import messaging as messaging_actions, skills as skill_actions, tasks as task_actions
+from app.orchestrator.handlers import messaging as messaging_actions, skills as skill_actions
 from app.orchestrator.handlers import team_actions, web as web_actions, workflow_actions
+from app.workflows import task_board
 
 Handler = Callable[..., Awaitable[None]]
 
@@ -47,7 +52,7 @@ FAMILIES: dict[str, dict[str, Handler]] = {
         "use_skill": skill_actions.act_use_skill,
     },
     "tasks": {
-        "update_task_board": task_actions.act_update_task_board,
+        "update_task_board": task_board.act_update_task_board,
     },
     "team": {
         "create_agent": team_actions.act_create_agent,
@@ -62,6 +67,20 @@ FAMILIES: dict[str, dict[str, Handler]] = {
         "set_track": workflow_actions.act_set_track,
     },
 }
+
+@dataclass(frozen=True)
+class ToolPlugin:
+    """One tool family: the manifest the catalog lists for it, and the actions it runs."""
+
+    manifest: Manifest
+    actions: dict[str, Handler]
+
+
+_CATALOG = {m.id: m for m in BUILTIN_MANIFESTS}
+TOOL_PLUGINS: dict[str, ToolPlugin] = {
+    family: ToolPlugin(_CATALOG[f"tool.{family}"], actions) for family, actions in FAMILIES.items()
+}
+
 
 TOOLS: dict[str, Handler] = {name: handler for family in FAMILIES.values() for name, handler in family.items()}
 

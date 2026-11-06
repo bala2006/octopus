@@ -219,9 +219,10 @@ def test_builtin_catalog_forms_a_valid_registry_with_every_entry_startable():
 
 
 def test_builtin_layer_counts_match_the_plan_mapping_table():
-    # One entry per row of section 4 in docs/architecture/refactor-plan.md.
+    # One entry per row of section 4 in docs/architecture/refactor-plan.md, plus the eleven tool families (tool.*),
+    # which Phase 3 added: eight capability families and three workflow families.
     assert Counter(m.layer for m in BUILTIN_MANIFESTS) == {
-        "channel": 4, "agent": 6, "workflow": 5, "capability": 12, "core": 6}
+        "channel": 4, "agent": 6, "workflow": 8, "capability": 20, "core": 6}
 
 
 def test_planned_and_partly_entries_are_declared_explicitly():

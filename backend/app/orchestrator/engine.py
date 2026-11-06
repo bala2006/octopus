@@ -45,7 +45,7 @@ from app.workflows.protocols import LoopDetector
 from app.workflows.review import ReviewState
 from app.schemas import RunBudget
 from app.orchestrator.handlers.registry import TOOLS
-from app.orchestrator.handlers import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, tasks as task_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions
+from app.orchestrator.handlers import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions
 from app.orchestrator import run_control, run_state, mailbox, board, turn_loop, lifecycle
 from app.workflows import task_board
 from app.orchestrator.handlers.messaging import DEBATE_PROTOCOL_TYPES, JUDGE_MAX_TOKENS, judge_verdict  # noqa: F401 (re-exported for existing callers)
@@ -581,11 +581,11 @@ class RunRuntime:
     delegate = delegation_actions.delegate
 
     # handlers.tasks
-    link_task = task_actions.link_task
-    child_task_contract = task_actions.child_task_contract
-    create_task = task_actions.create_task
-    save_task = task_actions.save_task
-    act_update_task_board = task_actions.act_update_task_board
+    link_task = task_board.link_task
+    child_task_contract = task_board.child_task_contract
+    create_task = task_board.create_task
+    save_task = task_board.save_task
+    act_update_task_board = task_board.act_update_task_board
 
     # handlers.mcp
     load_mcp = mcp_actions.load_mcp
