@@ -13,7 +13,7 @@ from app.models import Artifact
 from app.orchestrator import actions as A
 from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec
 from app.core.execution_contracts import ACTIVE_ATTEMPT
-from app.orchestrator.permissions import is_dangerous_edit
+from app.core.approval_modes import is_dangerous_edit
 from app.capabilities.workspace.project_fs import WorkspaceError
 
 if TYPE_CHECKING:  # pragma: no cover

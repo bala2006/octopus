@@ -15,7 +15,7 @@ from app.db.session import get_registry_db
 from app.capabilities.models.base import LLMError, LLMRequest
 from app.capabilities.models.router import LEGACY_AZURE_ROWS, PROVIDER_CATALOG, is_configured, prepare_request, resolve_credentials, stream_with_retry
 from app.models import McpServer, ProviderKey, User
-from app.orchestrator.permissions import normalize_mode
+from app.core.approval_modes import normalize_mode
 from app.schemas import (
     ApprovalModeIn, ApprovalModeOut, BrowserStatusOut, BrowserTestOut, FxRateOut,
     McpServerIn, McpServerOut, McpToolOut, ParsedFileOut, ProviderInfo, ProviderKeyIn, ProviderKeyOut, ProviderOptions, SettingsOut,

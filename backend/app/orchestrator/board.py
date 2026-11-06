@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.orchestrator.context import clip, AgentSpec
 from app.orchestrator.handlers.shared import OPEN_TASK_STATES
-from app.orchestrator.permissions import allowed_recipients
+from app.workflows.routing import allowed_recipients
 from app.orchestrator.run_state import JOURNAL_MAX
 
 if TYPE_CHECKING:  # pragma: no cover

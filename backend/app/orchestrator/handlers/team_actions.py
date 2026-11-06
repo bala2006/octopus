@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from app.db.base import new_id
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.permissions import allowed_recipients, EdgeSpec
+from app.workflows.routing import allowed_recipients, EdgeSpec
 from app.orchestrator.roles import role_category
 from app.workflows.org import _edge, _tool_map, EDITABLE_BEHAVIOR
 

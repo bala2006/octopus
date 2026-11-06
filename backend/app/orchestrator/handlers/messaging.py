@@ -12,7 +12,7 @@ from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec, clip
 from app.core.execution_contracts import ACTIVE_ATTEMPT
 from app.orchestrator.handlers.shared import OPEN_TASK_STATES
-from app.orchestrator.permissions import allowed_recipients, find_channel, rejection_reason, EdgeSpec
+from app.workflows.routing import allowed_recipients, find_channel, rejection_reason, EdgeSpec
 from app.workflows.boardroom import DebateState, debate_decided_externally, debate_on_message
 from app.workflows.review import ReviewState, infer_verdict, review_on_request, review_on_result
 

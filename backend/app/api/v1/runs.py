@@ -20,7 +20,7 @@ from app.schemas import (
     ApprovalIn, ArtifactContentOut, ArtifactOut, InterjectIn, MessageOut, RevertIn, RunCreate, RunDetail, RunEventOut, RunOut,
     RunOutcome, TaskOut,
 )
-from app.orchestrator.permissions import normalize_mode
+from app.core.approval_modes import normalize_mode
 from app.services import run_attachments
 from app.workflows.canvas import snapshot
 from app.capabilities.workspace.project_fs import ProjectFS, WorkspaceError

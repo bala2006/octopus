@@ -33,9 +33,8 @@ from app.models import Message, Run, Task
 from app.orchestrator import actions as A
 from app.orchestrator.bus import bus
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.permissions import (
-    EdgeSpec, normalize_mode,
-)
+from app.workflows.routing import EdgeSpec
+from app.core.approval_modes import normalize_mode
 from app.workflows.org import OrgService
 from app.workflows.company import CompanyWorkflow
 from app.core.execution_contracts import ACTIVE_ATTEMPT

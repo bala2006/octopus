@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.permissions import allowed_recipients, find_channel, rejection_reason
+from app.workflows.routing import allowed_recipients, find_channel, rejection_reason
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.orchestrator.engine import RunRuntime
