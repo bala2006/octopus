@@ -46,6 +46,7 @@ from app.workflows.review import ReviewState
 from app.schemas import RunBudget
 from app.orchestrator.handlers import messaging as messaging_actions, files as file_actions, delegation as delegation_actions, tasks as task_actions, mcp as mcp_actions, browser as browser_actions, commands as command_actions, web as web_actions, memory as memory_actions, skills as skill_actions, team_actions, workflow_actions
 from app.orchestrator import run_control, run_state, mailbox, board, turn_loop, lifecycle
+from app.workflows import task_board
 from app.orchestrator.handlers.messaging import DEBATE_PROTOCOL_TYPES, JUDGE_MAX_TOKENS, judge_verdict  # noqa: F401 (re-exported for existing callers)
 from app.orchestrator.handlers.shared import OPEN_TASK_STATES  # noqa: F401 (re-exported for existing callers)
 from app.orchestrator.run_control import MAX_SELF_TURNS  # noqa: F401 (re-exported for existing callers)
@@ -552,10 +553,10 @@ class RunRuntime:
     efficiency = board.efficiency
     file_lock = board.file_lock
     mark_progress = board.mark_progress
-    open_tasks = board.open_tasks
-    task_ready = board.task_ready
-    task_line = board.task_line
-    open_task_owners = board.open_task_owners
+    open_tasks = task_board.open_tasks
+    task_ready = task_board.task_ready
+    task_line = task_board.task_line
+    open_task_owners = task_board.open_task_owners
     nudge_open_tasks = board.nudge_open_tasks
     resolve_agent = board.resolve_agent
     blackboard = board.blackboard
