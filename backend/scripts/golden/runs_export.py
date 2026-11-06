@@ -120,7 +120,7 @@ async def _run_events(client: httpx.AsyncClient, scenario: Scenario, project: Pa
 
 
 def _lines(events: list[dict[str, Any]], roots: dict[str, str]) -> str:
-    placeholders = Placeholders()
+    placeholders = Placeholders(number_times=False)
     out = []
     for e in events:
         record = {"id": placeholders.name("seq", str(e["id"])), "run_id": e["run_id"], "type": e["type"], "payload": e["payload"],

@@ -18,9 +18,15 @@ def dump_json(value: Any) -> str:
 class Placeholders:
     """Replaces volatile values with <kind-N> names, numbered in order of first appearance."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, number_times: bool = True) -> None:
+        """``number_times=False`` replaces every timestamp with the fixed token <time>.
+
+        Numbered time placeholders record which timestamps are equal. Two events written within the clock's resolution
+        share a timestamp, so the numbering depends on the machine's clock. Run logs use the fixed token for that reason.
+        """
         self._names: dict[tuple[str, str], str] = {}
         self._count: Counter[str] = Counter()
+        self._number_times = number_times
 
     def name(self, kind: str, raw: str) -> str:
         key = (kind, raw)
@@ -34,6 +40,8 @@ class Placeholders:
         for raw, stable in sorted(literal_roots.items(), key=lambda item: -len(item[0])):
             text = text.replace(raw, stable)
         text = UUID_RE.sub(lambda m: self.name("uuid", m.group(0)), text)
+        if not self._number_times:
+            return TIME_RE.sub("<time>", text)
         return TIME_RE.sub(lambda m: self.name("time", m.group(0)), text)
 
     def scrub(self, value: Any, literal_roots: dict[str, str], volatile_keys: frozenset[str] = frozenset(),
