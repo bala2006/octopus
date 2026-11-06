@@ -18,9 +18,9 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
+from app.models.scoped_memory import MemoryGroup, MemoryGroupMember, MemoryHead, MemoryRecord
 from app.models import (
-    Agent, AgentMemory, Artifact, ChatSession, Company, Edge, McpServer, Message, ProviderKey, Run, RunEvent, Task,
-    User, UserRole, UserSkill, UserTemplate, Workspace,
+    Agent, AgentMemory, Artifact, ChatSession, Company, Edge, McpServer, Message, ProviderKey, Run, RunEvent, Task, User, UserRole, UserSkill, UserTemplate, Workspace,
 )
 
 
@@ -220,6 +220,9 @@ class AgentRepository:
     async def get(self, agent_id: str) -> Agent | None:
         return await self.db.get(Agent, agent_id)
 
+    async def active_ids_in_company(self, company_id: str) -> list[str]:
+        return list((await self.db.scalars(select(Agent.id).where(Agent.company_id == company_id, Agent.active.is_(True)))).all())
+
     async def ids_in_company(self, company_id: str) -> set[str]:
         return set((await self.db.execute(select(Agent.id).where(Agent.company_id == company_id))).scalars())
 
@@ -269,9 +272,82 @@ class AgentMemoryRepository:
     async def for_agent(self, agent_id: str) -> list[AgentMemory]:
         return list((await self.db.execute(select(AgentMemory).where(AgentMemory.agent_id == agent_id))).scalars().all())
 
+    async def notes_for_company(self, company_id: str) -> list[AgentMemory]:
+        return list((await self.db.execute(select(AgentMemory).join(Agent, AgentMemory.agent_id == Agent.id)
+                                           .where(Agent.company_id == company_id))).scalars().all())
+
     async def by_key(self, agent_id: str, key: str) -> AgentMemory | None:
         return (await self.db.execute(select(AgentMemory).where(
             AgentMemory.agent_id == agent_id, AgentMemory.key == key))).scalar_one_or_none()
+
+
+class MemoryRepository:
+    """Scoped memory: groups and their members, heads (one per scope and key) and their versioned records."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def group(self, group_id: str) -> MemoryGroup | None:
+        return await self.db.get(MemoryGroup, group_id)
+
+    async def groups_for_company(self, company_id: str) -> list[MemoryGroup]:
+        return list((await self.db.scalars(select(MemoryGroup).where(MemoryGroup.company_id == company_id))).all())
+
+    async def group_member_ids(self, group_id: str) -> list[str]:
+        return list((await self.db.scalars(
+            select(MemoryGroupMember.agent_id).where(MemoryGroupMember.group_id == group_id))).all())
+
+    async def replace_group_members(self, group_id: str, agent_ids: Iterable[str]) -> None:
+        await self.db.execute(delete(MemoryGroupMember).where(MemoryGroupMember.group_id == group_id))
+        self.db.add_all(MemoryGroupMember(group_id=group_id, agent_id=aid) for aid in set(agent_ids))
+
+    async def record(self, record_id: str) -> MemoryRecord | None:
+        return await self.db.get(MemoryRecord, record_id)
+
+    async def head(self, head_id: str) -> MemoryHead | None:
+        return await self.db.get(MemoryHead, head_id)
+
+    async def record_by_import_key(self, import_key: str) -> MemoryRecord | None:
+        return await self.db.scalar(select(MemoryRecord).where(MemoryRecord.import_key == import_key))
+
+    async def import_key_exists(self, import_key: str) -> bool:
+        return await self.db.scalar(select(MemoryRecord.id).where(MemoryRecord.import_key == import_key)) is not None
+
+    async def head_by_identity(self, company_id: str, scope: str, scope_id: str, key: str) -> MemoryHead | None:
+        return await self.db.scalar(select(MemoryHead).where(
+            MemoryHead.company_id == company_id, MemoryHead.scope == scope, MemoryHead.scope_id == scope_id, MemoryHead.key == key))
+
+    async def current_record(self, head_id: str, version: int) -> MemoryRecord | None:
+        return await self.db.scalar(select(MemoryRecord).where(MemoryRecord.head_id == head_id, MemoryRecord.version == version))
+
+    async def bump_head_version(self, head_id: str, expected_version: int) -> int:
+        """Compare-and-set the head's version. Returns the number of rows changed (1 when the version matched)."""
+        result = await self.db.execute(update(MemoryHead).where(
+            MemoryHead.id == head_id, MemoryHead.version == expected_version).values(version=expected_version + 1))
+        return result.rowcount
+
+    async def records_for_head(self, company_id: str, scope: str, scope_id: str, key: str) -> list[MemoryRecord]:
+        return list((await self.db.scalars(select(MemoryRecord).join(MemoryHead, MemoryRecord.head_id == MemoryHead.id).where(
+            MemoryHead.company_id == company_id, MemoryHead.scope == scope, MemoryHead.scope_id == scope_id,
+            MemoryHead.key == key, MemoryRecord.classification != "deleted").order_by(MemoryRecord.version))).all())
+
+    async def records_with_heads(self, company_id: str) -> list[Any]:
+        return list((await self.db.execute(select(MemoryRecord, MemoryHead).join(
+            MemoryHead, MemoryRecord.head_id == MemoryHead.id).where(
+            MemoryHead.company_id == company_id, MemoryRecord.version == MemoryHead.version)
+            .order_by(MemoryRecord.pinned.desc(), MemoryRecord.created_at.desc()))).all())
+
+    async def agent_records(self, company_id: str, agent_id: str, key: str | None = None) -> list[Any]:
+        query = select(MemoryRecord, MemoryHead.key).join(MemoryHead, MemoryRecord.head_id == MemoryHead.id).where(
+            MemoryHead.company_id == company_id, MemoryHead.scope == "agent", MemoryHead.scope_id == agent_id,
+            MemoryRecord.version == MemoryHead.version)
+        if key is not None:
+            query = query.where(MemoryHead.key == key)
+        return list((await self.db.execute(query.order_by(MemoryHead.key))).all())
+
+    async def source(self, kind: str, source_id: str) -> Any:
+        """A message or artifact that memory can cite as its source."""
+        return await self.db.get(Message if kind == "message" else Artifact, source_id)
 
 
 # ---------------------------------------------------------------- registry database

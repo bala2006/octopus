@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from fastapi.responses import Response
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import MemoryRepository
 from app.db.repositories import AgentRepository, EdgeRepository
 from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.db.base import utcnow
 from app.models import Agent, Edge, User
-from app.models.scoped_memory import MemoryHead, MemoryRecord
+from app.models.scoped_memory import MemoryRecord
 from app.schemas import AgentIn, AgentOut, AgentPatch, EdgeIn, EdgeOut, MemoryIn, MemoryOut
 from app.workflows.canvas import agent_out, apply_agent, edge_out, validate_edges
 from app.capabilities.memory import scoped as memory
@@ -75,13 +75,8 @@ async def agent_memory_owner(agent_id: str, db: AsyncSession, user: User, ctx: P
 
 
 async def agent_memory_records(ctx: ProjectCtx, actor: memory.Actor, agent_id: str, key: str | None = None):
-    query = select(MemoryRecord, MemoryHead.key).join(MemoryHead, MemoryRecord.head_id == MemoryHead.id).where(
-        MemoryHead.company_id == actor.company_id, MemoryHead.scope == "agent", MemoryHead.scope_id == agent_id,
-        MemoryRecord.version == MemoryHead.version)
-    if key is not None:
-        query = query.where(MemoryHead.key == key)
     async with ctx.sf() as db:
-        return (await db.execute(query.order_by(MemoryHead.key))).all()
+        return await MemoryRepository(db).agent_records(actor.company_id, agent_id, key)
 
 
 async def legacy_memory_out(ctx: ProjectCtx, actor: memory.Actor, agent_id: str, key: str, record: MemoryRecord) -> MemoryOut:

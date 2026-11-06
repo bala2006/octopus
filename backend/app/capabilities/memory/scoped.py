@@ -12,12 +12,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import AgentMemoryRepository, AgentRepository, CompanyRepository, MemoryRepository, RunRepository
 from app.db.session import SessionFactory
-from app.models import Agent, AgentMemory, Artifact, Company, Message, Run
+from app.models import Message
 from app.models.scoped_memory import MemoryGroup, MemoryGroupMember, MemoryHead, MemoryRecord
 
 Scope = Literal["agent", "group", "chat", "project"]
@@ -67,40 +67,40 @@ class MemoryView:
 
 
 async def _identity(db: AsyncSession, actor: Actor) -> None:
-    company = await db.get(Company, actor.company_id)
+    company = await CompanyRepository(db).get(actor.company_id)
     if not company or company.user_id != actor.user_id:
         raise MemoryDenied("Company does not belong to this user")
     if actor.agent_id:
-        agent = await db.get(Agent, actor.agent_id)
+        agent = await AgentRepository(db).get(actor.agent_id)
         if not agent or agent.company_id != company.id or not agent.active:
             raise MemoryDenied("Agent is not active in this company")
 
 
 async def _audience(db: AsyncSession, company_id: str, target: Target) -> set[str]:
     if target.run_id:
-        run = await db.get(Run, target.run_id)
+        run = await RunRepository(db).get(target.run_id)
         if not run or run.company_id != company_id:
             raise MemoryDenied("Run belongs to another company")
     if target.scope == "agent":
-        agent = await db.get(Agent, target.scope_id)
+        agent = await AgentRepository(db).get(target.scope_id)
         if not agent or agent.company_id != company_id:
             raise MemoryDenied("Agent memory belongs to another company")
         return {agent.id}
     if target.scope == "group":
-        group = await db.get(MemoryGroup, target.scope_id)
+        group = await MemoryRepository(db).group(target.scope_id)
         if not group or group.company_id != company_id:
             raise MemoryDenied("Unknown memory group")
-        return set((await db.scalars(select(MemoryGroupMember.agent_id).where(MemoryGroupMember.group_id == group.id))).all()) if group.active else set()
+        return set(await MemoryRepository(db).group_member_ids(group.id)) if group.active else set()
     if target.scope == "chat":
-        run = await db.get(Run, target.scope_id)
+        run = await RunRepository(db).get(target.scope_id)
         if not run or run.company_id != company_id or target.run_id not in (None, run.id):
             raise MemoryDenied("Chat memory must bind to its run")
         assigned = {a["id"] for a in (run.snapshot_json or {}).get("agents", []) if a.get("active", True)}
-        active = set((await db.scalars(select(Agent.id).where(Agent.company_id == company_id, Agent.active.is_(True)))).all())
+        active = set(await AgentRepository(db).active_ids_in_company(company_id))
         return assigned & active
     elif target.scope != "project" or target.scope_id != company_id:
         raise MemoryDenied("Invalid project memory target")
-    return set((await db.scalars(select(Agent.id).where(Agent.company_id == company_id))).all())
+    return await AgentRepository(db).ids_in_company(company_id)
 
 
 async def _access(db: AsyncSession, actor: Actor, target: Target) -> set[str]:
@@ -114,17 +114,17 @@ async def _sources(db: AsyncSession, actor: Actor, target: Target, refs: tuple[S
     destination = await _access(db, actor, target)
     for ref in refs:
         if ref.kind == "memory":
-            record = await db.get(MemoryRecord, ref.id)
+            record = await MemoryRepository(db).record(ref.id)
             if not record or record.company_id != actor.company_id:
                 raise MemoryDenied("Unknown memory source")
-            head = await db.get(MemoryHead, record.head_id)
+            head = await MemoryRepository(db).head(record.head_id)
             assert head
             source_target = Target(head.scope, head.scope_id, record.run_id)
             audience = await _access(db, actor, source_target)
             source_run = record.run_id or (head.scope_id if head.scope == "chat" else None)
         elif ref.kind in ("message", "artifact"):
-            item = await db.get(Message if ref.kind == "message" else Artifact, ref.id)
-            run = await db.get(Run, item.run_id) if item and item.run_id else None
+            item = await MemoryRepository(db).source(ref.kind, ref.id)
+            run = await RunRepository(db).get(item.run_id) if item and item.run_id else None
             if not run or run.company_id != actor.company_id:
                 raise MemoryDenied("Source is outside this company")
             source_run = run.id
@@ -159,16 +159,15 @@ async def _write(sf: SessionFactory, actor: Actor, target: Target, key: str, con
                 await _identity(db, actor)
                 await _access(db, actor, target)
                 if import_key:
-                    existing = await db.scalar(select(MemoryRecord).where(MemoryRecord.import_key == import_key))
+                    existing = await MemoryRepository(db).record_by_import_key(import_key)
                     if existing:
-                        original_head = await db.get(MemoryHead, existing.head_id)
+                        original_head = await MemoryRepository(db).head(existing.head_id)
                         if (existing.company_id != actor.company_id or not original_head or original_head.scope != target.scope
                                 or original_head.scope_id != target.scope_id or original_head.key != key):
                             raise MemoryConflict("Import identity already belongs to another memory")
                         return existing
                 await _sources(db, actor, target, refs, share=share)
-                head = await db.scalar(select(MemoryHead).where(MemoryHead.company_id == actor.company_id,
-                    MemoryHead.scope == target.scope, MemoryHead.scope_id == target.scope_id, MemoryHead.key == key))
+                head = await MemoryRepository(db).head_by_identity(actor.company_id, target.scope, target.scope_id, key)
                 if not head:
                     if expected_version:
                         raise MemoryConflict("Memory version changed")
@@ -176,13 +175,11 @@ async def _write(sf: SessionFactory, actor: Actor, target: Target, key: str, con
                     db.add(head)
                     await db.flush()
                 elif actor.agent_id:
-                    current = await db.scalar(select(MemoryRecord).where(MemoryRecord.head_id == head.id,
-                                                                         MemoryRecord.version == head.version))
+                    current = await MemoryRepository(db).current_record(head.id, head.version)
                     if current and (current.pinned or current.classification != "proposed"):
                         raise MemoryDenied("Agents cannot replace accepted memory; propose a separate note")
-                result = await db.execute(update(MemoryHead).where(MemoryHead.id == head.id,
-                    MemoryHead.version == expected_version).values(version=expected_version + 1))
-                if result.rowcount != 1:
+                rowcount = await MemoryRepository(db).bump_head_version(head.id, expected_version)
+                if rowcount != 1:
                     raise MemoryConflict("Memory version changed")
                 record = MemoryRecord(head_id=head.id, company_id=actor.company_id,
                     run_id=target.run_id or (target.scope_id if target.scope == "chat" else None),
@@ -240,14 +237,13 @@ async def owner_update_group(sf: SessionFactory, actor: Actor, group_id: str, *,
         raise ValueError("Invalid group name")
     async with sf() as db, db.begin():
         await _identity(db, actor)
-        group = await db.get(MemoryGroup, group_id)
+        group = await MemoryRepository(db).group(group_id)
         if not group or group.company_id != actor.company_id:
             raise MemoryDenied("Unknown memory group")
         if members is not None:
             for aid in set(members):
                 await _audience(db, actor.company_id, Target("agent", aid))
-            await db.execute(delete(MemoryGroupMember).where(MemoryGroupMember.group_id == group.id))
-            db.add_all(MemoryGroupMember(group_id=group.id, agent_id=aid) for aid in set(members))
+            await MemoryRepository(db).replace_group_members(group.id, members)
         if name is not None:
             group.name = name
         if active is not None:
@@ -275,10 +271,10 @@ async def get(sf: SessionFactory, actor: Actor, record_id: str, *, redact: bool 
     """Exact version lookup, including superseded originals. Tombstone content is not returned."""
     async with sf() as db:
         await _identity(db, actor)
-        record = await db.get(MemoryRecord, record_id)
+        record = await MemoryRepository(db).record(record_id)
         if not record or record.company_id != actor.company_id:
             raise MemoryDenied("Unknown memory reference")
-        head = await db.get(MemoryHead, record.head_id)
+        head = await MemoryRepository(db).head(record.head_id)
         assert head
         await _access(db, actor, _target(head, record))
         if record.classification == "deleted":
@@ -296,9 +292,7 @@ async def context(sf: SessionFactory, actor: Actor, *, run_id: str | None = None
         await _identity(db, actor)
         if run_id:
             await _audience(db, actor.company_id, Target("chat", run_id))
-        rows = (await db.execute(select(MemoryRecord, MemoryHead).join(MemoryHead, MemoryRecord.head_id == MemoryHead.id)
-            .where(MemoryHead.company_id == actor.company_id, MemoryRecord.version == MemoryHead.version)
-            .order_by(MemoryRecord.pinned.desc(), MemoryRecord.created_at.desc()))).all()
+        rows = await MemoryRepository(db).records_with_heads(actor.company_id)
         out = []
         remaining = max_chars
         overflow = False
@@ -336,8 +330,7 @@ async def import_legacy(sf: SessionFactory, owner: Actor, root: Path) -> int:
         raise MemoryDenied("Only the owner can import memory")
     async with sf() as db:
         await _identity(db, owner)
-        notes = (await db.execute(select(AgentMemory).join(Agent, AgentMemory.agent_id == Agent.id)
-                                 .where(Agent.company_id == owner.company_id))).scalars().all()
+        notes = await AgentMemoryRepository(db).notes_for_company(owner.company_id)
     entries = [(Target("agent", note.agent_id), note.key, note.value, f"legacy-agent:{note.id}") for note in notes]
     path = root.resolve() / ".octopus" / "memory.json"
     if path.exists():
@@ -351,15 +344,14 @@ async def import_legacy(sf: SessionFactory, owner: Actor, root: Path) -> int:
         for retro in data.get("runs", []):
             if isinstance(retro, dict) and isinstance(retro.get("run_id"), str):
                 async with sf() as db:
-                    run = await db.get(Run, retro["run_id"])
+                    run = await RunRepository(db).get(retro["run_id"])
                 if run and run.company_id == owner.company_id:
                     entries.append((Target("chat", run.id), "legacy-retrospective", json.dumps(retro, ensure_ascii=False), f"legacy-run:{run.id}"))
     imported = 0
     for target, key, content, import_key in entries:
         async with sf() as db:
-            exists = await db.scalar(select(MemoryRecord.id).where(MemoryRecord.import_key == import_key))
-            head = await db.scalar(select(MemoryHead).where(MemoryHead.company_id == owner.company_id,
-                MemoryHead.scope == target.scope, MemoryHead.scope_id == target.scope_id, MemoryHead.key == key))
+            exists = await MemoryRepository(db).import_key_exists(import_key)
+            head = await MemoryRepository(db).head_by_identity(owner.company_id, target.scope, target.scope_id, key)
         if exists or head:
             continue
         await owner_put(sf, owner, target, key, content, expected_version=0, classification="proposed", import_key=import_key)
