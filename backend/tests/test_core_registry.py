@@ -12,18 +12,17 @@ from sqlalchemy import create_engine, inspect, text
 
 import app
 from app.channels.ws import endpoints as ws_module
-from app.kernel.catalog import BUILTIN_MANIFESTS
-from app.sdk.topics import EPHEMERAL_TOPICS, RunTopic, TypedRunBus
-from app.sdk.manifest import LAYERS, Manifest, ManifestError
+from app.sdk.topics import EPHEMERAL_TOPICS, RunTopic
+from app.sdk.manifest import SDK_VERSION, SLOTS, Manifest, ManifestError, sdk_range_allows
 from app.kernel.registry import DependencyCycleError, MissingDependencyError, PluginRegistry, RegistryError
 from app.storage.migrate import _config, upgrade_registry
-from app.kernel.eventlog import EPHEMERAL, EventBus
+from app.kernel.eventlog import EPHEMERAL
 
 
-def make(plugin_id: str, *, layer: str = "capability", kind: str = "test", version: str = "1.0.0",
-         provides: tuple = (), requires: tuple = (), status: str = "built") -> Manifest:
-    return Manifest(id=plugin_id, layer=layer, kind=kind, version=version,
-                    provides=provides, requires=requires, status=status)
+def make(plugin_id: str, *, slot: str = "service", kind: str = "test", version: str = "1.0.0",
+         provides: tuple = (), requires: tuple = (), status: str = "built", **extra) -> Manifest:
+    return Manifest(id=plugin_id, slot=slot, kind=kind, version=version,
+                    provides=provides, requires=requires, status=status, **extra)
 
 
 def ids(manifests) -> list[str]:
@@ -33,205 +32,189 @@ def ids(manifests) -> list[str]:
 # --- manifest validation ---------------------------------------------------------------------------------------------
 
 def test_manifest_accepts_valid_fields_and_is_frozen():
-    m = make("capability.sandbox", provides=("sandbox.exec",), requires=("policy.gate",))
-    assert (m.layer, m.status, m.provides) == ("capability", "built", ("sandbox.exec",))
+    m = make("service.sandbox", provides=("sandbox.exec",), requires=("policy.gate",))
+    assert (m.slot, m.status, m.provides) == ("service", "built", ("sandbox.exec",))
     with pytest.raises(dataclasses.FrozenInstanceError):
-        m.id = "capability.other"
+        m.id = "service.other"
 
 
-@pytest.mark.parametrize("bad_id", ["sandbox", "Capability.sandbox", "capability..sandbox", "capability.sandbox ",
-                                    "", "capability-sandbox", ".sandbox", "capability.Sandbox", None])
+@pytest.mark.parametrize("bad_id", ["sandbox", "Capability.sandbox", "service..sandbox", "service.sandbox ",
+                                    "", "capability-sandbox", ".sandbox", "service.Sandbox", None])
 def test_manifest_rejects_ids_that_are_not_dotted_lowercase(bad_id):
     with pytest.raises(ManifestError):
         make(bad_id)
 
 
-def test_manifest_rejects_unknown_layer_and_status():
-    with pytest.raises(ManifestError, match="layer"):
-        make("capability.x", layer="plugin")
+def test_manifest_rejects_unknown_slot_and_status():
+    with pytest.raises(ManifestError, match="slot"):
+        make("service.x", slot="plugin")
     with pytest.raises(ManifestError, match="status"):
-        make("capability.x", status="done")
+        make("service.x", status="done")
 
 
-def test_manifest_accepts_every_layer_and_status():
-    for layer in LAYERS:
+def test_manifest_accepts_every_slot_and_status():
+    for slot in SLOTS:
         for status in ("built", "partly", "planned"):
-            make("core.x", layer=layer, status=status)
+            make("core.x", slot=slot, status=status)
 
 
 @pytest.mark.parametrize("field_name", ["provides", "requires"])
 def test_provides_and_requires_must_be_tuples_of_dotted_names(field_name):
     with pytest.raises(ManifestError, match="tuple"):
-        make("capability.x", **{field_name: ["sandbox.exec"]})
+        make("service.x", **{field_name: ["sandbox.exec"]})
     with pytest.raises(ManifestError, match="tuple"):
-        make("capability.x", **{field_name: "sandbox.exec"})
+        make("service.x", **{field_name: "sandbox.exec"})
     with pytest.raises(ManifestError, match="dotted"):
-        make("capability.x", **{field_name: ("sandbox",)})
+        make("service.x", **{field_name: ("sandbox",)})
     with pytest.raises(ManifestError, match="dotted"):
-        make("capability.x", **{field_name: ("sandbox.exec", 3)})
+        make("service.x", **{field_name: ("sandbox.exec", 3)})
     with pytest.raises(ManifestError, match="twice"):
-        make("capability.x", **{field_name: ("sandbox.exec", "sandbox.exec")})
+        make("service.x", **{field_name: ("sandbox.exec", "sandbox.exec")})
 
 
 def test_manifest_rejects_empty_kind_and_overlong_version():
     with pytest.raises(ManifestError, match="kind"):
-        make("capability.x", kind=" ")
+        make("service.x", kind=" ")
     with pytest.raises(ManifestError, match="version"):
-        make("capability.x", version="")
+        make("service.x", version="")
     with pytest.raises(ManifestError, match="version"):
-        make("capability.x", version="1" * 41)
+        make("service.x", version="1" * 41)
+
+
+# --- manifest v2 ----------------------------------------------------------------------------------------------------
+
+def test_manifest_v2_fields_default_to_a_plain_eager_plugin():
+    m = make("service.x")
+    assert (m.sdk, m.start, m.required, m.optional, m.permissions, m.emits, m.ui) == (">=1.0,<2", "eager", False, (), (), (), ())
+    assert m.compatible() and m.label == "service.x"
+
+
+def test_sdk_range_is_checked_against_the_sdk_version():
+    assert sdk_range_allows(">=1.0,<2", "1.0.0") and sdk_range_allows(">=1.0,<2", "1.9.3")
+    assert not sdk_range_allows(">=1.0,<2", "2.0.0") and not sdk_range_allows(">=1.1", "1.0.0")
+    assert not make("service.x", sdk=">=2.0").compatible(SDK_VERSION)
+    for bad in ("", "1.0", ">=one", ">=1.0;<2"):
+        with pytest.raises(ManifestError):
+            sdk_range_allows(bad)
+    with pytest.raises(ManifestError, match="sdk range"):
+        make("service.x", sdk="latest")
+
+
+def test_manifest_v2_validates_permissions_emits_start_and_optional():
+    with pytest.raises(ManifestError, match="permission"):
+        make("service.x", permissions=("root",))
+    with pytest.raises(ManifestError, match="not a run topic"):
+        make("service.x", emits=("made_up_topic",))
+    with pytest.raises(ManifestError, match="start"):
+        make("service.x", start="sometimes")
+    with pytest.raises(ManifestError, match="both required and optional"):
+        make("service.x", requires=("a.b",), optional=("a.b",))
+    ok = make("service.x", permissions=("network", "exec"), emits=("browser_action",), optional=("a.b",), start="lazy", required=True)
+    assert ok.permissions == ("network", "exec") and ok.start == "lazy" and ok.required
 
 
 # --- registry: validation and ordering -------------------------------------------------------------------------------
 
 def test_ordered_for_start_puts_providers_first_and_keeps_registration_order_for_ties():
-    a = make("capability.a", requires=("b.x",), provides=("a.x",))
-    b = make("capability.b", requires=("c.x",), provides=("b.x",))
-    c = make("capability.c", provides=("c.x",))
-    d = make("capability.d", provides=("d.x",))  # unrelated, registered last
+    a = make("service.a", requires=("b.x",), provides=("a.x",))
+    b = make("service.b", requires=("c.x",), provides=("b.x",))
+    c = make("service.c", provides=("c.x",))
+    d = make("service.d", provides=("d.x",))  # unrelated, registered last
     reg = PluginRegistry([a, b, c, d])
-    assert ids(reg.ordered_for_start()) == ["capability.c", "capability.b", "capability.a", "capability.d"]
+    assert ids(reg.ordered_for_start()) == ["service.c", "service.b", "service.a", "service.d"]
 
 
 def test_unrelated_plugins_start_in_registration_order():
-    x = make("capability.x", provides=("x.v",))
-    y = make("capability.y", provides=("y.v",))
-    assert ids(PluginRegistry([x, y]).ordered_for_start()) == ["capability.x", "capability.y"]
-    assert ids(PluginRegistry([y, x]).ordered_for_start()) == ["capability.y", "capability.x"]
+    x = make("service.x", provides=("x.v",))
+    y = make("service.y", provides=("y.v",))
+    assert ids(PluginRegistry([x, y]).ordered_for_start()) == ["service.x", "service.y"]
+    assert ids(PluginRegistry([y, x]).ordered_for_start()) == ["service.y", "service.x"]
 
 
 def test_requirement_with_two_providers_starts_after_both():
-    user = make("capability.user", requires=("shared.cap",))
-    first = make("capability.first", provides=("shared.cap",))
-    second = make("capability.second", provides=("shared.cap",))
+    user = make("service.user", requires=("shared.cap",))
+    first = make("service.first", provides=("shared.cap",))
+    second = make("service.second", provides=("shared.cap",))
     order = ids(PluginRegistry([user, first, second]).ordered_for_start())
-    assert order[-1] == "capability.user"
-    assert set(order[:2]) == {"capability.first", "capability.second"}
+    assert order[-1] == "service.user"
+    assert set(order[:2]) == {"service.first", "service.second"}
 
 
 def test_missing_requirement_is_rejected_at_construction():
-    with pytest.raises(MissingDependencyError, match="capability.a.*nothing.here"):
-        PluginRegistry([make("capability.a", requires=("nothing.here",))])
+    with pytest.raises(MissingDependencyError, match="service.a.*nothing.here"):
+        PluginRegistry([make("service.a", requires=("nothing.here",))])
 
 
 def test_plugin_cannot_satisfy_its_own_requirement():
     with pytest.raises(MissingDependencyError):
-        PluginRegistry([make("capability.a", provides=("a.x",), requires=("a.x",))])
+        PluginRegistry([make("service.a", provides=("a.x",), requires=("a.x",))])
 
 
 def test_two_plugin_cycle_is_rejected_and_the_loop_is_named():
-    a = make("capability.a", provides=("a.x",), requires=("b.x",))
-    b = make("capability.b", provides=("b.x",), requires=("a.x",))
+    a = make("service.a", provides=("a.x",), requires=("b.x",))
+    b = make("service.b", provides=("b.x",), requires=("a.x",))
     with pytest.raises(DependencyCycleError) as exc:
         PluginRegistry([a, b])
-    assert "capability.a requires capability.b requires capability.a" in str(exc.value)
+    assert "service.a requires service.b requires service.a" in str(exc.value)
 
 
 def test_cycle_is_named_even_when_a_dependent_is_registered_first():
-    dependent = make("capability.d", requires=("a.x",))
-    a = make("capability.a", provides=("a.x",), requires=("b.x",))
-    b = make("capability.b", provides=("b.x",), requires=("a.x",))
+    dependent = make("service.d", requires=("a.x",))
+    a = make("service.a", provides=("a.x",), requires=("b.x",))
+    b = make("service.b", provides=("b.x",), requires=("a.x",))
     with pytest.raises(DependencyCycleError) as exc:
         PluginRegistry([dependent, a, b])
-    assert "capability.a requires capability.b requires capability.a" in str(exc.value)
+    assert "service.a requires service.b requires service.a" in str(exc.value)
 
 
 def test_three_plugin_cycle_is_rejected():
-    a = make("capability.a", provides=("a.x",), requires=("c.x",))
-    b = make("capability.b", provides=("b.x",), requires=("a.x",))
-    c = make("capability.c", provides=("c.x",), requires=("b.x",))
+    a = make("service.a", provides=("a.x",), requires=("c.x",))
+    b = make("service.b", provides=("b.x",), requires=("a.x",))
+    c = make("service.c", provides=("c.x",), requires=("b.x",))
     with pytest.raises(DependencyCycleError):
         PluginRegistry([a, b, c])
 
 
 def test_duplicate_ids_and_non_manifests_are_rejected():
-    with pytest.raises(RegistryError, match="duplicate plugin id: capability.a"):
-        PluginRegistry([make("capability.a"), make("capability.a")])
+    with pytest.raises(RegistryError, match="duplicate plugin id: service.a"):
+        PluginRegistry([make("service.a"), make("service.a")])
     with pytest.raises(RegistryError, match="expected a Manifest"):
-        PluginRegistry([{"id": "capability.a"}])
+        PluginRegistry([{"id": "service.a"}])
 
 
 # --- registry: enable and disable ------------------------------------------------------------------------------------
 
 def test_disable_removes_a_plugin_from_start_order_and_enable_restores_it():
-    reg = PluginRegistry([make("capability.a", provides=("a.x",)), make("capability.b")])
-    reg.disable("capability.b")
-    assert reg.is_enabled("capability.b") is False
-    assert ids(reg.ordered_for_start()) == ["capability.a"]
-    reg.enable("capability.b")
-    assert reg.is_enabled("capability.b") is True
-    assert ids(reg.ordered_for_start()) == ["capability.a", "capability.b"]
+    reg = PluginRegistry([make("service.a", provides=("a.x",)), make("service.b")])
+    reg.disable("service.b")
+    assert reg.is_enabled("service.b") is False
+    assert ids(reg.ordered_for_start()) == ["service.a"]
+    reg.enable("service.b")
+    assert reg.is_enabled("service.b") is True
+    assert ids(reg.ordered_for_start()) == ["service.a", "service.b"]
 
 
 def test_enabled_plugin_that_needs_a_disabled_provider_cannot_start():
-    reg = PluginRegistry([make("capability.a", requires=("b.x",)), make("capability.b", provides=("b.x",))])
-    reg.disable("capability.b")
+    reg = PluginRegistry([make("service.a", requires=("b.x",)), make("service.b", provides=("b.x",))])
+    reg.disable("service.b")
     with pytest.raises(MissingDependencyError, match="no other enabled plugin"):
         reg.ordered_for_start()
-    reg.enable("capability.b")
-    assert ids(reg.ordered_for_start()) == ["capability.b", "capability.a"]
+    reg.enable("service.b")
+    assert ids(reg.ordered_for_start()) == ["service.b", "service.a"]
 
 
 def test_disabling_a_plugin_does_not_change_the_manifest_set():
-    reg = PluginRegistry([make("capability.a", provides=("a.x",))])
-    reg.disable("capability.a")
-    assert ids(reg.manifests()) == ["capability.a"]
-    assert reg.get("capability.a").provides == ("a.x",)
+    reg = PluginRegistry([make("service.a", provides=("a.x",))])
+    reg.disable("service.a")
+    assert ids(reg.manifests()) == ["service.a"]
+    assert reg.get("service.a").provides == ("a.x",)
 
 
 def test_state_calls_reject_unknown_plugin_ids():
-    reg = PluginRegistry([make("capability.a")])
+    reg = PluginRegistry([make("service.a")])
     for call in (reg.enable, reg.disable, reg.is_enabled, reg.get):
         with pytest.raises(RegistryError, match="unknown plugin id"):
-            call("capability.nope")
-
-
-# --- builtin catalog -------------------------------------------------------------------------------------------------
-
-def test_builtin_ids_are_unique():
-    assert len(set(ids(BUILTIN_MANIFESTS))) == len(BUILTIN_MANIFESTS)
-
-
-def test_every_builtin_entry_is_a_valid_manifest():
-    for m in BUILTIN_MANIFESTS:
-        assert isinstance(m, Manifest)
-        dataclasses.replace(m)  # re-runs __post_init__ validation
-        assert m.layer in LAYERS
-
-
-def test_builtin_catalog_forms_a_valid_registry_with_every_entry_startable():
-    reg = PluginRegistry(BUILTIN_MANIFESTS)
-    assert sorted(ids(reg.ordered_for_start())) == sorted(ids(BUILTIN_MANIFESTS))
-
-
-def test_builtin_layer_counts_match_the_plan_mapping_table():
-    # One entry per row of section 4 in docs/architecture/refactor-plan.md, plus the eleven tool families (tool.*),
-    # which Phase 3 added: eight capability families and three workflow families.
-    assert Counter(m.layer for m in BUILTIN_MANIFESTS) == {
-        "channel": 4, "agent": 6, "workflow": 8, "capability": 20, "core": 6}
-
-
-def test_planned_and_partly_entries_are_declared_explicitly():
-    not_built = {m.id: m.status for m in BUILTIN_MANIFESTS if m.status != "built"}
-    assert not_built == {
-        "channel.cli": "partly",
-        "channel.chat_apps": "planned",
-        "core.plugin_contract": "planned",
-        "core.plugin_registry": "planned",
-    }
-
-
-def test_builtin_requirements_point_only_to_the_same_or_a_lower_layer():
-    rank = {"channel": 4, "agent": 3, "workflow": 2, "capability": 1, "core": 0}
-    providers: dict[str, list[Manifest]] = {}
-    for m in BUILTIN_MANIFESTS:
-        for name in m.provides:
-            providers.setdefault(name, []).append(m)
-    for m in BUILTIN_MANIFESTS:
-        for need in m.requires:
-            for provider in providers[need]:
-                assert rank[provider.layer] <= rank[m.layer], (
-                    f"{m.id} ({m.layer}) requires {need} from {provider.id} ({provider.layer})")
+            call("service.nope")
 
 
 # --- typed run topics ------------------------------------------------------------------------------------------------
@@ -266,27 +249,8 @@ def test_run_topics_cover_every_literal_event_name_the_backend_sends():
     assert emitted <= {t.value for t in RunTopic}
 
 
-def test_ephemeral_topics_match_the_live_event_bus():
+def test_ephemeral_topics_match_the_event_log():
     assert {t.value for t in EPHEMERAL_TOPICS} == set(EPHEMERAL)
-
-
-async def test_typed_bus_forwards_publish_and_subscribe_to_the_existing_bus():
-    inner = EventBus()
-    typed = TypedRunBus(inner)
-    queue = typed.subscribe("run-1")
-    # token_stream is ephemeral, so publish never touches the session factory.
-    event = await typed.publish("run-1", RunTopic.TOKEN_STREAM, {"text": "hi"}, sf=None)
-    assert event == {"type": "token_stream", "run_id": "run-1", "data": {"text": "hi"}, "ts": event["ts"]}
-    assert queue.get_nowait() == event
-    typed.unsubscribe("run-1", queue)
-    await typed.publish("run-1", RunTopic.TOKEN_STREAM, {"text": "after"}, sf=None)
-    assert queue.empty()
-
-
-async def test_typed_bus_rejects_unknown_topics_before_sending():
-    typed = TypedRunBus(EventBus())
-    with pytest.raises(ValueError):
-        await typed.publish("run-1", "not_a_topic", {}, sf=None)
 
 
 # --- registry migration ----------------------------------------------------------------------------------------------

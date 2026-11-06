@@ -1,7 +1,7 @@
 """Workflow plugins: the task board, the debate and review protocols, org and hiring, the company workflow."""
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 
 from app.plugins.workflows.deps import deps
 from app.sdk.manifest import Manifest
@@ -9,20 +9,6 @@ from app.sdk.plugin import RunMethod, ServicePlugin, ToolHandler
 
 TASK_BOARD_METHODS = ("open_tasks", "task_ready", "task_line", "open_task_owners", "link_task", "child_task_contract", "create_task",
                       "save_task", "act_update_task_board")
-ORG_METHODS = ("manages", "_snapshot_agent", "_team_guard", "_persist_team", "act_list_agents", "act_create_agent", "act_update_agent")
-FLOW_METHODS = ("wf_active", "wf_phase", "wf_enabled_for_run", "wf_tool_exclusions", "wf_owner_of_active", "wf_emit", "wf_view",
-                "wf_blackboard", "wf_init", "wf_intake_note", "act_set_track", "wf_advance", "wf_start", "wf_brief", "wf_gate",
-                "wf_on_finish", "nudge_workflow")
-
-
-def _delegating(owner: str, name: str) -> RunMethod:
-    """A run method that calls the same-named method on the run's workflow object (``rt.org`` or ``rt.flow``)."""
-
-    def method(rt, *args, **kwargs):  # type: ignore[no-untyped-def]
-        return getattr(getattr(rt, owner), name)(*args, **kwargs)
-
-    method.__name__ = name
-    return method
 
 
 def _task_board():
@@ -55,17 +41,9 @@ def _org():
     return org
 
 
-def _org_methods() -> Mapping[str, RunMethod]:
-    return {name: _delegating("org", name) for name in ORG_METHODS}
-
-
 def _company():
     from app.plugins.workflows import company
     return company
-
-
-def _flow_methods() -> Mapping[str, RunMethod]:
-    return {name: _delegating("flow", name) for name in FLOW_METHODS}
 
 
 def _team_tools() -> Mapping[str, ToolHandler]:
@@ -100,12 +78,12 @@ PLUGINS = (
                  description="Hiring, reconfiguring and routing inside the org chart, under the approval setting.",
                  provides=("workflow.org",), requires=("roles.builtin",), optional=("models.router",), permissions=("db",),
                  emits=("agent_created", "agent_updated")),
-        services={"workflow.org": _org}, run_methods=_org_methods, deps=deps),
+        services={"workflow.org": _org}, deps=deps),
     ServicePlugin(
         Manifest(id="workflow.company", slot="workflow", kind="workflow", version="1.0.0", title="Company workflow",
                  description="Phases, owners, gates and bounded rework for a run (intake, plan, build, review, ship).",
                  provides=("workflow.company",), requires=(), emits=("workflow_updated", "workflow_checkpoint")),
-        services={"workflow.company": _company}, run_methods=_flow_methods, deps=deps),
+        services={"workflow.company": _company}, deps=deps),
     ServicePlugin(
         Manifest(id="tool.team", slot="tool", kind="tool family", version="1.0.0", title="Team tools",
                  description="list_agents, create_agent and update_agent.",

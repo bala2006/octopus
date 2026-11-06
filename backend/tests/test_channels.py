@@ -1,5 +1,5 @@
 """Channels as plugins: the mounted HTTP surface matches the golden OpenAPI, the WebSocket endpoints are mounted, the web
-shell serves the built UI, the chat-apps placeholder mounts nothing, and each channel's manifest is its catalog entry."""
+shell serves the built UI, the chat-apps placeholder mounts nothing, and each channel is a plugin of the channel slot."""
 from __future__ import annotations
 
 import ast
@@ -12,14 +12,13 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 import app as app_package
-from app.channels import catalog_manifest
 from app.channels import web_shell
 from app.channels.api import ApiChannel
 from app.channels.chat_apps import ChatAppsChannel
 from app.channels.cli import CliChannel
 from app.channels.web_shell import WebShellChannel
 from app.channels.ws import WsChannel
-from app.kernel.catalog import BUILTIN_MANIFESTS
+from app.bootstrap import builtin_plugins
 from app.main import app as main_app
 from app.main import create_app
 
@@ -162,18 +161,24 @@ def test_chat_apps_placeholder_imports_no_chat_platform() -> None:
 # --- manifests ------------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize(("channel", "plugin_id"), [
-    (ApiChannel, "channel.api_ws"),
-    (WsChannel, "channel.api_ws"),
+    (ApiChannel, "channel.api"),
+    (WsChannel, "channel.ws"),
     (WebShellChannel, "channel.web_shell"),
     (CliChannel, "channel.cli"),
     (ChatAppsChannel, "channel.chat_apps"),
 ])
-def test_channel_manifest_is_its_builtin_catalog_entry(channel: type, plugin_id: str) -> None:
+def test_channel_is_a_plugin_of_the_channel_slot_and_part_of_the_builtin_set(channel: type, plugin_id: str) -> None:
     manifest = channel.manifest
     assert manifest.id == plugin_id
-    assert manifest.layer == "channel"
-    assert manifest == catalog_manifest(plugin_id)
-    assert manifest in BUILTIN_MANIFESTS
+    assert manifest.slot == "channel"
+    assert manifest in [plugin.manifest for plugin in builtin_plugins()]
+
+
+def test_the_web_shell_starts_after_the_channels_it_serves() -> None:
+    from app.bootstrap import build_kernel
+
+    order = [plugin.manifest.id for plugin in build_kernel().host.active("channel")]
+    assert order.index("channel.web_shell") > order.index("channel.api") and order.index("channel.web_shell") > order.index("channel.ws")
 
 
 def test_cli_channel_is_partly_built_and_mounts_no_http_surface() -> None:

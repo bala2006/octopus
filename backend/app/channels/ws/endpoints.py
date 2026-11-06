@@ -42,7 +42,7 @@ async def _auth(ws: WebSocket, workspace_id: str):  # type: ignore[no-untyped-de
         if user is None:
             return None, None
         try:
-            ctx = await load_project(workspace_id, user, rdb, kernel=ws.app.state.kernel)
+            ctx = await load_project(workspace_id, user, rdb, kernel=getattr(ws.app.state, "kernel", None))
         except HTTPException:
             return user, None
     return user, ctx
@@ -104,13 +104,27 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
             await send({"type": r.type, "run_id": run_id, "data": r.payload_json, "seq": r.id, "ts": r.created_at.isoformat(), "replay": True})
         await ws.send_json({"type": "replay_done", "run_id": run_id, "data": {"last_seq": sent_seq}})
 
+        async def resync() -> None:
+            """The queue overflowed while this client was slow: read what it missed from the durable log."""
+            nonlocal sent_seq
+            async with ctx.sf() as db:
+                missed = await RunEventRepository(db).replay_after(run_id, sent_seq)
+            for row in missed:
+                await ws.send_json({"type": row.type, "run_id": run_id, "data": row.payload_json,
+                                    "seq": row.id, "ts": row.created_at.isoformat(), "replay": True})
+                sent_seq = row.id
+
         async def pump() -> None:
             while True:
                 try:
                     ev = await asyncio.wait_for(queue.get(), timeout=20)
                 except asyncio.TimeoutError:
+                    if queue.take_lag():
+                        await resync()
                     await ws.send_json({"type": "ping", "data": {}})
                     continue
+                if queue.take_lag():  # events were dropped behind this one: re-read the log, then the queued ones are skipped
+                    await resync()
                 await send(ev)
 
         async def receive() -> None:

@@ -105,7 +105,7 @@ PLUGINS = (
     ServicePlugin(
         Manifest(id="tool.mcp", slot="tool", kind="tool family", version="1.0.0", title="MCP tool",
                  description="mcp_call: use the MCP servers granted to an agent and the built-in browser.",
-                 provides=('tools.mcp',), requires=('mcp.client',), optional=('browser.sessions',), permissions=('network', 'exec'), emits=('browser_action',)),
+                 provides=('tools.mcp',), requires=('mcp.client',), optional=('browser.sessions', 'browser.frames'), permissions=('network', 'exec'), emits=('browser_action',)),
         tools={"mcp": _mcp_tools}, run_methods=_mcp_methods),
     ServicePlugin(
         Manifest(id="tool.memory", slot="tool", kind="tool family", version="1.0.0", title="Memory tool",

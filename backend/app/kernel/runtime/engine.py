@@ -31,7 +31,7 @@ from app.kernel.runtime import board, lifecycle, mailbox, run_control, run_state
 from app.kernel.runtime.context import build_turn_prompts
 from app.kernel.runtime.execution import ExecutionService, execution_field
 from app.kernel.runtime.loopguard import LoopDetector
-from app.kernel.runtime.nullflow import NullFlow, NullOrg
+from app.kernel.runtime.nullflow import FLOW_METHODS, ORG_METHODS, NullFlow, NullOrg
 from app.sdk import actions as A
 from app.sdk.agents import AgentSpec, role_category
 from app.sdk.approval_modes import normalize_mode
@@ -563,6 +563,20 @@ class RunRuntime:
     load_roles = lifecycle.load_roles
     finalize = lifecycle.finalize
     _finalize = lifecycle._finalize
+
+
+def _forward(owner: str, name: str):  # type: ignore[no-untyped-def]
+    def method(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return getattr(getattr(self, owner), name)(*args, **kwargs)
+
+    method.__name__ = name
+    return method
+
+
+for _name in FLOW_METHODS:
+    setattr(RunRuntime, _name, _forward("flow", _name))
+for _name in ORG_METHODS:
+    setattr(RunRuntime, _name, _forward("org", _name))
 
 async def load_run(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
     """Read a run row and its owner's user id from the project database."""

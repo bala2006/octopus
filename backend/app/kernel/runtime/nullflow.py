@@ -82,3 +82,12 @@ class NullOrg:
 
     async def act_update_agent(self, agent: Any, a: Any) -> None:
         return None
+
+
+def _public(cls: type) -> tuple[str, ...]:
+    return tuple(name for name in vars(cls) if not name.startswith("__"))
+
+
+# The runtime exposes these names and forwards each to run.flow / run.org (the plugin object, or the null stand-in).
+FLOW_METHODS = _public(NullFlow)
+ORG_METHODS = _public(NullOrg)
