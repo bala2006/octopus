@@ -33,7 +33,7 @@ modules directly (see section 9).
 | Project files | `<project>/…` | what agents read and write (sandboxed) |
 | Working docs | `<project>/.octopus/work/` | agents' working material (specs, plans, briefs, reviews, QA notes). This is the only part of `.octopus/` agents can read or write. |
 
-Both databases are migrated with Alembic (`backend/migrations/{registry,project}`). The project database is migrated when
+Queries go through the repositories in `backend/app/db/repositories.py`. Each repository is bound to a session the caller owns and does not commit, so transactions keep their boundaries. Both databases are migrated with Alembic (`backend/migrations/{registry,project}`). The project database is migrated when
 its folder is first opened. Opening a folder that has `.octopus/project.json` re-attaches its history. When a project opens,
 any run left `queued` or `running` by the previous process is marked `paused`, so the user can resume it.
 
