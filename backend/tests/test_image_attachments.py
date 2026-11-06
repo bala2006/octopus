@@ -89,7 +89,7 @@ async def test_goal_images_are_stored_announced_and_sent_to_the_model(client, wo
     img = goal_msg["meta"]["images"][0]
     r = await client.get(f"/api/v1/w/{workspace['id']}/runs/{run['id']}/attachments/{img['name']}")
     assert r.status_code == 200 and r.content == png and r.headers["content-type"] == "image/png"
-    req = next(q for q in seen if q.metadata.get("mock_context"))
+    req = next(q for q in seen if q.metadata.get("turn_context"))
     assert req.images == [{"mime": "image/png", "data": base64.b64encode(png).decode()}]
 
 

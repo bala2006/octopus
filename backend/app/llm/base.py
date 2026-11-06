@@ -64,7 +64,7 @@ class LLMRequest:
     base_url: str | None = None
     json_mode: bool = False
     extra: dict[str, Any] = field(default_factory=dict)  # provider options, e.g. Azure api_version / Entra auth
-    metadata: dict[str, Any] = field(default_factory=dict)  # consumed by the mock provider only
+    metadata: dict[str, Any] = field(default_factory=dict)  # free-form; read by test fakes and provider adapters
     # Native function calling: tool definitions ({name, description, parameters: JSON schema}) and, for the follow-up calls
     # of a tool loop, the provider-native items to append after `messages` (previous output items + tool outputs).
     tools: list[dict[str, Any]] = field(default_factory=list)

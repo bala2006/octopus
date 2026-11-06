@@ -1,29 +1,30 @@
 import * as React from "react";
+import "./navigation.css";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  ArrowUpRight,
+  ArrowLeft,
+  ArrowRight,
+  Bell,
   BookOpen,
   ChevronDown,
   ChevronRight,
-  FileCode2,
   Folder,
   FolderOpen,
   History,
   Home,
   MessageSquare,
   Moon,
-  Network,
   PanelLeftClose,
+  PanelLeft,
   PanelLeftOpen,
+  CircleHelp,
   Plus,
-  Search,
   Settings,
   SquarePen,
   Sun,
   X,
 } from "lucide-react";
 import {
-  useCompanies,
   useCompanyId,
   useRuns,
   useWorkspaceId,
@@ -32,39 +33,43 @@ import {
 import { useApp } from "@/stores/app";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Tip } from "@/components/ui/overlays";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/overlays";
 import { useOpenFolder } from "@/features/workspaces/useOpenFolder";
 import { threadKey, useWorkbenchStore } from "@/features/editor/workbenchStore";
+import { CommandPalette } from "./CommandPalette";
 
 const VIEWS = [
-  { to: "agent", label: "Conversations", icon: MessageSquare },
-  { to: "workspace", label: "Workspace", icon: FileCode2 },
-  { to: "canvas", label: "Team canvas", icon: Network },
-  { to: "runs", label: "Runs", icon: History },
-  { to: "artifacts", label: "Changes and artifacts", icon: FolderOpen },
+  { to: "agent", label: "Chats", icon: MessageSquare },
+  { to: "runs", label: "Activity", icon: History },
 ];
 
 export function DesktopLayout({
   children,
   header,
+  hideHeader = false,
 }: {
   children: React.ReactNode;
   header: React.ReactNode;
+  hideHeader?: boolean;
 }) {
-  const w = useWorkspaceId();
   const location = useLocation();
+  const w = useWorkspaceId();
   const { data: projects } = useWorkspaces();
-  const target = w || projects?.find((project) => project.exists)?.id;
+  // The project sidebar is shown only on the workspace Chats view.
+  const chatsView = Boolean(w) && location.pathname.split("/")[3] === "agent";
   const { theme, toggleTheme } = useApp();
-  const folder = useOpenFolder();
   const [sidebar, setSidebar] = React.useState(() => window.innerWidth >= 768);
+  const [showChats, setShowChats] = React.useState(false);
   const [mobile, setMobile] = React.useState(() => window.innerWidth < 768);
+  const sidebarView = chatsView || showChats;
   const sidebarRef = React.useRef<HTMLElement>(null);
   const toggleRef = React.useRef<HTMLButtonElement>(null);
   const closeSidebar = React.useCallback(() => {
     setSidebar(false);
-    toggleRef.current?.focus();
-  }, []);
+    setShowChats(false);
+    if (mobile) toggleRef.current?.focus();
+    else requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-label="Expand navigation bar"]')?.focus());
+  }, [mobile]);
   React.useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
     const resize = () => {
@@ -107,85 +112,57 @@ export function DesktopLayout({
     return () => window.removeEventListener("keydown", keydown);
   }, [mobile, sidebar, closeSidebar]);
 
+  const project = projects?.find((item) => item.id === w);
+  // The project sidebar owns a column on desktop. Elsewhere (mobile drawer,
+  // collapsed sidebar, non-chat views) the identity and actions share the bar.
+  const sidebarColumn = chatsView && !mobile && sidebar;
+  const identity = w ? (
+    <span className="topbar-project" title={project?.name}><span>{project?.name ?? "Project"}</span></span>
+  ) : null;
+  const actions = w ? (
+    <TopBarActions
+      chatsView={chatsView}
+      sidebar={sidebar}
+      mobile={mobile}
+      onToggleSidebar={() => setSidebar((open) => !open)}
+      toggleRef={toggleRef}
+    />
+  ) : null;
+
   return (
     <div className="desktop-layout">
-      <nav className="activity-rail" aria-label="Main">
-        <Tip content="All projects" side="right">
-          <Link
-            to="/"
-            aria-label="All projects"
-            className={cn("rail-item", !w && "is-active")}
-          >
-            <Home />
-          </Link>
-        </Tip>
-        <div className="rail-divider" />
-        {VIEWS.map(({ to, label, icon: Icon }) => (
-          <Tip key={to} content={label} side="right">
-            {target ? (
-              <Link
-                to={target ? `/w/${target}/${to}` : "/"}
-                aria-label={label}
-                className={cn(
-                  "rail-item",
-                  w && location.pathname.split("/")[3] === to && "is-active",
-                )}
-              >
-                <Icon />
-              </Link>
-            ) : (
-              <button
-                className="rail-item"
-                aria-label={label}
-                onClick={folder.open}
-              >
-                <Icon />
-              </button>
-            )}
-          </Tip>
+      <div className="app-top-rail" role="toolbar" aria-label="Application menu">
+        <div className="app-top-navigation">
+          <button type="button" disabled aria-label="Back"><ArrowLeft /></button>
+          <button type="button" disabled aria-label="Forward"><ArrowRight /></button>
+          <button type="button" disabled aria-label="Toggle sidebar"><PanelLeft /></button>
+        </div>
+        {["File", "Edit", "View", "Help"].map((label) => <button key={label} type="button" disabled className="app-top-menu">{label}</button>)}
+      </div>
+      <nav className="activity-rail" aria-label="Main navigation">
+        {chatsView && !sidebar && <Button variant="ghost" size="icon" className="rail-item rail-toggle" aria-label="Expand navigation bar" aria-expanded={false} onClick={() => setSidebar(true)}><img src="/octopus.svg" alt="" /></Button>}
+        <Link to="/" aria-label="All projects" className={cn("rail-item", location.pathname === "/" && "is-active")}><Home /></Link>
+        {VIEWS.map(({ to, label, icon: Icon }) => to === "agent" ? (
+          <button key={to} className={cn("rail-item", sidebarView && sidebar && "is-active")} aria-label={label} aria-expanded={sidebarView && sidebar} onClick={() => { if (sidebarView && sidebar) closeSidebar(); else { setShowChats(true); setSidebar(true); } }}><Icon /></button>
+        ) : (
+          <Link key={to} to="/activity" aria-label={label} className={cn("rail-item", location.pathname === "/activity" && "is-active")}><Icon /></Link>
         ))}
         <div className="flex-1" />
-        <Tip content="Guide" side="right">
-          <Link
-            to={w ? `/w/${w}/guide` : "/guide"}
-            aria-label="Guide"
-            className="rail-item"
-          >
-            <BookOpen />
-          </Link>
-        </Tip>
-        {
-          <Tip content="Settings" side="right">
-            <Link
-              to={w ? `/w/${w}/settings` : "/settings"}
-              aria-label="Settings"
-              className={cn(
-                "rail-item",
-                location.pathname.endsWith("/settings") && "is-active",
-              )}
-            >
-              <Settings />
-            </Link>
-          </Tip>
-        }
-        <Tip
-          content={theme === "dark" ? "Light theme" : "Dark theme"}
-          side="right"
-        >
-          <button
-            className="rail-item"
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-          >
-            {theme === "dark" ? <Sun /> : <Moon />}
-          </button>
-        </Tip>
-        <Link to="/" aria-label="Octopus home" className="rail-brand">
-          <img src="/octopus.svg" alt="" />
-        </Link>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="rail-profile" aria-label="Open profile menu"><span>AA</span></button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="right" className="w-64">
+            <DropdownMenuLabel className="flex flex-col gap-1"><span className="text-foreground">Octopus</span><span className="font-normal">Local workspace</span></DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={toggleTheme}>{theme === "dark" ? <Sun /> : <Moon />}{theme === "dark" ? "Light mode" : "Dark mode"}</DropdownMenuItem>
+            <DropdownMenuItem asChild><Link to={w ? `/w/${w}/settings` : "/settings"}><Settings />Settings</Link></DropdownMenuItem>
+            <DropdownMenuItem asChild><Link to={w ? `/w/${w}/guide` : "/guide"}><CircleHelp />Help</Link></DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </nav>
       <div className="desktop-surface">
-        {sidebar && mobile && (
+        {sidebarView && sidebar && mobile && (
           <button
             className="sidebar-backdrop"
             tabIndex={-1}
@@ -193,48 +170,56 @@ export function DesktopLayout({
             onClick={closeSidebar}
           />
         )}
-        {sidebar && (
-          <ProjectSidebar
-            mobile={mobile}
-            onClose={closeSidebar}
-            panelRef={sidebarRef}
-          />
-        )}
-        <div className="desktop-main">
-          <header className="desktop-header">
-            <Button
-              ref={toggleRef}
-              variant="ghost"
-              size="icon"
-              aria-label={
-                sidebar ? "Hide project sidebar" : "Show project sidebar"
-              }
-              aria-expanded={sidebar}
-              onClick={() => setSidebar(!sidebar)}
-            >
-              {sidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
-            </Button>
-            {header}
+        {!hideHeader && (
+          <header className="desktop-topbar">
+            {sidebarColumn && (
+              <div className="topbar-identity">
+                <Link to="/" className="topbar-brand" aria-label="Octopus home"><img src="/octopus.svg" alt="" /><span>Octopus</span></Link>
+                <span className="flex-1" />
+                {actions}
+              </div>
+            )}
+            <div className="desktop-header">
+              {identity}
+              {identity && (
+                chatsView ? <span className="topbar-breadcrumb-separator" aria-hidden>/</span> : <span className="topbar-divider" aria-hidden />
+              )}
+              {header}
+              {!sidebarColumn && actions}
+            </div>
           </header>
-          <main
-            id="main-content"
-            className="min-h-0 min-w-0 flex-1 overflow-hidden"
-          >
-            {children}
-          </main>
+        )}
+        <div className="desktop-body">
+          {sidebarView && (!mobile || sidebar) && (
+            <ProjectSidebar
+              mobile={mobile}
+              sidebarCollapsed={!sidebar}
+              onClose={closeSidebar}
+              panelRef={sidebarRef}
+            />
+          )}
+          <div className="desktop-main">
+            <main
+              id="main-content"
+              className="min-h-0 min-w-0 flex-1 overflow-hidden"
+            >
+              {children}
+            </main>
+          </div>
         </div>
       </div>
-      {folder.element}
     </div>
   );
 }
 
 function ProjectSidebar({
   mobile,
+  sidebarCollapsed,
   onClose,
   panelRef,
 }: {
   mobile: boolean;
+  sidebarCollapsed: boolean;
   onClose: () => void;
   panelRef: React.Ref<HTMLElement>;
 }) {
@@ -243,15 +228,14 @@ function ProjectSidebar({
   const navigate = useNavigate();
   const projects = useWorkspaces();
   const { companyId, setCompanyId } = useCompanyId();
-  const companies = useCompanies(w);
+  const target = w || projects.data?.find((project) => project.exists)?.id;
   const runs = useRuns(w, companyId || undefined, true);
+  const recentRuns = useRuns(target || "", undefined, false);
   const store = useWorkbenchStore();
   const key = threadKey(w, companyId);
   const selected = store.threads[key];
   const activeRun = selected === undefined ? runs.data?.[0]?.id : selected;
   const folder = useOpenFolder();
-  const [searching, setSearching] = React.useState(false);
-  const [query, setQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState(false);
   const filtered = [...(projects.data ?? [])]
     .sort((a, b) =>
@@ -259,11 +243,6 @@ function ProjectSidebar({
         String(a.last_opened_at ?? ""),
       ),
     )
-    .filter((p) =>
-      `${p.name} ${p.display_path || p.path}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    );
   const newChat = () => {
     if (!w) {
       navigate("/");
@@ -275,28 +254,19 @@ function ProjectSidebar({
   return (
     <aside
       ref={panelRef}
-      className="project-sidebar"
+      className={cn("project-sidebar", sidebarCollapsed && !mobile && "is-collapsed")}
       aria-label="Projects and conversations"
     >
-      <div className="sidebar-heading">
-        <Link
-          to="/"
-          className="flex items-center gap-2.5 text-lg font-semibold tracking-tight"
-        >
-          <img src="/octopus.svg" alt="" className="h-6 w-6" />
-          Octopus
-        </Link>
-        <span className="flex-1" />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Search projects"
-          aria-expanded={searching}
-          onClick={() => setSearching(!searching)}
-        >
-          <Search />
-        </Button>
-        {mobile && (
+      {mobile && (
+        <div className="sidebar-heading">
+          <Link
+            to="/"
+            className="flex items-center gap-2.5 text-lg font-semibold tracking-tight"
+          >
+            <img src="/octopus.svg" alt="" className="h-6 w-6" />
+            Octopus
+          </Link>
+          <span className="flex-1" />
           <Button
             variant="ghost"
             size="icon-sm"
@@ -305,40 +275,42 @@ function ProjectSidebar({
           >
             <X />
           </Button>
-        )}
-      </div>
+        </div>
+      )}
       <button className="sidebar-new-chat" onClick={newChat}>
         <SquarePen className="h-4 w-4" />
         <span>New conversation</span>
         <Plus className="ml-auto h-3.5 w-3.5 opacity-40" />
       </button>
-      {searching && (
-        <div className="px-4 pb-3">
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Filter projects"
-            placeholder="Find a project…"
-            className="sidebar-search"
-          />
-        </div>
-      )}
+
       <div className="sidebar-scroll">
+      <nav className="sidebar-navigation sidebar-mobile-navigation" aria-label="Main navigation">
+        <Link to="/" className={cn("sidebar-nav-item", !w && "is-active")}><Home /><span>All projects</span></Link>
+        {VIEWS.map(({ to, label, icon: Icon }) => to === "runs" ? (
+          <Link key={to} to="/activity" className={cn("sidebar-nav-item", location.pathname === "/activity" && "is-active")}><Icon /><span>{label}</span></Link>
+        ) : target ? (
+          <Link key={to} to={`/w/${target}/${to}`} className={cn("sidebar-nav-item", w && location.pathname.split("/")[3] === to && "is-active")}><Icon /><span>{label}</span></Link>
+        ) : (
+          <Link key={to} to={to === "runs" ? "/activity" : "/"} className="sidebar-nav-item"><Icon /><span>{label}</span></Link>
+        ))}
+        <Link to={w ? `/w/${w}/guide` : "/guide"} className="sidebar-nav-item"><BookOpen /><span>Guide</span></Link>
+        <Link to={w ? `/w/${w}/settings` : "/settings"} className="sidebar-nav-item"><Settings /><span>Settings</span></Link>
+      </nav>
         <div className="sidebar-section-heading">
           <button
             onClick={() => setCollapsed(!collapsed)}
             aria-expanded={!collapsed}
-            className="flex items-center gap-1.5"
+            className="sidebar-section-title"
           >
-            {collapsed ? <ChevronRight /> : <ChevronDown />}Projects
+            Projects
+            {collapsed ? <ChevronRight /> : <ChevronDown />}
           </button>
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Open project folder"
-            onClick={folder.open}
-            loading={folder.busy}
+            aria-label="Add project"
+            title="Add project"
+            onClick={folder.openPicker}
           >
             <Plus />
           </Button>
@@ -383,113 +355,105 @@ function ProjectSidebar({
                     <ChevronDown className="!h-3 !w-3 opacity-50" />
                   )}
                 </Link>
-                {w === project.id && (
-                  <div className="sidebar-conversations">
-                    {selected === null &&
-                      location.pathname.endsWith("/agent") && (
-                        <button
-                          className="sidebar-conversation is-selected"
-                          onClick={newChat}
-                        >
-                          <span>New conversation</span>
-                          <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                        </button>
-                      )}
-                    {runs.data?.slice(0, 12).map((run) => (
-                      <button
-                        key={run.id}
-                        className={cn(
-                          "sidebar-conversation",
-                          activeRun === run.id &&
-                            location.pathname.endsWith("/agent") &&
-                            "is-selected",
-                        )}
-                        title={run.goal.split("\n")[0]}
-                        onClick={() => {
-                          store.selectThread(key, run.id);
-                          navigate(`/w/${w}/agent`);
-                        }}
-                      >
-                        <span>{run.goal.split("\n")[0]}</span>
-                        {["running", "queued", "awaiting_user"].includes(
-                          run.status,
-                        ) && (
-                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-                        )}
-                      </button>
-                    ))}
-                    {runs.isError ? (
-                      <button
-                        className="px-3 py-2 text-xs text-muted-foreground"
-                        onClick={() => void runs.refetch()}
-                      >
-                        Retry conversations
-                      </button>
-                    ) : (
-                      !runs.isLoading &&
-                      !runs.data?.length && (
-                        <p className="px-3 py-2 text-xs text-muted-foreground">
-                          Your conversations will appear here.
-                        </p>
-                      )
-                    )}
-                    {!!runs.data?.length && (
-                      <Link className="sidebar-history" to={`/w/${w}/runs`}>
-                        View all activity
-                        <ArrowUpRight />
-                      </Link>
-                    )}
-                  </div>
-                )}
               </div>
             ))}
             {!projects.isLoading && !projects.isError && !filtered.length && (
               <p className="px-5 py-3 text-xs text-muted-foreground">
-                {query
-                  ? "No matching projects."
-                  : "Open a folder to get started."}
+                Open a folder to get started.
               </p>
             )}
           </div>
         )}
-        {w && !!companies.data?.length && (
-          <div className="sidebar-team">
-            <span className="sidebar-section-label">Current team</span>
-            <select
-              aria-label="Select project team"
-              value={companyId}
-              onChange={(event) => setCompanyId(event.target.value)}
-              className="mx-2 mb-2 w-[calc(100%-1rem)] rounded-lg border bg-surface px-2 py-2 text-xs"
-            >
-              {companies.data.map((company) => (
-                <option key={company.id} value={company.id}>
-                  {company.name}
-                </option>
-              ))}
-            </select>
-            <Link to={`/w/${w}/canvas`}>
-              <Network className="h-4 w-4" />
-              <span>Manage your team</span>
-              <ArrowUpRight className="h-3 w-3" />
-            </Link>
-            <Link to={`/w/${w}/chat`}>
-              <MessageSquare className="h-4 w-4" />
-              <span>Talk to an agent</span>
-            </Link>
-          </div>
-        )}
-      </div>
-      <button className="sidebar-open-folder" onClick={folder.open}>
-        <FolderOpen className="h-4 w-4" />
-        <span>Open project folder</span>
-        <Plus className="ml-auto h-3.5 w-3.5" />
-      </button>
-      <div className="sidebar-footer">
-        <span className="h-1.5 w-1.5 rounded-full bg-success" />
-        <span>Running locally</span>
-        <span className="ml-auto font-mono text-[10px]">OCTOPUS</span>
+        <div className="sidebar-section-heading sidebar-recents-heading">
+          <span>Recents</span>
+        </div>
+        <div className="sidebar-conversations">
+          {w && selected === null && location.pathname.endsWith("/agent") && (
+            <button className="sidebar-conversation is-selected" onClick={newChat}>
+              <span>New conversation</span>
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            </button>
+          )}
+          {recentRuns.data?.slice(0, 20).map((run) => (
+            <button key={run.id} className={cn("sidebar-conversation", w && activeRun === run.id && location.pathname.endsWith("/agent") && "is-selected")} title={run.goal.split("\n")[0]} onClick={() => { if (run.company_id && target) { if (w === target) setCompanyId(run.company_id); store.selectThread(threadKey(target, run.company_id), run.id); } if (target) navigate(`/w/${target}/agent`); }}>
+              <span>{run.goal.split("\n")[0] || "New conversation"}</span>
+              {["running", "queued", "awaiting_user"].includes(run.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+            </button>
+          ))}
+          {recentRuns.isError && <button className="px-3 py-2 text-xs text-muted-foreground" onClick={() => void recentRuns.refetch()}>Retry recents</button>}
+          {target && !recentRuns.isLoading && !recentRuns.data?.length && <p className="px-3 py-2 text-xs text-muted-foreground">Recent conversations will appear here.</p>}
+        </div>
       </div>
       {folder.element}
     </aside>
+  );
+}
+
+/** Notifications and quick open, plus the sidebar toggle. */
+function TopBarActions({
+  chatsView,
+  sidebar,
+  mobile,
+  onToggleSidebar,
+  toggleRef,
+}: {
+  chatsView: boolean;
+  sidebar: boolean;
+  mobile: boolean;
+  onToggleSidebar: () => void;
+  toggleRef: React.RefObject<HTMLButtonElement>;
+}) {
+  return (
+    <div className="topbar-actions">
+      <LiveBell />
+      <CommandPalette />
+      {chatsView && (
+        <button
+          ref={toggleRef}
+          type="button"
+          className="topbar-action"
+          aria-label={
+            mobile
+              ? sidebar
+                ? "Hide project sidebar"
+                : "Show project sidebar"
+              : sidebar
+                ? "Collapse navigation bar"
+                : "Expand navigation bar"
+          }
+          aria-expanded={sidebar}
+          onClick={onToggleSidebar}
+        >
+          {sidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** One bell for team activity: amber when the team waits on you. */
+function LiveBell() {
+  const w = useWorkspaceId();
+  const { data } = useRuns(w, undefined, true);
+  const live =
+    data?.filter((run) =>
+      ["running", "paused", "awaiting_user", "queued"].includes(run.status),
+    ) ?? [];
+  const needsYou = live.some((run) => run.status === "awaiting_user");
+  const first = live.find((run) => run.status === "awaiting_user") ?? live[0];
+  const label = needsYou
+    ? "Notifications: your team is waiting for you"
+    : live.length
+      ? `Notifications: ${live.length} active conversation${live.length === 1 ? "" : "s"}`
+      : "Notifications";
+  return (
+    <Link
+      to={first ? `/w/${w}/runs/${first.id}` : `/w/${w}/runs`}
+      aria-label={label}
+      className={cn("topbar-action", needsYou && "has-alert")}
+    >
+      <Bell />
+      {needsYou && <span className="topbar-dot" aria-hidden />}
+    </Link>
   );
 }

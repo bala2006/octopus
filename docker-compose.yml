@@ -1,5 +1,5 @@
 # Containerised setup (still fully local). Start it with ./start.sh (macOS/Linux) or start.bat (Windows): they also
-# run the laptop-side folder picker (scripts/folder_bridge.py), so "Open project folder" shows your OS's own dialog.
+# run the laptop-side folder picker (scripts/folder_bridge.py), so "Create project" can choose a folder from your OS.
 #
 # Your laptop folder OCTOPUS_HOST_DIR (default: your home folder) is shared with the container at /host, so any folder
 # inside it can be opened as a project. Paths are shown as laptop paths. Narrow it if you like, e.g.

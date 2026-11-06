@@ -14,7 +14,7 @@ Use **New conversation** to start a separate run. History and unfinished compose
 | Plan | Propose changes in the existing shadow-file plan system. Project files are unchanged. |
 | Ask | Read and explain. File writes and commands are disabled. |
 
-Modes cannot elevate a read-only or plan project's permissions. A continuing conversation keeps the permission level it started with; start a new conversation to change mode. The panel labels **Offline demo** when no live model is configured. Demo results are scripted; configure a model in Settings for real coding assistance.
+Modes cannot elevate a read-only or plan project's permissions. A continuing conversation keeps the permission level it started with; start a new conversation to change mode. The panel shows **Model not connected** when no live model is configured. Connect a model in Settings to run agents.
 
 Attach context explicitly with **@ Files**, **Current**, or **Selection**. File attachments use the latest editor draft when the file is open, or read its saved content when it is closed. A selection is a snapshot with its path and line range. Unsaved snapshots are labelled and never saved just because they were attached. Large context is bounded and marked as truncated. The advanced run dialog also provides image and file attachments and budget controls.
 

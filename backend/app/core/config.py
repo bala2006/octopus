@@ -42,9 +42,9 @@ class Settings(BaseSettings):
     single_user_mode: bool = True
     single_user_email: str = "demo@octopus.local"
 
-    demo_mode: bool = True  # when true, the mock provider is used for any agent lacking a key
-    default_provider: str = "azure"
-    default_model: str = "gpt-6-luna"  # Azure OpenAI deployment name
+    default_provider: str = "opencode"
+    default_model: str = "default"  # use the model configured in the host's OpenCode
+    opencode_executable: str = ""  # existing host installation; never downloaded by Octopus
     # Reasoning effort used when an agent / run says "Auto". xhigh: Azure's recommendation for long agentic runs, and the
     # best quality short of "max" (which is much slower). Set to "medium" (the model's own default) to trade quality for speed.
     default_reasoning_effort: str = "xhigh"

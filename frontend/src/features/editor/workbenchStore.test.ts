@@ -40,22 +40,20 @@ describe("home prompt handoff", () => {
     ).toEqual({
       model: { provider: "azure", model: "my-deployment" },
       reasoning_effort: "high",
-    });
-    expect(
-      recordedComposerSettings({
-        force_mock: true,
-        model: { provider: "azure", model: "unused" },
-      }),
-    ).toEqual({
-      model: { provider: "mock", model: "mock/demo" },
-      reasoning_effort: "default",
+      approvalMode: "ask",
+      engineering_workflow: "auto",
     });
     expect(
       recordedComposerSettings({
         model: "old-format",
         reasoning_effort: "unknown",
       }),
-    ).toEqual({ model: null, reasoning_effort: "default" });
+    ).toEqual({
+      model: null,
+      reasoning_effort: "default",
+      approvalMode: "ask",
+      engineering_workflow: "auto",
+    });
   });
   it("opens a new conversation in the selected company and consumes the prompt once", () => {
     const key = threadKey("project", "team");

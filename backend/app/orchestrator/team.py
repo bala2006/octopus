@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.db.base import new_id, utcnow
 from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
-from app.llm.demo_script import role_category
+from app.orchestrator.roles import role_category
 from app.orchestrator import actions as A
 from app.orchestrator.context import AgentSpec
 from app.orchestrator.permissions import LEVEL_ORDER, EdgeSpec, allowed_recipients, effective_level

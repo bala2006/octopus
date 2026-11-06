@@ -286,12 +286,11 @@ const SECTIONS: Section[] = [
   {
     id: "projects", title: "Projects are folders", icon: FolderOpen,
     body: <>
-      <p>A project is simply a folder on your computer. <b>Open project folder</b> shows your system's own folder window (Finder, Explorer or your
-        Linux file chooser), where you can pick a folder or create a new one. Agents can read and write <b>only inside it</b>.</p>
+      <p>A project is a folder on your computer. Select <b>New project</b>, choose a source folder, and give the project any name you like. If you leave the name blank, Octopus uses the folder name. Agents can read and write <b>only inside the selected folder</b>.</p>
       <p>Octopus creates and manages a hidden <code className="mx-1 rounded bg-muted px-1 text-foreground">.octopus/</code>folder there, like
         <code className="mx-1 rounded bg-muted px-1 text-foreground">.git</code>. It holds your teams, chats, run history and file versions, and git ignores
         it automatically. Re-open the folder later and everything is back. Removing a project from the list never deletes your files.</p>
-      <Shot name="welcome" alt="Welcome screen with the list of projects" caption="Open a folder from the welcome screen. Switch projects any time from the top-left." />
+      <Shot name="welcome" alt="Welcome screen with the list of projects" caption="Create a project from a local folder. Switch projects any time from the project selector." />
     </>,
   },
   {
@@ -334,47 +333,45 @@ const SECTIONS: Section[] = [
       <Shot name="quick-config" alt="Quick configuration popover next to an agent" />
       <Tips items={[
         <>Each agent can use a different model. Put a strong model on the manager and a fast one on the workers.</>,
-        <>Agents with <b>Manage team</b> can hire new teammates during a run. New hires show an <i>AI hire</i> badge.</>,
+        <>Agents with <b>Manage team</b> can hire new teammates while working with the team. New hires show an <i>AI hire</i> badge.</>,
       ]} />
     </>,
   },
   {
     id: "chat", title: "Chat with one agent", icon: MessagesSquare,
     body: <>
-      <p><b>Chat</b> is a direct conversation with a single agent. It's the quickest way to test a prompt, ask about your code, or try a model before a full run.
-        You can attach files, and the agent can use its tools.</p>
+      <p><b>Agent chats</b> are optional direct conversations with one teammate. For normal project work, use <b>Conversation</b>: each message goes to the team orchestrator, which can answer directly or coordinate other agents through the company's channels.</p>
       <Shot name="chat" alt="Direct chat with an agent" />
     </>,
   },
   {
-    id: "runs", title: "Run the team", icon: Play,
+    id: "runs", title: "Work with your team", icon: Play,
     body: <>
-      <p>Press <b>Run</b>, type a goal (for example <i>"Build a todo app with login"</i>) and choose how much freedom the team gets:</p>
+      <p>Send a message in <b>Conversation</b> (for example <i>"Build a todo app with login"</i>). The orchestrator chooses who should help and routes work through your team's communication channels. Follow up in the same conversation to steer or extend the work.</p>
       <PermissionLadder />
-      <p>While it runs you see who is thinking, messages flying along channels, and files being written. You can drag agents around to get a better view.
+      <p>While your team works, you see who is thinking, messages moving between agents, and files being written. You can open Team activity for the full collaboration view.
         Click the <b>tokens / cost</b> meter for the exact usage Azure reported: uncached input, cached input, cache writes and output (reasoning
-        included), each with its cost at gpt-6-luna prices. If an agent needs your approval, the run pauses and
-        a <b>Needs you</b> badge appears in the top bar. You can pause, send a message to the team, or stop at any time.</p>
-      <Shot name="run" alt="Live run view with the team graph and message feed" />
+        included), each with its cost. If an agent needs your approval, the team pauses and a <b>Needs you</b> badge appears in the top bar. You can pause, send a message to the team, or stop their work at any time.</p>
+      <Shot name="run" alt="Live team activity with the company graph and message feed" />
     </>,
   },
   {
     id: "artifacts", title: "Review the results", icon: FileCode2,
     body: <>
       <p><b>Artifacts</b> lists every file the team created or changed, with a diff for each version and the final report. <b>Project files</b> shows the
-        whole folder and updates live during a run. <b>Preview</b> runs HTML apps with their CSS, JS and images, and renders Markdown, images and PDFs. In <b>Plan</b> mode nothing touches your
+        whole folder and updates live while your team works. <b>Preview</b> runs HTML apps with their CSS, JS and images, and renders Markdown, images and PDFs. In <b>Plan</b> mode nothing touches your
         project until you apply the plan here. You can also download everything as a zip.</p>
       <Shot name="artifacts" alt="Artifacts page with files and diffs" />
     </>,
   },
   {
-    id: "history", title: "Past runs", icon: History,
-    body: <p><b>Runs</b> keeps every run with its full timeline. Open one to replay it step by step, see the cost and tokens, or read the final report again.</p>,
+    id: "history", title: "Team activity", icon: History,
+    body: <p><b>Activity</b> keeps the team's past conversations and collaboration details. Reopen a conversation to continue it, review agent messages, or see the files the team changed.</p>,
   },
   {
     id: "models", title: "Connect Azure OpenAI (gpt-6-luna)", icon: Cloud,
     body: <>
-      <p>Out of the box Octopus runs in <b>Demo Mode</b>: a scripted offline model, so you can try everything for free. To use real models open
+      <p>Every agent runs on your Azure OpenAI deployment. To connect it, open
         <b> Settings › Model</b> and fill in three things:</p>
       <ol className="space-y-1.5 pl-5 [list-style:decimal]">
         <li><b>Endpoint</b>: paste it exactly as the Azure or Foundry portal shows it. Octopus detects the format and shows which URL it will call.</li>
@@ -383,7 +380,7 @@ const SECTIONS: Section[] = [
       </ol>
       <EndpointExamples />
       <p>Click <b>Save</b>, then <b>Test connection</b>. The deployment now appears in every agent's model picker. Reasoning models that reject settings such as
-        temperature are handled automatically. Every agent runs on this deployment; the only other choice is the offline Demo model.</p>
+        temperature are handled automatically. Every agent runs on this deployment.</p>
       <Shot name="settings" alt="Azure OpenAI settings card" />
     </>,
   },

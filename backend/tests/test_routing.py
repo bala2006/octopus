@@ -58,11 +58,27 @@ async def test_broadcast_only_reaches_connected(client, workspace) -> None:
     agents = [agent("a1", "Alice", entry=True), agent("b1", "Bob"), agent("c1", "Carol"), agent("d1", "Dan")]
     edges = [edge("e1", "a1", "b1"), edge("e2", "a1", "c1", "consult", bidirectional=True)]
     cid = await make_company(client, workspace, agents, edges)
-    set_provider_override(ScriptedProvider({"Alice": [env(msg("all", "question", "status?")), env({"action": "finish", "summary": "x"})]}))
+    set_provider_override(ScriptedProvider({"Alice": [env(msg("all", "status_update", "Starting work")), env({"action": "finish", "summary": "x"})]}))
     run = await start_run(client, workspace, cid)
     await wait_status(client, workspace, run["id"])
-    to = {m["to_agent_id"] for m in await run_messages(client, workspace, run["id"]) if m["from_agent_id"] == "a1" and m["type"] == "question"}
+    to = {m["to_agent_id"] for m in await run_messages(client, workspace, run["id"]) if m["from_agent_id"] == "a1" and m["type"] == "status_update"}
     assert to == {"b1", "c1"}
+
+
+async def test_broadcast_question_is_refused_without_waking_peers_or_waiting(client, workspace) -> None:
+    agents = [agent("a1", "Alice", entry=True), agent("b1", "Bob"), agent("c1", "Carol")]
+    cid = await make_company(client, workspace, agents, [edge("e1", "a1", "b1"), edge("e2", "a1", "c1", "consult", bidirectional=True)])
+    provider = ScriptedProvider({"Alice": [env(msg("all", "question", "Who knows the specs?")), env({"action": "finish", "summary": "I will ask one peer"})]})
+    set_provider_override(provider)
+    run = await start_run(client, workspace, cid, budget={"max_turns": 3})
+    final = await wait_status(client, workspace, run["id"], timeout=5)
+    assert final["status"] == "completed", final["halt_reason"]
+    assert provider.calls == ["Alice", "Alice"]
+    assert not any(m["type"] == "question" for m in await run_messages(client, workspace, run["id"]))
+    rejected = await events(client, workspace, run["id"], "message_rejected")
+    assert len(rejected) == 1
+    assert rejected[0]["payload"]["to_agent_id"] is None
+    assert "Consult one named peer at a time" in rejected[0]["payload"]["reason"]
 
 
 async def test_canvas_rejects_self_loops_and_duplicates(client, workspace) -> None:

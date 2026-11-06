@@ -18,7 +18,7 @@ The maintainer will review reports and coordinate a fix and disclosure as resour
 
 ## Security reminders
 
-- Demo Mode can be used without external model credentials.
+- Octopus needs no external model credentials for its tests; the test suite uses a scripted fake provider.
 - Do not commit `.env` files, API keys, access tokens, personal data, or logs containing secrets.
 - Run Octopus only on machines and folders you trust; check permission settings before enabling tool execution, browser automation, or third-party MCP servers.
 - See the security section of the [README](README.md) for the app's currently documented sandbox and access model.

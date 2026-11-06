@@ -85,9 +85,12 @@ PopoverContent.displayName = "PopoverContent";
 export const TooltipProvider = TooltipPrimitive.Provider;
 export function Tip({ content, children, side = "top", delay = 300 }: { content: React.ReactNode; children: React.ReactNode; side?: "top" | "bottom" | "left" | "right"; delay?: number }) {
   if (!content) return <>{children}</>;
+  const tooltipChild = React.isValidElement(children)
+    ? React.cloneElement(children as React.ReactElement<{ "data-tooltip-managed"?: boolean }>, { "data-tooltip-managed": true })
+    : children;
   return (
     <TooltipPrimitive.Root delayDuration={delay}>
-      <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
+      <TooltipPrimitive.Trigger asChild>{tooltipChild}</TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content side={side} sideOffset={6} className={cn("z-[60] max-h-[var(--radix-tooltip-content-available-height)] max-w-xs overflow-y-auto rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-lg", contentAnim)}>
           {content}

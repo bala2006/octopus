@@ -114,50 +114,6 @@ jobs:
             exit 1
           fi
 
-  e2e:
-    name: E2E · Playwright (Demo Mode)
-    needs: [backend, frontend]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install backend
-        run: |
-          python -m venv backend/.venv
-          backend/.venv/bin/pip install -r backend/requirements.txt
-      - name: Install frontend
-        working-directory: frontend
-        run: npm ci --no-audit --no-fund
-      - uses: actions/download-artifact@v8
-        with:
-          name: frontend-dist
-          path: frontend/dist
-      - name: Install Chromium
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-      - name: Run Playwright
-        working-directory: frontend
-        run: npx playwright test
-      - name: Upload Playwright traces
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-results
-          path: |
-            frontend/test-results
-            frontend/playwright-report
-          retention-days: 7
-
   docker:
     name: Docker images build
     runs-on: ubuntu-latest
@@ -183,7 +139,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: always()
-    needs: [backend, frontend, api-types, e2e, docker]
+    needs: [backend, frontend, api-types, docker]
     runs-on: ubuntu-latest
     steps:
       - name: All required jobs succeeded

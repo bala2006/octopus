@@ -27,7 +27,7 @@ On Windows (PowerShell):
 .\octopus.ps1 start
 ```
 
-You can use **Demo Mode** for testing without Azure credentials. For details and environment configuration, consult the README. Never commit API keys, .env files, user data, model credentials, or other secrets.
+Tests run without Azure credentials: the backend suite answers from a scripted fake provider. For environment configuration, consult the README. Never commit API keys, .env files, user data, model credentials, or other secrets.
 
 ## Submitting a change
 
@@ -38,7 +38,7 @@ You can use **Demo Mode** for testing without Azure credentials. For details and
    make test-backend
    make test-frontend
    ```
-   For UI behavior changes, also run `make e2e` (Playwright browsers must be installed). On Windows, `.\octopus.ps1 test` runs the supported backend and frontend checks.
+   On Windows, `.\octopus.ps1 test` runs the supported backend and frontend checks.
 4. Update user-facing docs when functionality, configuration, or behavior changes.
 5. Submit a pull request to `main` using the PR template. Include what changed, why, how you verified it, and any known limitations.
 

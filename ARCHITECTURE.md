@@ -39,7 +39,7 @@ flowchart TD
 **Actions** (`orchestrator/actions.py`) are Pydantic models: `send_message`, `write_file`, `edit_file`, `read_file`, `list_files`, `run_code`, `mcp_call`, `update_task_board`, `remember`, `request_user_input`, `web_search`, `calculate`, team actions, `finish` and `wait`. Agents only get the actions their tools allow. They reach the model in one of two ways:
 
 - **Native function calling** (`orchestrator/tools.py`, used on the Azure Responses API). Each action is a function tool whose JSON schema is generated from its model; each MCP tool is its own function (`mcp__<server>__<tool>`). A turn is a tool loop: the model's `function_call` items are validated and executed, their results go back as `function_call_output` items together with the replayed output items (encrypted reasoning included, since requests are stateless with `store: false`), and the model continues until it stops calling tools, calls `wait`/`finish`, or asks the user (`budget.max_tool_rounds` calls per turn). Invalid arguments come back to the model as a tool error instead of failing the turn. `NATIVE_TOOLS=false` turns this off.
-- **JSON envelope** (everything else: the offline demo mock, Chat Completions, legacy endpoints). The reply is `{"thought": "...", "actions": [...]}`, described in the prompt, with one repair retry.
+- **JSON envelope** (everything else: Chat Completions, legacy endpoints). The reply is `{"thought": "...", "actions": [...]}`, described in the prompt, with one repair retry.
 
 **Editing files.** `edit_file` replaces exact existing text (`edits: [{old_string, new_string, replace_all?}]`). Each `old_string` must match exactly once unless `replace_all`; edits apply in order and all succeed or none do. The result shows the changed lines with line numbers. It goes through the same permission gate, version history and events as `write_file`.
 
@@ -54,9 +54,9 @@ becomes a structured task message.
 **Shared knowledge.** The engine keeps a team log (files written, task-board changes, decisions, delegations and their
 results, finishes, project notes). Every prompt carries "Team activity since your last turn": the log entries plus one
 line per message between other agents since that agent last acted. `search_project` greps the project and the working
-docs (`.octopus/work/`). **Project memory** (`.octopus/memory.json`, `services/project_memory.py`) outlives runs: notes saved
-with `remember(scope="project")` and an automatic retrospective of each finished run (goal, outcome, files, open tasks,
-decisions, efficiency) are shown to every agent in later runs.
+docs (`.octopus/work/`). **Project memory** is a scoped, versioned store in `services/scoped_memory.py`, kept in the database and
+outliving runs. Each entry is `proposed`, `verified`, `superseded`, or `deleted`. Agents save notes with `remember`, which
+records a `proposed` entry. Notes from a legacy `.octopus/memory.json` are imported as proposals when the owner opens agent memory; the file itself is not rewritten.
 
 **Efficiency metrics.** Each agent turn is counted, and marked as work when it changes a deliverable (not a working doc)
 or runs a command or browser/MCP tool. Runs report work turns vs. all turns, the turn of the first deliverable file and
@@ -94,7 +94,7 @@ checks) per template against a backend and prints a comparison table.
 manager → member `delegate`, member → manager `report`, head ↔ department managers, peer managers `consult`,
 plus explicit cross-department links (reviews, debates, consults). User templates are stored in the global registry
 (`user_templates`) as company exports, so they're reusable in every project. `org_generator.py` designs an org from a
-prompt with the configured model (strict JSON spec), or with a deterministic keyword-based designer in Demo Mode.
+prompt with the connected Azure model (strict JSON spec). Without a connected model, generation fails with a clear error.
 
 **Runtime team management** (`orchestrator/team.py`, mixed into `RunRuntime`):
 
@@ -191,7 +191,7 @@ Event types: `snapshot`, `run_status`, `agent_created`, `agent_updated`, `agent_
 
 ## 7. LLM layer (`backend/app/llm`)
 
-- **One real provider.** `router.PROVIDER_CATALOG` holds Azure OpenAI (`gpt-6-luna` by default) plus the offline `mock`. `prepare_request` routes every non-mock agent to Azure and maps unknown models to the configured deployment. It moves credentials saved on the legacy *Foundry* card to Azure, and in Demo Mode falls back to the mock when Azure isn't configured.
+- **One real provider.** `router.PROVIDER_CATALOG` holds Azure OpenAI (`gpt-6-luna` by default). `prepare_request` routes every agent to Azure, maps unknown models to the configured deployment, and fails with a clear error when Azure isn't connected. It moves credentials saved on the legacy *Foundry* card to Azure.
 - **`azure_v1.AzureV1Provider`** streams from `/openai/v1/responses` (default) or `/openai/v1/chat/completions`. `azure_v1_target()` accepts any endpoint shape and needs no `api-version`.
   - The deployment is sent as `model`, with `reasoning.effort` (Responses) or `reasoning_effort` (Chat).
   - `max_output_tokens` gets reasoning headroom.
@@ -206,14 +206,14 @@ Event types: `snapshot`, `run_status`, `agent_created`, `agent_updated`, `agent_
 
   The runtime aggregates totals, per-agent tokens and cost, and a cost breakdown, and emits them in `usage_update`. Costs are stored in USD. `services/fx.py` supplies USD→display-currency rates (ECB via Frankfurter, with ExchangeRate-API as a fallback), cached for 6h, with the last known rate used offline.
 - **Retries.** `stream_with_retry` retries 429/5xx/network errors with exponential backoff and jitter, but only if nothing has streamed yet.
-- **Demo Mode.** `MockProvider` plus `demo_script.py` implement deterministic, role-aware scripted policies that react to the actual inbox and topology, so edited companies still terminate. QA really runs the generated tests in the sandbox. `followup()` handles continued runs: the entry agent hands the change to a teammate, who records it in `docs/CHANGES.md` and reports back. Usage is estimated and priced at gpt-6-luna rates.
+- **Test fakes.** `backend/tests/fakes/` holds the deterministic, role-aware scripted policy and the offline fake provider that the test suite uses. The policy reacts to the actual inbox and topology, so edited companies still terminate. QA really runs the generated tests in the sandbox. `followup()` handles continued runs: the entry agent hands the change to a teammate, who records it in `docs/CHANGES.md` and reports back. Usage is estimated and priced at gpt-6-luna rates.
 
 ## 7b. Runs continue like chats
 
 `RunManager.continue_run()` is used by `POST /runs/{id}/continue`, by `/interject`, and by the run WebSocket's `interject` message.
 - **Live run:** the message is injected into the running team.
 - **Finished run (`completed`/`failed`/`cancelled`):** the **same run** is re-opened in these steps:
-  1. The `RunRuntime` is rebuilt with `restore()`: the full message history, task board, artifacts, observations, protocol state and mock state.
+  1. The `RunRuntime` is rebuilt with `restore()`: the full message history, task board, artifacts, observations, protocol state and agent state.
   2. The stale mailbox is cleared.
   3. `continue_with()` runs:
      - it records the follow-up;

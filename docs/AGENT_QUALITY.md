@@ -27,7 +27,7 @@ research behind the fixes, and what is still left to do.
 - **SWE-agent (agent-computer interface):** a linter in the edit loop and concise, actionable tool feedback are large wins.
   - Applied: syntax checks for `.py`, `.json`, `.js` and inline `<script>` in the tool result; a missed edit shows the real text where it belongs; edits tolerate an indentation shift.
 - **Reliability of tool calling:** native function calling avoids the parse and repair failures of a JSON envelope.
-  - Applied: Chat Completions endpoints (Azure chat style, litellm) now use native tools too. Only reasoning deployments on chat-only endpoints and the offline demo keep the envelope.
+  - Applied: Chat Completions endpoints (Azure chat style, litellm) now use native tools too. Only reasoning deployments on chat-only endpoints keep the envelope.
 
 ## Shipped, in stages (one commit each)
 

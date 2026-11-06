@@ -24,6 +24,7 @@ from app.core.config import PROJECT_DIRNAME
 
 MAX_FILE_BYTES = 1_000_000
 MAX_LIST = 3000
+MAX_LIST_DIRECTORIES = 12000
 IGNORED_DIRS = {".git", PROJECT_DIRNAME, "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
                 ".ruff_cache", ".tmp", "dist", "build", ".next", ".turbo", ".idea", ".vscode", ".ds_store",
                 ".dart_tool", ".gradle", ".cxx", ".pub-cache", ".npm", "coverage"}
@@ -163,6 +164,8 @@ class ProjectFS:
 
     def list(self, prefix: str = "") -> list[str]:
         out: set[str] = set()
+        visited_dirs = 0
+        inspected_entries = 0
         for base in [self.root] + ([self.shadow] if self.shadow else []):
             start = base
             if prefix:
@@ -170,15 +173,37 @@ class ProjectFS:
                 start = self._inside(base, rel)
                 if not start.is_dir():
                     continue
-            for dirpath, dirnames, filenames in os.walk(start):
-                dirnames[:] = [d for d in dirnames if d.lower() not in IGNORED_DIRS and not os.path.islink(os.path.join(dirpath, d))]
-                for f in filenames:
-                    rel = os.path.relpath(os.path.join(dirpath, f), base).replace("\\", "/")
-                    if f.endswith((".pyc", ".octopus-tmp")) or (not self.allow_secrets and is_secret(rel)):
-                        continue
-                    out.add(rel)
-                    if len(out) >= MAX_LIST:
-                        return sorted(out)
+            pending = [start]
+            while pending:
+                directory = pending.pop()
+                visited_dirs += 1
+                if visited_dirs > MAX_LIST_DIRECTORIES:
+                    return sorted(out)
+                try:
+                    with os.scandir(directory) as entries:
+                        for entry in entries:
+                            inspected_entries += 1
+                            if inspected_entries > MAX_LIST + MAX_LIST_DIRECTORIES:
+                                return sorted(out)
+                            try:
+                                if entry.is_symlink():
+                                    continue
+                                if entry.is_dir(follow_symlinks=False):
+                                    if entry.name.lower() not in IGNORED_DIRS:
+                                        pending.append(Path(entry.path))
+                                    continue
+                                if not entry.is_file(follow_symlinks=False):
+                                    continue
+                                rel = os.path.relpath(entry.path, base).replace("\\", "/")
+                                if entry.name.endswith((".pyc", ".octopus-tmp")) or (not self.allow_secrets and is_secret(rel)):
+                                    continue
+                                out.add(rel)
+                                if len(out) >= MAX_LIST:
+                                    return sorted(out)
+                            except OSError:
+                                continue
+                except OSError:
+                    continue
         return sorted(out)
 
     def search(self, query: str, *, regex: bool = False, prefix: str = "", max_results: int = 80) -> tuple[list[str], int, int]:

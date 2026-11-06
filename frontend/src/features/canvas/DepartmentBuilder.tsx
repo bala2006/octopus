@@ -73,7 +73,7 @@ export function DepartmentBuilder({ open, onOpenChange }: { open: boolean; onOpe
       name: name.trim(), color, reportsTo: target, at: { x: center.x - 125, y: center.y },
       manager: { role: mgr, name: manager.name, roleTitle: manager.title },
       members: members.filter((m) => byKey[m.roleKey]).map((m) => ({ role: byKey[m.roleKey] as RoleTemplateOut, name: m.name, roleTitle: m.title })),
-    }, { provider: settings.data?.default_provider ?? "mock", model: settings.data?.default_model ?? "mock/demo" });
+    }, { provider: settings.data?.default_provider ?? "azure", model: settings.data?.default_model ?? "gpt-6-luna" });
     toast.success(`Added ${name} department`, { description: `${ids.length} agents with channels wired to their manager` });
     onOpenChange(false);
     setTimeout(() => rf.fitView({ nodes: ids.map((id) => ({ id })), padding: 0.6, duration: 400 }), 60);

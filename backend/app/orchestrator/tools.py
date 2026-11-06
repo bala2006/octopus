@@ -32,6 +32,7 @@ DESCRIPTIONS = {
     "run_code": "Run one command in the project's sandboxed terminal, from the project root (e.g. python -m pytest, "
                 "node script.js, npm test). There is no shell: quoted arguments may contain any characters, but pipes, "
                 "&&, ;, redirects and $(...) only work at the danger permission level. Paths stay inside the project.",
+    "record_checkpoint": "Record an engineering workflow output using the required output keys from your brief. Cite real tool_call_ids. Unavailable checks remain unverified. This grants no permission or completion authority.",
     "mcp_call": "Call a tool on an MCP server granted to you.",
     "delegate": "Hand a piece of work to a teammate you have a delegate channel to. The teammate starts right away; its result "
                 "(summary, files changed, task status) comes back as this call's result. Several delegate calls in one reply run "

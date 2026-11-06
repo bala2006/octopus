@@ -15,7 +15,6 @@ watchdog (both auto-pause for a human), human pause and kill switch.
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import json
 import re
 import time
@@ -24,34 +23,34 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func, or_
 
 from app.core.config import PROJECT_DIRNAME, get_settings
 from app.core.logging import get_logger
 from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
 from app.llm.base import CODE_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS, LLMError, LLMOutputTruncated, LLMRequest, LLMResult, ToolCall
-from app.llm.demo_script import role_category
+from app.orchestrator.roles import role_category
 from app.llm.router import get_provider, prepare_request, stream_with_retry
 from app.models import AgentMemory, Artifact, Message, Run, Task
 from app.orchestrator import actions as A
 from app.orchestrator import tools as T
 from app.orchestrator.bus import bus
-from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_system_prompt, build_user_prompt, clip, team_status
+from app.orchestrator.context import TOOL_RESULT_CHARS, AgentSpec, build_turn_prompts, clip
 from app.orchestrator.permissions import (
     EdgeSpec, allowed_recipients, effective_level, find_channel, rejection_reason,
 )
 from app.orchestrator.team import TeamMixin
 from app.orchestrator.workflow import WorkflowMixin
+from app.orchestrator.execution import ExecutionMixin, ACTIVE_ATTEMPT
+from app.orchestrator.evidence import redact_evidence
 from app.orchestrator.protocols import (
     DebateState, LoopDetector, ReviewState, debate_decided_externally, debate_on_message, infer_verdict,
     review_on_request, review_on_result,
 )
 from app.schemas import RunBudget
-from app.services import project_memory as PM
 from app.tools import basic
 from app.services import skills as SK
-from app.services.roles import resolve_prompt
 from app.tools.sandbox import SandboxError, parse_command, run_command
 from app.tools.workspace import ProjectFS, WorkspaceError
 
@@ -68,9 +67,6 @@ MAX_SELF_TURNS = 3
 FOLLOWUP_BUDGET_CEILING = 3
 # Delegation as a tool call: the delegated teammate's sub-turn runs inside the delegator's tool call. These context vars
 # follow each asyncio task, so parallel delegations each see their own frame.
-DELEGATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("octopus_delegation", default=None)
-IN_TOOL_LOOP: contextvars.ContextVar[bool] = contextvars.ContextVar("octopus_in_tool_loop", default=False)
-MAX_DELEGATION_DEPTH = 3  # delegator → worker → worker's report → … (cycles are refused)
 JOURNAL_MAX = 400
 MAX_REDELIVERIES = 2  # a message whose turn failed is shown again at most this many times
 DIGEST_LINES = 40
@@ -283,7 +279,7 @@ def live_activity(text: str) -> tuple[str, str]:
     return ("thinking", "Planning next step…")
 
 
-class RunRuntime(TeamMixin, WorkflowMixin):
+class RunRuntime(ExecutionMixin, TeamMixin, WorkflowMixin):
     def __init__(self, run: Run, user_id: str, project: ProjectRef) -> None:
         snap = run.snapshot_json or {}
         self.snapshot: dict[str, Any] = {"company": snap.get("company") or {}, "agents": list(snap.get("agents") or []),
@@ -335,7 +331,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.decisions: list[str] = []
         self.user_notes: list[str] = []
         self.followups: list[str] = []  # messages sent after the run finished (the run continues like a chat)
-        self.mock_state: dict[str, dict[str, Any]] = {}
+        self.agent_state: dict[str, dict[str, Any]] = {}
         self.warned: set[str] = set()
         self.redeliveries: Counter[str] = Counter()  # message id -> times re-delivered after a failed turn
         self.browser_pages: dict[str, tuple[str, str]] = {}  # agent id -> (url, title) of its browser tab, for the Browser view
@@ -357,7 +353,6 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.turn_work: dict[str, bool] = {}
         self._file_locks: dict[str, asyncio.Lock] = {}
         self._approval_lock = asyncio.Lock()
-        self.memory = PM.load(project.root)  # project memory shared across runs
 
         self.seq = 0
         self.turn_no = run.turns or 0
@@ -372,7 +367,6 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.wf: dict[str, Any] | None = None  # the workflow's state (orchestrator/workflow.py); None = free-form run
         # verify-before-finish: code changed since anything was last run / opened in the browser
         self.unverified: dict[str, int] = {}  # deliverable path → turn it last changed without being exercised since
-        self.verification_events: list[dict[str, Any]] = []  # successful checks attributable to phase owners
         self.finish_bounces: set[str] = set()  # "agent|files" already sent back once (never twice for the same state)
         self._bounced_finish: str | None = None
         self.turn_t0: float | None = None  # monotonic start of the top-level turn in progress (counted live by the time limit)
@@ -395,6 +389,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.activity: dict[str, str] = {}
         agent_levels = {a["id"]: a.get("permission_level") for a in snap.get("agents", [])}
         self.levels = {aid: effective_level(self.level, agent_levels.get(aid)) for aid in self.agents}
+        self.init_execution(run)
 
     # ------------------------------------------------------------------ persistence helpers
     def db(self):  # type: ignore[no-untyped-def]
@@ -402,17 +397,31 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     def fs_for(self, aid: str) -> ProjectFS:
         level = self.levels.get(aid, self.level)
-        key = (level == "plan", level == "danger")
+        root = self.worker_root(aid)
+        key = (level == "plan", level == "danger", str(root))
         if key not in self._fs:
             shadow = self.root / PROJECT_DIRNAME / "plans" / self.run_id if key[0] else None
-            self._fs[key] = ProjectFS(self.root, shadow=shadow, allow_secrets=key[1])
+            self._fs[key] = ProjectFS(root, shadow=shadow, allow_secrets=key[1])
         return self._fs[key]
 
     async def emit(self, type_: str, data: dict[str, Any]) -> None:
+        if type_ not in ("run_status", "error", "usage_update", "agent_status", "attempt_updated"):
+            self.assert_current_attempt()
+        if type_ in ("tool_call", "tool_result", "thought", "error"):
+            def filtered(value):
+                if isinstance(value, str):
+                    return redact_evidence(value)
+                if isinstance(value, list):
+                    return [filtered(item) for item in value]
+                if isinstance(value, dict):
+                    return {key: filtered(item) for key, item in value.items()}
+                return value
+            data = filtered(data)
         await bus.publish(self.run_id, type_, data, self.sf)
 
     def state_dict(self) -> dict[str, Any]:
         return {
+            **self.execution_state(),
             "attachments": self.attachments,
             "observations": {k: [o for _, o in v] for k, v in self.observations.items()},
             "status": self.status, "done_agents": sorted(self.done_agents),
@@ -422,7 +431,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             "debates": {k: v.to_dict() for k, v in self.debates.items()},
             "reviews": {k: v.to_dict() for k, v in self.reviews.items()},
             "loop": self.loop.to_dict(), "task_counter": self.task_counter,
-            "decisions": self.decisions, "user_notes": self.user_notes, "followups": self.followups, "mock_state": self.mock_state,
+            "decisions": self.decisions, "user_notes": self.user_notes, "followups": self.followups, "agent_state": self.agent_state,
             "active_seconds": round(self.active_seconds, 2), "awaiting": self.awaiting,
             "pending_approval": self.pending_approval, "rejections": self.rejections,
             "auto_approve": sorted(self.auto_approve), "levels": self.levels, "activity": self.activity,
@@ -430,7 +439,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             "self_turns": dict(self.self_turns), "progress_turn": self.progress_turn, "nudged": self.nudged,
             "stall_ack": self.stall_ack,
             "broken_files": self.broken_files, "workflow": self.wf,
-            "unverified": self.unverified, "verification_events": self.verification_events[-200:],
+            "unverified": self.unverified,
             "journal": self.journal[-JOURNAL_MAX:], "journal_n": self.journal_n, "seen": self.seen, "seen_turn": self.seen_turn,
             "metrics": self.efficiency(),
         }
@@ -441,7 +450,9 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             values["snapshot_json"] = self.snapshot
             self.snapshot_dirty = False
         async with self.db() as db:
-            await db.execute(update(Run).where(Run.id == self.run_id).values(**values))
+            await db.execute(update(Run).where(Run.id == self.run_id,
+                or_(func.json_extract(Run.state_json, "$.plan_revision").is_(None),
+                    func.json_extract(Run.state_json, "$.plan_revision") <= self.plan_revision)).values(**values))
             await db.commit()
 
     async def restore(self, run: Run) -> None:
@@ -450,7 +461,6 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.done_agents = set(st.get("done_agents", []))
         self.broken_files = dict(st.get("broken_files", {}))
         self.unverified = dict(st.get("unverified", {}))
-        self.verification_events = list(st.get("verification_events", []))
         self.wf = st.get("workflow") or None
         self.agent_turns = Counter(st.get("agent_turns", {}))
         self.agent_tokens = Counter(st.get("agent_tokens", {}))
@@ -466,7 +476,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.task_counter = st.get("task_counter", 0)
         self.decisions, self.user_notes = st.get("decisions", []), st.get("user_notes", [])
         self.followups = st.get("followups", [])
-        self.mock_state = st.get("mock_state", {})
+        self.agent_state = st.get("agent_state", {})
         self.active_seconds = float(st.get("active_seconds", 0))
         self.awaiting = st.get("awaiting")
         self.rejections = st.get("rejections", 0)
@@ -493,7 +503,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             for t in (await db.execute(select(Task).where(Task.run_id == self.run_id))).scalars().all():
                 self.tasks[t.key] = self._task_dict(t)
             for a in (await db.execute(select(Artifact).where(Artifact.run_id == self.run_id).order_by(Artifact.version))).scalars().all():
-                self.artifacts[a.path] = {"version": a.version, "author": a.author_agent_id, "note": a.change_note}
+                self.artifacts[a.path] = {"version": a.version, "author": a.author_agent_id, "note": a.change_note, "deleted": a.deleted}
         for aid, obs in st.get("observations", {}).items():
             for o in obs:
                 self.seq += 1
@@ -501,10 +511,10 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         await self._load_memory()
 
     async def _load_memory(self) -> None:
-        async with self.db() as db:
-            rows = (await db.execute(select(AgentMemory).where(AgentMemory.agent_id.in_(list(self.agents))))).scalars().all()
-        for r in rows:
-            self.agents[r.agent_id].memory[r.key] = r.value
+        # Legacy notes are imported once into scoped, versioned records. Prompts
+        # retrieve that authorized view rather than a second mutable cache.
+        for agent in self.agents.values():
+            agent.memory.clear()
 
     @staticmethod
     def _rec(m: Message) -> dict[str, Any]:
@@ -514,7 +524,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
     @staticmethod
     def _task_dict(t: Task) -> dict[str, Any]:
         return {"id": t.id, "key": t.key, "title": t.title, "description": t.description, "assignee": t.assignee_agent_id,
-                "status": t.status, "acceptance_criteria": t.acceptance_criteria, "created_by": t.created_by}
+                "status": t.status, "acceptance_criteria": t.acceptance_criteria, "created_by": t.created_by,
+                "constraints_json": t.constraints_json or {}}
 
     # ------------------------------------------------------------------ status
     async def set_run_status(self, status: str, reason: str = "") -> None:
@@ -619,13 +630,20 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             await db.commit()
         return True
 
-    def next_runnable(self) -> str | None:
+    def next_runnable(self, exclude: set[str] | None = None) -> str | None:
         """FIFO over queued messages and activating observations. An agent that has already taken MAX_SELF_TURNS turns in a
         row on its own observations (no new message, no progress) is only woken by a message again."""
         best: tuple[int, str] | None = None
         for aid in self.agents:
-            if not self.agents[aid].active:
+            if not self.agents[aid].active or aid in (exclude or set()) or aid in self.waiting_peers:
                 continue
+            owned = [task for task in self.open_tasks() if task.get("assignee") == aid]
+            if aid != self.lead_agent_id and owned and not any(self.task_ready(task) for task in owned):
+                # Answers and decisions may still resolve a waiting dependency.
+                messages = {message["id"]: message for message in self.history}
+                if not any(messages.get(mid, {}).get("type") in ("answer", "decision", "review_result")
+                           for _, mid in self.mailbox.get(aid, [])):
+                    continue
             seqs = [s for s, _ in self.mailbox.get(aid, [])]
             if self.self_turns[aid] < MAX_SELF_TURNS:
                 seqs += [s for s, o in self.observations.get(aid, []) if o.get("activate")]
@@ -651,12 +669,6 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         since, since_turn = self.seen.get(aid, 0), self.seen_turn.get(aid, -1)
         rows: list[tuple[int, str]] = [(e["turn"], f"- t{e['turn']} {self.names.get(e['agent'] or '', 'Octopus')}: {e['text']}")
                                        for e in self.journal if e["n"] > since and e["agent"] != aid]
-        for m in self.history:
-            if m["turn"] <= since_turn or aid in (m["from"], m["to"]) or m["type"] == "artifact_created" or m["from"] is None:
-                continue
-            first = (m["content"].strip().splitlines() or [""])[0][:200]
-            to = self.names.get(m["to"] or "", "everyone")
-            rows.append((m["turn"], f"- t{m['turn']} {self.names.get(m['from'], '?')} → {to} ({m['type']}): {first}"))
         rows.sort(key=lambda r: r[0])
         lines = [r[1] for r in rows]
         if len(lines) > DIGEST_LINES:
@@ -690,6 +702,10 @@ class RunRuntime(TeamMixin, WorkflowMixin):
     def open_tasks(self) -> list[dict[str, Any]]:
         return [t for t in self.tasks.values() if t["status"] in OPEN_TASK_STATES]
 
+    def task_ready(self, task: dict[str, Any]) -> bool:
+        from app.orchestrator.task_contracts import dependency_blockers
+        return task["status"] != "blocked" and not dependency_blockers(task, self.tasks)
+
     def task_line(self, t: dict[str, Any]) -> str:
         return f"{t['key']} [{t['status']}] {t['title']} (assignee: {self.names.get(t['assignee'] or '', 'unassigned')})"
 
@@ -710,14 +726,16 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         open_ = self.open_tasks()
         if not open_:
             return False
-        deadlocked = all(t["status"] == "blocked" for t in open_)
+        deadlocked = not any(self.task_ready(t) for t in open_)
         entry = (self.entry_agents() or [None])[0]
         targets: dict[str, list[dict[str, Any]]] = {}
         for t in open_:
             if self.nudged.get(t["key"]) == self.progress_turn:
                 continue
             owner = t["assignee"]
-            if deadlocked or t["status"] == "blocked" or owner not in self.agents or not self.agents[owner].active:
+            if not self.task_ready(t) and not deadlocked:
+                continue
+            if deadlocked or owner not in self.agents or not self.agents[owner].active:
                 owner = entry
             if owner is None:
                 continue
@@ -792,7 +810,9 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             self.wake.clear()
             if self.stop_requested:
                 raise StopRun()
-            if self.awaiting:
+            if self.recovery_required:
+                await self.set_run_status("paused", "Recovery review required before another invocation")
+            elif self.awaiting:
                 await self.set_run_status("awaiting_user")
             elif self.paused:
                 await self.set_run_status("paused")
@@ -867,37 +887,17 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         if to_agent_id in self.agents:
             targets = [to_agent_id]
         else:  # "entry agent": the entry agent plus everyone who still owns an open task (they'd never be woken otherwise)
-            targets = list(dict.fromkeys(self.entry_agents() + self.open_task_owners()))
+            from app.orchestrator.contracts import route_target
+            targets = [route_target(content, [a.to_dict() for a in self.agents.values()], self.lead_agent_id)]
         for t in targets:
+            if t != self.lead_agent_id:
+                await self.link_task(self.lead_agent_id, t, None, content)
             mine = [x for x in self.open_tasks() if x["assignee"] == t]
             owned = ("\n\nYou still own these open tasks:\n" + "\n".join(f"- {self.task_line(x)}" for x in mine)
                      + "\nContinue them, or update the task board.") if mine else ""
             await self.post_message(sender="user", from_id=None, to_id=t, type_="task", meta={"followup": True, **(message_meta or {})},
                                     content=f"Follow-up from the user: {content}\n\nThe previous work is in the project (see Workspace files). "
                                             f"Change what's needed and report back; don't start over.{owned}")
-        self.wake.set()
-
-    async def interject(self, content: str, to_agent_id: str | None, *, message_meta: dict[str, Any] | None = None) -> None:
-        targets = [t for t in ([to_agent_id] if to_agent_id else self.agents) if t in self.agents and self.agents[t].active]
-        self.user_notes.append(clip(content, 1000))
-        self.mark_progress()  # new information from the user re-opens every nudge
-        # A message to everyone is one message: each agent gets its own copy in its inbox, but the run shows it once
-        # (it used to appear once per agent in the feed and timeline).
-        group = new_id() if len(targets) > 1 else None
-        first: dict[str, Any] | None = None
-        for t in targets:
-            meta = {"broadcast": group, "recipients": len(targets)} if group else {}
-            meta.update(message_meta or {})
-            rec = await self.post_message(sender="user", from_id=None, to_id=t, type_="user_interjection", content=content,
-                                          meta=meta, announce=not group)
-            first = first or rec
-        if group and first:
-            await self.announce_message(first, utcnow().isoformat(), to_everyone=True)
-        # The user is talking to the team: that answers a pending question and resumes a paused run (a paused run used to
-        # stay paused after "continue" until Resume was pressed). Pause again any time with Pause / Space.
-        self.awaiting = None
-        if self.paused:  # step mode still waits for Next turn
-            self.resume()
         self.wake.set()
 
     def resolve_approval(self, approval_id: str, approved: bool, reason: str, scope: str = "once") -> bool:
@@ -945,13 +945,21 @@ class RunRuntime(TeamMixin, WorkflowMixin):
     async def guard(self, agent: AgentSpec, kind: str, summary: str, preview: str, details: dict[str, Any] | None = None) -> tuple[bool, str]:
         """Permission gate for dangerous actions. Returns (allowed, reason-if-denied)."""
         level = self.levels.get(agent.id, self.level)
+        context = ACTIVE_ATTEMPT.get()
+        if context:
+            level = effective_level(level, context.assignment.policy.permission)
+        if kind == "web_search":
+            if level != "ask":
+                return True, ""
+            ok, reason = await self.request_approval(agent, kind, summary, preview, details)
+            return ok, ("" if ok else f"The user REJECTED {kind}: {reason or 'no reason given'}")
         if level == "read_only":
             return False, f"Your permission level is read-only: {kind} is not allowed. Describe the change instead."
         if level == "plan":
             if kind == "write_file":
                 return True, ""  # goes to the plan shadow directory
             return False, f"Plan mode: {kind} is not allowed. Write your proposed changes with write_file (they are saved as a plan)."
-        needs = level == "ask" or (self.mode == "supervised" and kind in ("write_file", "finish"))
+        needs = level == "ask" or (level == "auto" and kind == "mcp_call") or (self.mode == "supervised" and kind in ("write_file", "finish"))
         if not needs:
             return True, ""
         ok, reason = await self.request_approval(agent, kind, summary, preview, details)
@@ -959,6 +967,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     # ------------------------------------------------------------------ main loop
     def entry_agents(self) -> list[str]:
+        if hasattr(self, "lead_agent_id"):
+            return [self.lead_agent_id]
         active = [aid for aid, a in self.agents.items() if a.active]
         entries = [aid for aid in active if self.agents[aid].is_entry]
         if entries:
@@ -979,23 +989,23 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 self._goal_images = []
         return self._goal_images
 
-    def attach_followup(self, content: str, files: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
+    def attach_followup(self, content: str, files: list[dict[str, str]], *, stored: bool = False) -> tuple[str, dict[str, Any]]:
         meta: dict[str, Any] = {"display_content": content}
         if not files:
             return content, meta
         from app.services.run_attachments import MAX_IMAGES, store
 
-        stored = store(self.root, self.run_id, files, unique=True)
-        images = [item for item in [*self.attachments, *stored] if item.get("kind") == "image"][-MAX_IMAGES:]
-        self.attachments = [item for item in [*self.attachments, *stored] if item.get("kind") != "image"][-20:] + images
+        items = files if stored else store(self.root, self.run_id, files, unique=True)
+        images = [item for item in [*self.attachments, *items] if item.get("kind") == "image"][-MAX_IMAGES:]
+        self.attachments = [item for item in [*self.attachments, *items] if item.get("kind") != "image"][-20:] + images
         self._goal_images = None
-        for item in stored:
+        for item in items:
             if item.get("kind") == "image":
                 content += f"\n\nAttached image: {item['filename']} (shown to the agents)."
             else:
                 content += f"\n\n--- Attached file: {item['filename']} ---\n{item.get('text', '')}"
-        meta["images"] = [{"filename": item["filename"], "name": item["name"], "mime": item["mime"]} for item in stored if item.get("kind") == "image"]
-        meta["files"] = [item["filename"] for item in stored if item.get("kind") != "image"]
+        meta["images"] = [{"filename": item["filename"], "name": item["name"], "mime": item["mime"]} for item in items if item.get("kind") == "image"]
+        meta["files"] = [item["filename"] for item in items if item.get("kind") != "image"]
         return content, meta
 
     async def bootstrap(self) -> None:
@@ -1015,7 +1025,9 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         if images:
             meta["images"] = [{"filename": a.get("filename"), "name": a.get("name"), "mime": a.get("mime")} for a in images]
         self.goal_content = content.split("\n\n--- How this company works ---")[0]
-        for aid in self.entry_agents():
+        for aid in [getattr(self, "initial_target", None) or self.lead_agent_id]:
+            if aid != self.lead_agent_id:
+                meta["task_id"] = await self.link_task(self.lead_agent_id, aid, None, self.goal)
             await self.post_message(sender="user", from_id=None, to_id=aid, type_="task", content=content, meta=meta)
 
     async def main(self, fresh: bool = True) -> None:
@@ -1028,8 +1040,26 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 await db.commit()
             if fresh:
                 await self.set_run_status("running")
+                await self._load_memory()
+            await self.load_mcp()
+            await self.prepare_execution()
+            if fresh:
                 await self.bootstrap()
             while True:
+                if self.recovery_required:
+                    self.paused = True
+                for consultation in await self.runtime_store.expire_consultations():
+                    sender = consultation["sender"]
+                    self.waiting_peers.pop(sender, None)
+                    self.notice(sender, "Peer consultation timed out. Escalate to the lead with what is still unknown.", activate=True)
+                if self.waiting_peers:
+                    consultations = (await self.runtime_store.summary())["consultations"]
+                    waiting = {c["sender"]: c["recipient"] for c in consultations if c["state"] == "waiting"}
+                    for sender in set(self.waiting_peers) - waiting.keys():
+                        self.waiting_peers.pop(sender, None)
+                        self.notice(sender, "Peer wait ended; inspect the result or escalate unresolved work.", activate=True)
+                if self.awaiting and not self.recovery_required:
+                    await self.apply_queued_request()
                 reason = self.limit_reason()
                 if reason:
                     await self.emit("error", {"message": reason, "kind": "limit"})
@@ -1038,28 +1068,61 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 await self.gate()
                 aid = self.next_runnable()
                 if aid is None:
+                    if await self.apply_queued_request():
+                        continue
                     if self.awaiting:
+                        continue
+                    if self.waiting_peers:
+                        self.wake.clear()
+                        try:
+                            await asyncio.wait_for(self.wake.wait(), timeout=1)
+                        except asyncio.TimeoutError:
+                            pass
                         continue
                     if self.wf_active() and await self.nudge_workflow():
                         continue
                     if await self.nudge_open_tasks():
                         continue
                     open_ = self.open_tasks()
+                    acceptance_key = f"{self.plan_revision}:{self.current_request_id or 'initial'}"
+                    if not open_ and self.progress_turn > 0 and acceptance_key not in self.acceptance_nudges:
+                        self.acceptance_nudges.append(acceptance_key)
+                        await self.post_message(sender="system", from_id=None, to_id=self.lead_agent_id, type_="task",
+                            content="Work is quiescent. Review the integrated outcome against the user's request, then call finish with what is done and any missing verification. A successful tool call is not final acceptance.",
+                            meta={"acceptance_nudge": True})
+                        continue
                     if open_:  # never report success while the board says work is unfinished
                         await self.finalize("incomplete", f"Stalled: {len(open_)} open task(s) and no agent can make progress ("
                                             + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) + ")")
                     else:
-                        await self.finalize("completed", "Run went quiescent without a final report: no open tasks, no agent has pending work")
+                        await self.finalize("incomplete", "No accountable lead acceptance: no agent has pending work and no final report was produced")
                     return
                 t0 = self.turn_t0 = time.monotonic()
                 try:
-                    await self.turn(aid)
+                    batch = [aid]
+                    # Only independently queued specialists overlap. The lead and
+                    # ordered workflow phases stay serial; writes use private stages.
+                    if aid != self.lead_agent_id and not self.wf_active():
+                        for _ in range(self.budget.max_concurrency - 1):
+                            other = self.next_runnable(exclude=set(batch) | {self.lead_agent_id})
+                            if other is None:
+                                break
+                            batch.append(other)
+                    if len(batch) == 1:
+                        await self.turn(aid)
+                    else:
+                        outcomes = await asyncio.gather(*(self.turn(worker) for worker in batch), return_exceptions=True)
+                        for outcome in outcomes:
+                            if isinstance(outcome, BaseException):
+                                raise outcome
                 finally:
                     self.turn_t0 = None
                     self.active_seconds += time.monotonic() - t0
                 await self.save()
                 await self.usage_event()
                 if self.finished_summary is not None:
+                    if await self.apply_queued_request():
+                        continue
                     open_ = self.open_tasks()
                     await self.finalize("completed", f"Finished with {len(open_)} open task(s): "
                                         + "; ".join(f"{t['key']} {t['status']}" for t in open_[:6]) if open_ else "")
@@ -1105,6 +1168,11 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 f"- {p} v{a['version']} by {self.names.get(a['author'] or '', '?')}" for p, a in sorted(self.artifacts.items())))
         if self.wf:
             lines.append(self.wf_blackboard())
+        if self.engineering_checkpoints:
+            lines.append("Engineering checkpoints (current task revision):\n" + "\n".join(
+                f"- {r['step']} [{r['status']}] owner {self.names.get(r['owner'], r['owner'])}: "
+                + clip(json.dumps(r['outputs'], ensure_ascii=False), 800)
+                for r in self.engineering_checkpoints[-12:] if r["revision"] == self.plan_revision))
         if self.broken_files:
             lines.append("Files FAILING automatic checks (fix before anything else):\n" + "\n".join(
                 f"- {p}: {msg.splitlines()[0][:300]}" for p, msg in sorted(self.broken_files.items())))
@@ -1118,7 +1186,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         lines.append(f"Budget: turn {self.turn_no}/{self.budget.max_turns}, tokens {self.tokens}/{self.budget.max_tokens}")
         return "\n".join(lines)
 
-    def mock_context(self, agent: AgentSpec, inbox: list[dict[str, Any]], obs: list[dict[str, Any]]) -> dict[str, Any]:
+    def turn_context(self, agent: AgentSpec, inbox: list[dict[str, Any]], obs: list[dict[str, Any]]) -> dict[str, Any]:
         allowed = allowed_recipients(self.edges, agent.id)
         cat = lambda aid: self.agents[aid].category if aid in self.agents else "user"  # noqa: E731
         return {
@@ -1139,13 +1207,16 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                        for a in self.agents.values()],
             "tasks": [{"key": t["key"], "title": t["title"], "assignee": self.names.get(t["assignee"] or "", None), "status": t["status"]}
                       for t in self.tasks.values()],
-            "state": self.mock_state.setdefault(agent.id, {}),
+            "state": self.agent_state.setdefault(agent.id, {}),
         }
 
     def effort_for(self, agent: AgentSpec) -> str | None:
         """Run override wins, then the agent's setting; None = let the model use its default."""
-        e = self.budget.reasoning_effort if self.budget.reasoning_effort != "default" else str(agent.behavior.get("reasoning_effort") or "default")
+        scoped = self.budget.model_scope == "team" or agent.id == self.lead_agent_id
+        e = self.budget.reasoning_effort if scoped and self.budget.reasoning_effort != "default" else str(agent.behavior.get("reasoning_effort") or "default")
         if e == "default":
+            if self.model_for(agent)[0] == "opencode":
+                return None  # Auto means the installed worker's advertised default.
             e = get_settings().default_reasoning_effort or "default"
         return None if e in ("default", "") else e
 
@@ -1275,6 +1346,10 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                                   "agent_id": agent.id, "kind": "warning"})
 
     async def turn(self, aid: str) -> None:
+        await self.owned_turn(aid)
+
+    async def _turn(self, aid: str) -> None:
+        self.assert_current_attempt()
         agent = self.agents[aid]
         inbox_ids = [mid for _, mid in self.mailbox.pop(aid, [])]
         obs = [o for _, o in self.observations.pop(aid, [])]
@@ -1298,6 +1373,11 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         await self.set_agent_status(aid, "thinking", f"Reading {len(inbox_ids)} new message(s)…" if inbox_ids else "Reviewing results…")
         inbox_set = set(inbox_ids)
         inbox = [m for m in self.history if m["id"] in inbox_set]
+        if self.model_for(agent)[0] == "opencode":
+            from app.orchestrator.opencode import opencode_turn
+            await opencode_turn(self, agent, inbox, obs)
+            await self.end_turn(aid)
+            return
         try:
             req, native = await self.build_request(agent, inbox_set, obs)
             if native:
@@ -1306,7 +1386,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 return
             text = await self.call_llm_escalating(agent, req)
             parsed = A.parse_envelope(text)
-            if not parsed.ok and req.provider != "mock":
+            if not parsed.ok:
                 req.messages += [{"role": "assistant", "content": head_tail(text, 6000)},
                                  {"role": "user", "content": "Your reply was not valid per the response format ("
                                   + "; ".join(parsed.errors) + "). Reply again with ONLY the JSON object."}]
@@ -1321,6 +1401,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             await self.requeue(aid, inbox_ids)
             return
         except (LLMError, asyncio.TimeoutError) as exc:
+            if context := ACTIVE_ATTEMPT.get():
+                context.error = str(exc)[:2000]
             await self.set_agent_status(aid, "error")
             await self.emit("error", {"message": f"{agent.name}: LLM call failed: {exc}", "agent_id": aid, "kind": "llm"})
             back = await self.requeue(aid, inbox_ids)
@@ -1344,14 +1426,15 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             if self.stop_requested:
                 raise StopRun()
             await self.execute(agent, action)
+            if aid in self.waiting_peers or action.action in ("delegate", "wait", "request_user_input", "finish"):
+                if not (action.action == "finish" and self._bounced_finish == aid):
+                    break
             if self.finished_summary is not None:
                 break
         await self.end_turn(aid)
 
     def model_for(self, agent: AgentSpec) -> tuple[str, str]:
-        if self.budget.force_mock:
-            return "mock", "mock/demo"
-        if self.budget.model is not None:
+        if self.budget.model is not None and (self.budget.model_scope == "team" or agent.id == self.lead_agent_id):
             return self.budget.model.provider, self.budget.model.model
         return agent.provider, agent.model
 
@@ -1363,25 +1446,20 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         provider, model = self.model_for(agent)
         req = LLMRequest(provider=provider, model=model, temperature=agent.temperature, max_tokens=agent.max_tokens,
                          extra={"reasoning_effort": e} if (e := self.effort_for(agent)) else {}, messages=[], json_mode=True,
-                         metadata={"kind": "orchestrator", "mock_context": self.mock_context(agent, inbox, obs),
+                         metadata={"kind": "orchestrator", "turn_context": self.turn_context(agent, inbox, obs),
                                    "cache_key": f"octopus-{self.run_id[:18]}-{agent.id}"[:64]})
         async with registry_factory()() as rdb:
             req, warn = await prepare_request(rdb, self.user_id, req)
+        if req.provider != provider or req.model != model:
+            raise LLMError(f"Configured node model {provider}/{model} is unavailable; choose a connected model. No replacement model was invoked.", retryable=False)
         if warn and aid not in self.warned:
             self.warned.add(aid)
             await self.emit("error", {"message": f"{agent.name}: {warn}", "agent_id": aid, "kind": "warning"})
         native = self.native_tools_for(req)
-        system = build_system_prompt(agent, company=self.company_name, goal=self.goal, agents=self.agents, edges=self.edges,
-                                     status=self.status, preview_url=self.preview_url(), native=native,
-                                     project_memory=PM.render(self.memory, exclude_run=self.run_id),
-                                     role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, self.roles),
-                                     skills_text=SK.prompt_section(self.skills, str(agent.behavior.get("template_key") or ""),
-                                                                   list(agent.behavior.get("skills") or [])))
-        from app.services.project_guidance import load as load_guidance
-        system += await asyncio.to_thread(load_guidance, self.project.root)
-        user = build_user_prompt(agent=agent, history=self.history, inbox_ids=inbox_ids, observations=obs, blackboard=self.blackboard(),
-                                 names=self.names, recent_n=self.budget.context_recent, native=native, digest=self.digest(aid),
-                                 team_status=team_status(self.agents, self.status))
+        system, user = build_turn_prompts(self, agent, inbox_ids, obs, native=native,
+                                          memory_context=await self.scoped_context(aid))
+        system += (f"\n\n## Runtime identity\nYou are responding as an Octopus AI agent using the `{model}` model through `{provider}`. "
+                   "If the user asks which model you are, report these configured values accurately. You do not have a physical location.")
         if extra:
             user += "\n\n" + extra
         req.messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -1408,11 +1486,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         req.tools = [t for t in specs if t["name"] not in exclude]
         req.json_mode = False
         req.continuation = []
-        token = IN_TOOL_LOOP.set(True)
-        try:
-            return await self._tool_loop(agent, req, mcp_map)
-        finally:
-            IN_TOOL_LOOP.reset(token)
+        return await self._tool_loop(agent, req, mcp_map)
 
     async def _tool_loop(self, agent: AgentSpec, req: LLMRequest, mcp_map: dict[str, tuple[str, str]]) -> str:
         aid = agent.id
@@ -1444,6 +1518,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 self.metrics["parallel_delegations"] += len(delegations)
                 done = await asyncio.gather(*(self.run_tool_call(agent, c, mcp_map) for c in delegations))
                 ran = {c.id: r for c, r in zip(delegations, done)}
+                ended = any(result[1] for result in ran.values())
             for call in res.tool_calls:
                 if call.id in ran:
                     out, _ = ran[call.id]
@@ -1479,11 +1554,13 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         if action is None:
             await self.emit("error", {"message": f"{agent.name}: {call.name}: {err}", "agent_id": aid, "kind": "parse"})
             return f"Error: {err}. Nothing was done; call the tool again with corrected arguments.", False
-        if action.action == "delegate":  # returns the teammate's result directly (and may run in parallel with others)
+        if action.action == "delegate":
             if not A.tool_enabled(agent.tools, "send_message"):
                 return "Error: delegating needs the Messaging tool, which you don't have.", False
-            return clip(await self.delegate(agent, action), TOOL_RESULT_CHARS), False
+            result = await self.delegate(agent, action)
+            return clip(result, TOOL_RESULT_CHARS), not result.startswith("Not delegated:")
         before = len(self.observations.get(aid, []))
+        known_calls = set(self.observed_checks)
         await self.execute(agent, action)
         produced = self.observations.get(aid, [])[before:]
         if produced:
@@ -1495,6 +1572,12 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             tag = "" if o.get("tool") == "system" else f"[{o.get('tool')}{' OK' if o.get('ok') else ' FAILED' if o.get('ok') is False else ''}] "
             lines.append(tag + str(o.get("content", "")))
         name = action.action
+        observed_ids = [cid for cid, value in self.observed_checks.items() if cid not in known_calls and value["agent_id"] == aid]
+        if observed_ids:
+            if not lines:
+                lines.extend(f"[{self.observed_checks[cid]['tool']} {'OK' if self.observed_checks[cid]['ok'] else 'FAILED'}] "
+                             + self.observed_checks[cid]["summary"] for cid in observed_ids)
+            lines.append("Observed tool_call_ids: " + ", ".join(observed_ids))
         if not lines:
             if name == "update_task_board":
                 lines.append("Task board:\n" + "\n".join(f"- {self.task_line(t)}" for t in self.tasks.values()))
@@ -1506,7 +1589,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         if bounced:
             self._bounced_finish = None
         ended = not bounced and (name in T.TERMINAL_ACTIONS or self.finished_summary is not None or aid in self.done_agents
-                                 or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
+                                 or aid in self.waiting_peers or bool(self.awaiting and self.awaiting.get("agent_id") == aid))
         return clip("\n".join(lines), TOOL_RESULT_CHARS), ended
 
     # ------------------------------------------------------------------ delegation (orchestrator → worker)
@@ -1539,75 +1622,24 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         if edge is None:
             return "Not delegated: " + rejection_reason(self.edges, agent.id, tid, "task", self.names)
         brief = self.brief_text(agent, a)
-        frame = DELEGATION.get()
-        chain: tuple[str, ...] = (*(frame["chain"] if frame else ()), agent.id)
+        chain = [*self.delegation_chains.get(agent.id, []), agent.id]
+        if tid in chain or len(chain) > self.budget.max_delegation_depth:
+            return "Not delegated: delegation cycle or depth limit reached. Escalate to the accountable lead."
+        if self.mailbox.get(tid) or self.status.get(tid) in ("thinking", "working", "waiting_reply"):
+            return f"Not delegated: {worker.name} already has an active assignment. Wait for its result or choose an idle agent."
+        self.delegation_chains[tid] = chain
         self.metrics["delegations"] += 1
-        if not IN_TOOL_LOOP.get() or len(chain) > MAX_DELEGATION_DEPTH or tid in chain:
-            await self._send_one(agent, tid, A.SendMessage(action="send_message", to=worker.name, type="task", content=brief, task_id=a.task_id))
-            return f"Delegated to {worker.name} as a task message; the result arrives as a message when they report back."
-        req, native = await self.build_request(worker, set(), [o for _, o in self.observations.pop(tid, [])], extra="")
-        if not native:  # e.g. the teammate runs on another provider: fall back to a message
-            await self._send_one(agent, tid, A.SendMessage(action="send_message", to=worker.name, type="task", content=brief, task_id=a.task_id))
-            return f"Delegated to {worker.name} as a task message; the result arrives as a message when they report back."
-        key = await self.link_task(agent.id, tid, a.task_id, a.objective)
-        task = self.tasks[key]
-        if task["status"] in ("todo", "blocked"):
-            task["status"] = "in_progress"
-            await self.save_task(task)
-        self.edge_counts[edge.id] += 1
-        await self.post_message(sender="agent", from_id=agent.id, to_id=tid, type_="task", content=brief, edge_id=edge.id,
-                                meta={"task_id": key, "delegation": True}, deliver=False)
-        await self.emit("edge_activity", {"edge_id": edge.id, "from_agent_id": agent.id, "to_agent_id": tid, "type": "task",
-                                          "count": self.edge_counts[edge.id], "max_turns": int((edge.config or {}).get("max_turns", 20))})
-        self.log(agent.id, f"delegated {key} to {worker.name}: {a.objective[:200]}")
-        return await self.run_delegated(agent, worker, key, brief, req, chain)
-
-    async def run_delegated(self, delegator: AgentSpec, worker: AgentSpec, key: str, brief: str, req: LLMRequest,
-                            chain: tuple[str, ...]) -> str:
-        wid = worker.id
-        max_auto = int(worker.behavior.get("max_autonomous_turns", 12))
-        if self.agent_turns[wid] >= max_auto:
-            return f"{worker.name} has no turns left in this request (max {max_auto}); do it yourself or delegate to someone else."
-        if (why := self.limit_reason()):
-            return f"Not started: {why}"
-        self.turn_no += 1
-        self.agent_turns[wid] += 1
-        self.start_turn_metrics(wid)
-        await self.emit("turn_started", {"agent_id": wid, "turn_no": self.turn_no, "inbox": [], "delegated_by": delegator.id, "task": key})
-        await self.set_agent_status(wid, "thinking", f"Working on {key} for {delegator.name}…")
-        before = {p: v["version"] for p, v in self.artifacts.items()}
-        req.messages[-1]["content"] += (f"\n\n# Delegated to you by {delegator.name} (task {key})\n{brief}\n\nYour result goes straight back "
-                                        f"to {delegator.name}: when you're done, or can't go on, call `finish` with what you did, where "
-                                        "the results are, and anything still open.")
-        frame = {"worker": wid, "summary": None, "chain": chain}
-        token = DELEGATION.set(frame)
-        last = ""
-        try:
-            last = await self.native_turn(worker, req, exclude={"request_user_input"} | self.wf_tool_exclusions(worker))
-        except (LLMError, asyncio.TimeoutError) as exc:
-            last = f"(stopped by a model error: {exc})"
-            await self.emit("error", {"message": f"{worker.name}: LLM call failed: {exc}", "agent_id": wid, "kind": "llm"})
-        finally:
-            DELEGATION.reset(token)
-        summary = frame["summary"] or last or "(no summary)"
-        task = self.tasks[key]
-        if frame["summary"] is not None and task["status"] not in ("done", "blocked"):
-            task["status"] = "done"
-            await self.save_task(task)
-            self.mark_progress()
-        changed = [f"{p} (v{v['version']})" for p, v in self.artifacts.items() if before.get(p) != v["version"]]
-        await self.end_turn(wid)
-        self.log(wid, f"{'finished' if frame['summary'] is not None else 'stopped'} {key} for {delegator.name}: {summary[:200]}")
-        await self.post_message(sender="agent", from_id=wid, to_id=delegator.id, type_="status_update", content=summary,
-                                meta={"task_id": key, "delegation_result": True}, deliver=False)
-        return (f"Result from {worker.name} ({key} is {task['status']}):\n{summary}\n"
-                + (f"Files changed: {', '.join(changed)}" if changed else "No files changed."))
+        await self._send_one(agent, tid, A.SendMessage(action="send_message", to=worker.name, type="task", content=brief, task_id=a.task_id))
+        return (f"Queued an owned assignment for {worker.name}. The scheduler will return their result here. "
+                "Call wait while dependent work is pending; do not finish the run before reviewing the result.")
 
     async def act_search_project(self, agent: AgentSpec, a: A.SearchProject) -> None:
         cid = await self._tool_event(agent, "search_project", {"query": a.query, "path_prefix": a.path_prefix})
         await self.set_agent_status(agent.id, "reading", f"Searching for {a.query[:40]}…")
         try:
-            hits, total, n = self.fs_for(agent.id).search(a.query, regex=a.regex, prefix=a.path_prefix, max_results=a.max_results)
+            hits, total, n = await asyncio.to_thread(
+                self.fs_for(agent.id).search, a.query, regex=a.regex, prefix=a.path_prefix, max_results=a.max_results
+            )
             out = (f"{total} match{'es' if total != 1 else ''} in {n} files" + (f" (showing {len(hits)})" if total > len(hits) else "")
                    + (":\n" + "\n".join(hits) if hits else "."))
             ok = True
@@ -1616,17 +1648,12 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.observe(agent.id, {"tool": "search_project", "ok": ok, "content": out})
         await self._tool_result(agent, cid, "search_project", ok, out[:2000])
 
-    def retrospective(self, status: str, reason: str) -> dict[str, Any]:
-        open_ = self.open_tasks()
-        return {"run_id": self.run_id, "at": utcnow().isoformat(timespec="seconds"), "goal": self.goal[:500], "status": status,
-                "halt_reason": reason[:300], "summary": (self.finished_summary or "")[:800],
-                "files": sorted(self.artifacts)[:40], "open_tasks": [f"{t['key']} {t['status']} {t['title'][:80]}" for t in open_[:10]],
-                "decisions": self.decisions[-5:], "followups": [f[:200] for f in self.followups[-3:]], "efficiency": self.efficiency()}
-
     async def end_turn(self, aid: str) -> None:
         if self.progress_turn == self.turn_no:  # productive turn: the agent may keep working on its own results
             self.self_turns[aid] = 0
-        if aid in self.done_agents:
+        if aid in self.waiting_peers:
+            await self.set_agent_status(aid, "waiting_reply", "Waiting for a peer answer")
+        elif aid in self.done_agents:
             await self.set_agent_status(aid, "done", "Finished")
         elif self.mailbox.get(aid):
             await self.set_agent_status(aid, "waiting", f"{len(self.mailbox[aid])} message(s) queued")
@@ -1637,9 +1664,28 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     # ------------------------------------------------------------------ action execution
     async def execute(self, agent: AgentSpec, action: Any) -> None:
+        self.assert_current_attempt()
+        context = ACTIVE_ATTEMPT.get()
+        if context and context.assignment.owner != agent.id:
+            raise ValueError("A worker cannot act for another agent")
         name = action.action
+        if context and context.assignment.task_id:
+            from app.orchestrator.task_contracts import permits_path
+            owned_task = self.tasks.get(context.assignment.task_id)
+            if owned_task and not self.task_ready(owned_task) and name not in (
+                "send_message", "read_file", "search_project", "list_files", "recall_context", "wait"):
+                self.notice(agent.id, "This task is waiting on dependencies or is blocked. Answer peers or wait; do not start its work.", activate=True)
+                return
+            scopes = context.assignment.write_paths
+            paths = [getattr(action, field) for field in ("path", "source", "destination") if hasattr(action, field)]
+            mutation = name in ("write_file", "edit_file", "create_folder", "move_file")
+            if (mutation and any(not permits_path(scopes, path) for path in paths)) or (
+                scopes != ("*",) and name in ("run_code", "mcp_call")):
+                self.notice(agent.id, "Task write scope denied this action. Scoped tasks use brokered file tools; arbitrary terminal/MCP writes require the lead's explicit replan.", activate=True)
+                await self.emit("error", {"message": "Task write scope denied action", "agent_id": agent.id, "kind": "permission"})
+                return
         tool = A.ACTION_TOOL.get(name)
-        if tool and not A.tool_enabled(agent.tools, tool):
+        if tool and (not A.tool_enabled(agent.tools, tool) or (context and tool not in context.assignment.policy.capabilities)):
             self.notice(agent.id, f"Action '{name}' is not available to you (tool '{tool}' disabled).", activate=True)
             await self.emit("error", {"message": f"{agent.name} tried disabled tool {tool}", "agent_id": agent.id, "kind": "permission"})
             return
@@ -1653,35 +1699,13 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     async def _tool_event(self, agent: AgentSpec, tool: str, args: dict[str, Any]) -> str:
         cid = new_id()
+        await self.execution_tool_start(cid, tool, args)
         await self.emit("tool_call", {"call_id": cid, "agent_id": agent.id, "tool": tool, "args": args, "turn_no": self.turn_no})
         return cid
 
     async def _tool_result(self, agent: AgentSpec, cid: str, tool: str, ok: bool, output: str) -> None:
-        if ok and tool == "run_code":
-            from app.orchestrator.quality import command_is_verification
-            command = output.splitlines()[0].removeprefix("$ ").strip()
-            if command_is_verification(command, list(self.artifacts)):
-                phase = self.wf_phase()
-                self.verification_events.append({"agent_id": agent.id, "phase": phase["key"] if phase and phase["owner"] == agent.id else "",
-                                                 "tool": tool, "ok": True, "turn": self.turn_no,
-                                                 "detail": output[:600]})
+        await self.execution_tool_result(agent, cid, tool, ok, output)
         await self.emit("tool_result", {"call_id": cid, "agent_id": agent.id, "tool": tool, "ok": ok, "output": output[:4000]})
-
-    def delegated_message_refusal(self, agent: AgentSpec, a: A.SendMessage) -> str | None:
-        """Inside a delegated sub-turn nobody can answer in time (answers arrive as later turns, after this one has ended),
-        and the `finish` summary already goes back to the delegator. Questions and progress reports there only cost turns:
-        in practice the builder asked design/QA questions, built anyway, and the answers landed after it was done."""
-        frame = DELEGATION.get()
-        if frame is None or frame["worker"] != agent.id:
-            return None
-        boss = self.names.get(frame["chain"][-1], "your delegator") if frame["chain"] else "your delegator"
-        if a.type == "question":
-            return (f"You are working on a task {boss} delegated to you: an answer would only arrive after this turn has ended. "
-                    "Check the Blackboard and the files, make a sensible assumption and name it in your `finish` summary, "
-                    "or `finish` now and say exactly what is blocking.")
-        if a.type in ("status_update", "final_report") and self.resolve_agent(a.to.strip()) == (frame["chain"] or ("",))[-1]:
-            return f"Not needed: your `finish` summary goes straight back to {boss}. Keep working, then call `finish`."
-        return None
 
     async def reject(self, agent: AgentSpec, to_id: str | None, a: A.SendMessage, reason: str, *, retry: bool = True) -> None:
         """``retry=False`` for loop / channel-limit rejections: the agent sees the notice next time it is woken, but the
@@ -1693,10 +1717,10 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     async def act_send_message(self, agent: AgentSpec, a: A.SendMessage) -> None:
         to = a.to.strip()
-        if (why := self.delegated_message_refusal(agent, a)):
-            await self.reject(agent, self.resolve_agent(to), a, why, retry=False)
-            return
         if to.lower() in ("all", "everyone", "broadcast", "team", "@all"):
+            if a.type == "question":
+                await self.reject(agent, None, a, "Consult one named peer at a time; broadcast questions cannot establish an accountable reply.")
+                return
             targets = list(allowed_recipients(self.edges, agent.id))
             if not targets:
                 await self.reject(agent, None, a, "You have no outgoing channels.")
@@ -1774,8 +1798,28 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         if cfg.get("condition") and not await self.condition_met(agent, edge, a):
             await self.reject(agent, tid, a, f"Channel condition not met: \"{cfg['condition']}\".")
             return
+        if a.type == "question":
+            from app.orchestrator.runtime_store import Conflict
+            try:
+                consultation_id = await self.runtime_store.consult(agent.id, tid, self.plan_revision, content)
+            except Conflict as exc:
+                await self.reject(agent, tid, a, str(exc))
+                return
+            meta["consultation_id"] = consultation_id
+            self.waiting_peers[agent.id] = tid
+            await self.set_agent_status(agent.id, "waiting_reply", f"Waiting for {self.names[tid]}")
+        elif a.type in ("answer", "decision", "review_result"):
+            answered = await self.runtime_store.answer(agent.id, tid, content)
+            if answered and self.waiting_peers.get(tid) == agent.id:
+                self.waiting_peers.pop(tid, None)
+                await self.set_agent_status(tid, "waiting", "Peer answer received")
+                self.wake.set()
         if a.type == "task":
-            meta["task_id"] = await self.link_task(agent.id, tid, a.task_id, content)
+            try:
+                meta["task_id"] = await self.link_task(agent.id, tid, a.task_id, content)
+            except ValueError as exc:
+                await self.reject(agent, tid, a, str(exc))
+                return
         elif a.task_id:
             meta["task_id"] = a.task_id
         self.edge_counts[edge.id] += 1
@@ -1799,12 +1843,15 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         """Evaluate a natural-language edge condition with a tiny LLM judge call (mock: always satisfied)."""
         cond = edge.config.get("condition", "")
         provider, model = self.model_for(agent)
+        if provider == "opencode":
+            self.notice(agent.id, "This conditional channel needs an explicit reviewed decision; the OpenCode worker cannot invoke a separate provider as judge.")
+            return False
         req = LLMRequest(provider=provider, model=model, temperature=0, max_tokens=JUDGE_MAX_TOKENS,
                          extra={"reasoning_effort": "low" if self.effort_for(agent) != "none" else "none"}, messages=[
             {"role": "system", "content": "You are a strict gatekeeper. Answer only YES or NO."},
             {"role": "user", "content": f"Channel condition: {cond}\nBlackboard:\n{clip(self.blackboard(), 8000)}\n\n"
                                         f"Message ({a.type}): {clip(a.content, 6000)}\n\nIs the condition satisfied?"}],
-            metadata={"kind": "chat", "mock_script": "YES"})
+            metadata={"kind": "chat", "scripted_reply": "YES"})
         try:
             async with registry_factory()() as rdb:
                 req, _ = await prepare_request(rdb, self.user_id, req)
@@ -1819,31 +1866,53 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             why = f"unclear answer {out.strip()[:40]!r}" if out.strip() else "no answer"
         except LLMError as exc:
             why = f"judge failed: {exc}"
-        # Fail open (a broken judge must not block the run) but never silently: a non-answer is "unknown", not "yes".
-        await self.emit("error", {"message": f"Channel condition \"{cond}\" could not be evaluated ({why}); the message was delivered.",
+        await self.emit("error", {"message": f"Channel condition \"{cond}\" could not be evaluated ({why}); delivery is blocked pending a decision.",
                                   "agent_id": agent.id, "kind": "warning"})
-        return True
+        return False
 
     async def link_task(self, creator: str, assignee: str, task_key: str | None, content: str) -> str:
+        from app.orchestrator.task_contracts import contract
+        if task_key and task_key not in self.tasks:
+            raise ValueError("Unknown task; create its owned contract before delegating it")
         if task_key and task_key in self.tasks:
             t = self.tasks[task_key]
+            if t["assignee"] and t["assignee"] != assignee:
+                raise ValueError("Task belongs to another owner; the lead must reassign it explicitly")
+            self.child_task_contract(contract(t))
             if not t["assignee"]:
                 t["assignee"] = assignee
                 await self.save_task(t)
             return task_key
         for t in self.tasks.values():
             if t["assignee"] == assignee and t["status"] == "todo":
+                self.child_task_contract(contract(t))
                 return t["key"]
         title = next((ln.strip("#*- ") for ln in content.splitlines() if ln.strip()), "Task")[:100]
         t = await self.create_task(creator, {"title": title, "description": content[:1500], "assignee": assignee, "status": "todo",
                                              "acceptance_criteria": ""})
         return t["key"]
 
+    def child_task_contract(self, proposed=None):
+        from app.orchestrator.task_contracts import TaskContract, contract, permits_path
+        parent = ACTIVE_ATTEMPT.get()
+        if not parent or not parent.assignment.task_id:
+            return proposed or TaskContract()
+        parent_contract = contract(self.tasks[parent.assignment.task_id])
+        proposed = proposed or parent_contract
+        if any(not permits_path(parent_contract.write_paths, path) for path in proposed.write_paths) or proposed.max_turns > parent_contract.max_turns:
+            raise ValueError("A subtask cannot widen its parent's write scope or budget")
+        return proposed
+
     async def create_task(self, creator: str | None, fields: dict[str, Any]) -> dict[str, Any]:
-        self.task_counter += 1
-        t = {"id": new_id(), "key": f"T-{self.task_counter}", "title": fields.get("title") or "Untitled task",
+        from app.orchestrator.task_contracts import TaskContract, validate_task
+        constraints = self.child_task_contract(TaskContract.model_validate(fields["constraints_json"]) if fields.get("constraints_json") else None).model_copy(
+            update={"workflow_hash": self.workflow_contract().content_hash})
+        t = {"id": new_id(), "key": f"T-{self.task_counter + 1}", "title": fields.get("title") or "Untitled task",
              "description": fields.get("description") or "", "assignee": fields.get("assignee"), "status": fields.get("status") or "todo",
-             "acceptance_criteria": fields.get("acceptance_criteria") or "", "created_by": creator}
+             "acceptance_criteria": fields.get("acceptance_criteria") or "", "created_by": creator,
+             "constraints_json": constraints.model_dump(mode="json")}
+        validate_task(t, self.tasks)
+        self.task_counter += 1
         self.tasks[t["key"]] = t
         await self.save_task(t, new=True)
         self.log(creator, f"created {t['key']} \"{t['title'][:120]}\"" + (f" for {self.names.get(t['assignee'], '?')}" if t["assignee"] else ""))
@@ -1854,15 +1923,16 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             if new:
                 db.add(Task(id=t["id"], run_id=self.run_id, key=t["key"], title=t["title"], description=t["description"],
                             assignee_agent_id=t["assignee"], status=t["status"], acceptance_criteria=t["acceptance_criteria"],
-                            created_by=t["created_by"]))
+                            created_by=t["created_by"], constraints_json=t.get("constraints_json", {})))
             else:
                 await db.execute(update(Task).where(Task.id == t["id"]).values(
                     title=t["title"], description=t["description"], assignee_agent_id=t["assignee"], status=t["status"],
-                    acceptance_criteria=t["acceptance_criteria"], updated_at=utcnow()))
+                    acceptance_criteria=t["acceptance_criteria"], constraints_json=t.get("constraints_json", {}), updated_at=utcnow()))
             await db.commit()
         await self.emit("task_updated", {"task": {**t, "assignee_agent_id": t["assignee"], "run_id": self.run_id}})
 
     async def act_update_task_board(self, agent: AgentSpec, a: A.UpdateTaskBoard) -> None:
+        from app.orchestrator.task_contracts import validate_task
         cid = await self._tool_event(agent, "update_task_board", {"count": len(a.tasks)})
         changed = []
         for item in a.tasks:
@@ -1872,22 +1942,47 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 assignee = self.resolve_agent(item.assignee)
                 if assignee is None:
                     self.notice(agent.id, f"Task assignee '{item.assignee}' is not on the team; left unassigned.")
+                elif assignee != agent.id and agent.id != self.lead_agent_id and not (
+                    self.manages(agent.id, assignee) and find_channel(self.edges, agent.id, assignee, "task")):
+                    self.notice(agent.id, "You cannot assign work outside your managed delegation channels.")
+                    continue
             key = (item.key or "").upper()
             if key and key in self.tasks:
-                t = self.tasks[key]
+                original = self.tasks[key]
+                t = dict(original)
+                if agent.id != self.lead_agent_id and t.get("assignee") != agent.id and not self.manages(agent.id, t.get("assignee") or ""):
+                    self.notice(agent.id, f"You cannot change {key}: it belongs to another agent.")
+                    continue
                 before = (t["status"], t["assignee"])
                 for f, v in (("title", item.title), ("description", item.description), ("status", item.status), ("acceptance_criteria", ac)):
                     if v is not None:
                         t[f] = v
                 if assignee:
                     t["assignee"] = assignee
+                if item.constraints:
+                    if agent.id != self.lead_agent_id:
+                        self.notice(agent.id, "Only the accountable lead may change an existing task's scope, dependencies, criteria or budget.")
+                        continue
+                    t["constraints_json"] = item.constraints.model_copy(update={"workflow_hash": self.workflow_contract().content_hash}).model_dump(mode="json")
+                try:
+                    validate_task(t, self.tasks, previous=original)
+                except ValueError as exc:
+                    self.notice(agent.id, f"Task rejected: {exc}")
+                    continue
+                self.tasks[key] = t
                 if (t["status"], t["assignee"]) != before:
                     self.mark_progress()
                 await self.save_task(t)
                 changed.append(f"{key} → {t['status']}")
             elif item.title:
-                t = await self.create_task(agent.id, {"title": item.title, "description": item.description, "assignee": assignee,
-                                                      "status": item.status, "acceptance_criteria": ac})
+                constraints = item.constraints
+                try:
+                    t = await self.create_task(agent.id, {"title": item.title, "description": item.description, "assignee": assignee,
+                        "status": item.status, "acceptance_criteria": ac,
+                        "constraints_json": constraints.model_dump(mode="json") if constraints else {}})
+                except ValueError as exc:
+                    self.notice(agent.id, f"Task rejected: {exc}")
+                    continue
                 self.mark_progress()
                 changed.append(f"created {t['key']}")
             else:
@@ -1941,6 +2036,10 @@ class RunRuntime(TeamMixin, WorkflowMixin):
     async def _commit_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str, note: str, *,
                            appending: bool = False, partial: bool = False, context_line: int | None = None) -> None:
         fs = self.fs_for(agent.id)
+        if self.engineering_workflow == "fix" and self.budget.verify_before_finish and not any(
+            r["revision"] == self.plan_revision and r["step"] == "reproduce" for r in self.engineering_checkpoints):
+            await self.deny(agent, cid, tool, "Record the reproduction checkpoint before editing; use unavailable with the reason when reproduction cannot run.")
+            return
         if tool == "edit_file" or appending:  # the file may have changed while waiting for the lock: re-apply on current content
             current = fs.current(rel)
             if current != old:
@@ -1958,11 +2057,37 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             await self.deny(agent, cid, tool, reason)
             return
         await self.set_agent_status(agent.id, "writing", f"{'Editing' if tool == 'edit_file' else 'Appending to' if appending else 'Saving'} {rel}…")
+        from app.orchestrator.runtime_store import mutation_lock
+        async with mutation_lock(self.run_id):
+            context = ACTIVE_ATTEMPT.get()
+            await self.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
+            await self._write_checked_file(agent, cid, tool, rel, old, content, note, planned=planned,
+                                           appending=appending, partial=partial, context_line=context_line)
+
+    async def _write_checked_file(self, agent: AgentSpec, cid: str, tool: str, rel: str, old: str | None, content: str,
+                                  note: str, *, planned: bool, appending: bool, partial: bool,
+                                  context_line: int | None) -> None:
+        fs = self.fs_for(agent.id)
         try:
             fs.write(rel, content)
         except WorkspaceError as exc:
             await self.deny(agent, cid, tool, f"{tool} failed: {exc}")
             return
+        context = ACTIVE_ATTEMPT.get()
+        if context and context.workspace is not None and not context.integrated:
+            previous = context.pending_artifacts.get(rel)
+            context.pending_artifacts[rel] = {"old": previous["old"] if previous else old, "content": content, "note": note}
+            self.notice(agent.id, f"Staged {rel}; integration and canonical verification are pending.", activate=partial)
+            await self._tool_result(agent, cid, tool, True, f"Staged {rel}; not yet applied to the project")
+            return
+        await self.publish_file(agent, rel, old, content, note, planned=planned, tool=tool, cid=cid,
+                                appending=appending, partial=partial, context_line=context_line)
+
+    async def publish_file(self, agent: AgentSpec, rel: str, old: str | None, content: str, note: str, *,
+                           planned: bool, tool: str = "write_file", cid: str | None = None,
+                           appending: bool = False, partial: bool = False, context_line: int | None = None,
+                           deleted: bool = False) -> None:
+        fs = self.fs_for(agent.id)
         self.mark_progress()
         if not rel.startswith(PROJECT_DIRNAME + "/"):  # a deliverable (not a working doc)
             self.mark_work(agent.id)
@@ -1978,34 +2103,37 @@ class RunRuntime(TeamMixin, WorkflowMixin):
                 "The original is kept: revert it from Artifacts → Run changes.")})
         version = (prev or {}).get("version", 0) + 1
         art = Artifact(id=new_id(), run_id=self.run_id, path=rel, content=content, version=version, author_agent_id=agent.id,
-                       change_note=note[:1000], planned=planned, created_at=utcnow(),
+                       change_note=note[:1000], planned=planned, deleted=deleted, created_at=utcnow(),
                        previous_content=(fs.original(rel) if planned else old) if prev is None else None)
         async with self.db() as db:
             db.add(art)
             await db.commit()
-        added = content.count("\n") + 1
+        added = 0 if deleted else content.count("\n") + 1
         removed = (old or "").count("\n") + 1 if old else 0
-        self.artifacts[rel] = {"version": version, "author": agent.id, "note": note}
+        self.artifacts[rel] = {"version": version, "author": agent.id, "note": note, "deleted": deleted}
         await self.emit("artifact_updated", {"artifact": {"id": art.id, "run_id": self.run_id, "path": rel, "version": version,
                                                           "author_agent_id": agent.id, "change_note": note, "size": len(content),
-                                                          "planned": planned, "created": old is None, "appended": appending,
+                                                          "planned": planned, "deleted": deleted, "created": old is None and not deleted, "appended": appending,
                                                           "edited": tool == "edit_file", "lines": added, "previous_lines": removed,
                                                           "created_at": art.created_at.isoformat()}})
-        verb = "Planned" if planned else ("Created" if old is None else "Edited" if tool == "edit_file" else "Appended to" if appending else "Updated")
+        verb = "Deleted" if deleted else "Planned" if planned else ("Created" if old is None else "Edited" if tool == "edit_file" else "Appended to" if appending else "Updated")
         self.log(agent.id, f"{verb.lower()} {rel} (v{version})" + (f": {note[:200]}" if note else ""))
         await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="artifact_created",
                                 content=f"{verb} `{rel}` (v{version})" + (f": {note}" if note else ""),
-                                meta={"path": rel, "version": version, "artifact_id": art.id, "planned": planned}, deliver=False)
+                                meta={"path": rel, "version": version, "artifact_id": art.id, "planned": planned, "deleted": deleted}, deliver=False)
         size_note = (f" It now has {added} lines; append the next part now (mode \"append\")." if partial
                      else f" It now has {added} lines." if appending else "")
         if context_line is not None:  # show the edited region so the agent can check the result without re-reading the file
             size_note = f" Lines around the change:\n{numbered_excerpt(content, context_line)}"
-        problem = None if partial else await self.check_written(rel, content)
+        if deleted:
+            self.broken_files.pop(rel, None)
+        problem = None if partial or deleted else await self.check_written(rel, content)
         self.notice(agent.id, f"{verb} {rel} (v{version}).{size_note}"
                     + (" (plan mode: saved as a proposal, the project is unchanged)" if planned else "")
                     + (f"\n\nAUTOMATIC CHECK FAILED for {rel}:\n{problem}\nFix this before anything else." if problem else ""),
                     activate=partial or bool(problem))
-        await self._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
+        if cid is not None:
+            await self._tool_result(agent, cid, tool, True, f"{rel} v{version}{' (appended)' if appending else ''}{' (planned)' if planned else ''}")
 
     async def check_written(self, rel: str, content: str) -> str | None:
         """Syntax-check a file right after it was written (services/checks.py); remembered until a later write fixes it."""
@@ -2045,7 +2173,11 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             await self.deny(agent, cid, "create_folder", reason)
             return
         try:
-            fs.make_dir(rel)
+            from app.orchestrator.runtime_store import mutation_lock
+            async with mutation_lock(self.run_id):
+                context = ACTIVE_ATTEMPT.get()
+                await self.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
+                fs.make_dir(rel)
         except WorkspaceError as exc:
             await self.deny(agent, cid, "create_folder", f"create_folder failed: {exc}")
             return
@@ -2074,11 +2206,20 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             return
         await self.set_agent_status(agent.id, "writing", f"Moving {src} → {dst}…")
         try:
-            src, dst, moved = fs.move(src, dst)
+            from app.orchestrator.runtime_store import mutation_lock
+            async with mutation_lock(self.run_id):
+                context = ACTIVE_ATTEMPT.get()
+                await self.assert_durable_revision(context.assignment.revision if context else self.plan_revision)
+                src, dst, moved = fs.move(src, dst)
         except WorkspaceError as exc:
             await self.deny(agent, cid, "move_file", f"move_file failed: {exc}")
             return
         self.mark_progress()
+        context = ACTIVE_ATTEMPT.get()
+        if context and context.workspace is not None and not context.integrated:
+            self.notice(agent.id, f"Staged move {src} → {dst}; canonical integration is pending.")
+            await self._tool_result(agent, cid, "move_file", True, "Staged move; not yet applied to the project")
+            return
         # keep the run's file list in step with the project
         for old_path in [p for p in list(self.artifacts) if p == src or p.startswith(src + "/")]:
             self.artifacts[dst + old_path[len(src):]] = self.artifacts.pop(old_path)
@@ -2111,9 +2252,9 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         await self.set_agent_status(agent.id, "reading", f"Listing {a.prefix or 'project'} files…")
         try:
             fs = self.fs_for(agent.id)
-            files = fs.list(a.prefix.strip().strip("/"))
+            files = await asyncio.to_thread(fs.list, a.prefix.strip().strip("/"))
             if not a.prefix.strip().strip("/"):  # the whole project: working documents too (they live in .octopus/work/)
-                files += fs.list_work()
+                files += await asyncio.to_thread(fs.list_work)
             out, ok = ("\n".join(files[:400]) + (f"\n… {len(files) - 400} more" if len(files) > 400 else "")) or "(no files)", True
         except WorkspaceError as exc:
             out, ok = str(exc), False
@@ -2160,14 +2301,10 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         from app.services import browser_frames
         from app.services.browser import browser, page_info
 
-        if ok and a.tool in ("browser_snapshot", "browser_console_messages", "browser_click", "browser_take_screenshot"):
-            phase = self.wf_phase()
-            self.verification_events.append({"agent_id": agent.id, "phase": phase["key"] if phase and phase["owner"] == agent.id else "",
-                                             "tool": a.tool, "ok": True, "turn": self.turn_no, "detail": out[:600]})
         url, title = page_info(out)
         if (ok and a.tool in ("browser_snapshot", "browser_console_messages", "browser_click", "browser_take_screenshot")
                 and url and (url.startswith(self.preview_url()) or url.startswith(("http://localhost:", "http://127.0.0.1:")))):
-            self.unverified.clear()
+            await self.refresh_execution_evidence()
         if url:
             self.browser_pages[agent.id] = (url, title)
         else:
@@ -2193,8 +2330,22 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
         granted = {m["name"].lower(): m["id"] for m in agent.mcp}
         sid = granted.get(a.server.lower())
-        if sid == SERVER_ID:  # built-in browser: one persistent tab per agent, no approval needed (isolated, in-memory profile)
-            if self.levels.get(agent.id, self.level) == "read_only" and a.tool in ("browser_fill_form", "browser_type", "browser_file_upload"):
+        if sid == SERVER_ID:  # built-in browser: one persistent, in-memory tab per agent
+            level = self.levels.get(agent.id, self.level)
+            mutating_browser_tools = {"browser_click", "browser_type", "browser_fill_form", "browser_file_upload", "browser_press_key", "browser_evaluate", "browser_select_option", "browser_handle_dialog"}
+            needs_browser_approval = level == "ask" or (level == "auto" and a.tool in mutating_browser_tools)
+            if needs_browser_approval:
+                ok, reason = await self.guard(
+                    agent,
+                    "mcp_call",
+                    f"{agent.name} wants to use the browser tool {a.tool}",
+                    str(a.arguments),
+                    {"server": "browser", "tool": a.tool, "arguments": a.arguments},
+                )
+                if not ok:
+                    await self.deny(agent, cid, "mcp_call", reason)
+                    return
+            if level == "read_only" and a.tool in ("browser_fill_form", "browser_type", "browser_file_upload"):
                 await self.deny(agent, cid, "mcp_call", "Read-only mode: you may look at pages but not fill in forms.")
                 return
             await self.set_agent_status(agent.id, "tool", f"Browser: {a.tool.removeprefix('browser_')}…")
@@ -2232,7 +2383,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     async def act_run_code(self, agent: AgentSpec, a: A.RunCode) -> None:
         self.mark_work(agent.id)
-        cid = await self._tool_event(agent, "run_code", {"command": a.command})
+        cid = await self._tool_event(agent, "run_code", {"command": a.command, "covered_paths": a.covered_paths,
+                                                        "criterion_ids": a.criterion_ids, "whole_project": a.whole_project})
         level = self.levels.get(agent.id, self.level)
         try:
             parse_command(a.command, danger=level == "danger")
@@ -2246,12 +2398,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             return
         await self.set_agent_status(agent.id, "running", f"$ {a.command[:70]}")
         try:
-            res = await run_command(a.command, self.root, danger=level == "danger")
+            res = await run_command(a.command, self.worker_root(agent.id), danger=level == "danger")
             ok = res.ok
-            if ok:
-                from app.orchestrator.quality import command_is_verification
-                if command_is_verification(a.command, list(self.artifacts)):
-                    self.unverified.clear()
             out = f"$ {a.command}\n(exit {res.exit_code}{', timed out' if res.timed_out else ''}, {res.backend})\n{res.output}"
         except SandboxError as exc:
             ok, out = False, f"Command rejected by sandbox: {exc}"
@@ -2269,35 +2417,28 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     async def act_web_search(self, agent: AgentSpec, a: A.WebSearch) -> None:
         cid = await self._tool_event(agent, "web_search", {"query": a.query})
+        ok, reason = await self.guard(agent, "web_search", f"{agent.name} wants to search the web", a.query, {"query": a.query})
+        if not ok:
+            await self.deny(agent, cid, "web_search", reason)
+            return
         out = await basic.web_search(a.query)
         self.observe(agent.id, {"tool": "web_search", "ok": True, "content": out})
         await self._tool_result(agent, cid, "web_search", True, out)
 
     async def act_remember(self, agent: AgentSpec, a: A.Remember) -> None:
         cid = await self._tool_event(agent, "remember", {"key": a.key, "scope": a.scope})
-        if a.scope == "project":  # shared with the whole team, now and in future runs (.octopus/memory.json)
-            try:
-                self.memory = PM.remember(self.root, a.key, a.value, agent.name)
-                ok = True
-            except OSError:
-                ok = False
-            self.log(agent.id, f"project memory: {a.key} = {a.value[:200]}")
-            await self._tool_result(agent, cid, "remember", ok, a.key)
-            return
-        agent.memory[a.key] = a.value
+        from app.services import scoped_memory as memory
+        actor = memory.Actor(self.user_id, self.company_id, agent.id)
+        target = (memory.Target("project", self.company_id) if a.scope == "project" else
+                  memory.Target("chat", self.run_id) if a.scope == "chat" else
+                  memory.Target("group", a.scope_id or "") if a.scope == "group" else memory.Target("agent", agent.id))
         try:
-            async with self.db() as db:
-                row = (await db.execute(select(AgentMemory).where(AgentMemory.agent_id == agent.id, AgentMemory.key == a.key))).scalar_one_or_none()
-                if row:
-                    row.value = a.value
-                else:
-                    db.add(AgentMemory(agent_id=agent.id, key=a.key, value=a.value))
-                await db.commit()
-            ok = True
-        except Exception:  # agent may have been deleted from the company since the run started
-            ok = False
-        await self._tool_result(agent, cid, "remember", ok, a.key)
-
+            await memory.put(self.sf, actor, target, a.key, a.value, expected_version=a.expected_version,
+                             refs=tuple(memory.SourceRef(ref.get("kind", ""), ref.get("id", "")) for ref in a.sources))
+            await self._tool_result(agent, cid, "remember", True, "Stored as a proposed scoped observation. The owner can review it.")
+        except (memory.MemoryDenied, ValueError) as exc:
+            await self._tool_result(agent, cid, "remember", False, str(exc))
+        return
     async def act_request_user_input(self, agent: AgentSpec, a: A.RequestUserInput) -> None:
         options = [o.model_dump() for o in a.options]
         rec = await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="question", content=a.question,
@@ -2309,9 +2450,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         """Verify before done (MAST: missing/incomplete verification is a top cause of multi-agent failure). An agent that
         can run code or open a browser, finishing the run or a delegated task while code changed unexercised or a file
         fails its automatic check, is sent back once with what to check. Asking again finishes (it may be unverifiable)."""
-        frame = DELEGATION.get()
-        if self.budget.force_mock or not self.budget.verify_before_finish or not (
-                agent.is_entry or (frame is not None and frame["worker"] == agent.id) or self.wf_owner_of_active(agent.id)):
+        if not self.budget.verify_before_finish or not (
+                agent.is_entry or self.wf_owner_of_active(agent.id)):
             return None
         can_run = A.tool_enabled(agent.tools, "terminal")
         can_browse = any(m.get("builtin") for m in agent.mcp)
@@ -2338,8 +2478,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     async def wf_finish_refusal(self, agent: AgentSpec, a: A.Finish) -> str | None:
         """Workflow rules for `finish`: the head accepts at the end; a phase owner closes its phase (gate checked)."""
-        frame = DELEGATION.get()
-        if not self.wf_active() or (frame is not None and frame["worker"] == agent.id):
+        if not self.wf_active():
             return None
         ph = self.wf_phase()
         if ph is None:
@@ -2353,7 +2492,7 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             self.wf["ended"] = True
             await self.wf_emit()
             return None
-        if agent.is_entry:
+        if agent.id == self.lead_agent_id:
             if self.wf.get("head_bounced") == ph["key"]:
                 self.wf.update({"ended": True, "reason": f"head finished during {ph['key']}"})
                 return None
@@ -2367,25 +2506,48 @@ class RunRuntime(TeamMixin, WorkflowMixin):
 
     async def act_finish(self, agent: AgentSpec, a: A.Finish) -> None:
         self._bounced_finish = None
+        was_phase_owner = self.wf_owner_of_active(agent.id)
+        context = ACTIVE_ATTEMPT.get()
+        if context and context.workspace is not None and not context.integrated:
+            context.pending_finish = a
+            return
+        if agent.id == self.lead_agent_id and any(t["status"] != "blocked" for t in self.open_tasks()) and not self.wf_active():
+            self.notice(agent.id, "Specialist assignments are still open. Their results must be integrated before acceptance.", activate=False)
+            return
         if (why := self.finish_refusal(agent)) or (why := await self.wf_finish_refusal(agent, a)):
             self._bounced_finish = agent.id
             self.notice(agent.id, why, activate=True)
             return
-        frame = DELEGATION.get()
-        if frame is not None and frame["worker"] == agent.id:  # a delegated sub-turn: hand the result back to the delegator
-            frame["summary"] = a.summary or "Done."
-            return
+        if was_phase_owner:
+            return  # wf_on_finish already made the ordered handoff.
         if self.mode == "supervised":
             ok, reason = await self.request_approval(agent, "finish", f"{agent.name} wants to finish", a.summary, {"summary": a.summary})
             if not ok:
                 self.notice(agent.id, f"The user did not accept finishing yet: {reason or 'keep going'}", activate=True)
                 return
-        if agent.is_entry:
+        if agent.id == self.lead_agent_id:
             self.finished_summary = a.summary or f"{agent.name} finished."
             await self.post_message(sender="agent", from_id=agent.id, to_id=None, type_="final_report",
                                     content=self.finished_summary, deliver=False)
         else:
             self.done_agents.add(agent.id)
+            reported = False
+            attempt = ACTIVE_ATTEMPT.get()
+            for task in list(self.tasks.values()):
+                if attempt and attempt.assignment.task_id and task["key"] != attempt.assignment.task_id:
+                    continue
+                if task.get("assignee") == agent.id and task["status"] in OPEN_TASK_STATES:
+                    task["status"] = "blocked" if a.outcome == "fail" else "done"
+                    await self.save_task(task)
+                    parent = task.get("created_by") or self.lead_agent_id
+                    if parent in self.agents and parent != agent.id:
+                        await self.post_message(sender="agent", from_id=agent.id, to_id=parent,
+                            type_="status_update", content=a.summary or "Specialist finished without a summary.",
+                            meta={"task_id": task["key"], "delegation_result": True, "outcome": a.outcome})
+                        reported = True
+            if not reported and not self.wf_owner_of_active(agent.id):
+                await self.post_message(sender="agent", from_id=agent.id, to_id=self.lead_agent_id,
+                    type_="status_update", content=a.summary or "Specialist finished.", meta={"direct_request_result": True})
             self.mark_progress()
             self.log(agent.id, f"finished: {(a.summary or '')[:300]}")
             await self.emit("agent_finished", {"agent_id": agent.id, "summary": a.summary})
@@ -2402,30 +2564,48 @@ class RunRuntime(TeamMixin, WorkflowMixin):
             self.observe(agent.id, {"tool": "use_skill", "ok": False, "content": out})
             await self._tool_result(agent, cid, "use_skill", False, out)
             return
+        if a.resource:
+            bundle = self.pinned_skills.get(sk.name, {})
+            document = next((d for d in bundle.get("documents", []) if d["path"] == a.resource), None)
+            out = document["content"] if document else "Resource is not present in the pinned skill bundle"
+            self.observe(agent.id, {"tool": "use_skill", "ok": document is not None, "content": out})
+            await self._tool_result(agent, cid, "use_skill", document is not None, out)
+            return
         await self.set_agent_status(agent.id, "reading", f"Following the {sk.name} skill…")
         self.log(agent.id, f"uses the {sk.name} skill")
-        self.observe(agent.id, {"tool": "use_skill", "ok": True, "content": f"# Skill: {sk.name}\n{sk.description}\n\n{sk.body}"})
+        resources = ", ".join(d["path"] for d in self.pinned_skills.get(sk.name, {}).get("documents", []) if d["path"] != "SKILL.md")
+        self.observe(agent.id, {"tool": "use_skill", "ok": True, "content": f"# Skill: {sk.name}\n{sk.description}\n\n{sk.body}\nPinned resources (load using use_skill resource): {resources or 'none'}"})
         await self._tool_result(agent, cid, "use_skill", True, sk.name)
 
     # ------------------------------------------------------------------ finalisation
     async def finalize(self, status: str, reason: str) -> None:
+        from app.orchestrator.runtime_store import mutation_lock
+        async with mutation_lock(self.run_id):
+            await self._finalize(status, reason)
+
+    async def _finalize(self, status: str, reason: str) -> None:
         if self.finalized:
             return
+        async with self.db() as db:
+            current = await db.get(Run, self.run_id)
+            if current and int((current.state_json or {}).get("plan_revision", 1)) > self.plan_revision:
+                return  # A committed steer owns the next scheduler iteration.
+        if self._last_manifest is not None:
+            await self.refresh_execution_evidence()
+        blockers = self.engineering_blockers()
         from app.orchestrator.quality import assess_completion
         status, reason = assess_completion(
             status, reason, workflow=self.wf, open_tasks=self.open_tasks(),
             broken_files=self.broken_files, unverified=self.unverified,
-            require_verification=self.budget.verify_before_finish and not self.budget.force_mock,
+            require_verification=self.budget.verify_before_finish,
         )
+        if status in ("completed", "incomplete") and blockers:
+            status, reason = "incomplete", "; ".join(filter(None, (reason, *blockers)))
         self.finalized = True
         for aid in self.agents:
             final = "done" if (aid in self.done_agents or (status == "completed" and self.agent_turns[aid])) else "idle"
             await self.set_agent_status(aid, final)
         summary = self.finished_summary or reason
-        try:  # what this run did, for the agents of the next run in this project
-            self.memory = PM.add_run(self.root, self.retrospective(status, reason))
-        except OSError:  # pragma: no cover
-            log.warning("project_memory_write_failed", run_id=self.run_id)
         async with self.db() as db:
             await db.execute(update(Run).where(Run.id == self.run_id).values(
                 status=status, halt_reason=reason[:200], summary=summary, ended_at=utcnow(),
@@ -2446,7 +2626,8 @@ class RunRuntime(TeamMixin, WorkflowMixin):
         self.run_status = status
         await self.usage_event()
         await self.emit("run_status", {"status": status, "reason": reason, "summary": summary, "final": True})
-        manager.forget(self.run_id)
+        if manager.get(self.run_id) is self:
+            manager.forget(self.run_id)
 
 
 class RunManager:
@@ -2454,6 +2635,7 @@ class RunManager:
 
     def __init__(self) -> None:
         self.runtimes: dict[str, RunRuntime] = {}
+        self.locks: dict[str, asyncio.Lock] = {}
 
     @staticmethod
     async def _load(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
@@ -2467,18 +2649,27 @@ class RunManager:
             return run, company.user_id if company else ""
 
     async def start(self, run_id: str, project: ProjectRef) -> RunRuntime:
+        async with self.locks.setdefault(run_id, asyncio.Lock()):
+            existing = self.runtimes.get(run_id)
+            if existing:
+                return existing
+            return await self._start(run_id, project)
+
+    async def _start(self, run_id: str, project: ProjectRef) -> RunRuntime:
         loaded = await self._load(run_id, project)
         assert loaded, "run not found"
         run, user_id = loaded
         rt = RunRuntime(run, user_id, project)
-        await rt._load_memory()
-        await rt.load_mcp()
         self.runtimes[run_id] = rt
         rt.task = asyncio.create_task(rt.main(fresh=True), name=f"run-{run_id}")
         return rt
 
     async def ensure(self, run_id: str, project: ProjectRef) -> RunRuntime | None:
         """Return the live runtime, restoring a persisted (paused / interrupted) run if needed."""
+        async with self.locks.setdefault(run_id, asyncio.Lock()):
+            return await self._ensure(run_id, project)
+
+    async def _ensure(self, run_id: str, project: ProjectRef) -> RunRuntime | None:
         if run_id in self.runtimes:
             return self.runtimes[run_id]
         loaded = await self._load(run_id, project)
@@ -2489,35 +2680,45 @@ class RunManager:
             return None
         rt = RunRuntime(run, user_id, project)
         await rt.restore(run)
-        await rt.load_mcp()
+        rt.recovery_required = await rt.runtime_store.recover() or rt.recovery_required
         rt.paused = True
+        if rt.recovery_required:
+            rt.mailbox.clear()
+            rt.observations.clear()
+            await rt.save()
         self.runtimes[run_id] = rt
-        rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
+        rt.task = asyncio.create_task(rt.main(fresh=run.started_at is None), name=f"run-{run_id}")
         return rt
 
-    async def continue_run(self, run_id: str, project: ProjectRef, content: str, to_agent_id: str | None = None,
-                           attachments: list[dict[str, str]] | None = None) -> RunRuntime | None:
-        """Send a message to a run. Live runs get an interjection; finished runs are re-opened and continue with full context."""
-        rt = await self.ensure(run_id, project)
-        if rt is not None:
-            if rt.finalized or rt.run_status in TERMINAL_STATES:
-                return None  # finishing right now; caller retries
-            content, message_meta = rt.attach_followup(content, attachments or [])
-            await rt.interject(content, to_agent_id, message_meta=message_meta)
+    async def notify_requests(self, run_id: str, project: ProjectRef, *, steer: bool = False) -> RunRuntime | None:
+        """Wake a committed durable queue. Never replay ambiguous interrupted work."""
+        async with self.locks.setdefault(run_id, asyncio.Lock()):
+            rt = self.runtimes.get(run_id)
+            if rt and rt.task and not rt.task.done() and not rt.finalized:
+                if steer:
+                    await rt.steer_execution()
+                rt.wake.set()
+                return rt
+            loaded = await self._load(run_id, project)
+            if not loaded:
+                return None
+            run, user_id = loaded
+            rt = RunRuntime(run, user_id, project)
+            await rt.restore(run)
+            rt.recovery_required = await rt.runtime_store.recover() or rt.recovery_required
+            if rt.recovery_required or run.status not in ACTIVE_STATES:
+                rt.mailbox.clear()
+                rt.observations.clear()
+            rt.finalized = False
+            rt.stop_requested = False
+            rt.paused = rt.recovery_required
+            self.runtimes[run_id] = rt
+            if steer:
+                await rt.steer_execution()
+            await rt.set_run_status("paused" if rt.recovery_required else "running")
+            await rt.save()
+            rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
             return rt
-        loaded = await self._load(run_id, project)
-        if not loaded:
-            return None
-        run, user_id = loaded
-        rt = RunRuntime(run, user_id, project)
-        await rt.restore(run)
-        rt.mailbox.clear()  # stale unread messages from the finished run are context, not new work
-        content, message_meta = rt.attach_followup(content, attachments or [])
-        await rt.load_mcp()
-        self.runtimes[run_id] = rt
-        await rt.continue_with(content, to_agent_id, message_meta=message_meta)
-        rt.task = asyncio.create_task(rt.main(fresh=False), name=f"run-{run_id}")
-        return rt
 
     def get(self, run_id: str) -> RunRuntime | None:
         return self.runtimes.get(run_id)

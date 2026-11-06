@@ -150,7 +150,7 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
             </div>
           </TabsContent>
           <TabsContent value="generate" className="mt-3 space-y-3">
-            <Field label="Describe the company you need" hint="An org designer (your configured model, or the offline designer in Demo Mode) proposes departments, managers, specialists, prompts, tools and channels.">
+            <Field label="Describe the company you need" hint="An org designer (your connected Azure model) proposes departments, managers, specialists, prompts, tools and channels.">
               <Textarea autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} className="min-h-[84px]" placeholder={EXAMPLES[0]} data-testid="generate-prompt"
                 onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && prompt.trim().length > 2) generate.mutate(); }} />
             </Field>
@@ -167,7 +167,7 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
                 <div className="flex items-center gap-2">
                   <Network className="h-4 w-4 text-primary" />
                   <span className="text-sm font-semibold">{gen.spec.name}</span>
-                  <Badge variant={gen.source === "ai" ? "default" : "secondary"}>{gen.source === "ai" ? "Designed by AI" : "Offline designer"}</Badge>
+                  <Badge variant="default">Designed by AI</Badge>
                   <span className="ml-auto text-[11px] text-muted-foreground">{gen.spec.agents.length} agents · {gen.spec.edges.length} channels</span>
                 </div>
                 <div className="max-h-[30vh] overflow-y-auto"><OrgPreview departments={gen.departments} /></div>

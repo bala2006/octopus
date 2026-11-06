@@ -8,6 +8,7 @@ from typing import Any
 from app.core.deps import get_or_create_single_user
 from app.db.session import registry_factory
 from app.llm.router import set_provider_override
+from fakes.fake_provider import FakeProvider
 from app.services.chat import ChatConnection
 from conftest import ScriptedProvider, agent, env, events, make_company, start_run, wait_status
 
@@ -34,7 +35,7 @@ class FakeWS:
 
 
 async def test_direct_chat_stream_tool_and_regenerate(client, workspace) -> None:
-    set_provider_override(None)
+    set_provider_override(FakeProvider())
     cid = await make_company(client, workspace, [agent("a1", "Ava", role="CEO")], [])
     base = f"/api/v1/w/{workspace['id']}"
     s = (await client.post(f"{base}/sessions", json={"company_id": cid, "mode": "direct", "agent_id": "a1"})).json()

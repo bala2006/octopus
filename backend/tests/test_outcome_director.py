@@ -36,13 +36,13 @@ def test_unverified_code_downgrades_outcome_when_checks_enabled():
     assert assess_completion("failed", "budget", unverified={}, **kwargs) == ("failed", "budget")
 
 def test_unrelated_successful_command_is_not_code_verification():
-    from app.orchestrator.quality import command_is_verification
+    from app.orchestrator.evidence import command_is_verification
 
-    assert not command_is_verification("python --version", ["src/app.py"])
-    assert not command_is_verification("ls", ["src/app.py"])
-    assert command_is_verification("python src/app.py", ["src/app.py"])
-    assert command_is_verification("pytest -q", ["src/app.py"])
-    assert command_is_verification("npm run build", ["src/index.ts"])
+    assert not command_is_verification("python --version")
+    assert not command_is_verification("ls")
+    assert not command_is_verification("python src/app.py"), "Plain execution is not an assertion of acceptance"
+    assert command_is_verification("pytest -q")
+    assert command_is_verification("npm run build")
 
 def test_adaptive_company_staffing_is_proportionate():
     from app.orchestrator.director import default_company_template
@@ -52,9 +52,9 @@ def test_adaptive_company_staffing_is_proportionate():
     assert default_company_template("Build full UI application from scratch") == "web_app_studio"
 
 def test_an_unrelated_successful_command_cannot_certify_a_changed_file():
-    from app.orchestrator.quality import command_is_verification
+    from app.orchestrator.evidence import command_is_verification
 
-    assert not command_is_verification("echo src/app.py", ["src/app.py"])
-    assert not command_is_verification("ls src/app.py", ["src/app.py"])
-    assert not command_is_verification("python -c print", ["src/app.py"])
-    assert command_is_verification("python src/app.py", ["src/app.py"])
+    assert not command_is_verification("echo src/app.py")
+    assert not command_is_verification("ls src/app.py")
+    assert not command_is_verification("python -c print")
+    assert not command_is_verification("python src/app.py"), "Plain execution is not an assertion of acceptance"

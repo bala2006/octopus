@@ -1,11 +1,13 @@
 """Fixes for the "a multi-agent run does worse than one agent" failure mode: questions nobody can answer, silent tool-round exhaustion, blind edit retries, parallel work that depends on other work."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.llm.base import LLMRequest
 from app.llm.router import set_provider_override
 from app.orchestrator import engine as E
 from app.orchestrator.context import build_system_prompt
-from conftest import NativeScriptedProvider, agent, edge, make_company, start_run, wait_status
+from conftest import NativeScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status
 
 TEAM = [agent("a", "Ann", entry=True), agent("b", "Ben"), agent("c", "Cy")]
 EDGES = [edge("ab", "a", "b"), edge("bc", "b", "c", type_="consult", bidirectional=True), edge("ba", "b", "a", type_="report")]
@@ -15,23 +17,33 @@ def outputs_of(req: LLMRequest) -> list[str]:
     return [i["output"] for i in req.continuation if i.get("type") == "function_call_output"]
 
 
-async def test_delegated_worker_cannot_ask_questions_or_send_status_it_would_never_get_answered(client, workspace) -> None:
+async def test_delegated_worker_yields_for_peer_answer_then_returns_result_to_lead(client, workspace) -> None:
     provider = NativeScriptedProvider({
         "Ann": [[("delegate", {"to": "Ben", "objective": "Build index.html"})], [("finish", {"summary": "ok"})]],
-        "Ben": [[("send_message", {"to": "Cy", "type": "question", "content": "What are the specs?"}),
-                 ("send_message", {"to": "Ann", "type": "status_update", "content": "starting"})],
+        "Ben": [[("send_message", {"to": "Cy", "type": "question", "content": "What are the specs?"})],
                 [("write_file", {"path": "index.html", "content": "<h1>game</h1>"})], [("finish", {"summary": "built"})]],
+        "Cy": [[("send_message", {"to": "Ben", "type": "answer", "content": "Use the title game"}), ("wait", {})]],
     })
     set_provider_override(provider)
     cid = await make_company(client, workspace, TEAM, EDGES)
     run = await start_run(client, workspace, cid, permission_level="danger")
     done = await wait_status(client, workspace, run["id"])
     assert done["status"] == "completed", done["halt_reason"]
-    ben = [r for r in provider.requests if r.metadata["mock_context"]["agent"]["name"] == "Ben"]
-    outs = outputs_of(ben[1])
-    assert "REJECTED" in outs[0] and "make a sensible assumption" in outs[0]
-    assert "REJECTED" in outs[1] and "finish` summary goes straight back to Ann" in outs[1]
-    assert not any(r.metadata["mock_context"]["agent"]["name"] == "Cy" for r in provider.requests), "Cy never got woken by a question"
+    ben = [r for r in provider.requests if r.metadata["turn_context"]["agent"]["name"] == "Ben"]
+    assert any(m["from"] == "Cy" and m["type"] == "answer" and m["content"] == "Use the title game"
+               for m in ben[1].metadata["turn_context"]["inbox"])
+    calls = [request.metadata["turn_context"]["agent"]["name"] for request in provider.requests]
+    assert calls == ["Ann", "Ben", "Cy", "Ben", "Ben", "Ann"]
+    messages = await run_messages(client, workspace, run["id"])
+    assert [(m["from_agent_id"], m["to_agent_id"], m["type"], m["content"])
+            for m in messages if m["type"] in ("question", "answer")] == [
+        ("b", "c", "question", "What are the specs?"), ("c", "b", "answer", "Use the title game")]
+    assert any(m["from_agent_id"] == "b" and m["to_agent_id"] == "a" and m["content"] == "built"
+               and m["meta"].get("delegation_result") for m in messages)
+    assert any(m["from"] == "Ben" and m["content"] == "built"
+               for m in provider.requests[-1].metadata["turn_context"]["inbox"])
+    assert (Path(workspace["path"]) / "index.html").read_text() == "<h1>game</h1>"
+    assert not await events(client, workspace, run["id"], "message_rejected")
 
 
 async def test_agent_is_told_to_wrap_up_before_its_tool_rounds_run_out(client, workspace) -> None:

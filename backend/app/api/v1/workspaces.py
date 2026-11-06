@@ -13,7 +13,7 @@ from app.db.session import close_project, get_registry_db
 from app.models import Artifact, User, Workspace
 from app.orchestrator.engine import manager
 from app.schemas import (
-    BrowseOut, DirEntryOut, FileContentOut, FileNode, MkdirIn, NativeDialogOut, NativeOpenIn, NativeOpenOut, ProjectTreeOut, WorkspaceIn,
+    BrowseOut, DirEntryOut, FileContentOut, FileNode, MkdirIn, NativeDialogOut, NativeOpenIn, NativeOpenOut, NativePickOut, ProjectTreeOut, WorkspaceIn,
     WorkspaceOut, WorkspacePatch,
 )
 from app.core.config import get_settings
@@ -74,6 +74,24 @@ async def native_status(request: Request, user: User = Depends(current_user)) ->
     return NativeDialogOut(available=av.available, method=av.method, reason=av.reason, **extra)
 
 
+@router.post("/fs/native/pick", response_model=NativePickOut)
+async def pick_native_directory(request: Request, user: User = Depends(current_user)) -> NativePickOut:
+    """Choose a local directory without opening it as a project yet."""
+    if not _is_local(request):
+        raise HTTPException(403, "The system folder dialog is only available on the machine running Octopus")
+    try:
+        picked = await native_dialog.pick_directory()
+    except native_dialog.DialogError as exc:
+        raise HTTPException(501, str(exc)) from exc
+    if picked is None:
+        return NativePickOut(cancelled=True)
+    try:
+        root = validate_project_dir(str(picked), any_root=True)
+    except ProjectPathError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return NativePickOut(cancelled=False, path=hostpaths.to_host(str(root)))
+
+
 @router.post("/workspaces/native", response_model=NativeOpenOut)
 async def open_native(body: NativeOpenIn, request: Request, db: AsyncSession = Depends(get_registry_db),
                       user: User = Depends(current_user)) -> NativeOpenOut:
@@ -110,7 +128,14 @@ async def _register(root: Path, name: str | None, permission: str, db: AsyncSess
     existing_row = (await db.execute(select(Workspace).where(Workspace.user_id == user.id, Workspace.path == str(root)))).scalar_one_or_none()
     meta = init_project(root, name)
     if existing_row:
+        if name and name != existing_row.name:
+            existing_row.name = name
+            rename_project(root, name)
+            await db.commit()
+            await db.refresh(existing_row)
         return ws_out(existing_row, existing=True)
+    if name and name != meta.name:
+        rename_project(root, name)
     w = Workspace(user_id=user.id, name=name or meta.name, path=str(root), default_permission=permission)
     db.add(w)
     await db.commit()

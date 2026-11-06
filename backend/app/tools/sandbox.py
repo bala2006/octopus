@@ -146,20 +146,22 @@ def _limits(memory_mb: int, cpu_s: int, *, address_space: bool = True):  # type:
     return apply
 
 
-def _resolve_exe(argv: list[str]) -> list[str]:
+def _resolve_exe(argv: list[str], env: dict[str, str] | None = None) -> list[str]:
+    path = (env or {}).get("PATH")
     if argv[0] in ("python", "python3"):
-        return [shutil.which("python3") or sys.executable, *argv[1:]]
+        return [shutil.which("python3", path=path) or shutil.which("python", path=path) or sys.executable, *argv[1:]]
     if argv[0] == "pytest":
-        return [shutil.which("pytest") or sys.executable, *([] if shutil.which("pytest") else ["-m", "pytest"]), *argv[1:]]
+        pytest = shutil.which("pytest", path=path)
+        return [pytest or (shutil.which("python3", path=path) or sys.executable), *([] if pytest else ["-m", "pytest"]), *argv[1:]]
     if os.name == "nt" and argv[0] in ("npm", "npx"):
-        launcher = shutil.which(f"{argv[0]}.cmd")
-        node = shutil.which("node")
+        launcher = shutil.which(f"{argv[0]}.cmd", path=path)
+        node = shutil.which("node", path=path)
         if launcher and node:
             cli = Path(launcher).parent / "node_modules" / "npm" / "bin" / f"{argv[0]}-cli.js"
             if cli.is_file():
                 return [node, str(cli), *argv[1:]]
     if os.name == "nt":
-        launcher = shutil.which(argv[0])
+        launcher = shutil.which(argv[0], path=path)
         if launcher:
             # Windows resolves SDK tools through .bat/.cmd launchers. Such files
             # implicitly invoke cmd.exe, so reject arguments it could reinterpret.
@@ -197,6 +199,12 @@ def command_environment(cwd: Path, *, developer: bool = False) -> dict[str, str]
     for key in ("JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT", "FLUTTER_ROOT", "DART_SDK", "PUB_CACHE", "GRADLE_USER_HOME"):
         if key in os.environ:
             env[key] = os.environ[key]
+    from app.services.local_environment import environment_directory
+    venv = environment_directory(cwd)
+    if venv:
+        scripts = venv / ("Scripts" if os.name == "nt" else "bin")
+        env["PATH"] = f"{scripts}{os.pathsep}{env['PATH']}"
+        env["VIRTUAL_ENV"] = str(venv)
     if developer:
         env["HOME"] = os.environ.get("HOME") or os.environ.get("USERPROFILE") or str(Path.home())
     return env
@@ -245,8 +253,8 @@ async def bounded_output(proc: asyncio.subprocess.Process) -> str:
 
 
 async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: int, *, network: bool) -> ExecResult:
-    exe = _resolve_exe(argv)
     env = command_environment(cwd)
+    exe = _resolve_exe(argv, env)
     backend = "subprocess"
     if not network and await _unshare_available():
         exe = [shutil.which("unshare") or "unshare", "-rn", "--", *exe]
@@ -275,8 +283,15 @@ async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: i
 
 async def _run_docker(argv: list[str], cwd: Path, timeout: int, memory_mb: int, *, network: bool) -> ExecResult:
     s = get_settings()
+    local_env_args: list[str] = []
+    from app.services.local_environment import environment_directory
+    venv = environment_directory(cwd)
+    if venv:
+        env_rel = venv.relative_to(cwd.resolve()).as_posix()
+        local_env_args = ["-e", f"PATH=/work/{env_rel}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                          "-e", f"VIRTUAL_ENV=/work/{env_rel}"]
     cmd = ["docker", "run", "--rm", "--network", "bridge" if network else "none", "--memory", f"{memory_mb}m", "--cpus", "1",
-           "--pids-limit", "256", "--read-only", "--tmpfs", "/tmp", "-v", f"{cwd}:/work", "-w", "/work",
+           "--pids-limit", "256", "--read-only", "--tmpfs", "/tmp", *local_env_args, "-v", f"{cwd}:/work", "-w", "/work",
            "--user", f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "1000:1000", s.sandbox_docker_image, *argv]
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
     try:

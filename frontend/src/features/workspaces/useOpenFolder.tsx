@@ -1,130 +1,103 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useWorkbenchStore } from "@/features/editor/workbenchStore";
 import { toast } from "sonner";
-import { FolderOpen, Loader2 } from "lucide-react";
+import { useWorkbenchStore } from "@/features/editor/workbenchStore";
+import { usePendingAttachments } from "@/features/chat/attachments";
 import { api, unwrap } from "@/lib/api";
 import { qk } from "@/hooks/queries";
 import type { WorkspaceOut } from "@/types";
-import { DirectoryPicker } from "./DirectoryPicker";
+import { CreateProjectDialog, type ProjectFolder } from "./CreateProjectDialog";
 import { bridgeAvailable, bridgePick } from "./folderBridge";
 
-/**
- * "Open project folder": shows the operating system's own folder dialog (where you can also create a new folder).
- * Octopus then creates `<folder>/.octopus` and manages it.
- *
- * 1. Octopus running natively on this machine: the backend shows the dialog.
- * 2. Octopus in Docker: the backend has no desktop, so the browser asks the laptop-side helper
- *    (scripts/folder_bridge.py, started by start.bat / start.sh) and the chosen laptop path is opened through the
- *    folder shared with the container.
- * 3. Neither available: the in-app folder browser (which in Docker browses the shared laptop folder).
- */
 export function useOpenFolder() {
-  const qc = useQueryClient();
-  const nav = useNavigate();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const location = useLocation();
-  const [fallback, setFallback] = React.useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [choosingFolder, setChoosingFolder] = React.useState(false);
   const native = useQuery({
     queryKey: ["native-dialog"],
     staleTime: Infinity,
     queryFn: () => unwrap(api.GET("/api/v1/fs/native")),
   });
-  const opened = (w: WorkspaceOut) => {
-    if (location.pathname === "/")
-      useWorkbenchStore.getState().stageHomePrompt(w.id);
-    qc.invalidateQueries({ queryKey: qk.workspaces });
-    const where = w.display_path || w.path;
+
+  const opened = (workspace: WorkspaceOut) => {
+    if (location.pathname === "/") {
+      useWorkbenchStore.getState().stageHomePrompt(workspace.id);
+      usePendingAttachments.getState().stageHome(workspace.id);
+    }
+    void queryClient.invalidateQueries({ queryKey: qk.workspaces });
     toast.success(
-      w.existing_project ? `Re-opened ${w.name}` : `Opened ${w.name}`,
+      workspace.existing_project
+        ? `Re-opened ${workspace.name}`
+        : `Project ${workspace.name} is ready`,
       {
-        description: w.existing_project
+        description: workspace.existing_project
           ? "Found its .octopus folder: everything is restored."
-          : `Octopus created ${where}/.octopus for this project.`,
+          : `Octopus created ${workspace.display_path || workspace.path}/.octopus for this project.`,
       },
     );
-    nav(`/w/${w.id}/agent`);
+    navigate(`/w/${workspace.id}/agent`);
   };
-  const pick = useMutation({
-    mutationFn: () =>
+
+  const create = useMutation({
+    mutationFn: ({ folder, name }: { folder: ProjectFolder; name: string }) =>
       unwrap(
-        api.POST("/api/v1/workspaces/native", {
-          body: { default_permission: "ask" },
+        api.POST("/api/v1/workspaces", {
+          body: {
+            path: folder.path,
+            name,
+            default_permission: "ask",
+          },
         }),
       ),
-    onSuccess: (r) => {
-      if (!r.cancelled && r.workspace) opened(r.workspace);
-    },
-    onError: (e: Error) => {
-      toast.error("Couldn't open the folder dialog", {
-        description: e.message,
-      });
-      setFallback(e.message);
-    },
+    onSuccess: opened,
   });
-  const viaBridge = useMutation({
-    mutationFn: async () => {
-      const path = await bridgePick(native.data!.bridge_url!);
-      if (!path) return null;
-      return unwrap(
-        api.POST("/api/v1/workspaces", {
-          body: { path, default_permission: "ask" },
-        }),
-      );
-    },
-    onSuccess: (w) => {
-      if (w) opened(w);
-    },
-    onError: (e: Error) => {
-      toast.error("Couldn't open that folder", { description: e.message });
-      setFallback(e.message);
-    },
-  });
-  const open = React.useCallback(async () => {
-    const d = native.data;
-    if (d?.available) return pick.mutate();
-    if (d?.bridge_url && (await bridgeAvailable(d.bridge_url)))
-      return viaBridge.mutate();
-    setFallback(
-      d?.host_dir
-        ? `Browse your shared laptop folders in ${d.host_dir}, or paste a folder path below.`
-        : "Browse an available folder or paste its path below.",
-    );
-  }, [native.data, pick, viaBridge]);
 
-  const busy = pick.isPending || viaBridge.isPending;
+  const chooseFolder = async (): Promise<ProjectFolder | null> => {
+    setChoosingFolder(true);
+    try {
+      const availability = native.data ?? (await native.refetch()).data;
+      if (availability?.available) {
+        const picked = await unwrap(api.POST("/api/v1/fs/native/pick", {}));
+        return picked.cancelled || !picked.path
+          ? null
+          : { path: picked.path, displayPath: picked.path };
+      }
+
+      if (availability?.bridge_url) {
+        if (!(await bridgeAvailable(availability.bridge_url))) {
+          throw new Error("The local folder picker is unavailable. You can paste a folder path instead.");
+        }
+        const path = await bridgePick(availability.bridge_url);
+        return path ? { path, displayPath: path } : null;
+      }
+
+      throw new Error("The local folder picker is unavailable. You can paste a folder path instead.");
+    } finally {
+      setChoosingFolder(false);
+    }
+  };
+
+  const openPicker = React.useCallback(() => setDialogOpen(true), []);
   const element = (
-    <>
-      {busy && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-border bg-card p-6 text-center shadow-lg">
-            <FolderOpen className="h-7 w-7 text-primary" />
-            <div className="text-sm font-semibold">
-              Choose a folder in the window that just opened
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Pick an existing folder or create a new one there. Octopus keeps
-              its data in a <code>.octopus</code> folder inside it.
-            </p>
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          </div>
-        </div>
-      )}
-      <DirectoryPicker
-        open={fallback !== null}
-        onOpenChange={(o) => !o && setFallback(null)}
-        notice={fallback ?? undefined}
-        initialPath={native.data?.host_dir || undefined}
-      />
-    </>
+    <CreateProjectDialog
+      open={dialogOpen}
+      onOpenChange={setDialogOpen}
+      onChooseFolder={chooseFolder}
+      onCreateProject={(folder, name) => create.mutateAsync({ folder, name }).then(() => undefined)}
+      initialPath={native.data?.host_dir || undefined}
+      choosingFolder={choosingFolder}
+      creatingProject={create.isPending}
+    />
   );
+
   return {
-    open: () => void open(),
-    busy,
+    // Legacy callers that need a project destination now use the same Create project flow.
+    open: openPicker,
+    openPicker,
+    busy: choosingFolder || create.isPending,
     nativeAvailable: !!native.data?.available,
     element,
   };

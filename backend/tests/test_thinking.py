@@ -56,7 +56,7 @@ async def test_deployment_without_summaries_keeps_its_reasoning_effort() -> None
 
 class ThinkingProvider(NativeScriptedProvider):
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        if req.metadata.get("mock_context") is not None:
+        if req.metadata.get("turn_context") is not None:
             for part in ("**Checking the board**\n\n", "Nothing is open, ", "so I can finish."):
                 yield LLMChunk(thinking=part)
         async for ch in super().stream(req):
@@ -86,7 +86,7 @@ class SlowThinker(NativeScriptedProvider):
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
         import asyncio
 
-        if req.metadata.get("mock_context") is not None:
+        if req.metadata.get("turn_context") is not None:
             for i in range(self.chunks):
                 await asyncio.sleep(self.gap)
                 yield LLMChunk(thinking=f"step {i}. ")

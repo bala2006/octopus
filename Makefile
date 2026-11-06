@@ -3,7 +3,7 @@ PY ?= python3.11
 VENV := backend/.venv
 BIN := $(VENV)/bin
 
-.PHONY: setup dev backend frontend start test test-backend test-frontend e2e gen-api lint clean docker
+.PHONY: setup dev backend frontend start test test-backend test-frontend gen-api lint clean docker
 
 setup: ## Install backend (venv) + frontend deps
 	cd backend && ($(PY) -m venv .venv || python3 -m venv .venv) && .venv/bin/pip install -U pip && .venv/bin/pip install -r requirements.txt
@@ -12,7 +12,7 @@ setup: ## Install backend (venv) + frontend deps
 dev: ## Hot-reload dev: API on :8000, UI on :5173 (proxying /api and /ws)
 	@echo "UI → http://localhost:5173   API docs → http://localhost:8000/docs"
 	@trap 'kill 0' INT TERM; \
-	(cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000) & \
+	(cd backend && .venv/bin/python -m app.dev --port 8000) & \
 	(cd frontend && npm run dev) & wait
 
 start: ## Production-style single process: build UI, serve UI + API on :8000
@@ -26,9 +26,6 @@ test-backend:
 
 test-frontend:
 	cd frontend && npm run typecheck && npm test
-
-e2e: ## Playwright happy path (starts its own backend; needs `npm run build` first)
-	cd frontend && npm run build && npx playwright test
 
 gen-api: ## Regenerate typed TS client from the FastAPI OpenAPI schema
 	cd frontend && npm run gen:api

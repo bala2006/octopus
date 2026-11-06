@@ -229,7 +229,7 @@ function ChatMessage({ m, agent, isLast, onRegenerate, busy }: { m: MessageOut; 
           <span className="font-semibold" style={{ color: tone(agent.color) }}>{agent.name}</span>
           <span className="text-muted-foreground">{agent.role}</span>
           <span className="font-mono text-[10px] text-muted-foreground">{meta.provider}/{meta.model}</span>
-          {meta.warning && <Tip content={meta.warning}><Badge variant="warning">demo</Badge></Tip>}
+          {meta.warning && <Tip content={meta.warning}><Badge variant="warning">note</Badge></Tip>}
           {meta.stopped && <Badge variant="outline">stopped</Badge>}
         </div>
         {meta.tool_calls?.length > 0 && <ToolCalls calls={meta.tool_calls} />}
@@ -340,18 +340,17 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
       <div className="view-toolbar">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">Company Channel</div>
-          <div className="truncate text-xs text-muted-foreground">{shownRun ? `${live ? "Live" : "Finished, send a message to continue"}: ${shownRun.goal}` : "Send a goal to the entry agent(s); watch the team work"}</div>
+          <div className="text-sm font-semibold">Team conversation</div>
+          <div className="truncate text-xs text-muted-foreground">{shownRun ? `${live ? "Your team is working" : "Ready for your next message"}: ${shownRun.goal}` : "Message the team; the orchestrator will bring in the right agents"}</div>
         </div>
-        {sessionRuns.length > 1 && <span className="text-[11px] text-muted-foreground">{sessionRuns.length} runs</span>}
         <Select ariaLabel="Feed filter" value={filter} onValueChange={(v) => setFilter(v as FeedFilter)} className="h-7 w-[150px] text-xs"
           options={[{ value: "all", label: "All messages" }, { value: "user", label: "User-facing only" }, { value: "internal", label: "Internal only" }]} />
-        {shownRun && !live && <Tip content="Start over with a new goal (the current run and its history stay in Runs)"><Button size="sm" variant="ghost" onClick={() => setGoal("")}><Play />New run</Button></Tip>}
-        {shownRun && <Button size="sm" variant="secondary" onClick={() => nav(`/w/${w}/runs/${shownRun.id}`)}><Radio className={cn(live && "animate-pulse text-primary")} />Live view</Button>}
+        {shownRun && !live && <Tip content="Start a fresh team conversation"><Button size="sm" variant="ghost" onClick={() => setGoal("")}><Play />New conversation</Button></Tip>}
+        {shownRun && <Button size="sm" variant="secondary" onClick={() => nav(`/w/${w}/runs/${shownRun.id}`)}><Radio className={cn(live && "animate-pulse text-primary")} />Team activity</Button>}
       </div>
       <div className="min-h-0 flex-1">
         {shownRun ? <RunFeed state={stream.state} agents={agents} filter={filter} /> : (
-          <EmptyState icon={Building2} title="No runs in this channel yet" description='Type a goal below, e.g. "Build a todo app with auth", and press Run.' />
+          <EmptyState icon={Building2} title="Start a team conversation" description='Send a message, such as "Help me build a todo app with auth." The orchestrator will coordinate the team.' />
         )}
       </div>
       {live && stream.state.awaiting && (
@@ -367,10 +366,10 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
         </div>
       )}
       <Composer
-        placeholder={live ? "Interject: your message is injected into the run…" : shownRun ? "Continue: ask for changes or the next step. The team keeps its context and files…" : "Give the company a goal…"}
+        placeholder={live ? "Message your team while they work…" : shownRun ? "Continue the conversation with your team…" : "Message Octopus to build, fix, or explore…"}
         images={!shownRun}
         onSend={(t, files) => {
-          // a finished run continues like a chat (same run, history and files); "New run" starts over explicitly
+          // A follow-up continues the same team conversation and keeps its history and files.
           if (shownRun) stream.send({ type: "interject", content: t, to_agent_id: target === "all" ? undefined : target });
           else { setGoalFiles(files); setGoal(t); }
         }}
@@ -378,7 +377,7 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
           <Select ariaLabel="Send to" value={target} onValueChange={setTarget} variant="ghost" className="w-auto max-w-40"
             options={[{ value: "all", label: live ? "Everyone" : "Entry agent" }, ...Object.values(agents).map((a) => ({ value: a.id, label: a.name }))]} />
         ) : (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Play className="h-3 w-3" />starts a run</span>
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Play className="h-3 w-3" />starts a team conversation</span>
         )}
       />
       <RunDialog open={goal !== null} onOpenChange={(o) => !o && setGoal(null)} companyId={companyId} sessionId={session.id} initialGoal={goal ?? ""}

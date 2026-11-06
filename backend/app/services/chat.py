@@ -14,7 +14,7 @@ from app.db.base import new_id, utcnow
 from app.db.session import SessionFactory, registry_factory
 from app.core.config import get_settings
 from app.llm.base import LLMError, LLMRequest, effective_max_tokens
-from app.llm.demo_script import role_category
+from app.orchestrator.roles import role_category
 from app.llm.router import prepare_request, stream_with_retry
 from app.models import Agent, AgentMemory, ChatSession, Company, Message
 from app.orchestrator.context import clip, render_template, rolling_summary

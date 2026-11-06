@@ -4,7 +4,7 @@ Octopus is a local coding workspace. The primary flow is to open a folder, choos
 
 The interface keeps the charcoal theme, blue actions, project sidebar and quiet conversation layout. Settings are available before opening a project. The folder picker uses a bounded browser with an always-visible footer, recent projects and laptop paths. Advanced permissions stay behind disclosure. New projects can start with a coding agent directly from the composer; custom teams remain available.
 
-Model choice and reasoning effort belong to the composer and persist per project. A run records the selected model in its budget. Existing conversations show their recorded settings and explain how to change them for a new conversation. No provider keys are added automatically. Offline demo remains an explicit option.
+Model choice and reasoning effort belong to the composer and persist per project. A run records the selected model in its budget. Existing conversations show their recorded settings and explain how to change them for a new conversation. No provider keys are added automatically.
 
 | Problem | Change | Acceptance |
 | --- | --- | --- |

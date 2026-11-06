@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 from app.core.deps import ProjectCtx, project_ctx
+from app.db.session import get_registry_db
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.services import editor
 from app.services import file_items
 from app.tools.workspace import MAX_LIST, ProjectFS, WorkspaceError
@@ -141,6 +143,18 @@ class GitStage(BaseModel):
     staged: bool
 
 
+class LocalBranchIn(BaseModel):
+    branch: str = Field(min_length=1, max_length=240)
+
+
+class LocalWorktreeIn(BaseModel):
+    base_branch: str = Field(min_length=1, max_length=240)
+
+
+class LocalEnvironmentIn(BaseModel):
+    selected: str | None = Field(default=None, max_length=80)
+
+
 class GitCommit(BaseModel):
     message: str = Field(min_length=1, max_length=5000)
     expected_index: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -205,6 +219,56 @@ async def git_status(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
         return await git_review.status(ctx.root)
     except (WorkspaceError, OSError, TimeoutError) as exc:
         raise HTTPException(400, str(exc) or "Git timed out. Try refreshing.") from exc
+
+
+@router.get("/local-environment")
+async def get_local_environment(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    from app.services import hostpaths, local_environment
+    try:
+        result = await local_environment.inspect(ctx.root)
+        for worktree in result["worktrees"]:
+            worktree["display_path"] = hostpaths.to_host(worktree["path"])
+        result["display_root"] = hostpaths.to_host(str(ctx.root))
+        return result
+    except (WorkspaceError, OSError, TimeoutError) as exc:
+        raise HTTPException(400, str(exc) or "Local repository settings could not be read.") from exc
+
+
+@router.post("/git/branch")
+async def switch_local_branch(body: LocalBranchIn, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    from app.services import git_review, local_environment
+    try:
+        async with git_review.operation_lock(ctx.root):
+            await local_environment.switch_branch(ctx.root, body.branch)
+            return await local_environment.inspect(ctx.root)
+    except (WorkspaceError, OSError, TimeoutError) as exc:
+        raise HTTPException(409, str(exc) or "The local branch could not be switched.") from exc
+
+
+@router.post("/git/worktree")
+async def create_local_worktree(body: LocalWorktreeIn, ctx: ProjectCtx = Depends(project_ctx),
+                                db: AsyncSession = Depends(get_registry_db)) -> dict:
+    from app.api.v1.workspaces import _register
+    from app.services import git_review, hostpaths, local_environment
+    from app.services.projects import ProjectPathError, validate_project_dir
+    try:
+        async with git_review.operation_lock(ctx.root):
+            path, branch = await local_environment.create_worktree(ctx.root, body.base_branch, ctx.workspace.id)
+            validate_project_dir(str(path.parent))
+            opened = await _register(path, f"{ctx.workspace.name} · {branch}", ctx.workspace.default_permission, db, ctx.user)
+            return {"workspace": opened, "branch": branch, "display_path": hostpaths.to_host(str(path))}
+    except (WorkspaceError, ProjectPathError, OSError, TimeoutError) as exc:
+        raise HTTPException(400, str(exc) or "The local worktree could not be created.") from exc
+
+
+@router.put("/local-environment")
+async def set_local_environment(body: LocalEnvironmentIn, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
+    from app.services import local_environment
+    try:
+        selected = local_environment.save_environment(ctx.root, body.selected)
+        return await local_environment.inspect(ctx.root)
+    except (WorkspaceError, OSError) as exc:
+        raise HTTPException(400, str(exc) or "The local environment could not be saved.") from exc
 
 
 @router.get("/git/diff", response_model=GitDiff)

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.db.base import new_id
+from app.llm.base import LLMError
 from app.models import Company, User
 from app.schemas import (
     AgentIn, CanvasExport, CanvasOut, CanvasState, CompanyIn, CompanyOut, CompanyPatch, DepartmentSummary, EdgeIn, GenerateCompanyIn,
@@ -73,7 +74,10 @@ async def generate_company(body: GenerateCompanyIn, user: User = Depends(current
                            _ctx: ProjectCtx = Depends(project_ctx)) -> GenerateCompanyOut:
     """Design a company (departments, managers, specialists, prompts, tools, channels) from a prompt. Not saved:
     review the preview, then POST it to /companies/import (or save it as a template)."""
-    spec, source, warning = await generate_org(rdb, user.id, body.prompt, body.max_agents, body.provider, body.model)
+    try:
+        spec, source, warning = await generate_org(rdb, user.id, body.prompt, body.max_agents, body.provider, body.model)
+    except LLMError as exc:
+        raise HTTPException(422, str(exc)) from exc
     agents, edges, meta = spec_to_canvas(spec, body.max_agents)
     export = CanvasExport(name=spec.name, description=spec.description, agents=agents, edges=edges, departments=meta)  # type: ignore[arg-type]
     return GenerateCompanyOut(spec=export, departments=[DepartmentSummary(**d) for d in summarize_departments(agents, meta)],

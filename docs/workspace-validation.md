@@ -20,10 +20,10 @@ The complete backend suite passed **260 tests with one skip**. The frontend suit
 
 ## Reproduce
 
-On Windows, run `./octopus.ps1 setup`, then `./octopus.ps1 test`. For browser checks, run `npm run build` and `npm run e2e` in `frontend`; install Playwright Chromium first with `npx playwright install chromium` if needed. The browser tests use isolated project folders and a dedicated backend, not your working repository’s Git index.
+On Windows, run `./octopus.ps1 setup`, then `./octopus.ps1 test`. Browser checks use isolated project folders and a dedicated backend, not your working repository’s Git index.
 
 ## Scope of this evidence
 
-Live Azure agent quality and performance against Codex or Claude Code have not been benchmarked. The agent-run browser tests use Demo Mode. These checks establish the local development workflows and regression coverage, not product parity or hosted CI results.
+Live Azure agent quality and performance against Codex or Claude Code have not been benchmarked. These checks establish the local development workflows and regression coverage, not product parity or hosted CI results.
 
 Workspace commands stream output, accept line input, and have a one-hour limit. Managed servers are separate, persist across page navigation, and run until stopped or backend shutdown. Docker deployments cannot start these managed local processes. Full-screen terminal applications requiring a TTY still need a system terminal.

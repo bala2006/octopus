@@ -89,8 +89,8 @@ def inbound_senders(edges: list[EdgeSpec], agent_id: str) -> set[str]:
 
 
 # ---------------------------------------------------------------- permission levels
-LEVEL_ORDER = {"read_only": 0, "plan": 1, "ask": 2, "danger": 3}
-LEVEL_LABEL = {"read_only": "read-only", "plan": "plan", "ask": "ask", "danger": "danger"}
+LEVEL_ORDER = {"read_only": 0, "plan": 1, "ask": 2, "auto": 3, "danger": 4}
+LEVEL_LABEL = {"read_only": "read-only", "plan": "plan", "ask": "ask", "auto": "auto", "danger": "danger"}
 DANGEROUS = {"write_file", "run_code", "mcp_call"}
 
 

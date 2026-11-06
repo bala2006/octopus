@@ -1,7 +1,6 @@
 import * as React from "react";
 import { PromptComposer } from "@/components/ui/surfaces";
 import { Link, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowLeft, CircleStop, Download, FileCode2, FileText, Footprints, ListTodo, Loader2, Pause, Play, ArrowUp, Wrench, History,
@@ -14,7 +13,6 @@ import { useRun, useWorkspaceId } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
 import type { AgentOut, EdgeOut, PermissionLevel } from "@/types";
 import { AgentAvatar, ConnectionDot, EmptyState, PermissionBadge } from "@/components/common";
-import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/button";
 import { Badge, Textarea } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
@@ -27,6 +25,7 @@ import { RunGraph } from "./RunGraph";
 import { QuestionCard, type AwaitingQuestion } from "./QuestionCard";
 import { TaskBoard, Timeline, UsageMeter } from "./RunWidgets";
 import { TeamView } from "./TeamView";
+import { ReportView } from "./RunReport";
 import { replayTo, TERMINAL } from "./runState";
 import { useRunStream } from "./useRunStream";
 
@@ -73,7 +72,7 @@ export default function LiveRunPage() {
     fresh: Object.fromEntries(Object.entries(state.fresh).filter(([, t]) => Date.now() - t < 3000).map(([k]) => [k, true])),
   }), [state, departments, agentsList]);
 
-  const control = (action: "pause" | "resume" | "step" | "stop") => { send({ type: "control", action }); if (action === "stop") toast("Stopping run…"); };
+  const control = (action: "pause" | "resume" | "step" | "stop") => { send({ type: "control", action }); };
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -86,24 +85,27 @@ export default function LiveRunPage() {
   });
 
   if (run.isLoading) return <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
-  if (run.isError || !run.data) return <EmptyState icon={History} title="Run not found" description={(run.error as Error)?.message} />;
+  if (run.isError || !run.data) return <EmptyState icon={History} title="Team activity not found" description={(run.error as Error)?.message} />;
   const r = run.data;
   const st = RUN_STATUS[status] ?? RUN_STATUS.queued;
+  const statusLabel = status === "running" || status === "queued" ? "Team is working"
+    : status === "completed" ? "Ready to continue" : status === "incomplete" ? "Ready for follow-up"
+      : status === "failed" ? "Needs attention" : status === "cancelled" ? "Stopped"
+        : status === "awaiting_user" ? "Waiting on you" : status === "paused" ? "Team paused" : st.label;
   const maxSeq = liveState.lastSeq;
 
   return (
     <div className="flex h-full flex-col">
       {/* header */}
       <div className="view-toolbar">
-        <Button asChild variant="ghost" size="icon-sm" aria-label="Back to runs"><Link to={`/w/${w}/runs`}><ArrowLeft /></Link></Button>
+        <Button asChild variant="ghost" size="icon-sm" aria-label="Back to activity"><Link to={`/w/${w}/runs`}><ArrowLeft /></Link></Button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <Badge variant={st.variant} className={cn(status === "running" && "animate-pulse")}>{st.label}</Badge>
+            <Badge variant={st.variant} className={cn(status === "running" && "animate-pulse")}>{statusLabel}</Badge>
             <h1 className="truncate text-sm font-semibold" title={r.goal}>{r.goal}</h1>
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
             <span className="capitalize">{r.mode}</span>·<PermissionBadge level={r.permission_level as PermissionLevel} />
-            {!!(r.budget as Record<string, unknown> | undefined)?.force_mock && <Badge variant="secondary">Demo Mode</Badge>}
             {(liveState.reason && status !== "running") && <span className="truncate text-warning">{liveState.reason}</span>}
             <ConnectionDot state={conn} />
           </div>
@@ -113,18 +115,18 @@ export default function LiveRunPage() {
           {isLive && (
             <>
               {status === "paused" || status === "awaiting_user" ? (
-                <Tip content="Resume (Space)"><Button size="sm" variant="secondary" onClick={() => control("resume")} disabled={!!liveState.pendingApproval}><Play />Resume</Button></Tip>
+              <Tip content="Resume team work (Space)"><Button size="sm" variant="secondary" onClick={() => control("resume")} disabled={!!liveState.pendingApproval}><Play />Resume</Button></Tip>
               ) : (
-                <Tip content="Pause after the current turn (Space)"><Button size="sm" variant="secondary" onClick={() => control("pause")}><Pause />Pause</Button></Tip>
+                <Tip content="Pause after the current agent step (Space)"><Button size="sm" variant="secondary" onClick={() => control("pause")}><Pause />Pause</Button></Tip>
               )}
-              {r.mode === "step" && <Tip content="Run exactly one agent turn (N)"><Button size="sm" onClick={() => control("step")} data-testid="next-turn"><Footprints />Next turn</Button></Tip>}
-              <Tip content="Kill switch: stop immediately"><Button size="sm" variant="destructive" onClick={() => setStopping(true)}><CircleStop />Stop</Button></Tip>
+              {r.mode === "step" && <Tip content="Advance the team by one agent step (N)"><Button size="sm" onClick={() => control("step")} data-testid="next-turn"><Footprints />Next step</Button></Tip>}
+              <Tip content="Stop the team's current work"><Button size="sm" variant="destructive" onClick={() => setStopping(true)}><CircleStop />Stop team</Button></Tip>
             </>
           )}
           {terminal && (
             <>
               <Button asChild size="sm" variant="secondary"><Link to={`/w/${w}/artifacts/${runId}`}><FileCode2 />Artifacts</Link></Button>
-              <Button size="sm" variant="ghost" onClick={async () => { const res = await fetchRaw(`/api/v1/w/${w}/runs/${runId}/report?download=true`); download(`run-report-${runId.slice(0, 8)}.md`, await res.text(), "text/markdown"); }}><Download />Report</Button>
+              <Button size="sm" variant="ghost" onClick={async () => { const res = await fetchRaw(`/api/v1/w/${w}/runs/${runId}/report?download=true`); download(`team-recap-${runId.slice(0, 8)}.md`, await res.text(), "text/markdown"); }}><Download />Team recap</Button>
             </>
           )}
         </div>
@@ -154,7 +156,7 @@ export default function LiveRunPage() {
               <TabsTrigger value="browser" data-testid="tab-browser"><Globe className={cn(browsing && "animate-pulse text-success")} />Browser
                 {!!state.browser.length && <span className="tabular-nums text-muted-foreground">{state.browser.length}</span>}</TabsTrigger>
               <TabsTrigger value="tools"><Wrench />Tools</TabsTrigger>
-              <TabsTrigger value="report" disabled={!terminal}><FileText />Report</TabsTrigger>
+              <TabsTrigger value="report" disabled={!terminal}><FileText />Team recap</TabsTrigger>
             </TabsList>
             {tab === "feed" && (
               <div className="ml-auto">
@@ -183,8 +185,8 @@ export default function LiveRunPage() {
         </Tabs>
       </div>
       <Timeline items={liveState.timeline} maxSeq={maxSeq} cursor={cursor} onCursor={setCursor} agents={agents} live={isLive} />
-      <ConfirmDialog open={stopping} onOpenChange={setStopping} title="Stop this run?" destructive confirmLabel="Stop run"
-        description="The kill switch cancels the current turn immediately. Files already written stay in the project; a report is still generated."
+      <ConfirmDialog open={stopping} onOpenChange={setStopping} title="Stop team work?" destructive confirmLabel="Stop team"
+        description="This stops the agents immediately. Files already written stay in the project; a recap is still generated."
         onConfirm={() => control("stop")} />
     </div>
   );
@@ -208,8 +210,7 @@ function AgentStrip({ agents, state, onBrowse }: { agents: AgentOut[]; state: Re
   );
 }
 
-/** Talk to the team. While live this steers the run; after it finished it continues the same run like a chat. */
-/** Talk to the team. While live this steers the run; after it finished it continues the same run like a chat. */
+/** Send a message to the team orchestrator or steer agents that are already working. */
 function InterjectBox({ agents, awaiting, onSend, finished }: { agents: AgentOut[]; awaiting: AwaitingQuestion | null; onSend: (c: string, to?: string) => void; finished?: boolean }) {
   const [text, setText] = React.useState("");
   const [to, setTo] = React.useState<string>("all");
@@ -218,7 +219,7 @@ function InterjectBox({ agents, awaiting, onSend, finished }: { agents: AgentOut
     if (!text.trim()) return;
     onSend(text.trim(), to === "all" ? undefined : to);
     setText("");
-    toast.success(finished ? "Continuing the run" : to === "all" ? "Sent to everyone" : `Sent to ${agents.find((a) => a.id === to)?.name}`,
+    toast.success(finished ? "Team conversation continued" : to === "all" ? "Sent to everyone" : `Sent to ${agents.find((a) => a.id === to)?.name}`,
       { duration: 1500, description: finished ? "Same team, same files and history." : undefined });
   };
   return (
@@ -232,17 +233,10 @@ function InterjectBox({ agents, awaiting, onSend, finished }: { agents: AgentOut
       <PromptComposer caption={<><span>{finished ? "Continue with the same team and project" : "Send direction to your team"}</span><span className="ml-auto hidden sm:inline">Enter to send</span></>}
         controls={<><Select ariaLabel="Send to" value={to} onValueChange={setTo} variant="ghost" className="w-auto max-w-48" options={[{ value: "all", label: finished ? "Entry agent" : "Everyone" }, ...agents.map((agent) => ({ value: agent.id, label: agent.name }))]} /><Button onClick={submit} disabled={!text.trim()} size="icon" className="composer-send ml-auto" aria-label="Send"><ArrowUp /></Button></>}>
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={1}
-          placeholder={awaiting ? "Or message the team…" : finished ? "Ask for a change or a next step: the team continues from where it stopped…" : "Interject: steer the team…"}
+          placeholder={awaiting ? "Or message the team…" : finished ? "Continue the conversation with your team…" : "Message your team while they work…"}
           className="max-h-32"
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} aria-label="Interjection" />
       </PromptComposer>
     </div>
   );
-}
-
-function ReportView({ w, runId, enabled }: { w: string; runId: string; enabled: boolean }) {
-  const q = useQuery({ queryKey: ["report", w, runId], enabled, queryFn: async () => (await fetchRaw(`/api/v1/w/${w}/runs/${runId}/report`)).text() });
-  if (!enabled) return <p className="p-6 text-sm text-muted-foreground">The report is generated when the run ends.</p>;
-  if (q.isLoading) return <div className="space-y-2 p-4">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-4" />)}</div>;
-  return <div className="p-4"><Markdown>{q.data ?? ""}</Markdown></div>;
 }

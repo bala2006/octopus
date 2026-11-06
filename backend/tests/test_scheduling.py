@@ -65,27 +65,30 @@ async def test_finish_with_open_tasks_is_flagged(client, workspace) -> None:
                                                          {"action": "finish", "summary": "all done!"})]}))
     run = await start_run(client, workspace, cid)
     done = await wait_status(client, workspace, run["id"])
-    assert done["status"] == "completed" and done["summary"] == "all done!"
-    assert done["halt_reason"].startswith("Finished with 1 open task") and "T-1 in_progress" in done["halt_reason"]
+    assert done["status"] == "incomplete" and done["summary"] != "all done!"
+    assert "open task" in done["halt_reason"] and "T-1" in done["halt_reason"]
+    assert [(task["key"], task["status"]) for task in await tasks(client, workspace, run["id"])] == [("T-1", "in_progress")]
 
 
-async def test_follow_up_wakes_every_open_task_owner(client, workspace) -> None:
-    """Regression: a follow-up only reached the entry agent, so owners of open tasks were never woken."""
+async def test_follow_up_routes_to_lead_who_reassigns_the_pending_owned_task(client, workspace) -> None:
+    """User follow-ups have one owner; the lead forwards existing work to its specialist."""
     cid = await make_company(client, workspace, TEAM, EDGES)
     set_provider_override(ScriptedProvider({"Cleo": [env(msg("Dev", "task", "Build index.html"))]}))
     run = await start_run(client, workspace, cid)
     assert (await wait_status(client, workspace, run["id"]))["status"] == "incomplete"
 
-    set_provider_override(ScriptedProvider({"Dev": [env(board({"key": "T-1", "status": "done"}), msg("Cleo", "status_update", "done"))],
-                                            "Cleo": [env({"action": "finish", "summary": "finished after the follow-up"})]}))
+    set_provider_override(ScriptedProvider({"Dev": [env({"action": "finish", "summary": "pending task finished"})],
+                                            "Cleo": [env(msg("Dev", "task", "Finish your pending task", task_id="T-1")), env({"action": "finish", "summary": "finished after the follow-up"})]}))
     r = await client.post(f"/api/v1/w/{workspace['id']}/runs/{run['id']}/continue", json={"content": "finish your pending tasks"})
     assert r.status_code == 202, r.text
     done = await wait_status(client, workspace, run["id"])
     assert done["status"] == "completed", done["halt_reason"]
     followups = [m for m in await run_messages(client, workspace, run["id"]) if m["sender"] == "user" and (m["meta"] or {}).get("followup")]
-    assert {m["to_agent_id"] for m in followups} == {"ceo", "dev"}
-    dev_msg = next(m for m in followups if m["to_agent_id"] == "dev")
-    assert "You still own these open tasks" in dev_msg["content"] and "T-1" in dev_msg["content"]
+    assert {m["to_agent_id"] for m in followups} == {"ceo"}
+    messages = await run_messages(client, workspace, run["id"])
+    assert any(message["from_agent_id"] == "ceo" and message["to_agent_id"] == "dev" and message["content"] == "Finish your pending task" and message["meta"].get("task_id") == "T-1" for message in messages)
+    assert any(message["from_agent_id"] == "dev" and message["to_agent_id"] == "ceo" and message["content"] == "pending task finished" and message["meta"].get("delegation_result") for message in messages)
+    assert [(task["key"], task["status"]) for task in await tasks(client, workspace, run["id"])] == [("T-1", "done")]
 
 
 async def test_reading_without_producing_does_not_spin(client, workspace) -> None:
@@ -95,7 +98,7 @@ async def test_reading_without_producing_does_not_spin(client, workspace) -> Non
     run = await start_run(client, workspace, cid, budget={"max_turns": 50})
     done = await wait_status(client, workspace, run["id"])
     assert done["turns"] == 1 + MAX_SELF_TURNS, "one turn for the goal, then at most MAX_SELF_TURNS on its own results"
-    assert done["status"] == "completed"
+    assert done["status"] == "incomplete" and "No accountable lead acceptance" in done["halt_reason"]
 
 
 async def test_productive_self_turns_are_not_capped(client, workspace) -> None:

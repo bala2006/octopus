@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import ws
-from app.api.v1 import agents, auth, companies, editor, roles, runs, sessions, settings, skills, templates, workspaces
+from app.api.v1 import activity, agents, auth, companies, editor, memory, roles, runs, sessions, settings, skills, templates, workspaces
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.ratelimit import RateLimitMiddleware
@@ -28,7 +28,7 @@ async def lifespan(_: FastAPI):  # type: ignore[no-untyped-def]
     configure_logging()
     s = get_settings()
     await asyncio.to_thread(upgrade_registry, s.registry_database_url)
-    log.info("octopus_started", home=str(s.octopus_home), demo_mode=s.demo_mode, roots=s.workspace_allowed_roots)
+    log.info("octopus_started", home=str(s.octopus_home), roots=s.workspace_allowed_roots)
     yield
     from app.services.browser import browser
     from app.services.processes import commands, servers
@@ -56,10 +56,10 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
     api = APIRouter(prefix="/api/v1")
-    for r in (auth.router, templates.router, roles.router, skills.router, settings.router, workspaces.router):
+    for r in (activity.router, auth.router, templates.router, roles.router, skills.router, settings.router, workspaces.router):
         api.include_router(r)
     project = APIRouter(prefix="/w/{workspace_id}")
-    for r in (companies.router, agents.router, sessions.router, runs.router, editor.router):
+    for r in (companies.router, agents.router, sessions.router, runs.router, editor.router, memory.router):
         project.include_router(r)
     api.include_router(project)
     app.include_router(api)
@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", tags=["meta"])
     async def health() -> dict[str, object]:
-        return {"ok": True, "app": s.app_name, "demo_mode": s.demo_mode, "live_runs": len(manager.runtimes)}
+        return {"ok": True, "app": s.app_name, "live_runs": len(manager.runtimes)}
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:  # pragma: no cover

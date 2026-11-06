@@ -63,7 +63,7 @@ async def test_system_prompt_is_stable_across_turns_so_it_can_be_cached(client, 
     cid = await make_company(client, workspace, [agent("a", "Ann", entry=True), agent("b", "Ben")], [edge("e", "a", "b", bidirectional=True)])
     run = await start_run(client, workspace, cid)
     await wait_status(client, workspace, run["id"])
-    ann = [r for r in provider.requests if r.metadata["mock_context"]["agent"]["name"] == "Ann"]
+    ann = [r for r in provider.requests if r.metadata["turn_context"]["agent"]["name"] == "Ann"]
     status = [r.messages[1]["content"].split("# Team status\n", 1)[1].split("\n", 1)[0] for r in ann]
     assert len(set(status)) >= 2, f"the team's status changed between Ann's turns: {status}"
     systems = {r.messages[0]["content"] for r in ann}

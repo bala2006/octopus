@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
+from app.llm.base import LLMChunk, Usage
 from app.llm.router import set_provider_override
+from fakes.fake_provider import FakeProvider
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status
 
 
@@ -56,11 +59,11 @@ async def test_agent_hires_teammate_without_privilege_escalation(client, workspa
                      "connect": [{"to": "Xan", "type": "consult"}, {"to": "Nobody", "type": "review"}],
                      "brief": "Build the API and report back."}),
                 env({"action": "finish", "summary": "team built"})],
-        "Leo": [env({"action": "write_file", "path": "api.py", "content": "print('api')\n"}, msg("Bea", "status_update", "API done: api.py"))],
+        "Leo": [env({"action": "write_file", "path": "api.py", "content": "print('api')\n"}, {"action": "finish", "summary": "API done: api.py"})],
     }))
     run = await start_run(client, workspace, cid, permission_level="danger")
     done = await wait_status(client, workspace, run["id"])
-    assert done["status"] == "completed"
+    assert done["status"] == "completed", done["halt_reason"]
     created = [e["payload"] for e in await events(client, workspace, run["id"], "agent_created")]
     assert len(created) == 1
     leo = created[0]["agent"]
@@ -170,11 +173,11 @@ async def test_manager_reconfigures_and_deactivates_report(client, workspace) ->
     assert "Pip" in listing and "status: inactive" in listing and "1 inactive" in listing
 
 
-# ------------------------------------------------------------------ demo runs
+# ------------------------------------------------------------------ scripted company runs
 async def test_self_organizing_company_builds_itself(client, workspace) -> None:
-    set_provider_override(None)
+    set_provider_override(FakeProvider())
     c = (await client.post(f"/api/v1/w/{workspace['id']}/companies/from-template", json={"template_key": "self_organizing"})).json()
-    run = await start_run(client, workspace, c["company"]["id"], goal="Build a URL shortener", permission_level="danger", budget={"force_mock": True})
+    run = await start_run(client, workspace, c["company"]["id"], goal="Build a URL shortener", permission_level="danger", budget={"verify_before_finish": False, "workflow": "off"})
     done = await wait_status(client, workspace, run["id"], timeout=90)
     assert done["status"] == "completed", done["halt_reason"]
     created = [e["payload"]["agent"] for e in await events(client, workspace, run["id"], "agent_created")]
@@ -190,11 +193,11 @@ async def test_self_organizing_company_builds_itself(client, workspace) -> None:
     assert "hired" in report
 
 
-async def test_full_company_demo_completes(client, workspace) -> None:
-    set_provider_override(None)
+async def test_full_company_completes(client, workspace) -> None:
+    set_provider_override(FakeProvider())
     c = (await client.post(f"/api/v1/w/{workspace['id']}/companies/from-template", json={"template_key": "full_company"})).json()
     run = await start_run(client, workspace, c["company"]["id"], goal="Launch a habit tracker", permission_level="danger",
-                          budget={"force_mock": True, "max_turns": 120})
+                          budget={"verify_before_finish": False, "workflow": "off", "max_turns": 120})
     done = await wait_status(client, workspace, run["id"], timeout=90)
     assert done["status"] == "completed", done["halt_reason"]
     senders = {m["from_agent_id"] for m in await run_messages(client, workspace, run["id"]) if m["type"] == "status_update"}
@@ -202,12 +205,35 @@ async def test_full_company_demo_completes(client, workspace) -> None:
 
 
 # ------------------------------------------------------------------ generation & user templates
+DESIGN = {
+    "name": "Invoice Co", "description": "GDPR-ready invoicing",
+    "head": {"name": "Ada", "role": "CEO"},
+    "departments": [
+        {"name": "Engineering", "manager": {"name": "Maya", "role": "Engineering Manager"}, "members": [{"name": "Omar", "role": "Backend Engineer"}]},
+        {"name": "Growth", "manager": {"name": "Tess", "role": "Growth Manager"}, "members": [{"name": "Kofi", "role": "Content Marketer"}]},
+        {"name": "Security", "manager": {"name": "Lucia", "role": "Security Lead"}, "members": [{"name": "Ivan", "role": "Security Engineer"}]},
+    ],
+    "links": [],
+}
+
+
+class DesignerProvider:
+    """Answers the company designer with a valid organisation spec."""
+
+    name = "designer"
+
+    async def stream(self, req):
+        yield LLMChunk(delta=json.dumps(DESIGN))
+        yield LLMChunk(usage=Usage(1, 1, 0.0))
+
+
 async def test_generate_company_from_prompt(client, workspace) -> None:
+    set_provider_override(DesignerProvider())
     base = f"/api/v1/w/{workspace['id']}/companies"
     r = await client.post(f"{base}/generate", json={"prompt": "Build and launch a GDPR-compliant SaaS invoicing app with a marketing campaign", "max_agents": 14})
     assert r.status_code == 200, r.text
     g = r.json()
-    assert g["source"] == "demo"
+    assert g["source"] == "ai"
     depts = {d["name"]: d for d in g["departments"] if d["name"] != "Executive"}
     assert {"Engineering", "Growth", "Security"} <= set(depts)
     for d in depts.values():

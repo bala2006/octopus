@@ -14,22 +14,19 @@ from app.core.security import decrypt_secret
 from app.llm.base import LLMChunk, LLMError, LLMProvider, LLMRequest
 from app.llm.azure_v1 import AzureV1Provider, azure_v1_target
 from app.llm.litellm_provider import LiteLLMProvider
-from app.llm.mock_provider import MockProvider
 from app.models import ProviderKey
 
 log = get_logger("llm")
 
 # Octopus is wired to a single real provider: Azure OpenAI (v1 API) with the gpt-6-luna deployment.
-# "mock" is the offline Demo Mode model used when Azure isn't configured (or a run forces it).
 DEFAULT_DEPLOYMENT = "gpt-6-luna"
 PROVIDER_CATALOG: dict[str, dict] = {
-    "mock": {"label": "Demo (mock, offline)", "needs_key": False, "models": ["mock/demo"]},
     "azure": {"label": "Azure OpenAI", "needs_key": True, "needs_base": True, "models": [DEFAULT_DEPLOYMENT]},
 }
 # Rows saved by earlier versions for other providers; the Azure credentials may live under "azure_ai" (Foundry card).
 LEGACY_AZURE_ROWS = ("azure_ai",)
 
-# Providers can be overridden (tests inject scripted providers).
+# Tests inject a fake provider here. The product code never sets it.
 _override: LLMProvider | None = None
 
 
@@ -41,8 +38,6 @@ def set_provider_override(provider: LLMProvider | None) -> None:
 def get_provider(name: str, req: LLMRequest | None = None) -> LLMProvider:
     if _override is not None:
         return _override
-    if name == "mock":
-        return MockProvider()
     if name == "azure" and req is not None and azure_v1_target(req.base_url, req.extra) is not None:
         return AzureV1Provider()  # Azure OpenAI v1 API (Responses / Chat Completions), no api-version needed
     return LiteLLMProvider()
@@ -90,25 +85,18 @@ def is_configured(provider: str, key: str | None, base: str | None, extra: dict)
 
 
 async def prepare_request(db: AsyncSession, user_id: str, req: LLMRequest) -> tuple[LLMRequest, str | None]:
-    """Fill credentials (``db`` is a registry session). In demo mode, fall back to the mock provider when
-    a provider isn't configured. Returns (request, warning)."""
-    if req.provider == "mock":
-        return req, None
+    """Fill credentials (``db`` is a registry session). Raises when Azure is not connected. Returns (request, warning)."""
     req.provider = "azure"  # the only real provider; agents saved with openai/anthropic/azure_ai/... are routed here too
     key, base, extra = await resolve_credentials(db, user_id, req.provider)
     if not is_configured(req.provider, key, base, extra):
-        if get_settings().demo_mode:
-            req.provider, req.model = "mock", "mock/demo"
-            return req, "Azure OpenAI is not connected (Settings → Model); using the Demo Mode mock."
-        raise LLMError(f"Provider '{req.provider}' is not configured", retryable=False)
+        raise LLMError("Azure OpenAI is not connected. Connect it in Settings → Model.", retryable=False)
     req.api_key, req.base_url = key, base
     req.extra = {**extra, **req.extra}
     allowed = allowed_models(extra)
     warning = None
     if req.model not in allowed:  # e.g. gpt-4.1-mini from older templates → the configured deployment
-        if req.model and req.model != "mock/demo":  # never swap a model silently: the replacement may be weaker or stronger
-            warning = (f"Model '{req.model}' is not a deployment on your Azure resource; using '{allowed[0]}' instead "
-                       "(Settings → Model → deployments).")
+        warning = (f"Model '{req.model}' is not a deployment on your Azure resource; using '{allowed[0]}' instead "
+                   "(Settings → Model → deployments).")  # never swap a model silently: the replacement may be weaker or stronger
         req.model = allowed[0]
     if req.model in (extra.get("reasoning_models") or []):
         req.extra["reasoning_model"] = True
