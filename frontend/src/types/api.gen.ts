@@ -758,6 +758,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Plugins
+         * @description Every plugin. ``health=true`` asks each running plugin for its current health first.
+         */
+        get: operations["list_plugins_api_v1_plugins_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plugins/{plugin_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Toggle Plugin
+         * @description Switch a plugin on or off. The change is saved and takes effect for the next model call, tool call or run.
+         */
+        patch: operations["toggle_plugin_api_v1_plugins__plugin_id__patch"];
+        trace?: never;
+    };
     "/api/v1/w/{workspace_id}/companies": {
         parameters: {
             query?: never;
@@ -2277,6 +2317,13 @@ export interface components {
             /** Id */
             id?: string | null;
         };
+        /** AgentMemoryIn */
+        AgentMemoryIn: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
+        };
         /** AgentOut */
         AgentOut: {
             /** Name */
@@ -3409,6 +3456,92 @@ export interface components {
              */
             data: string;
         };
+        /** PluginHealthOut */
+        PluginHealthOut: {
+            /** State */
+            state: string;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+        };
+        /** PluginOut */
+        PluginOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Slot */
+            slot: string;
+            /** Kind */
+            kind: string;
+            /** Version */
+            version: string;
+            /** Status */
+            status: string;
+            /** Required */
+            required: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /** State */
+            state: string;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            health: components["schemas"]["PluginHealthOut"];
+            /** Provides */
+            provides: string[];
+            /** Requires */
+            requires: string[];
+            /** Optional */
+            optional: string[];
+            /** Permissions */
+            permissions: string[];
+            /** Emits */
+            emits: string[];
+            /** Ui */
+            ui: string[];
+            /** Start */
+            start: string;
+            /** Sdk */
+            sdk: string;
+            /** Dependents */
+            dependents: string[];
+            /** Applies */
+            applies: string;
+        };
+        /** PluginToggleIn */
+        PluginToggleIn: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Cascade
+             * @default false
+             */
+            cascade: boolean;
+        };
+        /** PluginToggleOut */
+        PluginToggleOut: {
+            /** Changed */
+            changed: string[];
+            state: components["schemas"]["PluginsOut"];
+        };
+        /** PluginsOut */
+        PluginsOut: {
+            /** Sdk Version */
+            sdk_version: string;
+            /** Plugins */
+            plugins: components["schemas"]["PluginOut"][];
+            /** Event Log */
+            event_log: {
+                [key: string]: number;
+            };
+        };
         /** ProjectTask */
         ProjectTask: {
             /** Id */
@@ -3946,6 +4079,42 @@ export interface components {
             /** Revision */
             revision?: string | null;
         };
+        /** ScopedMemoryIn */
+        ScopedMemoryIn: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "agent" | "group" | "chat" | "project";
+            /** Scope Id */
+            scope_id: string;
+            /** Run Id */
+            run_id?: string | null;
+            /** Key */
+            key: string;
+            /** Content */
+            content: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Sources */
+            sources?: components["schemas"]["SourceIn"][];
+            /**
+             * Classification
+             * @default proposed
+             * @enum {string}
+             */
+            classification: "proposed" | "verified" | "superseded" | "deleted";
+            /**
+             * Pinned
+             * @default false
+             */
+            pinned: boolean;
+            /**
+             * Share Sources
+             * @default false
+             */
+            share_sources: boolean;
+        };
         /** ScopedMemoryOut */
         ScopedMemoryOut: {
             /** Id */
@@ -4335,49 +4504,6 @@ export interface components {
         WorkspacePatch: {
             /** Name */
             name?: string | null;
-        };
-        /** MemoryIn */
-        app__api__v1__memory__MemoryIn: {
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "agent" | "group" | "chat" | "project";
-            /** Scope Id */
-            scope_id: string;
-            /** Run Id */
-            run_id?: string | null;
-            /** Key */
-            key: string;
-            /** Content */
-            content: string;
-            /** Expected Version */
-            expected_version: number;
-            /** Sources */
-            sources?: components["schemas"]["SourceIn"][];
-            /**
-             * Classification
-             * @default proposed
-             * @enum {string}
-             */
-            classification: "proposed" | "verified" | "superseded" | "deleted";
-            /**
-             * Pinned
-             * @default false
-             */
-            pinned: boolean;
-            /**
-             * Share Sources
-             * @default false
-             */
-            share_sources: boolean;
-        };
-        /** MemoryIn */
-        app__schemas__MemoryIn: {
-            /** Key */
-            key: string;
-            /** Value */
-            value: string;
         };
     };
     responses: never;
@@ -5827,6 +5953,72 @@ export interface operations {
             };
         };
     };
+    list_plugins_api_v1_plugins_get: {
+        parameters: {
+            query?: {
+                health?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    toggle_plugin_api_v1_plugins__plugin_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginToggleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginToggleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_companies_api_v1_w__workspace_id__companies_get: {
         parameters: {
             query?: never;
@@ -6410,7 +6602,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["app__schemas__MemoryIn"];
+                "application/json": components["schemas"]["AgentMemoryIn"];
             };
         };
         responses: {
@@ -8756,7 +8948,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["app__api__v1__memory__MemoryIn"];
+                "application/json": components["schemas"]["ScopedMemoryIn"];
             };
         };
         responses: {

@@ -7,14 +7,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, FastAPI, Request
 
-from app.channels.api.routes import activity, agents, auth, companies, editor, memory, roles, runs, sessions, settings, skills, templates, workspaces
+from app.channels.api.routes import activity, agents, auth, companies, editor, memory, plugins, roles, runs, sessions, settings, skills, templates, workspaces
 from app.foundation.config import get_settings
 from app.sdk.manifest import Manifest
 from app.channels import Channel
 
 # Mounted directly under /api/v1. These do not depend on a workspace.
 GLOBAL_ROUTERS = (activity.router, auth.router, templates.router, roles.router, skills.router, settings.router,
-                  workspaces.router)
+                  workspaces.router, plugins.router)
 # Mounted under /api/v1/w/{workspace_id}.
 PROJECT_ROUTERS = (companies.router, agents.router, sessions.router, runs.router, editor.router, memory.router)
 

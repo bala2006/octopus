@@ -2987,6 +2987,229 @@
         "title": "ParsedFileOut",
         "type": "object"
       },
+      "PluginHealthOut": {
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "PluginHealthOut",
+        "type": "object"
+      },
+      "PluginOut": {
+        "properties": {
+          "applies": {
+            "title": "Applies",
+            "type": "string"
+          },
+          "dependents": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependents",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "emits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Emits",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "health": {
+            "$ref": "#/components/schemas/PluginHealthOut"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "optional": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Optional",
+            "type": "array"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "provides": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Provides",
+            "type": "array"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "requires": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requires",
+            "type": "array"
+          },
+          "sdk": {
+            "title": "Sdk",
+            "type": "string"
+          },
+          "slot": {
+            "title": "Slot",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "ui": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ui",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "slot",
+          "kind",
+          "version",
+          "status",
+          "required",
+          "enabled",
+          "state",
+          "health",
+          "provides",
+          "requires",
+          "optional",
+          "permissions",
+          "emits",
+          "ui",
+          "start",
+          "sdk",
+          "dependents",
+          "applies"
+        ],
+        "title": "PluginOut",
+        "type": "object"
+      },
+      "PluginToggleIn": {
+        "properties": {
+          "cascade": {
+            "default": false,
+            "title": "Cascade",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "PluginToggleIn",
+        "type": "object"
+      },
+      "PluginToggleOut": {
+        "properties": {
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed",
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PluginsOut"
+          }
+        },
+        "required": [
+          "changed",
+          "state"
+        ],
+        "title": "PluginToggleOut",
+        "type": "object"
+      },
+      "PluginsOut": {
+        "properties": {
+          "event_log": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Event Log",
+            "type": "object"
+          },
+          "plugins": {
+            "items": {
+              "$ref": "#/components/schemas/PluginOut"
+            },
+            "title": "Plugins",
+            "type": "array"
+          },
+          "sdk_version": {
+            "title": "Sdk Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sdk_version",
+          "plugins",
+          "event_log"
+        ],
+        "title": "PluginsOut",
+        "type": "object"
+      },
       "ProjectTask": {
         "properties": {
           "command": {
@@ -5691,6 +5914,103 @@
         "summary": "Refresh Mcp",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/plugins": {
+      "get": {
+        "description": "Every plugin. ``health=true`` asks each running plugin for its current health first.",
+        "operationId": "list_plugins_api_v1_plugins_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "health",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Health",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Plugins",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}": {
+      "patch": {
+        "description": "Switch a plugin on or off. The change is saved and takes effect for the next model call, tool call or run.",
+        "operationId": "toggle_plugin_api_v1_plugins__plugin_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_id",
+            "required": true,
+            "schema": {
+              "title": "Plugin Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginToggleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginToggleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Toggle Plugin",
+        "tags": [
+          "plugins"
         ]
       }
     },
