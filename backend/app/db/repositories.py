@@ -14,10 +14,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
+from app.models.runtime_records import Consultation, ExecutionEvidence, RunRequest, TaskAttempt
 from app.models.scoped_memory import MemoryGroup, MemoryGroupMember, MemoryHead, MemoryRecord
 from app.models import (
     Agent, AgentMemory, Artifact, ChatSession, Company, Edge, McpServer, Message, ProviderKey, Run, RunEvent, Task, User, UserRole, UserSkill, UserTemplate, Workspace,
@@ -32,6 +33,10 @@ class RunRepository:
 
     async def get(self, run_id: str) -> Run | None:
         return await self.db.get(Run, run_id)
+
+    async def touch(self, run_id: str) -> None:
+        """Update the run row without changing it, to take its write lock in this transaction."""
+        await self.db.execute(update(Run).where(Run.id == run_id).values(turns=Run.turns))
 
     async def update(self, run_id: str, *where: Any, **values: Any) -> None:
         await self.db.execute(update(Run).where(Run.id == run_id, *where).values(**values))
@@ -348,6 +353,98 @@ class MemoryRepository:
     async def source(self, kind: str, source_id: str) -> Any:
         """A message or artifact that memory can cite as its source."""
         return await self.db.get(Message if kind == "message" else Artifact, source_id)
+
+
+# ---------------------------------------------------------------- run runtime tables (requests, attempts, consultations)
+
+class RunRequestRepository:
+    """Queued and applied user requests of one run. transition() is a compare-and-set on the current state."""
+
+    def __init__(self, db: AsyncSession, run_id: str) -> None:
+        self.db, self.run_id = db, run_id
+
+    async def list_for_run(self) -> list[RunRequest]:
+        return list((await self.db.execute(select(RunRequest).where(RunRequest.run_id == self.run_id)
+                                           .order_by(RunRequest.created_at, RunRequest.id))).scalars().all())
+
+    async def get(self, request_id: str) -> RunRequest | None:
+        return await self.db.scalar(select(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.id == request_id))
+
+    async def by_client_id(self, client_id: str) -> RunRequest | None:
+        return (await self.db.execute(select(RunRequest).where(
+            RunRequest.run_id == self.run_id, RunRequest.client_id == client_id))).scalar_one_or_none()
+
+    async def first_queued(self) -> RunRequest | None:
+        """The next queued request: steers first, then by creation order."""
+        return (await self.db.execute(select(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.state == "queued")
+                                      .order_by(case((RunRequest.kind == "steer", 0), else_=1), RunRequest.created_at,
+                                                RunRequest.id).limit(1))).scalar_one_or_none()
+
+    async def transition(self, request_id: str, from_state: str, *extra: Any, **values: Any) -> Any:
+        """Set ``values`` only if the request is still in ``from_state`` (and ``extra`` holds). Returns the result: check rowcount."""
+        return await self.db.execute(update(RunRequest).where(
+            RunRequest.id == request_id, RunRequest.run_id == self.run_id, RunRequest.state == from_state, *extra).values(**values))
+
+    async def supersede_queued(self, revision: int) -> None:
+        await self.db.execute(update(RunRequest).where(
+            RunRequest.run_id == self.run_id, RunRequest.state == "queued").values(revision=revision))
+
+    async def cancel_in_states(self, states: Any) -> None:
+        await self.db.execute(update(RunRequest).where(
+            RunRequest.run_id == self.run_id, RunRequest.state.in_(states)).values(state="cancelled"))
+
+    async def mark_recovery(self, request_ids: Any, from_state: str) -> None:
+        await self.db.execute(update(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.id.in_(request_ids),
+                                                       RunRequest.state == from_state).values(state="recovery_required"))
+
+    async def claimed_to_recovery(self) -> Any:
+        return await self.db.execute(update(RunRequest).where(
+            RunRequest.run_id == self.run_id, RunRequest.state == "claimed").values(state="recovery_required"))
+
+
+class TaskAttemptRepository:
+    def __init__(self, db: AsyncSession, run_id: str) -> None:
+        self.db, self.run_id = db, run_id
+
+    async def get(self, attempt_id: str) -> TaskAttempt | None:
+        return await self.db.get(TaskAttempt, attempt_id)
+
+    async def active_id(self, agent_id: str, states: Any) -> str | None:
+        return await self.db.scalar(select(TaskAttempt.id).where(
+            TaskAttempt.run_id == self.run_id, TaskAttempt.agent_id == agent_id, TaskAttempt.state.in_(states)))
+
+    async def find(self, *where: Any) -> list[TaskAttempt]:
+        return list((await self.db.scalars(select(TaskAttempt).where(TaskAttempt.run_id == self.run_id, *where))).all())
+
+    async def ordered(self) -> list[TaskAttempt]:
+        return list((await self.db.execute(select(TaskAttempt).where(TaskAttempt.run_id == self.run_id)
+                                           .order_by(TaskAttempt.started_at))).scalars().all())
+
+    async def finish(self, attempt_id: str, revision: int, state: str, result: dict) -> Any:
+        """Record a result only if the attempt is still running at this revision. Returns the result: check rowcount."""
+        return await self.db.execute(update(TaskAttempt).where(
+            TaskAttempt.id == attempt_id, TaskAttempt.run_id == self.run_id, TaskAttempt.revision == revision,
+            TaskAttempt.state == "running").values(state=state, result_json=result, ended_at=utcnow()))
+
+    async def mark_running_recovery(self) -> Any:
+        return await self.db.execute(update(TaskAttempt).where(
+            TaskAttempt.run_id == self.run_id, TaskAttempt.state == "running").values(state="recovery_required", ended_at=utcnow()))
+
+
+class ConsultationRepository:
+    def __init__(self, db: AsyncSession, run_id: str) -> None:
+        self.db, self.run_id = db, run_id
+
+    async def find(self, *where: Any) -> list[Consultation]:
+        return list((await self.db.scalars(select(Consultation).where(Consultation.run_id == self.run_id, *where))).all())
+
+
+class EvidenceRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def for_run(self, run_id: str) -> list[ExecutionEvidence]:
+        return list((await self.db.execute(select(ExecutionEvidence).where(ExecutionEvidence.run_id == run_id))).scalars().all())
 
 
 # ---------------------------------------------------------------- registry database

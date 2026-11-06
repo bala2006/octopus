@@ -8,9 +8,9 @@ from weakref import WeakValueDictionary
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import case, select, update
 from sqlalchemy.exc import IntegrityError
 from app.db.base import new_id, utcnow
+from app.db.repositories import ConsultationRepository, EvidenceRepository, RunRepository, RunRequestRepository, TaskAttemptRepository
 from app.db.session import SessionFactory
 from app.models import Run, RunEvent
 from app.models.runtime_records import RunRequest, TaskAttempt, ExecutionEvidence, Consultation
@@ -71,13 +71,13 @@ class RuntimeStore:
             raise ValueError("Request must queue or steer")
         digest = hashlib.sha256(json.dumps([content, target, attachments, kind], sort_keys=True).encode()).hexdigest()
         async with self.sf() as db:
-            await db.execute(update(Run).where(Run.id == self.run_id).values(turns=Run.turns))
-            existing = (await db.execute(select(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.client_id == client_id))).scalar_one_or_none()
+            await RunRepository(db).touch(self.run_id)
+            existing = await RunRequestRepository(db, self.run_id).by_client_id(client_id)
             if existing:
                 if existing.content_hash != digest:
                     raise Conflict("The request ID was already used for different content")
                 return request_out(existing), False
-            run = await db.get(Run, self.run_id)
+            run = await RunRepository(db).get(self.run_id)
             if not run:
                 raise ValueError("Run not found")
             revision = int((run.state_json or {}).get("plan_revision", 1))
@@ -96,13 +96,12 @@ class RuntimeStore:
 
     async def requests(self) -> list[dict]:
         async with self.sf() as db:
-            rows = (await db.execute(select(RunRequest).where(RunRequest.run_id == self.run_id).order_by(RunRequest.created_at, RunRequest.id))).scalars()
+            rows = await RunRequestRepository(db, self.run_id).list_for_run()
             return [request_out(row) for row in rows]
 
     async def cancel_request(self, request_id: str) -> None:
         async with self.sf() as db:
-            changed = await db.execute(update(RunRequest).where(RunRequest.id == request_id, RunRequest.run_id == self.run_id,
-                                                               RunRequest.state == "queued").values(state="cancelled"))
+            changed = await RunRequestRepository(db, self.run_id).transition(request_id, "queued", state="cancelled")
             if changed.rowcount != 1:
                 raise Conflict("Only a queued request can be removed")
             event(db, self.run_id, "request_updated", {"id": request_id, "state": "cancelled"})
@@ -114,18 +113,17 @@ class RuntimeStore:
 
     async def _steer_request(self, request_id: str) -> tuple[dict, bool]:
         async with self.sf() as db:
-            await db.execute(update(Run).where(Run.id == self.run_id).values(turns=Run.turns))
-            row = await db.scalar(select(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.id == request_id))
+            await RunRepository(db).touch(self.run_id)
+            row = await RunRequestRepository(db, self.run_id).get(request_id)
             if not row or row.state != "queued":
                 raise Conflict("Only a queued request can steer work")
             if row.kind == "steer":
                 return request_out(row), False
-            changed = await db.execute(update(RunRequest).where(RunRequest.id == row.id, RunRequest.state == "queued",
-                RunRequest.kind == "queue").values(kind="steer"))
+            changed = await RunRequestRepository(db, self.run_id).transition(row.id, "queued", RunRequest.kind == "queue", kind="steer")
             if changed.rowcount != 1:
                 raise Conflict("Request changed while steering")
             row.kind = "steer"
-            run = await db.get(Run, self.run_id)
+            run = await RunRepository(db).get(self.run_id)
             if not run:
                 raise Conflict("Run no longer exists")
             row.revision = await self._advance_revision(db, run)
@@ -135,11 +133,10 @@ class RuntimeStore:
 
     async def claim(self) -> RunRequest | None:
         async with self.sf() as db:
-            row = (await db.execute(select(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.state == "queued")
-                                    .order_by(case((RunRequest.kind == "steer", 0), else_=1), RunRequest.created_at, RunRequest.id).limit(1))).scalar_one_or_none()
+            row = await RunRequestRepository(db, self.run_id).first_queued()
             if not row:
                 return None
-            changed = await db.execute(update(RunRequest).where(RunRequest.id == row.id, RunRequest.state == "queued").values(state="claimed"))
+            changed = await RunRequestRepository(db, self.run_id).transition(row.id, "queued", state="claimed")
             if changed.rowcount != 1:
                 await db.rollback()
                 return None
@@ -152,8 +149,7 @@ class RuntimeStore:
         if state not in ("applied", "failed", "recovery_required"):
             raise ValueError("Invalid request transition")
         async with self.sf() as db:
-            changed = await db.execute(update(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.id == request_id,
-                                                               RunRequest.state == "claimed").values(state=state))
+            changed = await RunRequestRepository(db, self.run_id).transition(request_id, "claimed", state=state)
             if changed.rowcount != 1:
                 raise Conflict("Request is no longer claimed")
             event(db, self.run_id, "request_updated", {"id": request_id, "state": state})
@@ -163,12 +159,11 @@ class RuntimeStore:
         if assignment.run_id != self.run_id:
             raise Conflict("Assignment belongs to another run")
         async with self.sf() as db:
-            await db.execute(update(Run).where(Run.id == self.run_id).values(turns=Run.turns))
-            run = await db.get(Run, self.run_id)
+            await RunRepository(db).touch(self.run_id)
+            run = await RunRepository(db).get(self.run_id)
             if not run or int((run.state_json or {}).get("plan_revision", 1)) != assignment.revision:
                 raise Conflict("Assignment belongs to a stale plan revision")
-            active = await db.scalar(select(TaskAttempt.id).where(TaskAttempt.run_id == self.run_id,
-                TaskAttempt.agent_id == assignment.owner, TaskAttempt.state.in_(("running", "recovery_required"))))
+            active = await TaskAttemptRepository(db, self.run_id).active_id(assignment.owner, ("running", "recovery_required"))
             if active:
                 raise Conflict("Agent already has a running or uncertain invocation")
             row = TaskAttempt(id=new_id(), run_id=self.run_id, agent_id=assignment.owner, revision=assignment.revision,
@@ -187,18 +182,15 @@ class RuntimeStore:
         return revision
 
     async def _supersede(self, db, revision: int) -> None:
-        attempts = (await db.scalars(select(TaskAttempt).where(TaskAttempt.run_id == self.run_id,
-                TaskAttempt.revision < revision, TaskAttempt.state.in_(("running", "waiting_reply", "blocked"))))).all()
+        attempts = await TaskAttemptRepository(db, self.run_id).find(TaskAttempt.revision < revision, TaskAttempt.state.in_(("running", "waiting_reply", "blocked")))
         for attempt in attempts:
             attempt.state, attempt.ended_at = "superseded", utcnow()
             event(db, self.run_id, "attempt_updated", {"id": attempt.id, "state": "superseded", "revision": attempt.revision})
-        consultations = (await db.scalars(select(Consultation).where(Consultation.run_id == self.run_id,
-                Consultation.revision < revision, Consultation.state == "waiting"))).all()
+        consultations = await ConsultationRepository(db, self.run_id).find(Consultation.revision < revision, Consultation.state == "waiting")
         for consultation in consultations:
             consultation.state = "superseded"
             event(db, self.run_id, "consultation_updated", {"id": consultation.id, "sender": consultation.sender, "state": "superseded"})
-        await db.execute(update(RunRequest).where(RunRequest.run_id == self.run_id,
-                RunRequest.state == "queued").values(revision=revision))
+        await RunRequestRepository(db, self.run_id).supersede_queued(revision)
 
     async def supersede_revision(self, revision: int) -> None:
         """Invalidate pending old work without pretending in-flight host actions were undone."""
@@ -210,42 +202,34 @@ class RuntimeStore:
         if state not in ("completed", "unverified", "waiting_reply", "blocked", "failed", "cancelled", "superseded", "recovery_required"):
             raise ValueError("Invalid attempt result")
         async with self.sf() as db:
-            changed = await db.execute(update(TaskAttempt).where(TaskAttempt.id == attempt_id, TaskAttempt.run_id == self.run_id,
-                                                                 TaskAttempt.revision == revision, TaskAttempt.state == "running")
-                                       .values(state=state, result_json=result, ended_at=utcnow()))
+            changed = await TaskAttemptRepository(db, self.run_id).finish(attempt_id, revision, state, result)
             if changed.rowcount:
                 event(db, self.run_id, "attempt_updated", {"id": attempt_id, "state": state, "result": result})
                 if state == "recovery_required":
-                    attempt = await db.get(TaskAttempt, attempt_id)
+                    attempt = await TaskAttemptRepository(db, self.run_id).get(attempt_id)
                     request_id = (attempt.assignment_json or {}).get("request_id") if attempt else None
                     if request_id:
-                        await db.execute(update(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.id == request_id,
-                            RunRequest.state == "applied").values(state="recovery_required"))
+                        await RunRequestRepository(db, self.run_id).transition(request_id, "applied", state="recovery_required")
                         event(db, self.run_id, "request_updated", {"id": request_id, "state": "recovery_required"})
                 await self.commit(db)
 
     async def recover(self) -> bool:
         async with self.sf() as db:
-            interrupted = (await db.scalars(select(TaskAttempt).where(TaskAttempt.run_id == self.run_id,
-                TaskAttempt.state == "running"))).all()
+            interrupted = await TaskAttemptRepository(db, self.run_id).find(TaskAttempt.state == "running")
             request_ids = [(a.assignment_json or {}).get("request_id") for a in interrupted]
             if request_ids:
-                await db.execute(update(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.id.in_(request_ids),
-                    RunRequest.state == "applied").values(state="recovery_required"))
-            a = await db.execute(update(TaskAttempt).where(TaskAttempt.run_id == self.run_id, TaskAttempt.state == "running")
-                                 .values(state="recovery_required", ended_at=utcnow()))
-            r = await db.execute(update(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.state == "claimed")
-                                 .values(state="recovery_required"))
+                await RunRequestRepository(db, self.run_id).mark_recovery(request_ids, "applied")
+            a = await TaskAttemptRepository(db, self.run_id).mark_running_recovery()
+            r = await RunRequestRepository(db, self.run_id).claimed_to_recovery()
             changed = bool(a.rowcount or r.rowcount)
             if changed:
-                run = await db.get(Run, self.run_id)
+                run = await RunRepository(db).get(self.run_id)
                 if run:
                     state = dict(run.state_json or {})
                     state["recovery_required"] = True
                     current_id = state.get("current_request_id")
                     if current_id and a.rowcount:
-                        await db.execute(update(RunRequest).where(RunRequest.run_id == self.run_id,
-                            RunRequest.id == current_id, RunRequest.state == "applied").values(state="recovery_required"))
+                        await RunRequestRepository(db, self.run_id).transition(current_id, "applied", state="recovery_required")
                     run.state_json = state
                 event(db, self.run_id, "execution_recovery", {"state": "recovery_required", "reason": "An invocation may have started. Inspect its effects before explicitly resuming."})
             await self.commit(db)
@@ -255,20 +239,18 @@ class RuntimeStore:
         if not acknowledged or action not in ("retry", "cancel"):
             raise Conflict("Inspect possible side effects and explicitly acknowledge recovery")
         async with self.sf() as db:
-            row = await db.scalar(select(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.id == request_id))
+            row = await RunRequestRepository(db, self.run_id).get(request_id)
             if not row or row.state != "recovery_required":
                 raise Conflict("Request does not require recovery")
-            changed = await db.execute(update(RunRequest).where(RunRequest.id == row.id, RunRequest.state == "recovery_required")
-                .values(state="queued" if action == "retry" else "cancelled"))
+            changed = await RunRequestRepository(db, self.run_id).transition(row.id, "recovery_required", state="queued" if action == "retry" else "cancelled")
             if changed.rowcount != 1:
                 raise Conflict("Recovery changed concurrently")
             row.state = "queued" if action == "retry" else "cancelled"
-            uncertain = (await db.scalars(select(TaskAttempt).where(TaskAttempt.run_id == self.run_id,
-                TaskAttempt.state == "recovery_required"))).all()
+            uncertain = await TaskAttemptRepository(db, self.run_id).find(TaskAttempt.state == "recovery_required")
             for attempt in uncertain:
                 if attempt.assignment_json.get("request_id") == request_id:
                     attempt.state, attempt.result_json, attempt.ended_at = "cancelled", {**attempt.result_json, "recovery_acknowledged": True, "action": action}, utcnow()
-            run = await db.get(Run, self.run_id)
+            run = await RunRepository(db).get(self.run_id)
             if run:
                 run.state_json = self.reconciled_state(run.state_json or {},
                     {a.agent_id for a in uncertain if a.assignment_json.get("request_id") == request_id}, action,
@@ -282,18 +264,16 @@ class RuntimeStore:
         if not acknowledged or action not in ("acknowledge", "cancel"):
             raise Conflict("Inspect possible side effects and explicitly acknowledge recovery")
         async with self.sf() as db:
-            run = await db.get(Run, self.run_id)
+            run = await RunRepository(db).get(self.run_id)
             if not run:
                 raise Conflict("Run does not exist")
-            attempts = (await db.scalars(select(TaskAttempt).where(TaskAttempt.run_id == self.run_id,
-                TaskAttempt.state == "recovery_required"))).all()
+            attempts = await TaskAttemptRepository(db, self.run_id).find(TaskAttempt.state == "recovery_required")
             for attempt in attempts:
                 attempt.state, attempt.ended_at = "cancelled", utcnow()
                 attempt.result_json = {**attempt.result_json, "recovery_acknowledged": True, "action": action}
             # Interrupted requests remain explicit decisions; acknowledgment never silently requeues them.
             if action == "cancel":
-                await db.execute(update(RunRequest).where(RunRequest.run_id == self.run_id, RunRequest.state.in_(("queued", "recovery_required")))
-                    .values(state="cancelled"))
+                await RunRequestRepository(db, self.run_id).cancel_in_states(("queued", "recovery_required"))
             run.state_json = self.reconciled_state(run.state_json or {}, {a.agent_id for a in attempts}, action, False)
             event(db, self.run_id, "execution_recovery", {"state": "acknowledged", "action": action})
             await self.commit(db)
@@ -309,7 +289,7 @@ class RuntimeStore:
 
     async def add_evidence(self, attempt_id: str, revision: int, record: dict) -> str:
         async with self.sf() as db:
-            attempt = await db.get(TaskAttempt, attempt_id)
+            attempt = await TaskAttemptRepository(db, self.run_id).get(attempt_id)
             if not attempt or attempt.run_id != self.run_id or attempt.revision != revision or attempt.state not in ("running", "completed", "unverified"):
                 raise Conflict("Evidence belongs to a stale attempt")
             row = ExecutionEvidence(id=new_id(), run_id=self.run_id, attempt_id=attempt_id, revision=revision, record_json=record)
@@ -320,10 +300,10 @@ class RuntimeStore:
 
     async def summary(self) -> dict:
         async with self.sf() as db:
-            attempts = (await db.execute(select(TaskAttempt).where(TaskAttempt.run_id == self.run_id).order_by(TaskAttempt.started_at))).scalars().all()
-            evidence = (await db.execute(select(ExecutionEvidence).where(ExecutionEvidence.run_id == self.run_id))).scalars().all()
-            consultations = (await db.execute(select(Consultation).where(Consultation.run_id == self.run_id))).scalars().all()
-            run = await db.get(Run, self.run_id)
+            attempts = await TaskAttemptRepository(db, self.run_id).ordered()
+            evidence = await EvidenceRepository(db).for_run(self.run_id)
+            consultations = await ConsultationRepository(db, self.run_id).find()
+            run = await RunRepository(db).get(self.run_id)
             saved = (run.state_json or {}) if run else {}
             return {"requests": await self.requests(), "recovery_required": bool(saved.get("recovery_required")),
                     "plan_revision": int(saved.get("plan_revision", 1)),
@@ -343,12 +323,12 @@ class RuntimeStore:
         if not sender or not recipient or not question.strip() or len(question) > 8000:
             raise ValueError("A consultation needs valid participants and a bounded question")
         async with self.sf() as db:
-            await db.execute(update(Run).where(Run.id == self.run_id).values(turns=Run.turns))
-            run = await db.get(Run, self.run_id)
+            await RunRepository(db).touch(self.run_id)
+            run = await RunRepository(db).get(self.run_id)
             if not run or int((run.state_json or {}).get("plan_revision", 1)) != revision:
                 raise Conflict("Consultation belongs to a stale plan revision")
             await self._expire(db)
-            rows = (await db.execute(select(Consultation).where(Consultation.run_id == self.run_id, Consultation.state == "waiting"))).scalars().all()
+            rows = await ConsultationRepository(db, self.run_id).find(Consultation.state == "waiting")
             if any(row.sender == sender for row in rows):
                 raise Conflict("An agent already has an outstanding consultation")
             graph = {row.sender: row.recipient for row in rows}
@@ -369,8 +349,7 @@ class RuntimeStore:
     async def answer(self, sender: str, recipient: str, content: str) -> list[str]:
         async with self.sf() as db:
             await self._expire(db)
-            rows = (await db.execute(select(Consultation).where(Consultation.run_id == self.run_id, Consultation.sender == recipient,
-                                                              Consultation.recipient == sender, Consultation.state == "waiting"))).scalars().all()
+            rows = await ConsultationRepository(db, self.run_id).find(Consultation.sender == recipient, Consultation.recipient == sender, Consultation.state == "waiting")
             for row in rows:
                 row.answer, row.state = content, "answered"
                 event(db, self.run_id, "consultation_updated", {"id": row.id, "state": "answered"})
@@ -378,8 +357,7 @@ class RuntimeStore:
             return [row.id for row in rows]
 
     async def _expire(self, db) -> list[dict]:
-        rows = (await db.scalars(select(Consultation).where(Consultation.run_id == self.run_id,
-            Consultation.state == "waiting", Consultation.deadline <= utcnow()))).all()
+        rows = await ConsultationRepository(db, self.run_id).find(Consultation.state == "waiting", Consultation.deadline <= utcnow())
         for row in rows:
             row.state = "expired"
             event(db, self.run_id, "consultation_updated", {"id": row.id, "sender": row.sender, "state": "expired"})
