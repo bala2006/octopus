@@ -342,7 +342,8 @@ Sections 2 to 6 show the plan's target paths. This section records what the code
 
 ### Decisions
 
-- **Phase 0 baseline:** accepted as the reference by the maintainer. Three run screens do not match it and are parked (see G6).
+- **Phase 0 baseline:** accepted as the reference by the maintainer.
+- **G6:** marked done by the maintainer. Three run screens still differ from the baseline, and that difference is accepted.
 - **Phase 4 custom role group:** confirmed. The four named groups are fixed, and every other built-in role goes to the custom group.
 - **O1:** removal of `DirectoryPicker.tsx` and `project_memory.py` (from #74) confirmed. No references remain in this branch.
 - **O2:** CD publishing is unchanged. It runs after a successful CI run on `main`, on version tags, and on manual dispatch.
@@ -355,15 +356,15 @@ Sections 2 to 6 show the plan's target paths. This section records what the code
 
 | Phase | State | Done | Still open |
 |---|---|---|---|
-| 0 Baseline | Done, parked item | Golden files (62), visual harness, baseline of 36 PNGs. Baseline accepted by the maintainer. | G6: three run screens (see below). |
+| 0 Baseline | Done | Golden files (62), visual harness, baseline of 36 PNGs. Baseline accepted by the maintainer. | None. |
 | 1 Core and rules | Done | Manifests, registry, catalog of 44 entries (33 components, 11 tool families), migration `0006_plugins`, import-linter, `make lint-arch`. | The registry is not read at startup. Manifests have no events, config or lifecycle fields. |
 | 2 Kernel | Done | `engine.py` is 652 lines (target under 800). Policy gate, contracts, run manager, execution service, handler modules. Kill-switch and restart-recovery tests exist and pass (47 selected). | None. |
 | 3 Capabilities | Partly | Models, workspace, sandbox, browser, MCP, memory, skills and tools are in `app/capabilities/`. The engine imports no capability module (import-linter). Action dispatch is a family-grouped registry (`handlers/registry.py`). Each family is a `ToolPlugin` with its own catalog manifest (11 families). The first storage repository is `TaskRepository` (`app/db/repositories.py`). | Storage repositories for the other tables: about 49 modules still use sessions directly (API 14, orchestrator 11, capabilities 10, workflows 6, services 3, core 3, channels 1, agents 1). Handler modules still import capability modules directly. |
 | 4 Agents | Done | Role plugins (`agents/roles`), user roles (`agents/user_roles.py`), chief (`agents/chief.py`). Custom group confirmed. | None. |
 | 5 Workflows | Done, with two notes | Debate (`boardroom.py`), review (`review.py`), company workflow (`CompanyWorkflow`), org and hiring (`OrgService`). Mixins are gone. Routing is in `workflows/routing.py`. Task state, the `UpdateTaskBoard` handler and task persistence are in `workflows/task_board.py`. | Notes: the blackboard and nudging stay in `orchestrator/board.py` because they drive run behavior. `workflows/tasks.py` is command discovery, not the board. Workflows import orchestrator types, which import-linter does not check. |
 | 6 Channels | Partly | API, WebSocket, web shell and CLI channels. `chat_apps` is a `planned` manifest with no routes. `main.py` mounts the channels. | The start scripts and dev scripts stay where they are (decision). G7 on the three start paths is run by the maintainer. |
-| 7 Frontend | Partly | `frontend/src/plugins/registry.ts` builds the routes. Typed client in sync (G5). | G6 is not fully green (see below). |
-| 8 Hardening | Partly | Shims removed. import-linter runs three contracts with no ignore list. `ARCHITECTURE.md` and `docs/plugins.md` updated. Timing recorded. | G6 (three screens) and G7 (live start paths). Plan sections 2 to 6 still show target paths. |
+| 7 Frontend | Done | `frontend/src/plugins/registry.ts` builds the routes. Typed client in sync (G5). G6 marked done by the maintainer. | None. |
+| 8 Hardening | Partly | Shims removed. import-linter runs three contracts with no ignore list. `ARCHITECTURE.md` and `docs/plugins.md` updated. Timing recorded. | G7 (live start paths, run by the maintainer). Plan sections 2 to 6 still show target paths. |
 
 ### Gates at `b79661b`
 
@@ -374,7 +375,7 @@ Sections 2 to 6 show the plan's target paths. This section records what the code
 - **G5 OpenAPI:** the golden `openapi.json` is unchanged. `npm run gen:api` reproduces `api.gen.ts` with no diff.
 - **G6 screenshots:** 33 of 36 captures match the baseline when captured with the baseline's browser (Chromium 156.0.8078.4, the `chromium_headless_shell-1248` build). The harness takes `--chromium` or `OCTOPUS_VISUAL_CHROMIUM`. Playwright's default browser (157) renders the run screens differently, which explains the earlier failures.
   - Still different, on every capture here: `run-approval` at 1440x900 and 1024x768, and `run-timeline` at 1024x768. The difference is a background tint on one agent row that the run view highlights for four seconds after it changes (`bg-steel/5`, `TeamView.tsx`). Every capture here omits the tint, including captures from the baseline commit `701641a`, so the baseline was taken under a timing this environment does not reproduce.
-  - **Parked by the maintainer.** The options (threshold, or replacing the baseline for those three) are still open.
+  - **Marked done by the maintainer.** The three differences are accepted.
 - **G7 start path:** the app boots in-process with the real lifespan (migrations and capability install). The UI returns 200, OpenAPI lists 112 paths, and sampled API routes return 200. No live server was run from the sandbox. The maintainer runs `make start` (and `make dev`) and reports the result.
 
 ### Timing
