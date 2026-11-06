@@ -31,7 +31,7 @@ MAX_OUTPUT_CHARS = 12_000
 class ProjectPaths(Protocol):
     """Resolves a project-relative path to (relative path, real path) and raises on paths outside the project.
 
-    capabilities/workspace/project_fs.ProjectFS implements it. Core takes the resolver as an argument because the file system layer sits above core.
+    sdk.projectfs.ProjectFS implements it.
     """
 
     def resolve(self, path: str) -> tuple[str, Path]: ...

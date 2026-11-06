@@ -1,4 +1,4 @@
-"""System prompt of every built-in role, built by the real turn-prompt path (orchestrator/context.build_turn_prompts).
+"""System prompt of every built-in role, built by the real turn-prompt path (app.kernel.runtime.context.build_turn_prompts).
 
 Each role sits in one fixed team: a CEO lead, the role under test, a direct report and a peer. The run is held in memory. Its
 project database is a fresh, migrated SQLite file that holds only the company, the team and the run rows, so the scoped memory

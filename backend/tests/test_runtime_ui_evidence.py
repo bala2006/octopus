@@ -5,11 +5,11 @@ from app.foundation.config import get_settings
 from app.sdk import actions as A
 from app.sdk.evidence import AcceptanceCriterion, RevisionEvidence, validate_evidence
 from app.plugins.browser.service import SERVER_ID, browser
-from test_runtime_recovery_regressions import inspection_runtime, execute  # noqa: F401
+from test_runtime_recovery_regressions import inspection_runtime, execute  # noqa: F401, F811 (a pytest fixture is imported by name)
 
 
 @pytest.mark.parametrize("result", ["true", "false"])
-async def test_ui_proof_observes_interaction_assertion_and_exact_revision(inspection_runtime, monkeypatch, result):
+async def test_ui_proof_observes_interaction_assertion_and_exact_revision(inspection_runtime, monkeypatch, result):  # noqa: F811
     runtime = inspection_runtime
     monkeypatch.setattr(get_settings(), "browser_live_frames", False)
     runtime.agents["reviewer"].mcp = [{"id": SERVER_ID, "name": "browser", "builtin": True}]
@@ -32,7 +32,7 @@ async def test_ui_proof_observes_interaction_assertion_and_exact_revision(inspec
                                  environment=runtime._proof_environment, criterion=criterion).valid
 
 
-async def test_screenshots_and_reordered_claims_cannot_certify_ui(inspection_runtime, monkeypatch):
+async def test_screenshots_and_reordered_claims_cannot_certify_ui(inspection_runtime, monkeypatch):  # noqa: F811
     runtime = inspection_runtime
     monkeypatch.setattr(get_settings(), "browser_live_frames", False)
     runtime.agents["reviewer"].mcp = [{"id": SERVER_ID, "name": "browser", "builtin": True}]

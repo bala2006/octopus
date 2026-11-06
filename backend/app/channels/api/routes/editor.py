@@ -265,7 +265,7 @@ async def create_local_worktree(body: LocalWorktreeIn, ctx: ProjectCtx = Depends
 async def set_local_environment(body: LocalEnvironmentIn, ctx: ProjectCtx = Depends(project_ctx)) -> dict:
     from app.plugins.workspace import worktrees as local_environment
     try:
-        selected = local_environment.save_environment(ctx.root, body.selected)
+        local_environment.save_environment(ctx.root, body.selected)
         return await local_environment.inspect(ctx.root)
     except (WorkspaceError, OSError) as exc:
         raise HTTPException(400, str(exc) or "The local environment could not be saved.") from exc

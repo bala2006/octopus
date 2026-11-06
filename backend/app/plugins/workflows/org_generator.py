@@ -4,7 +4,6 @@ Uses the connected Azure OpenAI deployment with a strict JSON spec. Without a co
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError

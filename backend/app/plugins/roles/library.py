@@ -1,4 +1,4 @@
-"""The role library: built-in roles (``prompts/roles*.py``) merged with the user's edits and own roles (``user_roles``).
+"""The role library: built-in roles (``prompts.py`` and ``prompts_org.py`` in this package) merged with the user's edits and own roles (``user_roles``).
 
 * A role carries the agent's system prompt, description, look and default tools.
 * Agents link to their role by ``behavior.template_key``. A linked agent's prompt is resolved at run time from the
@@ -17,8 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.storage.repositories import UserRoleRepository
 from app.plugins.roles.prompts import RoleTemplate, _tools, all_roles
 
-CATEGORIES = ["Leadership", "Product", "Design", "Engineering", "Quality", "Operations", "Security", "Research", "Data",
-              "Content", "Growth", "Support", "Debate", "General"]
 _CATEGORY_RULES: list[tuple[str, str]] = [
     ("Debate", r"^(moderator|proposer|critic)$"),
     ("Leadership", r"^(ceo|founder|chief_of_staff|department_head|eng_manager|techlead|game_director|creative_director)$"),

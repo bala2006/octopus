@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import io
 import zipfile
-from pathlib import Path
 from types import SimpleNamespace
 
 import httpx

@@ -32,7 +32,7 @@ def decide(rt: RunRuntime, text: str, aid: str | None = None) -> None:
 
 def digest(rt: RunRuntime, aid: str) -> str:
     """What teammates did since this agent's last turn: the engine's log plus one line per message between others."""
-    since, since_turn = rt.seen.get(aid, 0), rt.seen_turn.get(aid, -1)
+    since = rt.seen.get(aid, 0)
     rows: list[tuple[int, str]] = [(e["turn"], f"- t{e['turn']} {rt.names.get(e['agent'] or '', 'Octopus')}: {e['text']}")
                                    for e in rt.journal if e["n"] > since and e["agent"] != aid]
     rows.sort(key=lambda r: r[0])

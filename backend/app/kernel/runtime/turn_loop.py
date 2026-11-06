@@ -220,7 +220,7 @@ async def build_request(rt: RunRuntime, agent: AgentSpec, inbox_ids: set[str], o
         req.images = images
         req.messages[-1]["content"] += (f"\n\n(The user attached {len(images)} image(s) to the goal; they follow this message. "
                                         "Use them as reference for what to build.)")
-    rt.seen[aid], rt.seen_turn[aid] = rt.journal_n, rt.turn_no
+    rt.seen[aid] = rt.journal_n
     return req, native
 
 
@@ -235,7 +235,6 @@ def native_tools_for(rt: RunRuntime, req: LLMRequest) -> bool:
 async def native_turn(rt: RunRuntime, agent: AgentSpec, req: LLMRequest, *, exclude: set[str] | frozenset[str] = frozenset()) -> str:
     """One turn as a tool loop: the model calls tools, gets each result back, and keeps going until it stops calling tools
         (or ends the turn with wait / finish / a question for the user). Errors are returned to the model as tool results."""
-    aid = agent.id
     specs, mcp_map = T.tool_specs(agent.tools, agent.mcp)
     req.tools = [t for t in specs if t["name"] not in exclude and rt.tool_available("mcp_call" if t["name"] in mcp_map else t["name"])]
     req.json_mode = False

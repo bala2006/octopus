@@ -3,7 +3,7 @@ keeps going while a plugin is switched off."""
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest

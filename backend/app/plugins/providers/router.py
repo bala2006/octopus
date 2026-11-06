@@ -56,10 +56,6 @@ def unregister_provider(name: str) -> None:
     _registered[:] = [r for r in _registered if r.name != name]
 
 
-def registered_providers() -> list[str]:
-    return [r.name for r in _registered]
-
-
 def get_provider(name: str, req: LLMRequest | None = None) -> LLMProvider:
     if _override is not None:
         return _override

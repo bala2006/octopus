@@ -80,10 +80,6 @@ def shell_operators(command: str) -> list[str]:
     return ops
 
 
-def needs_shell(command: str) -> bool:
-    return bool(shell_operators(command))
-
-
 @dataclass(frozen=True)
 class CommandPlan:
     argv: list[str]

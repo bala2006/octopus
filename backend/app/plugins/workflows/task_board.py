@@ -1,6 +1,6 @@
 """The task board: task state, the update_task_board action, and the task records it writes.
 
-Moved from orchestrator/board.py and orchestrator/handlers/tasks.py in Phase 5. The board's nudging and blackboard
+The board's nudging and blackboard
 stay in the orchestrator because they drive run behavior.
 """
 from __future__ import annotations

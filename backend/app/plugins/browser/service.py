@@ -5,7 +5,7 @@
   ``browser_snapshot`` / ``browser_click`` see the same page. Sessions close when the run ends.
 * Live view: Chromium is launched with a local DevTools port (``--remote-debugging-port`` via the MCP config file), and
   each agent's session is mapped to its page target. The run's Browser tab then streams that real tab (CDP screencast,
-  ``services/browser_live.py``) and can forward the user's clicks and keys to it.
+  ``app/plugins/browser/live.py``) and can forward the user's clicks and keys to it.
 * The browser binary is installed automatically on first use (``npx @playwright/mcp install-browser``) unless Chrome is
   already on the machine.
 

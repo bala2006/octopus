@@ -1,7 +1,7 @@
 """API channel: the REST routers under /api/v1, the project routers under /api/v1/w/{workspace_id}, and /api/health.
 
 The routers are included in the same order, with the same prefixes, as the router list that used to sit in app/main.py.
-Route handlers live in app/api/v1 and are unchanged.
+Route handlers live in app/channels/api/routes.
 """
 from __future__ import annotations
 

@@ -57,13 +57,6 @@ def registry_engine() -> AsyncEngine:
     return _registry[0]
 
 
-def set_registry_url(url: str) -> None:
-    """Replace the registry engine (tests)."""
-    global _registry
-    eng = make_engine(url)
-    _registry = (eng, async_sessionmaker(eng, expire_on_commit=False))
-
-
 async def get_registry_db() -> AsyncIterator[AsyncSession]:
     async with registry_factory()() as s:
         yield s

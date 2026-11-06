@@ -42,7 +42,7 @@ def state_dict(rt: RunRuntime) -> dict[str, Any]:
         "stall_ack": rt.stall_ack,
         "broken_files": rt.broken_files, "workflow": rt.wf,
         "unverified": rt.unverified,
-        "journal": rt.journal[-JOURNAL_MAX:], "journal_n": rt.journal_n, "seen": rt.seen, "seen_turn": rt.seen_turn,
+        "journal": rt.journal[-JOURNAL_MAX:], "journal_n": rt.journal_n, "seen": rt.seen,
         "metrics": rt.efficiency(),
     }
 
@@ -92,7 +92,6 @@ async def restore(rt: RunRuntime, run: Run) -> None:
     rt.journal = list(st.get("journal", []))
     rt.journal_n = int(st.get("journal_n", len(rt.journal)))
     rt.seen = dict(st.get("seen", {}))
-    rt.seen_turn = dict(st.get("seen_turn", {}))
     m = st.get("metrics") or {}
     rt.metrics = Counter({k: int(m.get(k, 0)) for k in ("turns", "work_turns", "delegations", "parallel_delegations")})
     rt.first_deliverable_turn = m.get("first_deliverable_turn")

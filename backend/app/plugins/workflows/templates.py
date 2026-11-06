@@ -401,11 +401,6 @@ def build_from_template(t: CompanyTemplate) -> tuple[list[dict[str, Any]], list[
     return agents, edges, meta
 
 
-def build_template(key: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    agents, edges, _ = build_from_template(TEMPLATES[key])
-    return agents, edges
-
-
 def summarize_departments(agents: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for a in agents:

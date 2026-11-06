@@ -68,7 +68,7 @@ def fid(name: str) -> str:
 
 
 def ts(text: str) -> datetime:
-    """Naive UTC, the same shape as ``app.db.base.utcnow()``."""
+    """Naive UTC, the same shape as ``app.storage.base.utcnow()``."""
     return datetime.fromisoformat(text)
 
 
@@ -287,7 +287,7 @@ async def seed_acme(db: Any, company: Any, sessions: dict[str, str], agents: dic
     from app.storage.models import Artifact, ChatSession, Message  # noqa: F401  (registers tables)
 
     ceo, pm, architect = agents["ceo"].id, agents["pm"].id, agents["architect"].id
-    design, lena, backend, sam, noah = agents["designer"].id, agents["frontend"].id, agents["backend"].id, agents["qa"].id, agents["devops"].id
+    lena, sam, noah = agents["frontend"].id, agents["qa"].id, agents["devops"].id
     db.add(ChatSession(id=sessions["scope"], company_id=company.id, agent_id=None, title="Landing page scope", mode="company",
                        created_at=ts("2026-01-13 16:00:00")))
     db.add(ChatSession(id=sessions["quick"], company_id=company.id, agent_id=lena, title="Hero section CSS", mode="direct",

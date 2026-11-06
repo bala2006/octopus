@@ -1,4 +1,3 @@
-from pathlib import Path
 
 import pytest
 
@@ -84,7 +83,7 @@ def test_binary_hashes_are_bounded_and_incomplete_inventory_cannot_pass(tmp_path
     (tmp_path / "image.png").write_bytes(b"\x89PNG\x00test")
     first = capture_manifest(tmp_path)
     assert [file.path for file in first.files] == ["image.png"]
-    monkeypatch.setattr(CORE_EVIDENCE, "MAX_BINARY_BYTES", 4)  # the limit is read where capture_manifest now lives (app.core)
+    monkeypatch.setattr(CORE_EVIDENCE, "MAX_BINARY_BYTES", 4)  # the limit is read where capture_manifest lives (app.sdk.evidence)
     capped = capture_manifest(tmp_path)
     assert not capped.complete
     assert record(capped).status == "unknown"

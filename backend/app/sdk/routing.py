@@ -1,6 +1,6 @@
 """Message routing between agents: which edge a message travels on, and who may talk to whom.
 
-Moved from app/orchestrator/permissions.py in Phase 5. Pure functions over EdgeSpec; no runtime state.
+Pure functions over EdgeSpec; no runtime state.
 """
 from __future__ import annotations
 
@@ -79,16 +79,6 @@ def allowed_recipients(edges: list[EdgeSpec], agent_id: str) -> dict[str, list[E
         elif e.bidirectional and e.target == agent_id:
             out.setdefault(e.source, []).append(e)
     return out
-
-
-def inbound_senders(edges: list[EdgeSpec], agent_id: str) -> set[str]:
-    s: set[str] = set()
-    for e in edges:
-        if e.target == agent_id:
-            s.add(e.source)
-        elif e.bidirectional and e.source == agent_id:
-            s.add(e.target)
-    return s
 
 
 # ---------------------------------------------------------------- approval modes

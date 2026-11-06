@@ -78,7 +78,6 @@ class AgentTools(BaseModel):
 
 
 ReasoningEffort = Literal["default", "none", "low", "medium", "high", "xhigh", "max"]
-EFFORTS = ("none", "low", "medium", "high", "xhigh", "max")
 
 
 class AgentBehavior(BaseModel):

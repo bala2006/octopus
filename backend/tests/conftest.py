@@ -146,14 +146,6 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
     set_provider_override(None)
 
 
-@pytest.fixture(autouse=True)
-def default_fake_provider():
-    """Every test answers from the offline fake provider unless it injects its own scripted provider."""
-    set_provider_override(FakeProvider())
-    yield
-    set_provider_override(None)
-
-
 @pytest_asyncio.fixture
 async def workspace(client: httpx.AsyncClient, tmp_root: Path, request: pytest.FixtureRequest) -> dict[str, Any]:
     name = re.sub(r"[^a-zA-Z0-9_-]", "_", request.node.name[:40])

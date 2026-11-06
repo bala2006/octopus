@@ -1,7 +1,7 @@
 """The provider-agnostic LLM contract: requests, streamed chunks, results, errors and token budgets.
 
-Lives in core so the orchestrator can call a model without importing a provider. The provider modules in
-app/capabilities/models implement the protocol and re-export these names from base.py.
+Lives in the SDK so the kernel can call a model without importing a provider. The provider plugins in
+app/plugins/providers implement the protocol.
 """
 from __future__ import annotations
 

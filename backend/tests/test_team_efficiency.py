@@ -10,7 +10,7 @@ from app.sdk.llm import LLMChunk, LLMRequest
 from app.plugins.providers.router import set_provider_override
 from fakes.fake_provider import FakeProvider
 from app.sdk.projectfs import ProjectFS
-from conftest import NativeScriptedProvider, ScriptedProvider, agent, edge, env, events, make_company, run_messages, start_run, wait_status
+from conftest import NativeScriptedProvider, ScriptedProvider, agent, edge, env, make_company, run_messages, start_run, wait_status
 
 TEAM = [agent("a", "Ann", entry=True), agent("b", "Ben"), agent("c", "Cy")]
 EDGES = [edge("ab", "a", "b"), edge("ac", "a", "c")]

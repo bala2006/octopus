@@ -127,7 +127,7 @@ def browser_note(agent: AgentSpec, preview_url: str) -> str:
 def build_system_prompt(agent: AgentSpec, *, company: str, goal: str, agents: dict[str, AgentSpec], edges: list[EdgeSpec],
                         status: dict[str, str] | None = None, preview_url: str = "", native: bool = False,
                         role_prompt: str | None = None, skills_text: str = "") -> str:
-    """``role_prompt``: the agent's prompt resolved from the role library (services/roles.py); default: its own."""
+    """``role_prompt``: the agent's prompt resolved from the role library (the roles.library service); default: its own."""
     names = {a.id: a.name for a in agents.values()}
     variables = {"company_name": company, "goal": goal, "team": team_roster(agents), "agent_name": agent.name, "role": agent.role,
                  **org_variables(agent, agents)}

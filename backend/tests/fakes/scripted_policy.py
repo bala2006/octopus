@@ -8,7 +8,6 @@ a generic "respond to whoever wrote to me" behaviour so every run terminates.
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from app.sdk.agents import role_category  # noqa: F401

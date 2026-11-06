@@ -27,11 +27,9 @@ CHANNELS_DIR = BACKEND / "app" / "channels"
 GOLDEN_OPENAPI = BACKEND / "tests" / "golden" / "openapi.json"
 HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 WS_PATHS = ("/ws/w/w1/runs/r1", "/ws/w/w1/runs/r1/browser/a1", "/ws/w/w1/chat/s1")
-# Imports allowed inside app/channels. app.capabilities, app.workflows, and app.main are never allowed.
+# Imports allowed inside app/channels. app.bootstrap and app.main are never allowed.
 APP_IMPORTS_ALLOWED = ("app.channels", "app.application", "app.kernel", "app.plugins", "app.sdk", "app.foundation", "app.storage")
-# app/channels/deps.py is the FastAPI wiring that opens registry and project DB sessions and loads the User model.
-# The one exception to the layer rules: it moved from app/core/deps.py in Phase 2.
-# No other channel module may import storage.
+# Channel modules may use the storage layer for sessions and models (the routes read and write rows through repositories).
 CHANNEL_STORAGE_ALLOWED = ("app.storage",)
 CHANNEL_STORAGE_MODULES = {"app/channels/deps.py"}
 

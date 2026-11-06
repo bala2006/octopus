@@ -1,6 +1,5 @@
 from app.kernel.current import current
 from app.kernel.runtime.context import build_turn_prompts
-import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -57,7 +56,6 @@ class FakeRuntime:
         self.waiting_peers = {}
         self.journal_n = 0
         self.seen = {}
-        self.seen_turn = {}
 
     def build_turn_prompts(self, agent, inbox_ids, observations, *, native, memory_context):
         return build_turn_prompts(self, agent, inbox_ids, observations, native=native, memory_context=memory_context)

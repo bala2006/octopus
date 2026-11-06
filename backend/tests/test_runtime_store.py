@@ -8,13 +8,13 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-from sqlalchemy import select, update
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.storage.base import ProjectBase, utcnow
 from app.storage.session import make_engine
 from app.storage.models import Company, Run, User
-from app.storage.models.runtime_records import Consultation, RunRequest, TaskAttempt
+from app.storage.models.runtime_records import Consultation, TaskAttempt
 from app.sdk.contracts import Assignment, ExecutionPolicy
 from app.kernel.runtime.runtime_store import RuntimeStore
 from app.sdk.execution_contracts import Conflict, mutation_lock

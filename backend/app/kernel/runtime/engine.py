@@ -22,7 +22,6 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 
-from app.foundation.config import get_settings
 from app.foundation.logging import get_logger
 from app.kernel.current import current
 from app.kernel.policy import PolicyGate
@@ -51,9 +50,6 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 log = get_logger("orchestrator")
-
-
-TERMINAL_STATES = {"completed", "incomplete", "failed", "cancelled"}
 
 
 # A model call is only treated as hung after this long with *no* output (reasoning summaries, text or tool arguments).
@@ -187,7 +183,6 @@ class RunRuntime:
         self.journal: list[dict[str, Any]] = []
         self.journal_n = 0
         self.seen: dict[str, int] = {}
-        self.seen_turn: dict[str, int] = {}
         # efficiency: turns that changed a deliverable or ran something vs. turns spent coordinating
         self.metrics: Counter[str] = Counter()
         self.first_deliverable_turn: int | None = None
@@ -203,7 +198,7 @@ class RunRuntime:
         self.roles = builtin_roles.all_roles() if builtin_roles is not None else {}  # replaced by the owner's role library in load_roles()
         self.skills: dict[str, Any] = skills.builtin_skills() if skills is not None else {}  # + the owner's and the project's skills in load_roles()
         self.broken_files: dict[str, str] = {}  # path → the failed automatic check of its latest version
-        self.wf: dict[str, Any] | None = None  # the workflow's state (orchestrator/workflow.py); None = free-form run
+        self.wf: dict[str, Any] | None = None  # the company workflow's state; None = free-form run
         # verify-before-finish: code changed since anything was last run / opened in the browser
         self.unverified: dict[str, int] = {}  # deliverable path → turn it last changed without being exercised since
         self.finish_bounces: set[str] = set()  # "agent|files" already sent back once (never twice for the same state)
@@ -588,8 +583,3 @@ async def load_run(run_id: str, project: ProjectRef) -> tuple[Run, str] | None:
         company = await CompanyRepository(db).get(run.company_id)
         return run, company.user_id if company else ""
 
-
-def default_budget() -> dict[str, Any]:
-    s = get_settings()
-    return RunBudget(max_turns=s.default_max_turns, max_tokens=s.default_max_tokens_budget, max_cost_usd=s.default_max_cost_usd,
-                     timeout_s=s.default_timeout_s).model_dump()

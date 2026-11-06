@@ -8,9 +8,6 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-
-
 def _default_roots() -> list[str]:
     roots = [str(Path.home())]
     for extra in ("/projects", "/workspaces"):

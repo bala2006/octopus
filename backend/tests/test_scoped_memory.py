@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.storage.base import ProjectBase
 from app.storage.session import make_engine
 from app.storage.models import Agent, AgentMemory, Company, Message, Run
-from app.storage.models.scoped_memory import MemoryHead, MemoryRecord
+from app.storage.models.scoped_memory import MemoryRecord
 from app.plugins.memory.scoped import Actor, MemoryConflict, MemoryDenied, SourceRef, Target, context, get, import_legacy, owner_group, owner_put, put
 
 

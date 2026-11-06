@@ -1,6 +1,6 @@
 """Chief orchestrator: lead selection, reporting checks, and routing a message to its owner.
 
-Moved out of app.core.contracts in Phase 4. Pure functions over agent dictionaries, no I/O.
+Pure functions over agent dictionaries, no I/O.
 """
 from __future__ import annotations
 

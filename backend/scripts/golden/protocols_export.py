@@ -1,4 +1,4 @@
-"""Debate and review transcripts: fixed message sequences through the pure state machines in orchestrator/protocols.py.
+"""Debate and review transcripts: fixed message sequences through the pure state machines in app/plugins/workflows/boardroom.py and review.py.
 
 Each step records its input, the verdict (accept, notices, reason, event) and the full state after the step.
 """

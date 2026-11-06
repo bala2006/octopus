@@ -15,7 +15,6 @@ from app.sdk.contracts import Assignment, ExecutionPolicy
 from app.sdk.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
 from app.sdk.task_contracts import TaskContract, validate_task
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, start_run, wait_status
-from test_runtime_recovery_regressions import inspection_runtime
 
 
 def test_graph_and_terminal_transitions_reject_invalid_state():

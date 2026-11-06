@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections import Counter
 from pathlib import Path
 
 import pytest

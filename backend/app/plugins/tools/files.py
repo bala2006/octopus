@@ -288,7 +288,7 @@ async def publish_file(rt: RunContext, agent: AgentSpec, rel: str, old: str | No
 
 
 async def check_written(rt: RunContext, rel: str, content: str) -> str | None:
-    """Syntax-check a file right after it was written (services/checks.py); remembered until a later write fixes it."""
+    """Syntax-check a file right after it was written (the workspace plugin's checks module); remembered until a later write fixes it."""
     checks = rt.services.get("workspace.checks")
     if checks is None:  # the workspace plugin is disabled: no automatic checks
         return None

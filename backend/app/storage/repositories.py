@@ -7,7 +7,7 @@ Boundary (decided for this refactor):
 
 A repository is bound to a session that the caller owns. Its methods do not commit, so transaction boundaries are the
 same as before the repositories existed. Project repositories take a project session (``rt.db()`` or a request
-session); registry repositories take a registry session. Models stay in app/models.
+session); registry repositories take a registry session. Models stay in app/storage/models.
 """
 from __future__ import annotations
 
