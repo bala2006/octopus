@@ -11,14 +11,13 @@ from alembic import command
 from sqlalchemy import create_engine, inspect, text
 
 import app
-from app.api import ws as ws_module
-from app.core.builtin import BUILTIN_MANIFESTS
-from app.core.bus import EPHEMERAL_TOPICS, RunTopic, TypedRunBus
-from app.core.context import PluginContext
-from app.core.manifest import LAYERS, Manifest, ManifestError
-from app.core.registry import DependencyCycleError, MissingDependencyError, PluginRegistry, RegistryError
-from app.db.migrate import _config, upgrade_registry
-from app.orchestrator.bus import EPHEMERAL, EventBus
+from app.channels.ws import endpoints as ws_module
+from app.kernel.catalog import BUILTIN_MANIFESTS
+from app.sdk.topics import EPHEMERAL_TOPICS, RunTopic, TypedRunBus
+from app.sdk.manifest import LAYERS, Manifest, ManifestError
+from app.kernel.registry import DependencyCycleError, MissingDependencyError, PluginRegistry, RegistryError
+from app.storage.migrate import _config, upgrade_registry
+from app.kernel.eventlog import EPHEMERAL, EventBus
 
 
 def make(plugin_id: str, *, layer: str = "capability", kind: str = "test", version: str = "1.0.0",
@@ -187,19 +186,6 @@ def test_state_calls_reject_unknown_plugin_ids():
             call("capability.nope")
 
 
-def test_plugin_context_holds_explicit_handles_and_none_placeholders():
-    reg = PluginRegistry([])
-    bus = TypedRunBus(EventBus())
-    ctx = PluginContext(bus=bus, registry=reg)
-    assert ctx.bus is bus and ctx.registry is reg
-    for placeholder in ("policy", "run_manager", "storage", "models", "tools", "sandbox"):
-        assert getattr(ctx, placeholder) is None
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        ctx.policy = object()
-    with pytest.raises(TypeError):
-        PluginContext()  # bus and registry are required
-
-
 # --- builtin catalog -------------------------------------------------------------------------------------------------
 
 def test_builtin_ids_are_unique():
@@ -272,7 +258,7 @@ def test_run_topics_cover_every_run_event_named_in_the_ws_docstring():
 def test_run_topics_cover_every_literal_event_name_the_backend_sends():
     root = Path(app.__file__).parent
     pattern = re.compile(r'\b(?:emit|publish)\(\s*(?:[\w.]+,\s*)?"([a-z_]+)"')
-    sources = [*sorted((root / "orchestrator").rglob("*.py")), root / "api" / "ws.py"]  # rglob: handlers/ holds emit sites too
+    sources = [*sorted((root / "kernel").rglob("*.py")), *sorted((root / "plugins").rglob("*.py")), root / "channels" / "ws" / "endpoints.py"]
     emitted: set[str] = set()
     for path in sources:
         emitted |= set(pattern.findall(path.read_text(encoding="utf-8")))

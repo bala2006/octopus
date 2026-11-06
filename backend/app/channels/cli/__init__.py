@@ -8,7 +8,7 @@ repo-root ``scripts/`` folder: ``bench.py``, ``evaluate_runtime.py``, ``folder_b
 from __future__ import annotations
 
 from app.channels import catalog_manifest
-from app.core.manifest import Manifest
+from app.sdk.manifest import Manifest
 
 
 class CliChannel:

@@ -13,16 +13,16 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.db.base import ProjectBase
-from app.db.session import make_engine
-from app.models import Agent, Artifact, Company, Run, RunEvent
-from app.orchestrator import actions as A
-from app.capabilities.models import opencode_turn as adapter
-from app.core.contracts import Assignment, ExecutionPolicy
-from app.orchestrator.engine import ProjectRef, RunRuntime, manager
-from app.core.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
-from app.capabilities.models import opencode
-from app.capabilities.memory.scoped import Actor, MemoryDenied, Target, get, owner_put, put
+from app.storage.base import ProjectBase
+from app.storage.session import make_engine
+from app.storage.models import Agent, Artifact, Company, Run, RunEvent
+from app.sdk import actions as A
+from app.plugins.providers import opencode_turn as adapter
+from app.sdk.contracts import Assignment, ExecutionPolicy
+from app.kernel.runtime.engine import ProjectRef, RunRuntime, manager
+from app.sdk.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
+from app.plugins.providers import opencode
+from app.plugins.memory.scoped import Actor, MemoryDenied, Target, get, owner_put, put
 from conftest import agent, make_company, start_run, wait_status
 
 
@@ -110,7 +110,7 @@ async def test_chat_memory_rejects_active_company_agent_outside_run_snapshot(ins
 
 @pytest.mark.parametrize("deletion", [False, True])
 async def test_stage_terminal_results_publish_canonical_content_and_original_history(inspection_runtime, monkeypatch, deletion):
-    from app.api.v1 import runs
+    from app.channels.api.routes import runs
     runtime = inspection_runtime
     if deletion:
         program = "from pathlib import Path\nPath('app.py').unlink()\n"
@@ -131,7 +131,7 @@ async def test_stage_terminal_results_publish_canonical_content_and_original_his
         assert versions[0].previous_content == "VALUE = 1\n"
         assert versions[0].content == ("" if deletion else "VALUE = 3\n")
         assert versions[0].deleted is deletion
-        from app.services.report import build_report
+        from app.plugins.observers.report import build_report
         report = await build_report("run", runtime.sf)
         assert ("| deleted |" in report) is deletion
         user = SimpleNamespace(id="owner")

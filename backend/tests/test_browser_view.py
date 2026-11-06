@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 
-from app.core.config import get_settings
-from app.capabilities.models.router import set_provider_override
-from app.capabilities.browser import service as B
-from app.capabilities.browser import frames as browser_frames
+from app.foundation.config import get_settings
+from app.plugins.providers.router import set_provider_override
+from app.plugins.browser import service as B
+from app.plugins.browser import frames as browser_frames
 from conftest import NativeScriptedProvider, agent, events, make_company, start_run, wait_status
 
 JPEG = b"\xff\xd8\xff\xe0fake-jpeg"

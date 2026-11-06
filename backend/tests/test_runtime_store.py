@@ -11,12 +11,12 @@ from fastapi import FastAPI
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.db.base import ProjectBase, utcnow
-from app.db.session import make_engine
-from app.models import Company, Run, User
-from app.models.runtime_records import Consultation, RunRequest, TaskAttempt
-from app.core.contracts import Assignment, ExecutionPolicy
-from app.orchestrator.runtime_store import RuntimeStore, Conflict, mutation_lock
+from app.storage.base import ProjectBase, utcnow
+from app.storage.session import make_engine
+from app.storage.models import Company, Run, User
+from app.storage.models.runtime_records import Consultation, RunRequest, TaskAttempt
+from app.sdk.contracts import Assignment, ExecutionPolicy
+from app.kernel.runtime.runtime_store import RuntimeStore, Conflict, mutation_lock
 
 
 @pytest_asyncio.fixture
@@ -123,7 +123,7 @@ async def test_steering_waits_for_canonical_mutation_boundary(durable):
 
 @pytest.mark.asyncio
 async def test_stale_runtime_save_cannot_lower_persisted_plan_revision(durable):
-    from app.orchestrator.engine import ProjectRef, RunRuntime
+    from app.kernel.runtime.engine import ProjectRef, RunRuntime
     store, sf, root = durable
     async with sf() as db:
         saved = await db.get(Run, "r")
@@ -171,9 +171,9 @@ async def test_consultation_cycle_one_wait_and_expiry(durable):
 
 @pytest_asyncio.fixture
 async def durable_client(durable, monkeypatch):
-    from app.api.v1.runs import router
+    from app.channels.api.routes.runs import router
     from app.channels.deps import current_user, get_pdb, project_ctx
-    from app.orchestrator.engine import manager
+    from app.kernel.runtime.engine import manager
     store, sf, root = durable
     async def notify(*_, **__):
         pass  # API persistence test must never launch a model.
@@ -214,8 +214,8 @@ async def test_request_api_images_have_stable_references_and_reject_conflicts(du
 @pytest.mark.asyncio
 async def test_execution_api_reports_current_evidence_and_recovery(durable_client, durable):
     import platform
-    from app.capabilities.workspace.manifests import capture_manifest
-    from app.core.evidence import record_evidence, VerificationCheck
+    from app.plugins.workspace.manifests import capture_manifest
+    from app.sdk.evidence import record_evidence, VerificationCheck
     store, _, root = durable
     (root / "app.py").write_text("print('ok')", encoding="utf-8")
     aid = await store.start_attempt(assignment())
@@ -244,8 +244,8 @@ async def test_execution_api_reports_current_evidence_and_recovery(durable_clien
 @pytest.mark.asyncio
 async def test_staged_evidence_cannot_certify_canonical_workspace(durable_client, durable):
     import platform
-    from app.capabilities.workspace.manifests import capture_manifest
-    from app.core.evidence import record_evidence, VerificationCheck
+    from app.plugins.workspace.manifests import capture_manifest
+    from app.sdk.evidence import record_evidence, VerificationCheck
     store, sf, root = durable
     (root / "app.py").write_text("print('ok')", encoding="utf-8")
     aid = await store.start_attempt(assignment())

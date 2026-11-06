@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from app.channels.deps import get_or_create_single_user
-from app.db.session import registry_factory
-from app.capabilities.models.router import set_provider_override
+from app.storage.session import registry_factory
+from app.plugins.providers.router import set_provider_override
 from fakes.fake_provider import FakeProvider
-from app.services.chat import ChatConnection
+from app.application.chat import ChatConnection
 from conftest import ScriptedProvider, agent, env, events, make_company, start_run, wait_status
 
 MCP_SERVER = '''

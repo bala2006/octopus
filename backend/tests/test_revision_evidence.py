@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from app.core import evidence as CORE_EVIDENCE
-from app.capabilities.workspace.manifests import capture_manifest
-from app.core import evidence as E
-from app.capabilities.skills.contracts import ContractError
+from app.sdk import evidence as CORE_EVIDENCE
+from app.plugins.workspace.manifests import capture_manifest
+from app.sdk import evidence as E
+from app.plugins.skills.contracts import ContractError
 
 
 ENV = {"python": "3.12", "lockfile": "known-lock"}

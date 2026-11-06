@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.capabilities.models.router import set_provider_override
+from app.plugins.providers.router import set_provider_override
 from fakes.fake_provider import FakeProvider
 from conftest import events, run_messages, wait_status
 

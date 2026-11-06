@@ -3,12 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.capabilities.sandbox.commands import (
-    SandboxError,
-    analyze_command,
-    parse_command,
-    shell_operators,
-)
+from app.plugins.sandbox.commands import SandboxError, analyze_command, parse_command, shell_operators
 from scripts.golden.canon import dump_json
 
 COMMANDS: dict[str, list[str]] = {

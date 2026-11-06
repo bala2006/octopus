@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from app.orchestrator.engine import RunRuntime
+from app.kernel.runtime.engine import RunRuntime
 from scripts.golden.export_all import BACKEND, GOLDEN_DIR, generate_all
 
 REGENERATE = "Regenerate with: cd backend && python -m scripts.golden.export_all"

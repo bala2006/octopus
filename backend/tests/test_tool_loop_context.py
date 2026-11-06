@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.capabilities.models.router import set_provider_override
-from app.orchestrator.engine import KEEP_FULL_ROUNDS, OLD_ROUND_CHARS, compact_rounds
+from app.plugins.providers.router import set_provider_override
+from app.kernel.runtime.engine import KEEP_FULL_ROUNDS, OLD_ROUND_CHARS, compact_rounds
 from conftest import NativeScriptedProvider, agent, make_company, start_run, wait_status
 
 BIG = "x = 1\n" * 4000  # 24k characters
@@ -71,8 +71,8 @@ async def test_system_prompt_is_stable_across_turns_so_it_can_be_cached(client, 
 
 
 def test_prompt_cache_key_is_sent_and_droppable() -> None:
-    from app.capabilities.models.azure_v1 import _body, _rejected_param
-    from app.capabilities.models.base import LLMRequest
+    from app.plugins.providers.azure_v1 import _body, _rejected_param
+    from app.plugins.providers.base import LLMRequest
 
     req = LLMRequest(provider="azure", model="gpt-6-luna", messages=[{"role": "user", "content": "hi"}], api_key="k",
                      base_url="https://x.openai.azure.com", metadata={"cache_key": "octopus-run-a"})

@@ -8,9 +8,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from app.core.policy import PolicyGate
-from app.orchestrator.context import AgentSpec
-from app.workflows.org import OrgService
+from app.kernel.policy import PolicyGate
+from app.kernel.runtime.context import AgentSpec
+from app.plugins.workflows.org import OrgService
 from scripts.golden.canon import dump_json
 
 LEVELS = ("ask", "auto")

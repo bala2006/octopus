@@ -7,25 +7,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, FastAPI
 
-from app.api.v1 import (
-    activity,
-    agents,
-    auth,
-    companies,
-    editor,
-    memory,
-    roles,
-    runs,
-    sessions,
-    settings,
-    skills,
-    templates,
-    workspaces,
-)
+from app.channels.api.routes import activity, agents, auth, companies, editor, memory, roles, runs, sessions, settings, skills, templates, workspaces
 from app.channels import catalog_manifest
-from app.core.config import get_settings
-from app.core.manifest import Manifest
-from app.orchestrator.engine import manager
+from app.foundation.config import get_settings
+from app.sdk.manifest import Manifest
+from app.kernel.runtime.engine import manager
 
 # Mounted directly under /api/v1. These do not depend on a workspace.
 GLOBAL_ROUTERS = (activity.router, auth.router, templates.router, roles.router, skills.router, settings.router,

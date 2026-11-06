@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.orchestrator.roles import ROLE_KEYWORDS, role_category  # noqa: F401
+from app.kernel.runtime.roles import ROLE_KEYWORDS, role_category  # noqa: F401
 from fakes import sample_project as A
 
 Ctx = dict[str, Any]

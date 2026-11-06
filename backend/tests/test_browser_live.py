@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from app.capabilities.browser.live import input_command
+from app.plugins.browser.live import input_command
 
 
 def test_mouse_wheel_and_key_inputs_become_cdp_commands() -> None:
@@ -57,8 +57,8 @@ PAGE = ("data:text/html,<title>Live</title><button id=b style='position:fixed;le
 
 @pytest.mark.skipif(os.environ.get("OCTOPUS_E2E_BROWSER") != "1" or not shutil.which("npx"), reason="real browser e2e (OCTOPUS_E2E_BROWSER=1)")
 async def test_live_view_streams_the_agents_real_tab_and_forwards_clicks() -> None:
-    from app.capabilities.browser import live as browser_live
-    from app.capabilities.browser.service import BrowserService
+    from app.plugins.browser import live as browser_live
+    from app.plugins.browser.service import BrowserService
 
     svc = BrowserService()
     browser_live.browser = svc  # the module-level service the viewer socket uses

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.capabilities.models.router import set_provider_override
+from app.plugins.providers.router import set_provider_override
 from conftest import NativeScriptedProvider, agent, edge, make_company, start_run, wait_status
 
 ON = {"verify_before_finish": True}

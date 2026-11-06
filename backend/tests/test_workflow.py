@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.capabilities.models.router import set_provider_override
-from app.orchestrator.context import AgentSpec
-from app.workflows.company import PHASES, can_staff, pick_owner
+from app.plugins.providers.router import set_provider_override
+from app.kernel.runtime.context import AgentSpec
+from app.plugins.workflows.company import PHASES, can_staff, pick_owner
 from conftest import NativeScriptedProvider, agent, events, make_company, run_messages, start_run, wait_status
 
 REPORT = "# Test report\n| AC | result |\n|---|---|\n| AC1 game starts | {r} |\nCommand: python app.py -> printed ok\n"
@@ -115,7 +115,7 @@ async def test_quick_track_without_a_tester_is_checked_by_a_reviewer(client, wor
 
 
 def test_templates_say_which_teams_run_the_workflow() -> None:
-    from app.workflows.templates import TEMPLATES, template_summary
+    from app.plugins.workflows.templates import TEMPLATES, template_summary
 
     flags = {k: template_summary(t)["workflow"] for k, t in TEMPLATES.items()}
     assert flags["software_startup"] and flags["game_studio"] and flags["web_app_studio"] and flags["bug_squad"]

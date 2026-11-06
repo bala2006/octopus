@@ -6,10 +6,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.capabilities.models.router import set_provider_override
-from app.capabilities.models import opencode_turn as adapter
-from app.capabilities.models import opencode
-from app.capabilities.skills.contracts import workflow_spec
+from app.plugins.providers.router import set_provider_override
+from app.plugins.providers import opencode_turn as adapter
+from app.plugins.providers import opencode
+from app.plugins.skills.contracts import workflow_spec
 from conftest import NativeScriptedProvider, agent, events, make_company, start_run, wait_status
 
 

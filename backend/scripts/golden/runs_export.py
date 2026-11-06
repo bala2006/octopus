@@ -22,7 +22,7 @@ from conftest import (
     wait_status,
 )
 
-from app.capabilities.models.router import set_provider_override
+from app.plugins.providers.router import set_provider_override
 from app.main import app
 from scripts.golden import _harness
 from scripts.golden.canon import Placeholders

@@ -12,16 +12,16 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.capabilities.bootstrap import install as install_capabilities
+from app.plugins.bootstrap import install as install_capabilities
 from app.channels.api import ApiChannel
 from app.channels.web_shell import WebShellChannel
 from app.channels.ws import WsChannel
-from app.core.config import get_settings
-from app.core.logging import configure_logging, get_logger
-from app.core.ratelimit import RateLimitMiddleware
-from app.db.migrate import upgrade_registry
-from app.db.session import dispose_all
-from app.orchestrator.engine import manager
+from app.foundation.config import get_settings
+from app.foundation.logging import configure_logging, get_logger
+from app.channels.ratelimit import RateLimitMiddleware
+from app.storage.migrate import upgrade_registry
+from app.storage.session import dispose_all
+from app.kernel.runtime.engine import manager
 
 log = get_logger("app")
 
@@ -33,8 +33,8 @@ async def lifespan(_: FastAPI):  # type: ignore[no-untyped-def]
     await asyncio.to_thread(upgrade_registry, s.registry_database_url)
     log.info("octopus_started", home=str(s.octopus_home), roots=s.workspace_allowed_roots)
     yield
-    from app.capabilities.browser.service import browser
-    from app.capabilities.sandbox.processes import commands, servers
+    from app.plugins.browser.service import browser
+    from app.plugins.sandbox.processes import commands, servers
 
     await manager.shutdown()
     await browser.shutdown()

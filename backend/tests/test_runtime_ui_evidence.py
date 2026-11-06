@@ -1,10 +1,10 @@
 """UI proof is built from actual broker observations rather than agent claims."""
 import pytest
 
-from app.core.config import get_settings
-from app.orchestrator import actions as A
-from app.core.evidence import AcceptanceCriterion, RevisionEvidence, validate_evidence
-from app.capabilities.browser.service import SERVER_ID, browser
+from app.foundation.config import get_settings
+from app.sdk import actions as A
+from app.sdk.evidence import AcceptanceCriterion, RevisionEvidence, validate_evidence
+from app.plugins.browser.service import SERVER_ID, browser
 from test_runtime_recovery_regressions import inspection_runtime, execute  # noqa: F401
 
 

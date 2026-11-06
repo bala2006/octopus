@@ -12,17 +12,17 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.roles import BUILTIN_ROLE_PLUGINS, CUSTOM_GROUP_MANIFEST, plugin_for
-from app.agents.user_roles import custom_role_plugin, load_user_roles
-from app.core.builtin import BUILTIN_MANIFESTS
-from app.core.manifest import Manifest
-from app.core.registry import PluginRegistry
-from app.db.migrate import upgrade_registry
-from app.db.session import make_engine
-from app.models import User, UserRole
-from app.prompts.roles import ROLE_TEMPLATES
-from app.prompts.roles_org import ORG_ROLES
-from app.services.roles import effective_roles
+from app.plugins.roles.builtin import BUILTIN_ROLE_PLUGINS, CUSTOM_GROUP_MANIFEST, plugin_for
+from app.plugins.roles.user_roles import custom_role_plugin, load_user_roles
+from app.kernel.catalog import BUILTIN_MANIFESTS
+from app.sdk.manifest import Manifest
+from app.kernel.registry import PluginRegistry
+from app.storage.migrate import upgrade_registry
+from app.storage.session import make_engine
+from app.storage.models import User, UserRole
+from app.plugins.roles.prompts import ROLE_TEMPLATES
+from app.plugins.roles.prompts_org import ORG_ROLES
+from app.plugins.roles.library import effective_roles
 
 BUILTIN_KEYS = set(ROLE_TEMPLATES) | set(ORG_ROLES)
 

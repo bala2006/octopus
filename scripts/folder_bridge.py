@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
-from app.services import native_dialog  # noqa: E402  (standard-library only)
+from app.application import native_dialog  # noqa: E402  (standard-library only)
 
 PORT = int(os.environ.get("OCTOPUS_BRIDGE_PORT", "8765"))
 ORIGINS = {o.strip().rstrip("/") for o in os.environ.get(

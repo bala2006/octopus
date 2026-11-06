@@ -364,6 +364,26 @@
         "title": "AgentIn",
         "type": "object"
       },
+      "AgentMemoryIn": {
+        "properties": {
+          "key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "AgentMemoryIn",
+        "type": "object"
+      },
       "AgentOut": {
         "properties": {
           "active": {
@@ -4054,6 +4074,92 @@
         "title": "SaveDocument",
         "type": "object"
       },
+      "ScopedMemoryIn": {
+        "additionalProperties": false,
+        "properties": {
+          "classification": {
+            "default": "proposed",
+            "enum": [
+              "proposed",
+              "verified",
+              "superseded",
+              "deleted"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "content": {
+            "maxLength": 50000,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "scope": {
+            "enum": [
+              "agent",
+              "group",
+              "chat",
+              "project"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "scope_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "share_sources": {
+            "default": false,
+            "title": "Share Sources",
+            "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceIn"
+            },
+            "maxItems": 100,
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scope",
+          "scope_id",
+          "key",
+          "content",
+          "expected_version"
+        ],
+        "title": "ScopedMemoryIn",
+        "type": "object"
+      },
       "ScopedMemoryOut": {
         "properties": {
           "classification": {
@@ -5010,112 +5116,6 @@
           }
         },
         "title": "WorkspacePatch",
-        "type": "object"
-      },
-      "app__api__v1__memory__MemoryIn": {
-        "additionalProperties": false,
-        "properties": {
-          "classification": {
-            "default": "proposed",
-            "enum": [
-              "proposed",
-              "verified",
-              "superseded",
-              "deleted"
-            ],
-            "title": "Classification",
-            "type": "string"
-          },
-          "content": {
-            "maxLength": 50000,
-            "title": "Content",
-            "type": "string"
-          },
-          "expected_version": {
-            "minimum": 0.0,
-            "title": "Expected Version",
-            "type": "integer"
-          },
-          "key": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Key",
-            "type": "string"
-          },
-          "pinned": {
-            "default": false,
-            "title": "Pinned",
-            "type": "boolean"
-          },
-          "run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Id"
-          },
-          "scope": {
-            "enum": [
-              "agent",
-              "group",
-              "chat",
-              "project"
-            ],
-            "title": "Scope",
-            "type": "string"
-          },
-          "scope_id": {
-            "maxLength": 36,
-            "minLength": 1,
-            "title": "Scope Id",
-            "type": "string"
-          },
-          "share_sources": {
-            "default": false,
-            "title": "Share Sources",
-            "type": "boolean"
-          },
-          "sources": {
-            "items": {
-              "$ref": "#/components/schemas/SourceIn"
-            },
-            "maxItems": 100,
-            "title": "Sources",
-            "type": "array"
-          }
-        },
-        "required": [
-          "scope",
-          "scope_id",
-          "key",
-          "content",
-          "expected_version"
-        ],
-        "title": "MemoryIn",
-        "type": "object"
-      },
-      "app__schemas__MemoryIn": {
-        "properties": {
-          "key": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Key",
-            "type": "string"
-          },
-          "value": {
-            "title": "Value",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "value"
-        ],
-        "title": "MemoryIn",
         "type": "object"
       }
     }
@@ -6764,7 +6764,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/app__schemas__MemoryIn"
+                "$ref": "#/components/schemas/AgentMemoryIn"
               }
             }
           },
@@ -9509,7 +9509,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/app__api__v1__memory__MemoryIn"
+                "$ref": "#/components/schemas/ScopedMemoryIn"
               }
             }
           },

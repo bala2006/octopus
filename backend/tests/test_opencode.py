@@ -3,9 +3,9 @@ import sys
 
 import pytest
 
-from app.core.config import get_settings
-from app.capabilities.models import opencode
-from app.orchestrator.bus import bus
+from app.foundation.config import get_settings
+from app.plugins.providers import opencode
+from app.kernel.eventlog import bus
 from conftest import agent, make_company, run_messages, start_run, wait_status
 
 

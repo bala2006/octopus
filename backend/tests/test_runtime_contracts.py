@@ -1,6 +1,6 @@
 import pytest
-from app.agents.chief import choose_lead, route_target, validate_reporting
-from app.core.contracts import classify_workflow
+from app.plugins.roles.chief import choose_lead, route_target, validate_reporting
+from app.sdk.contracts import classify_workflow
 
 
 def test_one_lead_and_explicit_eligible_target():

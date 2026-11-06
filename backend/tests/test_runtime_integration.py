@@ -8,11 +8,11 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.db.base import ProjectBase
-from app.db.session import make_engine
-from app.capabilities.models.router import set_provider_override
-from app.models import Company, Run
-from app.orchestrator.engine import ProjectRef, RunRuntime
+from app.storage.base import ProjectBase
+from app.storage.session import make_engine
+from app.plugins.providers.router import set_provider_override
+from app.storage.models import Company, Run
+from app.kernel.runtime.engine import ProjectRef, RunRuntime
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status
 from test_engineering_workflows import WorkflowProgram
 

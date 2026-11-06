@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.api import ws as ws_endpoints
+from app.channels.ws import endpoints as ws_endpoints
 from app.channels import catalog_manifest
-from app.core.manifest import Manifest
+from app.sdk.manifest import Manifest
 
 
 class WsChannel:

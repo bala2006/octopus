@@ -7,7 +7,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from app.db.migrate import upgrade_project, upgrade_registry
+from app.storage.migrate import upgrade_project, upgrade_registry
 
 _TABLE_CONSTRAINT = ("CONSTRAINT ", "PRIMARY KEY", "UNIQUE", "FOREIGN KEY", "CHECK")
 _CREATE_TABLE = re.compile(r"(?s)^(CREATE TABLE[^(]*\()(.*)\)$")

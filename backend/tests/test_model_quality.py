@@ -5,13 +5,13 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from app.capabilities.models import router
-from app.capabilities.models.azure_v1 import _body
-from app.capabilities.models.base import LLMChunk, LLMRequest, Usage
-from app.capabilities.models.router import prepare_request, set_provider_override
-from app.orchestrator.actions import MAX_ACTIONS, parse_envelope
-from app.orchestrator.context import TOOL_RESULT_CHARS, build_user_prompt, fmt_msg
-from app.orchestrator.engine import head_tail, judge_verdict
+from app.plugins.providers import router
+from app.plugins.providers.azure_v1 import _body
+from app.plugins.providers.base import LLMChunk, LLMRequest, Usage
+from app.plugins.providers.router import prepare_request, set_provider_override
+from app.sdk.actions import MAX_ACTIONS, parse_envelope
+from app.kernel.runtime.context import TOOL_RESULT_CHARS, build_user_prompt, fmt_msg
+from app.kernel.runtime.engine import head_tail, judge_verdict
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status
 
 
@@ -37,7 +37,7 @@ def test_reasoning_headroom_scales_with_effort() -> None:
 
 
 def test_long_tool_results_and_messages_are_marked_not_silently_cut() -> None:
-    from app.orchestrator.context import AgentSpec
+    from app.kernel.runtime.context import AgentSpec
 
     a = AgentSpec.from_dict({"id": "a", "name": "Ann"}, "generic")
     big = "x" * (TOOL_RESULT_CHARS + 5000)

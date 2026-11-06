@@ -7,13 +7,13 @@ from pathlib import Path
 
 from sqlalchemy import func, select
 
-from app.api.ws import handle_client
+from app.channels.ws.endpoints import handle_client
 from app.channels.deps import get_or_create_single_user, load_project
-from app.db.session import registry_factory
-from app.capabilities.models.router import set_provider_override
-from app.models import Run, User
-from app.models.runtime_records import RunRequest, TaskAttempt
-from app.orchestrator.engine import ProjectRef
+from app.storage.session import registry_factory
+from app.plugins.providers.router import set_provider_override
+from app.storage.models import Run, User
+from app.storage.models.runtime_records import RunRequest, TaskAttempt
+from app.kernel.runtime.engine import ProjectRef
 from conftest import NativeScriptedProvider, agent, events, make_company, start_run, wait_status
 
 

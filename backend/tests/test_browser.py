@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.capabilities.browser import service as B
+from app.plugins.browser import service as B
 
 # What Playwright MCP returned in the reported container (abridged): the cause is buried under Chromium's command line.
 LAUNCH_FAILURE = """### Error: async initializeServer: Target page, context or browser has been closed

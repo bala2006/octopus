@@ -9,12 +9,12 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.repositories import CompanyRepository, UserRepository, WorkspaceRepository
-from app.core.config import get_settings
-from app.core.security import decode_access_token, hash_password
-from app.db.base import new_id, utcnow
-from app.db.session import SessionFactory, get_registry_db, project_factory
-from app.models import Company, User, Workspace
+from app.storage.repositories import CompanyRepository, UserRepository, WorkspaceRepository
+from app.foundation.config import get_settings
+from app.foundation.security import decode_access_token, hash_password
+from app.storage.base import new_id, utcnow
+from app.storage.session import SessionFactory, get_registry_db, project_factory
+from app.storage.models import Company, User, Workspace
 
 
 async def get_or_create_single_user(db: AsyncSession) -> User:
@@ -78,7 +78,7 @@ async def load_project(workspace_id: str, user: User, rdb: AsyncSession, *, touc
     if not root.is_dir():
         raise HTTPException(410, f"Project directory is missing: {ws.path}")
     if touch:
-        from app.services.projects import ensure_layout
+        from app.application.projects import ensure_layout
 
         ensure_layout(root)  # self-managed .octopus: recreate anything the user deleted
         ws.last_opened_at = utcnow()

@@ -4,8 +4,8 @@ from __future__ import annotations
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-import app.models  # noqa: F401  (register tables)
-from app.db.base import RegistryBase
+import app.storage.models  # noqa: F401  (register tables)
+from app.storage.base import RegistryBase
 
 config = context.config
 target_metadata = RegistryBase.metadata

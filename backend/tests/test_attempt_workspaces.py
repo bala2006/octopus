@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from app.capabilities.workspace import stages as W
-from app.capabilities.skills.contracts import ContractError
+from app.plugins.workspace import stages as W
+from app.plugins.skills.contracts import ContractError
 
 
 def project(tmp_path):

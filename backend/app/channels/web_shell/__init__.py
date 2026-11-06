@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.channels import catalog_manifest
-from app.core.manifest import Manifest
+from app.sdk.manifest import Manifest
 
 # This file is backend/app/channels/web_shell/__init__.py, so the repo root is four levels above its directory.
 DEFAULT_DIST = Path(__file__).resolve().parents[4] / "frontend" / "dist"

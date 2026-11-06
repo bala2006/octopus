@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from app.core.config import get_settings
-from app.services import hostpaths
+from app.foundation.config import get_settings
+from app.application import hostpaths
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -127,7 +127,7 @@ def test_bridge_reports_cancel(bridge) -> None:  # type: ignore[no-untyped-def]
 
 def test_native_dialog_module_has_no_backend_dependencies() -> None:
     """The helper imports native_dialog on the laptop, where pydantic & co. aren't installed."""
-    src = (ROOT / "backend" / "app" / "services" / "native_dialog.py").read_text()
+    src = (ROOT / "backend" / "app" / "application" / "native_dialog.py").read_text()
     top = [ln for ln in src.splitlines() if ln.startswith(("import ", "from "))]
     import sys
     assert all(ln.split()[1].split(".")[0] in sys.stdlib_module_names for ln in top), top

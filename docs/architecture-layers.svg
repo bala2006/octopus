@@ -1,0 +1,238 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1130" viewBox="0 0 1100 1130" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .title { font-size: 24px; font-weight: 700; fill: #1F1E1D; }
+      .subtitle { font-size: 13px; fill: #5b5955; }
+      .layer-label { font-size: 15px; font-weight: 700; fill: #1F1E1D; }
+      .layer-note { font-size: 11px; fill: #5b5955; }
+      .block-title { font-size: 13px; font-weight: 700; fill: #1F1E1D; }
+      .block-text { font-size: 11px; fill: #3d3c3a; }
+      .arrow-label { font-size: 11px; fill: #5b5955; font-style: italic; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1F1E1D"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="1130" fill="#FAF9F5"/>
+  <text x="30" y="30" class="title">Octopus: layers and modules</text>
+  <text x="30" y="48" class="subtitle">Taken from backend/.importlinter (layer order) and the module folders. Each layer imports only the layers below it.</text>
+
+  <!-- 1. Presentation -->
+  <rect x="30" y="60" width="1040" height="104" rx="10" fill="#F1EEE6" stroke="#D97756" stroke-width="2"/>
+  <text x="50" y="88" class="layer-label">Presentation</text>
+  <text x="50" y="106" class="layer-note">frontend/src: React 18 and Vite.</text>
+  <text x="50" y="121" class="layer-note">Built into frontend/dist and served</text>
+  <text x="50" y="136" class="layer-note">by the web shell channel.</text>
+  <rect x="250" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
+  <text x="325" y="104" text-anchor="middle" class="block-title">Canvas</text>
+  <text x="325" y="122" text-anchor="middle" class="block-text">features/canvas</text>
+  <text x="325" y="136" text-anchor="middle" class="block-text">org chart (React Flow)</text>
+  <rect x="412" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
+  <text x="487" y="104" text-anchor="middle" class="block-title">Chat and workbench</text>
+  <text x="487" y="122" text-anchor="middle" class="block-text">features/chat, editor,</text>
+  <text x="487" y="136" text-anchor="middle" class="block-text">workspaces</text>
+  <rect x="574" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
+  <text x="649" y="104" text-anchor="middle" class="block-title">Live runs</text>
+  <text x="649" y="122" text-anchor="middle" class="block-text">features/runs</text>
+  <text x="649" y="136" text-anchor="middle" class="block-text">feed, tasks, approvals</text>
+  <rect x="736" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
+  <text x="811" y="104" text-anchor="middle" class="block-title">Artifacts and preview</text>
+  <text x="811" y="122" text-anchor="middle" class="block-text">features/artifacts</text>
+  <text x="811" y="136" text-anchor="middle" class="block-text">diffs, files, previews</text>
+  <rect x="898" y="82" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#D97756"/>
+  <text x="973" y="104" text-anchor="middle" class="block-title">Other pages</text>
+  <text x="973" y="122" text-anchor="middle" class="block-text">settings, activity,</text>
+  <text x="973" y="136" text-anchor="middle" class="block-text">guide, onboarding</text>
+
+  <line x1="540" y1="164" x2="540" y2="192" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="552" y="182" class="arrow-label">HTTP and WebSocket</text>
+
+  <!-- 2. Channels -->
+  <rect x="30" y="194" width="1040" height="104" rx="10" fill="#EEF2E8" stroke="#6B8440" stroke-width="2"/>
+  <text x="50" y="222" class="layer-label">Channels</text>
+  <text x="50" y="240" class="layer-note">backend/app/channels: ways in</text>
+  <text x="50" y="255" class="layer-note">and out of the backend.</text>
+  <rect x="250" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
+  <text x="325" y="238" text-anchor="middle" class="block-title">REST API</text>
+  <text x="325" y="256" text-anchor="middle" class="block-text">channels/api</text>
+  <text x="325" y="270" text-anchor="middle" class="block-text">routes under /api/v1</text>
+  <rect x="412" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
+  <text x="487" y="238" text-anchor="middle" class="block-title">WebSocket</text>
+  <text x="487" y="256" text-anchor="middle" class="block-text">channels/ws</text>
+  <text x="487" y="270" text-anchor="middle" class="block-text">run and chat events</text>
+  <rect x="574" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
+  <text x="649" y="238" text-anchor="middle" class="block-title">Web shell</text>
+  <text x="649" y="256" text-anchor="middle" class="block-text">channels/web_shell</text>
+  <text x="649" y="270" text-anchor="middle" class="block-text">serves the built UI</text>
+  <rect x="736" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440"/>
+  <text x="811" y="238" text-anchor="middle" class="block-title">CLI</text>
+  <text x="811" y="256" text-anchor="middle" class="block-text">channels/cli</text>
+  <text x="811" y="270" text-anchor="middle" class="block-text">partly built</text>
+  <rect x="898" y="216" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6B8440" stroke-dasharray="4 3"/>
+  <text x="973" y="238" text-anchor="middle" class="block-title">Chat apps</text>
+  <text x="973" y="256" text-anchor="middle" class="block-text">channels/chat_apps</text>
+  <text x="973" y="270" text-anchor="middle" class="block-text">planned, no routes yet</text>
+
+  <line x1="540" y1="298" x2="540" y2="326" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="552" y="316" class="arrow-label">starts runs and chats</text>
+
+  <!-- 3. Agents -->
+  <rect x="30" y="328" width="1040" height="104" rx="10" fill="#F4F0E8" stroke="#A8893A" stroke-width="2"/>
+  <text x="50" y="356" class="layer-label">Agents</text>
+  <text x="50" y="374" class="layer-note">backend/app/agents: roles and</text>
+  <text x="50" y="389" class="layer-note">the chief's routing rules.</text>
+  <rect x="250" y="350" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
+  <text x="325" y="372" text-anchor="middle" class="block-title">Chief</text>
+  <text x="325" y="390" text-anchor="middle" class="block-text">agents/chief.py</text>
+  <text x="325" y="404" text-anchor="middle" class="block-text">lead routing</text>
+  <rect x="412" y="350" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
+  <text x="487" y="372" text-anchor="middle" class="block-title">Built-in roles</text>
+  <text x="487" y="390" text-anchor="middle" class="block-text">agents/roles</text>
+  <text x="487" y="404" text-anchor="middle" class="block-text">product, eng, design, QA</text>
+  <rect x="574" y="350" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#A8893A"/>
+  <text x="649" y="372" text-anchor="middle" class="block-title">Custom roles</text>
+  <text x="649" y="390" text-anchor="middle" class="block-text">agents/user_roles.py</text>
+  <text x="649" y="404" text-anchor="middle" class="block-text">user-defined roles</text>
+
+  <line x1="540" y1="432" x2="540" y2="460" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="552" y="450" class="arrow-label">runs the steps of a process</text>
+
+  <!-- 4. Workflows -->
+  <rect x="30" y="462" width="1040" height="104" rx="10" fill="#EFEBF5" stroke="#7A65A8" stroke-width="2"/>
+  <text x="50" y="490" class="layer-label">Workflows</text>
+  <text x="50" y="508" class="layer-note">backend/app/workflows: processes</text>
+  <text x="50" y="523" class="layer-note">that span several turns.</text>
+  <rect x="250" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
+  <text x="325" y="506" text-anchor="middle" class="block-title">Company</text>
+  <text x="325" y="524" text-anchor="middle" class="block-text">workflows/company.py</text>
+  <text x="325" y="538" text-anchor="middle" class="block-text">phases and gates</text>
+  <rect x="412" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
+  <text x="487" y="506" text-anchor="middle" class="block-title">Boardroom</text>
+  <text x="487" y="524" text-anchor="middle" class="block-text">workflows/boardroom.py</text>
+  <text x="487" y="538" text-anchor="middle" class="block-text">debate protocol</text>
+  <rect x="574" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
+  <text x="649" y="506" text-anchor="middle" class="block-title">Review gates</text>
+  <text x="649" y="524" text-anchor="middle" class="block-text">workflows/review.py</text>
+  <text x="649" y="538" text-anchor="middle" class="block-text">review protocol</text>
+  <rect x="736" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
+  <text x="811" y="506" text-anchor="middle" class="block-title">Task board</text>
+  <text x="811" y="524" text-anchor="middle" class="block-text">workflows/task_board.py</text>
+  <text x="811" y="538" text-anchor="middle" class="block-text">tasks and their state</text>
+  <rect x="898" y="484" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#7A65A8"/>
+  <text x="973" y="506" text-anchor="middle" class="block-title">Org and hiring</text>
+  <text x="973" y="524" text-anchor="middle" class="block-text">workflows/org.py</text>
+  <text x="973" y="538" text-anchor="middle" class="block-text">self-organizing teams</text>
+
+  <line x1="540" y1="566" x2="540" y2="594" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="552" y="584" class="arrow-label">executes each turn</text>
+
+  <!-- 5. Orchestrator -->
+  <rect x="30" y="596" width="1040" height="104" rx="10" fill="#E9EEF3" stroke="#66839A" stroke-width="2"/>
+  <text x="50" y="624" class="layer-label">Orchestrator</text>
+  <text x="50" y="642" class="layer-note">backend/app/orchestrator: runs one</text>
+  <text x="50" y="657" class="layer-note">agent turn at a time, per run.</text>
+  <rect x="250" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="325" y="640" text-anchor="middle" class="block-title">Run engine</text>
+  <text x="325" y="658" text-anchor="middle" class="block-text">orchestrator/engine.py</text>
+  <text x="325" y="672" text-anchor="middle" class="block-text">one runtime per run</text>
+  <rect x="412" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="487" y="640" text-anchor="middle" class="block-title">Turn loop</text>
+  <text x="487" y="658" text-anchor="middle" class="block-text">turn_loop.py</text>
+  <text x="487" y="672" text-anchor="middle" class="block-text">model call, then action</text>
+  <rect x="574" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="649" y="640" text-anchor="middle" class="block-title">Run state</text>
+  <text x="649" y="658" text-anchor="middle" class="block-text">run_state, lifecycle,</text>
+  <text x="649" y="672" text-anchor="middle" class="block-text">mailbox, control</text>
+  <rect x="736" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="811" y="640" text-anchor="middle" class="block-title">Action handlers</text>
+  <text x="811" y="658" text-anchor="middle" class="block-text">orchestrator/handlers</text>
+  <text x="811" y="672" text-anchor="middle" class="block-text">files, commands, web, MCP</text>
+  <rect x="898" y="618" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#66839A"/>
+  <text x="973" y="640" text-anchor="middle" class="block-title">Execution</text>
+  <text x="973" y="658" text-anchor="middle" class="block-text">orchestrator/execution.py</text>
+  <text x="973" y="672" text-anchor="middle" class="block-text">attempts and evidence</text>
+
+  <line x1="540" y1="700" x2="540" y2="728" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="552" y="718" class="arrow-label">calls through core ports</text>
+
+  <!-- 6. Capabilities -->
+  <rect x="30" y="730" width="1040" height="104" rx="10" fill="#F4ECE6" stroke="#B5654A" stroke-width="2"/>
+  <text x="50" y="758" class="layer-label">Capabilities</text>
+  <text x="50" y="776" class="layer-note">backend/app/capabilities: what</text>
+  <text x="50" y="791" class="layer-note">the runtime uses.</text>
+  <rect x="250" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <text x="325" y="774" text-anchor="middle" class="block-title">Models</text>
+  <text x="325" y="792" text-anchor="middle" class="block-text">Azure OpenAI v1,</text>
+  <text x="325" y="806" text-anchor="middle" class="block-text">LiteLLM, OpenCode</text>
+  <rect x="412" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <text x="487" y="774" text-anchor="middle" class="block-title">Sandbox</text>
+  <text x="487" y="792" text-anchor="middle" class="block-text">capabilities/sandbox</text>
+  <text x="487" y="806" text-anchor="middle" class="block-text">commands, processes</text>
+  <rect x="574" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <text x="649" y="774" text-anchor="middle" class="block-title">MCP and browser</text>
+  <text x="649" y="792" text-anchor="middle" class="block-text">capabilities/mcp,</text>
+  <text x="649" y="806" text-anchor="middle" class="block-text">browser (Playwright)</text>
+  <rect x="736" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <text x="811" y="774" text-anchor="middle" class="block-title">Workspace</text>
+  <text x="811" y="792" text-anchor="middle" class="block-text">capabilities/workspace</text>
+  <text x="811" y="806" text-anchor="middle" class="block-text">git, preview, project files</text>
+  <rect x="898" y="752" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#B5654A"/>
+  <text x="973" y="774" text-anchor="middle" class="block-title">Storage and memory</text>
+  <text x="973" y="792" text-anchor="middle" class="block-text">repositories, scoped</text>
+  <text x="973" y="806" text-anchor="middle" class="block-text">memory, skills library</text>
+
+  <line x1="540" y1="834" x2="540" y2="862" stroke="#1F1E1D" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="552" y="852" class="arrow-label">contracts and events</text>
+
+  <!-- 7. Core -->
+  <rect x="30" y="864" width="1040" height="104" rx="10" fill="#F2F2F2" stroke="#6F6C66" stroke-width="2"/>
+  <text x="50" y="892" class="layer-label">Core</text>
+  <text x="50" y="910" class="layer-note">backend/app/core: the bottom layer.</text>
+  <text x="50" y="925" class="layer-note">Imports nothing above it.</text>
+  <rect x="250" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
+  <text x="325" y="908" text-anchor="middle" class="block-title">Event bus</text>
+  <text x="325" y="926" text-anchor="middle" class="block-text">core/bus.py</text>
+  <text x="325" y="940" text-anchor="middle" class="block-text">persist and fan out</text>
+  <rect x="412" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
+  <text x="487" y="908" text-anchor="middle" class="block-title">Policy gate</text>
+  <text x="487" y="926" text-anchor="middle" class="block-text">core/policy.py</text>
+  <text x="487" y="940" text-anchor="middle" class="block-text">approval modes</text>
+  <rect x="574" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
+  <text x="649" y="908" text-anchor="middle" class="block-title">Run manager</text>
+  <text x="649" y="926" text-anchor="middle" class="block-text">core/run_manager.py</text>
+  <text x="649" y="940" text-anchor="middle" class="block-text">run lifecycle, project</text>
+  <rect x="736" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
+  <text x="811" y="908" text-anchor="middle" class="block-title">Ports and contracts</text>
+  <text x="811" y="926" text-anchor="middle" class="block-text">core/ports.py</text>
+  <text x="811" y="940" text-anchor="middle" class="block-text">core/contracts.py</text>
+  <rect x="898" y="886" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#6F6C66"/>
+  <text x="973" y="908" text-anchor="middle" class="block-title">Registry</text>
+  <text x="973" y="926" text-anchor="middle" class="block-text">core/registry.py</text>
+  <text x="973" y="940" text-anchor="middle" class="block-text">manifests, plugin catalog</text>
+
+  <!-- Data and external -->
+  <rect x="30" y="998" width="1040" height="110" rx="10" fill="#FFFFFF" stroke="#8a8782" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="50" y="1026" class="layer-label">Storage and external</text>
+  <text x="50" y="1044" class="layer-note">Files and services outside the code.</text>
+  <rect x="250" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="325" y="1042" text-anchor="middle" class="block-title">registry.db</text>
+  <text x="325" y="1060" text-anchor="middle" class="block-text">~/.octopus/</text>
+  <text x="325" y="1074" text-anchor="middle" class="block-text">keys, MCP servers, projects</text>
+  <rect x="412" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="487" y="1042" text-anchor="middle" class="block-title">octopus.db</text>
+  <text x="487" y="1060" text-anchor="middle" class="block-text">&lt;folder&gt;/.octopus/</text>
+  <text x="487" y="1074" text-anchor="middle" class="block-text">companies, runs, events</text>
+  <rect x="574" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="649" y="1042" text-anchor="middle" class="block-title">Project files</text>
+  <text x="649" y="1060" text-anchor="middle" class="block-text">&lt;folder&gt;/ (the sandbox)</text>
+  <text x="649" y="1074" text-anchor="middle" class="block-text">.octopus and .git are protected</text>
+  <rect x="736" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="811" y="1042" text-anchor="middle" class="block-title">Model APIs</text>
+  <text x="811" y="1060" text-anchor="middle" class="block-text">Azure OpenAI</text>
+  <text x="811" y="1074" text-anchor="middle" class="block-text">OpenCode (local CLI)</text>
+  <rect x="898" y="1020" width="150" height="70" rx="8" fill="#FFFFFF" stroke="#8a8782"/>
+  <text x="973" y="1042" text-anchor="middle" class="block-title">Local processes</text>
+  <text x="973" y="1060" text-anchor="middle" class="block-text">MCP servers, Chromium</text>
+  <text x="973" y="1074" text-anchor="middle" class="block-text">via Playwright MCP</text>
+</svg>

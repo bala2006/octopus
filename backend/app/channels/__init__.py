@@ -6,8 +6,8 @@ import the layers below them. No lower layer imports a channel.
 """
 from __future__ import annotations
 
-from app.core.builtin import BUILTIN_MANIFESTS
-from app.core.manifest import Manifest
+from app.kernel.catalog import BUILTIN_MANIFESTS
+from app.sdk.manifest import Manifest
 
 
 def catalog_manifest(plugin_id: str) -> Manifest:

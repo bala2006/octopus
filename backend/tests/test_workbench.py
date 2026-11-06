@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from app.capabilities.workspace.git import commit, stage, status
-from app.workflows.tasks import discover
-from app.services.project_guidance import load
-from app.capabilities.workspace.project_fs import WorkspaceError
+from app.plugins.workspace.git import commit, stage, status
+from app.plugins.workspace.tasks import discover
+from app.plugins.skills.guidance import load
+from app.plugins.workspace.project_fs import WorkspaceError
 
 
 def git(root: Path, *args: str) -> str:
@@ -25,7 +25,7 @@ def repository(root: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_git_review_supports_mounted_repository_ownership_without_global_config(tmp_path, monkeypatch):
-    from app.capabilities.workspace import git as git_review
+    from app.plugins.workspace import git as git_review
 
     repository(tmp_path)
     (tmp_path / "mounted.txt").write_text("Review this mounted file")

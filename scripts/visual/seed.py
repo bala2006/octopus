@@ -218,13 +218,13 @@ class Feed:
         return self.t0 + timedelta(seconds=seconds)
 
     def event(self, type_: str, data: dict[str, Any], at: int) -> None:
-        from app.models import RunEvent
+        from app.storage.models import RunEvent
         self.db.add(RunEvent(run_id=self.run.id, type=type_, payload_json=data, created_at=self._at(at)))
 
     def message(self, sender: str, frm: str | None, to: str | None, type_: str, content: str, at: int, *,
                 meta: dict[str, Any] | None = None, turn: int = 0, session_id: str | None = None,
                 run_id: str | None = None, emit: bool = True) -> Any:
-        from app.models import Message
+        from app.storage.models import Message
         self.n += 1
         m = Message(id=fid(f"{self.key}:message:{self.n}"), run_id=run_id, session_id=session_id, sender=sender, from_agent_id=frm,
                     to_agent_id=to, edge_id=None, type=type_, content=content, meta_json=meta or {}, turn_no=turn, read=True,
@@ -243,7 +243,7 @@ def tool_pair(feed: Feed, key: str, agent: str, tool: str, args: dict[str, Any],
 
 def artifact(feed: Feed, db: Any, run: Any, path: str, version: int, content: str, author: str, at: int,
              previous: str | None, note: str) -> None:
-    from app.models import Artifact
+    from app.storage.models import Artifact
     db.add(Artifact(id=fid(f"{feed.key}:artifact:{path}:{version}"), run_id=run.id, path=path, content=content,
                     previous_content=previous, version=version, deleted=False, author_agent_id=author, change_note=note,
                     created_at=feed._at(at)))
@@ -263,7 +263,7 @@ def task_event(feed: Feed, run: Any, key: str, title: str, status: str, assignee
 def task_row(db: Any, feed: Feed, run: Any, key: str, title: str, status: str, assignee: str | None, at: int,
              description: str = "", criteria: str = "") -> None:
     """The tasks table keeps one row per task, in its final state."""
-    from app.models import Task
+    from app.storage.models import Task
     db.add(Task(id=fid(f"{feed.key}:task:{key}"), run_id=run.id, key=key, title=title, description=description,
                 assignee_agent_id=assignee, status=status, acceptance_criteria=criteria, constraints_json={},
                 created_by=None, updated_at=feed._at(at)))
@@ -271,7 +271,7 @@ def task_row(db: Any, feed: Feed, run: Any, key: str, title: str, status: str, a
 
 def run_row(company_id: str, key: str, session_id: str | None, goal: str, status: str, start: datetime, tokens: int,
             cost: float, turns: int, summary: str, report: str, snapshot: dict[str, Any], ended: bool) -> Any:
-    from app.models import Run
+    from app.storage.models import Run
     return Run(id=fid(f"run:{key}"), company_id=company_id, session_id=session_id, goal=goal, status=status, mode="autonomous",
                permission_level="ask",
                budget_json={"max_turns": 60, "max_tokens": 400_000, "max_cost_usd": 2.0, "timeout_s": 900,
@@ -284,7 +284,7 @@ def run_row(company_id: str, key: str, session_id: str | None, goal: str, status
 
 # --------------------------------------------------------------------------- scenario data written per project
 async def seed_acme(db: Any, company: Any, sessions: dict[str, str], agents: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, str]:
-    from app.models import Artifact, ChatSession, Message  # noqa: F401  (registers tables)
+    from app.storage.models import Artifact, ChatSession, Message  # noqa: F401  (registers tables)
 
     ceo, pm, architect = agents["ceo"].id, agents["pm"].id, agents["architect"].id
     design, lena, backend, sam, noah = agents["designer"].id, agents["frontend"].id, agents["backend"].id, agents["qa"].id, agents["devops"].id
@@ -408,13 +408,13 @@ async def seed(home: Path, projects_root: Path) -> dict[str, Any]:
     import httpx
     from sqlalchemy import select
 
-    from app.core.config import get_settings
-    from app.db.migrate import upgrade_registry
-    from app.db.session import dispose_all, project_factory, registry_engine, registry_factory
+    from app.foundation.config import get_settings
+    from app.storage.migrate import upgrade_registry
+    from app.storage.session import dispose_all, project_factory, registry_engine, registry_factory
     from app.main import app
-    from app.models import Agent, Company, Workspace
-    from app.schemas import CanvasOut
-    from app.workflows.canvas import snapshot
+    from app.storage.models import Agent, Company, Workspace
+    from app.sdk.schemas import CanvasOut
+    from app.plugins.workflows.canvas import snapshot
 
     upgrade_registry(get_settings().registry_database_url)
     info: dict[str, Any] = {"seed_version": SEED_VERSION, "clock": CLOCK, "projects": {}}
@@ -476,7 +476,7 @@ async def seed(home: Path, projects_root: Path) -> dict[str, Any]:
 
 async def remap_ids(api: Any, base: str, canvas: Any) -> Any:
     """Replace random template ids with ids derived from each agent's role, so every run uses the same ids."""
-    from app.schemas import AgentIn, CanvasOut, EdgeIn
+    from app.sdk.schemas import AgentIn, CanvasOut, EdgeIn
 
     key_of = {a.id: f"agent:{a.role}:{a.name}" for a in canvas.agents}
     new_id = {old: fid(key) for old, key in key_of.items()}

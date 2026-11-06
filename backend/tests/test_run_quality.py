@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.capabilities.models.base import LLMRequest
-from app.capabilities.models.router import set_provider_override
-from app.orchestrator import engine as E
-from app.orchestrator.context import build_system_prompt
+from app.plugins.providers.base import LLMRequest
+from app.plugins.providers.router import set_provider_override
+from app.kernel.runtime import engine as E
+from app.kernel.runtime.context import build_system_prompt
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status
 
 TEAM = [agent("a", "Ann", entry=True), agent("b", "Ben"), agent("c", "Cy")]
@@ -67,7 +67,7 @@ def test_missed_edit_shows_where_the_text_probably_is() -> None:
 
 
 def test_system_prompt_steers_toward_one_owner_and_sequencing() -> None:
-    from app.orchestrator.context import AgentSpec
+    from app.kernel.runtime.context import AgentSpec
 
     a = AgentSpec.from_dict(agent("a", "Ann", entry=True), "generic")
     p = build_system_prompt(a, company="Co", goal="g", agents={"a": a}, edges=[])

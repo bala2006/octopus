@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 import httpx  # noqa: E402
 
-from app.services.bench import run_case, summarize  # noqa: E402
+from app.application.bench import run_case, summarize  # noqa: E402
 
 
 async def main() -> None:
@@ -33,7 +33,7 @@ async def main() -> None:
     ap.add_argument("--only", default="", help="comma-separated task ids")
     ap.add_argument("--repeat", type=int, default=1, help="runs per case (models are not deterministic)")
     ap.add_argument("--max-turns", type=int, default=80)
-   ap.add_argument("--workflow", default="auto", choices=["auto", "on", "off"], help="how the team works (defined workflow or free-form)")
+    ap.add_argument("--workflow", default="auto", choices=["auto", "on", "off"], help="how the team works (defined workflow or free-form)")
     ap.add_argument("--out", type=Path, default=Path("bench-results.json"))
     args = ap.parse_args()
 
