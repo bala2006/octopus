@@ -23,12 +23,11 @@ import contextlib
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
 
+from app.db.repositories import ChatSessionRepository, CompanyRepository, RunEventRepository, RunRepository
 from app.channels.deps import load_project, resolve_user
 from app.core.logging import get_logger
 from app.db.session import registry_factory
-from app.models import ChatSession, Company, Run, RunEvent
 from app.orchestrator.bus import bus
 from app.orchestrator.engine import ProjectRef, manager
 from app.services.chat import ChatConnection
@@ -57,8 +56,8 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
         await ws.close(code=4401 if user is None else 4404)
         return
     async with ctx.sf() as db:
-        run = await db.get(Run, run_id)
-        company = await db.get(Company, run.company_id) if run else None
+        run = await RunRepository(db).get(run_id)
+        company = await CompanyRepository(db).get(run.company_id) if run else None
         if run is None or company is None or company.user_id != user.id:
             await ws.close(code=4404)
             return
@@ -80,8 +79,7 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
             # Concurrent committed producers can relay out of order. Fill the
             # durable gap before advancing the client's cursor.
             async with ctx.sf() as db:
-                pending_rows = (await db.scalars(select(RunEvent).where(RunEvent.run_id == run_id,
-                    RunEvent.id > sent_seq, RunEvent.id <= seq).order_by(RunEvent.id))).all()
+                pending_rows = await RunEventRepository(db).between(run_id, sent_seq, seq)
             for row in pending_rows:
                 await ws.send_json({"type": row.type, "run_id": run_id, "data": row.payload_json,
                                     "seq": row.id, "ts": row.created_at.isoformat(), "replay": event.get("replay", False)})
@@ -99,7 +97,7 @@ async def run_socket(ws: WebSocket, workspace_id: str, run_id: str) -> None:
             "usage": {"tokens": rt.tokens if rt else run.tokens_used, "cost_usd": rt.cost if rt else run.cost_usd,
                       "turns": rt.turn_no if rt else run.turns}}})
         async with ctx.sf() as db:
-            rows = (await db.execute(select(RunEvent).where(RunEvent.run_id == run_id, RunEvent.id > last_seq).order_by(RunEvent.id))).scalars().all()
+            rows = await RunEventRepository(db).replay_after(run_id, last_seq)
         for r in rows:
             await send({"type": r.type, "run_id": run_id, "data": r.payload_json, "seq": r.id, "ts": r.created_at.isoformat(), "replay": True})
         await ws.send_json({"type": "replay_done", "run_id": run_id, "data": {"last_seq": sent_seq}})
@@ -146,8 +144,8 @@ async def browser_socket(ws: WebSocket, workspace_id: str, run_id: str, agent_id
         await ws.close(code=4401 if user is None else 4404)
         return
     async with ctx.sf() as db:
-        run = await db.get(Run, run_id)
-        company = await db.get(Company, run.company_id) if run else None
+        run = await RunRepository(db).get(run_id)
+        company = await CompanyRepository(db).get(run.company_id) if run else None
         if run is None or company is None or company.user_id != user.id:
             await ws.close(code=4404)
             return
@@ -201,8 +199,8 @@ async def chat_socket(ws: WebSocket, workspace_id: str, session_id: str) -> None
         await ws.close(code=4401 if user is None else 4404)
         return
     async with ctx.sf() as db:
-        s = await db.get(ChatSession, session_id)
-        company = await db.get(Company, s.company_id) if s else None
+        s = await ChatSessionRepository(db).get(session_id)
+        company = await CompanyRepository(db).get(s.company_id) if s else None
         if s is None or company is None or company.user_id != user.id:
             await ws.close(code=4404)
             return

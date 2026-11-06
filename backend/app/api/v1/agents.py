@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import AgentRepository, EdgeRepository
 from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.db.base import utcnow
 from app.models import Agent, Edge, User
@@ -17,7 +18,7 @@ router = APIRouter(tags=["agents & edges"])
 
 
 async def owned_agent(agent_id: str, db: AsyncSession, user: User) -> Agent:
-    a = await db.get(Agent, agent_id)
+    a = await AgentRepository(db).get(agent_id)
     if a is None:
         raise HTTPException(404, "Agent not found")
     await owned_company(a.company_id, db, user)
@@ -159,7 +160,7 @@ async def create_edge(company_id: str, body: EdgeIn, db: AsyncSession = Depends(
 
 @router.patch("/edges/{edge_id}", response_model=EdgeOut)
 async def patch_edge(edge_id: str, body: EdgeIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> EdgeOut:
-    e = await db.get(Edge, edge_id)
+    e = await EdgeRepository(db).get(edge_id)
     if e is None:
         raise HTTPException(404, "Edge not found")
     c = await owned_company(e.company_id, db, user)
@@ -174,7 +175,7 @@ async def patch_edge(edge_id: str, body: EdgeIn, db: AsyncSession = Depends(get_
 
 @router.delete("/edges/{edge_id}", status_code=204, response_class=Response, response_model=None)
 async def delete_edge(edge_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> None:
-    e = await db.get(Edge, edge_id)
+    e = await EdgeRepository(db).get(edge_id)
     if e is None:
         raise HTTPException(404, "Edge not found")
     await owned_company(e.company_id, db, user)

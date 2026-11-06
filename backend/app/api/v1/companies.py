@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi.responses import Response
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import CompanyRepository
 from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.db.base import new_id
 from app.capabilities.models.base import LLMError
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/companies", tags=["companies"])
 
 @router.get("", response_model=list[CompanyOut])
 async def list_companies(db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[CompanyOut]:
-    rows = (await db.execute(select(Company).where(Company.user_id == user.id).order_by(Company.updated_at.desc()))).scalars().all()
+    rows = await CompanyRepository(db).for_user(user.id)
     return [company_out(c) for c in rows]
 
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import UserRepository
 from app.core.config import get_settings
 from app.channels.deps import current_user
 from app.core.security import create_access_token, hash_password, verify_password
@@ -25,7 +25,7 @@ async def register(body: Credentials, db: AsyncSession = Depends(get_registry_db
     email = body.email.strip().lower()
     if "@" not in email:
         raise HTTPException(422, "Invalid email")
-    if (await db.execute(select(User).where(User.email == email))).scalar_one_or_none():
+    if await UserRepository(db).by_email(email):
         raise HTTPException(409, "Email already registered")
     user = User(email=email, password_hash=hash_password(body.password))
     db.add(user)
@@ -35,7 +35,7 @@ async def register(body: Credentials, db: AsyncSession = Depends(get_registry_db
 
 @router.post("/login", response_model=TokenOut)
 async def login(body: Credentials, db: AsyncSession = Depends(get_registry_db)) -> TokenOut:
-    user = (await db.execute(select(User).where(User.email == body.email.strip().lower()))).scalar_one_or_none()
+    user = await UserRepository(db).by_email(body.email.strip().lower())
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "Invalid email or password")
     return TokenOut(access_token=create_access_token(user.id))

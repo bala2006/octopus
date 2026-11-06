@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import UserTemplateRepository
 from app.channels.deps import current_user
 from app.db.session import get_registry_db
 from app.models import User, UserTemplate
@@ -33,7 +33,7 @@ def builtin_spec(key: str) -> CanvasExport:
 
 async def resolve_spec(key: str, db: AsyncSession, user: User) -> CanvasExport:
     if key.startswith(USER_PREFIX):
-        row = await db.get(UserTemplate, key[len(USER_PREFIX):])
+        row = await UserTemplateRepository(db).get(key[len(USER_PREFIX):])
         if row is None or row.user_id != user.id:
             raise HTTPException(404, "Template not found")
         return CanvasExport(**row.spec_json)
@@ -45,7 +45,7 @@ async def resolve_spec(key: str, db: AsyncSession, user: User) -> CanvasExport:
 @router.get("", response_model=list[TemplateOut])
 async def list_templates(db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> list[TemplateOut]:
     builtins = [TemplateOut(**template_summary(t)) for t in TEMPLATES.values()]
-    rows = (await db.execute(select(UserTemplate).where(UserTemplate.user_id == user.id).order_by(UserTemplate.updated_at.desc()))).scalars().all()
+    rows = await UserTemplateRepository(db).for_user(user.id)
     return builtins + [user_template_out(r) for r in rows]
 
 
@@ -77,7 +77,7 @@ async def create_template(body: UserTemplateIn, db: AsyncSession = Depends(get_r
 
 @router.patch("/{key}", response_model=TemplateOut)
 async def update_template(key: str, body: UserTemplateIn, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> TemplateOut:
-    row = await db.get(UserTemplate, key.removeprefix(USER_PREFIX))
+    row = await UserTemplateRepository(db).get(key.removeprefix(USER_PREFIX))
     if row is None or row.user_id != user.id:
         raise HTTPException(404, "Built-in templates are read-only; save a copy instead")
     row.name, row.description = body.name.strip(), body.description
@@ -90,7 +90,7 @@ async def update_template(key: str, body: UserTemplateIn, db: AsyncSession = Dep
 
 @router.delete("/{key}", status_code=204, response_class=Response, response_model=None)
 async def delete_template(key: str, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> None:
-    row = await db.get(UserTemplate, key.removeprefix(USER_PREFIX))
+    row = await UserTemplateRepository(db).get(key.removeprefix(USER_PREFIX))
     if row is None or row.user_id != user.id:
         raise HTTPException(404, "Template not found")
     await db.delete(row)

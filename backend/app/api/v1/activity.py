@@ -7,13 +7,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import RunEventRepository, RunRepository, WorkspaceRepository
 from app.channels.deps import current_user
 from app.db.session import get_registry_db, project_db_path, project_factory
-from app.models import Company, Run, RunEvent, User, Workspace
+from app.models import Run, RunEvent, User
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -118,7 +118,7 @@ async def activity(tz: str = Query(default="UTC", max_length=80), user: User = D
         zone = ZoneInfo(tz)
     except (ZoneInfoNotFoundError, ValueError):
         raise HTTPException(422, "Unknown time zone")
-    workspaces = (await db.execute(select(Workspace).where(Workspace.user_id == user.id))).scalars().all()
+    workspaces = await WorkspaceRepository(db).for_user(user.id)
     rows = []
     projects = []
     unavailable = 0
@@ -135,10 +135,8 @@ async def activity(tz: str = Query(default="UTC", max_length=80), user: User = D
         try:
             sf = await project_factory(str(root), root)
             async with sf() as pdb:
-                runs = (await pdb.execute(select(Run).join(Company).where(Company.user_id == user.id))).scalars().all()
-                events = (await pdb.execute(select(RunEvent).join(Run).join(Company).where(
-                    Company.user_id == user.id, RunEvent.type.in_(["usage_update", "tool_call", "tool_result"])
-                ).order_by(RunEvent.id))).scalars().all()
+                runs = await RunRepository(pdb).for_user_with_company(user.id)
+                events = await RunEventRepository(pdb).for_user_types(user.id, ["usage_update", "tool_call", "tool_result"])
                 grouped = {}
                 for event in events:
                     grouped.setdefault(event.run_id, []).append(event)

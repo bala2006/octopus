@@ -5,12 +5,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import ArtifactRepository, WorkspaceRepository
 from app.channels.deps import ProjectCtx, current_user, load_project, project_ctx
 from app.db.session import close_project, get_registry_db
-from app.models import Artifact, User, Workspace
+from app.models import User, Workspace
 from app.orchestrator.engine import manager
 from app.schemas import (
     BrowseOut, DirEntryOut, FileContentOut, FileNode, MkdirIn, NativeDialogOut, NativeOpenIn, NativeOpenOut, NativePickOut, ProjectTreeOut, WorkspaceIn,
@@ -53,7 +53,7 @@ async def mkdir(body: MkdirIn, user: User = Depends(current_user)) -> DirEntryOu
 
 @router.get("/workspaces", response_model=list[WorkspaceOut])
 async def list_workspaces(db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> list[WorkspaceOut]:
-    rows = (await db.execute(select(Workspace).where(Workspace.user_id == user.id).order_by(Workspace.last_opened_at.desc()))).scalars().all()
+    rows = await WorkspaceRepository(db).for_user(user.id)
     return [ws_out(w) for w in rows]
 
 
@@ -125,7 +125,7 @@ async def create_workspace(body: WorkspaceIn, db: AsyncSession = Depends(get_reg
 
 
 async def _register(root: Path, name: str | None, db: AsyncSession, user: User) -> WorkspaceOut:
-    existing_row = (await db.execute(select(Workspace).where(Workspace.user_id == user.id, Workspace.path == str(root)))).scalar_one_or_none()
+    existing_row = await WorkspaceRepository(db).by_path(user.id, str(root))
     meta = init_project(root, name)
     if existing_row:
         if name and name != existing_row.name:
@@ -153,7 +153,7 @@ async def get_workspace(workspace_id: str, db: AsyncSession = Depends(get_regist
 @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceOut)
 async def patch_workspace(workspace_id: str, body: WorkspacePatch, db: AsyncSession = Depends(get_registry_db),
                           user: User = Depends(current_user)) -> WorkspaceOut:
-    w = await db.get(Workspace, workspace_id)
+    w = await WorkspaceRepository(db).get(workspace_id)
     if w is None or w.user_id != user.id:
         raise HTTPException(404, "Workspace not found")
     if body.name:
@@ -167,7 +167,7 @@ async def patch_workspace(workspace_id: str, body: WorkspacePatch, db: AsyncSess
 @router.delete("/workspaces/{workspace_id}", status_code=204, response_class=Response, response_model=None)
 async def forget_workspace(workspace_id: str, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> None:
     """Remove the project from Octopus' list. The directory and its .octopus data are left untouched."""
-    w = await db.get(Workspace, workspace_id)
+    w = await WorkspaceRepository(db).get(workspace_id)
     if w is None or w.user_id != user.id:
         raise HTTPException(404, "Workspace not found")
     if manager.active_for(Path(w.path)):
@@ -200,7 +200,7 @@ async def project_files(ctx: ProjectCtx = Depends(project_ctx)) -> list[FileNode
     ``generated`` tells files some run wrote apart from the user's own files."""
     fs = ProjectFS(ctx.root)
     async with ctx.sf() as db:
-        generated = set((await db.execute(select(Artifact.path).distinct())).scalars())
+        generated = await ArtifactRepository(db).generated_paths()
     out = []
     for area, paths in (("project", fs.list()), ("work", fs.list_work())):
         for rel in paths:

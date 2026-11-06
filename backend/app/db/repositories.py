@@ -1,24 +1,26 @@
-"""Storage repositories: the queries and writes for the project and registry tables, in one place.
+"""Storage repositories: the queries and statements for the project and registry tables, in one place.
 
-A repository is bound to a session that the caller owns. Its methods run statements on that session and do not commit.
-The caller commits, so transaction boundaries are the same as before the repositories existed. Models stay in
-app/models; this module only holds the statements that touch them.
+Boundary (decided for this refactor):
+- Queries and set-based statements (select, update and delete by condition, counts) live in repositories.
+- ORM unit-of-work on objects a caller already loaded (add, delete, refresh, flush, commit) stays with the session
+  owner. Some repositories also offer add() where the caller already uses one.
 
-Project repositories take a project session (``rt.db()``). Registry repositories take a registry session
-(``get_registry_db()``). Repositories still to come are listed in docs/architecture/refactor-plan.md, section 9.
+A repository is bound to a session that the caller owns. Its methods do not commit, so transaction boundaries are the
+same as before the repositories existed. Project repositories take a project session (``rt.db()`` or a request
+session); registry repositories take a registry session. Models stay in app/models.
 """
 from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
 from app.models import (
     Agent, AgentMemory, Artifact, ChatSession, Company, Edge, McpServer, Message, ProviderKey, Run, RunEvent, Task,
-    User, UserRole, UserSkill, Workspace,
+    User, UserRole, UserSkill, UserTemplate, Workspace,
 )
 
 
@@ -33,6 +35,39 @@ class RunRepository:
 
     async def update(self, run_id: str, *where: Any, **values: Any) -> None:
         await self.db.execute(update(Run).where(Run.id == run_id, *where).values(**values))
+
+    async def recent(self, company_id: str | None = None, limit: int = 200) -> list[Run]:
+        q = select(Run).order_by(Run.created_at.desc()).limit(limit)
+        if company_id:
+            q = q.where(Run.company_id == company_id)
+        return list((await self.db.execute(q)).scalars().all())
+
+    async def live_count(self, company_id: str) -> int:
+        return (await self.db.execute(select(func.count()).select_from(Run).where(
+            Run.company_id == company_id, Run.status.in_(["running", "queued"])))).scalar() or 0
+
+    async def by_client_request(self, company_id: str, client_id: str) -> Run | None:
+        return await self.db.scalar(select(Run).where(
+            Run.company_id == company_id, func.json_extract(Run.state_json, "$.initial_client_id") == client_id))
+
+    async def for_user_with_company(self, user_id: str) -> list[Run]:
+        return list((await self.db.execute(select(Run).join(Company).where(Company.user_id == user_id))).scalars().all())
+
+
+class CompanyRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def get(self, company_id: str) -> Company | None:
+        return await self.db.get(Company, company_id)
+
+    async def for_user(self, user_id: str) -> list[Company]:
+        return list((await self.db.execute(select(Company).where(Company.user_id == user_id)
+                                           .order_by(Company.updated_at.desc()))).scalars().all())
+
+    async def bump_revision_lock(self, company_id: str) -> None:
+        """Take the company row's write lock in this transaction (used before a deduplicated insert)."""
+        await self.db.execute(update(Company).where(Company.id == company_id).values(revision=Company.revision))
 
 
 class MessageRepository:
@@ -60,6 +95,17 @@ class MessageRepository:
             stmt = stmt.limit(limit)
         return list((await self.db.execute(stmt)).scalars().all())
 
+    async def session_history(self, session_id: str, *, newest_first: bool = False, limit: int | None = None) -> list[Message]:
+        stmt = select(Message).where(Message.session_id == session_id)
+        stmt = stmt.order_by(Message.created_at.desc() if newest_first else Message.created_at)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list((await self.db.execute(stmt)).scalars().all())
+
+    async def final_report_run_ids(self, run_ids: Iterable[str]) -> list[str]:
+        return list((await self.db.execute(select(Message.run_id).where(
+            Message.run_id.in_(list(run_ids)), Message.type == "final_report").distinct())).scalars().all())
+
 
 class RunEventRepository:
     def __init__(self, db: AsyncSession) -> None:
@@ -72,6 +118,28 @@ class RunEventRepository:
         return list((await self.db.execute(select(RunEvent).where(
             RunEvent.run_id == run_id, RunEvent.type.in_(list(types))).order_by(RunEvent.id))).scalars().all())
 
+    async def after(self, run_id: str, after: int, limit: int) -> list[RunEvent]:
+        return list((await self.db.execute(select(RunEvent).where(
+            RunEvent.run_id == run_id, RunEvent.id > after).order_by(RunEvent.id).limit(limit))).scalars().all())
+
+    async def between(self, run_id: str, after: int, upto: int) -> list[RunEvent]:
+        return list((await self.db.execute(select(RunEvent).where(
+            RunEvent.run_id == run_id, RunEvent.id > after, RunEvent.id <= upto).order_by(RunEvent.id))).scalars().all())
+
+    async def replay_after(self, run_id: str, last_seq: int) -> list[RunEvent]:
+        return list((await self.db.execute(select(RunEvent).where(
+            RunEvent.run_id == run_id, RunEvent.id > last_seq).order_by(RunEvent.id))).scalars().all())
+
+    async def error_counts(self, run_ids: Iterable[str], kinds: Iterable[str]) -> list[tuple[str, int]]:
+        kind = func.json_extract(RunEvent.payload_json, "$.kind")
+        return [(rid, n) for rid, n in (await self.db.execute(select(RunEvent.run_id, func.count()).where(
+            RunEvent.run_id.in_(list(run_ids)), RunEvent.type == "error", kind.in_(list(kinds)))
+            .group_by(RunEvent.run_id))).all()]
+
+    async def for_user_types(self, user_id: str, types: Iterable[str]) -> list[RunEvent]:
+        return list((await self.db.execute(select(RunEvent).join(Run).join(Company).where(
+            Company.user_id == user_id, RunEvent.type.in_(list(types))).order_by(RunEvent.id))).scalars().all())
+
 
 class ArtifactRepository:
     def __init__(self, db: AsyncSession) -> None:
@@ -83,6 +151,9 @@ class ArtifactRepository:
     async def path_exists(self, path: str) -> bool:
         return (await self.db.execute(select(Artifact.id).where(Artifact.path == path).limit(1))).first() is not None
 
+    async def generated_paths(self) -> set[str]:
+        return set((await self.db.execute(select(Artifact.path).distinct())).scalars())
+
     async def for_run(self, run_id: str) -> list[Artifact]:
         return list((await self.db.execute(
             select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.version))).scalars().all())
@@ -90,6 +161,25 @@ class ArtifactRepository:
     async def for_run_by_path(self, run_id: str) -> list[Artifact]:
         return list((await self.db.execute(select(Artifact).where(Artifact.run_id == run_id)
                                            .order_by(Artifact.path, Artifact.version))).scalars().all())
+
+    async def versions_of(self, run_id: str, path: str) -> list[Artifact]:
+        return list((await self.db.execute(select(Artifact).where(
+            Artifact.run_id == run_id, Artifact.path == path).order_by(Artifact.version))).scalars().all())
+
+    async def first_version(self, run_id: str, path: str) -> Artifact | None:
+        return (await self.db.execute(select(Artifact).where(Artifact.run_id == run_id, Artifact.path == path)
+                                      .order_by(Artifact.version).limit(1))).scalar_one_or_none()
+
+    async def version(self, run_id: str, path: str, version: int | None) -> Artifact | None:
+        """The given version of a path, or the latest one when ``version`` is falsy."""
+        q = select(Artifact).where(Artifact.run_id == run_id, Artifact.path == path)
+        q = q.where(Artifact.version == version) if version else q.order_by(Artifact.version.desc())
+        return (await self.db.execute(q.limit(1))).scalar_one_or_none()
+
+    async def distinct_paths_by_run(self, run_ids: Iterable[str]) -> list[tuple[str, int]]:
+        return [(rid, n) for rid, n in (await self.db.execute(
+            select(Artifact.run_id, func.count(func.distinct(Artifact.path))).where(Artifact.run_id.in_(list(run_ids)))
+            .group_by(Artifact.run_id))).all()]
 
 
 class TaskRepository:
@@ -114,6 +204,11 @@ class TaskRepository:
     async def for_run_by_key(self, run_id: str) -> list[Task]:
         return list((await self.db.execute(select(Task).where(Task.run_id == run_id).order_by(Task.key))).scalars().all())
 
+    async def status_counts(self, run_ids: Iterable[str]) -> list[tuple[str, str, int]]:
+        return [(rid, status, n) for rid, status, n in (await self.db.execute(
+            select(Task.run_id, Task.status, func.count()).where(Task.run_id.in_(list(run_ids)))
+            .group_by(Task.run_id, Task.status))).all()]
+
 
 class AgentRepository:
     def __init__(self, db: AsyncSession) -> None:
@@ -128,6 +223,9 @@ class AgentRepository:
     async def ids_in_company(self, company_id: str) -> set[str]:
         return set((await self.db.execute(select(Agent.id).where(Agent.company_id == company_id))).scalars())
 
+    async def for_company(self, company_id: str) -> list[Agent]:
+        return list((await self.db.execute(select(Agent).where(Agent.company_id == company_id))).scalars().all())
+
     async def foreign_ids(self, ids: Iterable[str], company_id: str) -> list[str]:
         """The ids among ``ids`` that belong to another company."""
         return list((await self.db.execute(
@@ -141,17 +239,12 @@ class EdgeRepository:
     def add(self, edge: Edge) -> None:
         self.db.add(edge)
 
+    async def get(self, edge_id: str) -> Edge | None:
+        return await self.db.get(Edge, edge_id)
+
     async def foreign_ids(self, ids: Iterable[str], company_id: str) -> list[str]:
         return list((await self.db.execute(
             select(Edge.id).where(Edge.id.in_(list(ids)), Edge.company_id != company_id))).scalars().all())
-
-
-class CompanyRepository:
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
-
-    async def get(self, company_id: str) -> Company | None:
-        return await self.db.get(Company, company_id)
 
 
 class ChatSessionRepository:
@@ -160,6 +253,10 @@ class ChatSessionRepository:
 
     async def get(self, session_id: str) -> ChatSession | None:
         return await self.db.get(ChatSession, session_id)
+
+    async def for_company(self, company_id: str) -> list[ChatSession]:
+        return list((await self.db.execute(select(ChatSession).where(ChatSession.company_id == company_id)
+                                           .order_by(ChatSession.created_at.desc()))).scalars().all())
 
 
 class AgentMemoryRepository:
@@ -201,6 +298,14 @@ class WorkspaceRepository:
     async def get(self, workspace_id: str) -> Workspace | None:
         return await self.rdb.get(Workspace, workspace_id)
 
+    async def for_user(self, user_id: str) -> list[Workspace]:
+        return list((await self.rdb.execute(select(Workspace).where(Workspace.user_id == user_id)
+                                            .order_by(Workspace.last_opened_at.desc()))).scalars().all())
+
+    async def by_path(self, user_id: str, path: str) -> Workspace | None:
+        return (await self.rdb.execute(select(Workspace).where(
+            Workspace.user_id == user_id, Workspace.path == path))).scalar_one_or_none()
+
 
 class ProviderKeyRepository:
     def __init__(self, rdb: AsyncSession) -> None:
@@ -210,6 +315,12 @@ class ProviderKeyRepository:
         return (await self.rdb.execute(select(ProviderKey).where(
             ProviderKey.user_id == user_id, ProviderKey.provider == provider))).scalar_one_or_none()
 
+    async def for_user(self, user_id: str, providers: Iterable[str] | None = None) -> list[ProviderKey]:
+        q = select(ProviderKey).where(ProviderKey.user_id == user_id)
+        if providers is not None:
+            q = q.where(ProviderKey.provider.in_(list(providers)))
+        return list((await self.rdb.execute(q)).scalars().all())
+
 
 class UserRoleRepository:
     def __init__(self, rdb: AsyncSession) -> None:
@@ -217,6 +328,10 @@ class UserRoleRepository:
 
     async def for_user(self, user_id: str) -> list[UserRole]:
         return list((await self.rdb.execute(select(UserRole).where(UserRole.user_id == user_id))).scalars().all())
+
+    async def by_key(self, user_id: str, key: str) -> UserRole | None:
+        return (await self.rdb.execute(select(UserRole).where(
+            UserRole.user_id == user_id, UserRole.key == key))).scalar_one_or_none()
 
 
 class UserSkillRepository:
@@ -226,11 +341,38 @@ class UserSkillRepository:
     async def for_user(self, user_id: str) -> list[UserSkill]:
         return list((await self.rdb.execute(select(UserSkill).where(UserSkill.user_id == user_id))).scalars().all())
 
+    async def by_name(self, user_id: str, name: str) -> UserSkill | None:
+        return (await self.rdb.execute(select(UserSkill).where(
+            UserSkill.user_id == user_id, UserSkill.name == name))).scalar_one_or_none()
+
+
+class UserTemplateRepository:
+    def __init__(self, rdb: AsyncSession) -> None:
+        self.rdb = rdb
+
+    async def get(self, key: str) -> UserTemplate | None:
+        return await self.rdb.get(UserTemplate, key)
+
+    async def for_user(self, user_id: str) -> list[UserTemplate]:
+        return list((await self.rdb.execute(select(UserTemplate).where(UserTemplate.user_id == user_id)
+                                            .order_by(UserTemplate.updated_at.desc()))).scalars().all())
+
 
 class McpServerRepository:
     def __init__(self, rdb: AsyncSession) -> None:
         self.rdb = rdb
 
+    async def get(self, server_id: str) -> McpServer | None:
+        return await self.rdb.get(McpServer, server_id)
+
     async def enabled_for_user(self, ids: Iterable[str], user_id: str) -> list[McpServer]:
         return list((await self.rdb.execute(select(McpServer).where(
             McpServer.id.in_(list(ids)), McpServer.user_id == user_id, McpServer.enabled.is_(True)))).scalars().all())
+
+    async def for_user(self, user_id: str) -> list[McpServer]:
+        return list((await self.rdb.execute(select(McpServer).where(McpServer.user_id == user_id)
+                                            .order_by(McpServer.name))).scalars().all())
+
+    async def by_name(self, user_id: str, name: str) -> McpServer | None:
+        return (await self.rdb.execute(select(McpServer).where(
+            McpServer.user_id == user_id, McpServer.name == name))).scalar_one_or_none()

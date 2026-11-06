@@ -4,9 +4,9 @@ import json
 
 from fastapi.responses import Response
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repositories import McpServerRepository, ProviderKeyRepository
 from app.core.config import get_settings
 from app.channels.deps import current_user
 from app.core.security import decrypt_secret, encrypt_secret, mask_secret
@@ -33,7 +33,7 @@ router = APIRouter(tags=["settings"])
 async def get_settings_view(db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> SettingsOut:
     s = get_settings()
     await migrate_legacy_azure(db, user.id)
-    rows = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user.id, ProviderKey.provider.in_(list(PROVIDER_CATALOG))))).scalars().all()
+    rows = await ProviderKeyRepository(db).for_user(user.id, PROVIDER_CATALOG)
     keys = [key_out(r) for r in rows]
     providers = []
     local = await discover() if s.single_user_mode else OpenCodeStatus(error="Host OpenCode is available only in local single-user mode.")
@@ -67,7 +67,7 @@ async def opencode_status(user: User = Depends(current_user)) -> OpenCodeStatus:
 
 async def migrate_legacy_azure(db: AsyncSession, user_id: str) -> None:
     """Earlier versions had an "Azure AI Foundry" card; credentials pasted there become the Azure OpenAI provider."""
-    rows = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user_id))).scalars().all()
+    rows = await ProviderKeyRepository(db).for_user(user_id)
     if any(r.provider == "azure" for r in rows):
         return
     legacy = next((r for r in rows if r.provider in LEGACY_AZURE_ROWS and (r.encrypted_key or r.base_url)), None)
@@ -85,7 +85,7 @@ def key_out(r: ProviderKey) -> ProviderKeyOut:
 
 @router.put("/settings/providers", response_model=ProviderKeyOut)
 async def put_key(body: ProviderKeyIn, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> ProviderKeyOut:
-    row = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user.id, ProviderKey.provider == body.provider))).scalar_one_or_none()
+    row = await ProviderKeyRepository(db).get(user.id, body.provider)
     if row is None:
         row = ProviderKey(user_id=user.id, provider=body.provider, encrypted_key="")
         db.add(row)
@@ -106,7 +106,7 @@ async def put_key(body: ProviderKeyIn, db: AsyncSession = Depends(get_registry_d
 
 @router.delete("/settings/providers/{provider}", status_code=204, response_class=Response, response_model=None)
 async def delete_key(provider: str, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> None:
-    row = (await db.execute(select(ProviderKey).where(ProviderKey.user_id == user.id, ProviderKey.provider == provider))).scalar_one_or_none()
+    row = await ProviderKeyRepository(db).get(user.id, provider)
     if row:
         await db.delete(row)
         await db.commit()
@@ -199,7 +199,7 @@ def mcp_out(r: McpServer) -> McpServerOut:
 
 
 async def _owned_mcp(server_id: str, db: AsyncSession, user: User) -> McpServer:
-    r = await db.get(McpServer, server_id)
+    r = await McpServerRepository(db).get(server_id)
     if r is None or r.user_id != user.id:
         raise HTTPException(404, "MCP server not found")
     return r
@@ -215,7 +215,7 @@ async def _refresh(r: McpServer) -> None:
 
 @router.get("/mcp-servers", response_model=list[McpServerOut])
 async def list_mcp(db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> list[McpServerOut]:
-    rows = (await db.execute(select(McpServer).where(McpServer.user_id == user.id).order_by(McpServer.name))).scalars().all()
+    rows = await McpServerRepository(db).for_user(user.id)
     return [mcp_out(r) for r in rows]
 
 
@@ -231,7 +231,7 @@ def _apply_mcp(r: McpServer, body: McpServerIn, keep_env: bool) -> None:
 
 @router.post("/mcp-servers", response_model=McpServerOut, status_code=201)
 async def create_mcp(body: McpServerIn, db: AsyncSession = Depends(get_registry_db), user: User = Depends(current_user)) -> McpServerOut:
-    if (await db.execute(select(McpServer).where(McpServer.user_id == user.id, McpServer.name == body.name.strip()))).scalar_one_or_none():
+    if await McpServerRepository(db).by_name(user.id, body.name.strip()):
         raise HTTPException(409, "An MCP server with that name already exists")
     r = McpServer(user_id=user.id)
     _apply_mcp(r, body, keep_env=False)
