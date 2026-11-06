@@ -39,10 +39,13 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install -r requirements.txt ruff
+          .venv/bin/pip install -r requirements.txt -r requirements-dev.txt ruff
       - name: Lint (syntax errors, undefined names)
         working-directory: backend
         run: .venv/bin/ruff check app tests --select E9,F63,F7,F82 --output-format github
+      - name: Architecture (import-linter layer rules)
+        working-directory: backend
+        run: .venv/bin/lint-imports
       - name: Tests
         working-directory: backend
         run: .venv/bin/python -m pytest -q --junitxml=pytest-report.xml

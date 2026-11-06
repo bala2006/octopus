@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_user
+from app.db.repositories import UserRoleRepository
+from app.channels.deps import current_user
 from app.db.session import get_registry_db
 from app.models import User, UserRole
 from app.schemas import AgentTools, RoleIn, RoleTemplateOut
@@ -31,7 +31,7 @@ def _out(t, row) -> RoleTemplateOut:  # type: ignore[no-untyped-def]
 
 
 async def _row(db: AsyncSession, user: User, key: str) -> UserRole | None:
-    return (await db.execute(select(UserRole).where(UserRole.user_id == user.id, UserRole.key == key))).scalar_one_or_none()
+    return await UserRoleRepository(db).by_key(user.id, key)
 
 
 def _fill(row: UserRole, body: RoleIn) -> None:

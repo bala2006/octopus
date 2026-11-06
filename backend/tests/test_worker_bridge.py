@@ -6,11 +6,11 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from app.orchestrator import tools as T
+from app.capabilities.tools import specs as T
 from app.orchestrator.context import AgentSpec
-from app.orchestrator.contracts import Assignment, ExecutionPolicy
-from app.orchestrator.execution import ACTIVE_ATTEMPT, AttemptContext
-from app.orchestrator.worker_bridge import WorkerBridge
+from app.core.contracts import Assignment, ExecutionPolicy
+from app.core.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
+from app.capabilities.mcp.worker_bridge import WorkerBridge
 
 
 def node(aid="worker", **kwargs):
@@ -43,6 +43,7 @@ class FakeRuntime:
         self.stop_requested = False
         self.turn_no = 1
         self.events = []
+        self.execution = self  # the fake plays the runtime and its execution service
         self.executed = []
         self.messages = []
         self.used = []

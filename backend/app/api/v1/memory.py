@@ -5,13 +5,12 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
-from app.models import User, Message, Artifact, Run
-from app.models.scoped_memory import MemoryGroup, MemoryGroupMember, MemoryHead, MemoryRecord
-from app.services import scoped_memory as memory
+from app.db.repositories import MemoryRepository, RunRepository
+from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
+from app.models import User
+from app.capabilities.memory import scoped as memory
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -106,9 +105,9 @@ async def put_memory(body: MemoryIn, actor: memory.Actor = Depends(owner), ctx: 
 
 @router.get("/groups", response_model=list[GroupOut])
 async def list_groups(actor: memory.Actor = Depends(owner), db: AsyncSession = Depends(get_pdb)):
-    groups = (await db.scalars(select(MemoryGroup).where(MemoryGroup.company_id == actor.company_id))).all()
+    groups = await MemoryRepository(db).groups_for_company(actor.company_id)
     return [GroupOut(id=group.id, name=group.name, active=group.active,
-        members=list((await db.scalars(select(MemoryGroupMember.agent_id).where(MemoryGroupMember.group_id == group.id))).all()))
+        members=await MemoryRepository(db).group_member_ids(group.id))
         for group in groups]
 
 
@@ -143,9 +142,7 @@ async def archive_group(group_id: str, actor: memory.Actor = Depends(owner), ctx
 @router.get("/versions", response_model=list[ScopedMemoryOut])
 async def versions(scope: memory.Scope, scope_id: str, key: str, actor: memory.Actor = Depends(owner),
                    ctx: ProjectCtx = Depends(project_ctx), db: AsyncSession = Depends(get_pdb)):
-    rows = (await db.scalars(select(MemoryRecord).join(MemoryHead, MemoryRecord.head_id == MemoryHead.id).where(
-        MemoryHead.company_id == actor.company_id, MemoryHead.scope == scope, MemoryHead.scope_id == scope_id,
-        MemoryHead.key == key, MemoryRecord.classification != "deleted").order_by(MemoryRecord.version))).all()
+    rows = await MemoryRepository(db).records_for_head(actor.company_id, scope, scope_id, key)
     return [await memory.get(ctx.sf, actor, record.id) for record in rows]
 
 
@@ -161,15 +158,15 @@ async def exact_memory(record_id: str, actor: memory.Actor = Depends(owner), ctx
 async def exact_source(kind: Literal["memory", "message", "artifact"], source_id: str,
                        actor: memory.Actor = Depends(owner), ctx: ProjectCtx = Depends(project_ctx),
                        db: AsyncSession = Depends(get_pdb)) -> dict:
-    from app.orchestrator.evidence import redact_evidence
+    from app.core.evidence import redact_evidence
     if kind == "memory":
         try:
             item = await memory.get(ctx.sf, actor, source_id)
             return {"kind": kind, "id": item.id, "content": item.content, "label": item.key, "run_id": item.run_id}
         except memory.MemoryDenied as exc:
             raise failure(exc) from exc
-    item = await db.get(Message if kind == "message" else Artifact, source_id)
-    run = await db.get(Run, item.run_id) if item else None
+    item = await MemoryRepository(db).source(kind, source_id)
+    run = await RunRepository(db).get(item.run_id) if item else None
     if not item or not run or run.company_id != actor.company_id:
         raise HTTPException(404, "Source not found")
     value = redact_evidence(item.content)

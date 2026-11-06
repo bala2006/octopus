@@ -22,8 +22,13 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
 }
 
+/** Parse an API timestamp. The backend stores naive UTC, so a value without a zone means UTC, not local time. */
+export function parseUtc(iso: string): number {
+  return Date.parse(iso.endsWith("Z") || iso.includes("+") ? iso : `${iso}Z`);
+}
+
 export function timeAgo(iso: string | Date): string {
-  const d = typeof iso === "string" ? new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z") : iso;
+  const d = typeof iso === "string" ? new Date(parseUtc(iso)) : iso;
   const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
   if (s < 45) return "just now";
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
@@ -32,7 +37,7 @@ export function timeAgo(iso: string | Date): string {
 }
 
 export function clockTime(iso: string): string {
-  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  const d = new Date(parseUtc(iso));
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 

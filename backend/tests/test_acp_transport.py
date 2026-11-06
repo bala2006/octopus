@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from app.services import opencode
+from app.capabilities.models import opencode
 
 
 @pytest.fixture

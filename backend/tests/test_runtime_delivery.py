@@ -8,9 +8,9 @@ from pathlib import Path
 from sqlalchemy import func, select
 
 from app.api.ws import handle_client
-from app.core.deps import get_or_create_single_user, load_project
+from app.channels.deps import get_or_create_single_user, load_project
 from app.db.session import registry_factory
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from app.models import Run, User
 from app.models.runtime_records import RunRequest, TaskAttempt
 from app.orchestrator.engine import ProjectRef

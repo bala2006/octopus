@@ -5,7 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 
-from app.tools.workspace import IGNORED_DIRS, MAX_FILE_BYTES, MAX_LIST, ProjectFS, WorkspaceError, is_secret
+from app.capabilities.workspace.project_fs import IGNORED_DIRS, MAX_FILE_BYTES, MAX_LIST, ProjectFS, WorkspaceError, is_secret
 
 
 class FileConflict(WorkspaceError):

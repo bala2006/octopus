@@ -5,8 +5,8 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-from app.llm.base import LLMChunk, LLMError, LLMRequest
-from app.llm.router import set_provider_override
+from app.capabilities.models.base import LLMChunk, LLMError, LLMRequest
+from app.capabilities.models.router import set_provider_override
 from conftest import ScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status
 
 NOTE = "Please use TypeScript for everything"

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from collections import Counter
 
-from sqlalchemy import select
 
+from app.db.repositories import ArtifactRepository, MessageRepository, RunEventRepository, RunRepository, TaskRepository
 from app.db.session import SessionFactory
-from app.models import Artifact, Message, Run, RunEvent, Task
+from app.models import Artifact, Run
 
 
 def _dur(run: Run) -> str:
@@ -18,13 +18,13 @@ def _dur(run: Run) -> str:
 
 async def build_report(run_id: str, sf: SessionFactory) -> str:
     async with sf() as db:
-        run = await db.get(Run, run_id)
+        run = await RunRepository(db).get(run_id)
         assert run is not None
-        msgs = (await db.execute(select(Message).where(Message.run_id == run_id).order_by(Message.created_at))).scalars().all()
-        tasks = (await db.execute(select(Task).where(Task.run_id == run_id).order_by(Task.key))).scalars().all()
-        arts = (await db.execute(select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.path, Artifact.version))).scalars().all()
-        events = (await db.execute(select(RunEvent).where(RunEvent.run_id == run_id, RunEvent.type.in_(
-            ["protocol", "message_rejected", "error", "tool_result", "agent_created", "agent_updated"])).order_by(RunEvent.id))).scalars().all()
+        msgs = await MessageRepository(db).for_run(run_id)
+        tasks = await TaskRepository(db).for_run_by_key(run_id)
+        arts = await ArtifactRepository(db).for_run_by_path(run_id)
+        events = await RunEventRepository(db).report_events(
+            run_id, ["protocol", "message_rejected", "error", "tool_result", "agent_created", "agent_updated"])
 
     snap = run.snapshot_json or {}
     agents = {a["id"]: a for a in snap.get("agents", [])}
@@ -63,7 +63,7 @@ async def build_report(run_id: str, sf: SessionFactory) -> str:
 
     wf = state.get("workflow") or {}
     if wf.get("phases"):
-        from app.orchestrator.workflow import PHASES
+        from app.workflows.company import PHASES
 
         out += [f"## Workflow ({wf.get('track') or 'intake only'} track)", "", "| Phase | Owner | Status | Fix rounds | Summary |", "|---|---|---|---|---|"]
         for p in wf["phases"]:

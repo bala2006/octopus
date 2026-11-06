@@ -17,12 +17,12 @@ from app.db.base import ProjectBase
 from app.db.session import make_engine
 from app.models import Agent, Artifact, Company, Run, RunEvent
 from app.orchestrator import actions as A
-from app.orchestrator import opencode as adapter
-from app.orchestrator.contracts import Assignment, ExecutionPolicy
+from app.capabilities.models import opencode_turn as adapter
+from app.core.contracts import Assignment, ExecutionPolicy
 from app.orchestrator.engine import ProjectRef, RunRuntime, manager
-from app.orchestrator.execution import ACTIVE_ATTEMPT, AttemptContext
-from app.services import opencode
-from app.services.scoped_memory import Actor, MemoryDenied, Target, get, owner_put, put
+from app.core.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
+from app.capabilities.models import opencode
+from app.capabilities.memory.scoped import Actor, MemoryDenied, Target, get, owner_put, put
 from conftest import agent, make_company, start_run, wait_status
 
 
@@ -123,7 +123,7 @@ async def test_stage_terminal_results_publish_canonical_content_and_original_his
             await runtime.execute(worker, A.WriteFile(action="write_file", path="app.py", content="VALUE = 2\n"))
         await runtime.execute(worker, A.RunCode(action="run_code", command="python mutate.py"))
     monkeypatch.setattr(runtime, "_turn", turn)
-    await runtime.owned_turn("reviewer")
+    await runtime.execution.owned_turn("reviewer")
     async with runtime.db() as db:
         versions = (await db.scalars(select(Artifact).where(Artifact.run_id == "run", Artifact.path == "app.py")
                                     .order_by(Artifact.version))).all()
@@ -164,7 +164,7 @@ async def test_post_integration_command_can_verify_deleted_file_absence(inspecti
     async def turn(aid):
         await runtime.execute(runtime.agents[aid], A.RunCode(action="run_code", command="python remove.py"))
     monkeypatch.setattr(runtime, "_turn", turn)
-    await runtime.owned_turn("reviewer")
+    await runtime.execution.owned_turn("reviewer")
     assert "app.py" in runtime.unverified
     await execute(runtime, "lead", A.RunCode(action="run_code", command="python -m unittest test_absence",
                   covered_paths=["app.py", "test_absence.py"], criterion_ids=["requested_outcome"]))

@@ -12,7 +12,7 @@ from app.db.base import ProjectBase
 from app.db.session import make_engine
 from app.models import Agent, AgentMemory, Company, Message, Run
 from app.models.scoped_memory import MemoryHead, MemoryRecord
-from app.services.scoped_memory import (
+from app.capabilities.memory.scoped import (
     Actor, MemoryConflict, MemoryDenied, SourceRef, Target, context, get, import_legacy, owner_group, owner_put, put,
 )
 
@@ -180,7 +180,7 @@ async def memory_client(memory):
     import httpx
     from fastapi import FastAPI
     from app.api.v1.memory import router
-    from app.core.deps import current_user, get_pdb, project_ctx
+    from app.channels.deps import current_user, get_pdb, project_ctx
     from app.models import User
 
     sf, _, _ = memory
@@ -271,7 +271,7 @@ async def test_search_checks_acl_before_returning_matching_memory(memory):
 
 
 async def test_runtime_never_silently_truncates_pinned_constraints(memory):
-    from app.services.scoped_memory import runtime_context
+    from app.capabilities.memory.scoped import runtime_context
     sf, owner, _ = memory
     record = await owner_put(sf, owner, Target("project", "company"), "critical", "A" * 17000, expected_version=0, pinned=True)
     with pytest.raises(MemoryConflict, match="Pinned constraints exceed"):

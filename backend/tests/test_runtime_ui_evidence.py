@@ -3,8 +3,8 @@ import pytest
 
 from app.core.config import get_settings
 from app.orchestrator import actions as A
-from app.orchestrator.evidence import AcceptanceCriterion, RevisionEvidence, validate_evidence
-from app.services.browser import SERVER_ID, browser
+from app.core.evidence import AcceptanceCriterion, RevisionEvidence, validate_evidence
+from app.capabilities.browser.service import SERVER_ID, browser
 from test_runtime_recovery_regressions import inspection_runtime, execute  # noqa: F401
 
 
@@ -25,10 +25,10 @@ async def test_ui_proof_observes_interaction_assertion_and_exact_revision(inspec
     proof = RevisionEvidence.model_validate(runtime.execution_records[-1])
     assert proof.status == ("pass" if result == "true" else "fail")
     criterion = AcceptanceCriterion(id="popup-anchor", description="Popup anchors after restore", check_kinds=("ui",), required_paths=("app.py",))
-    current = runtime.execution_manifest(runtime.root)
+    current = runtime.execution.execution_manifest(runtime.root)
     assert validate_evidence(proof, current, task_revision=1, environment=runtime._proof_environment, criterion=criterion).valid == (result == "true")
     (runtime.root / "app.py").write_text("VALUE = 2\n")
-    assert not validate_evidence(proof, runtime.execution_manifest(runtime.root), task_revision=1,
+    assert not validate_evidence(proof, runtime.execution.execution_manifest(runtime.root), task_revision=1,
                                  environment=runtime._proof_environment, criterion=criterion).valid
 
 

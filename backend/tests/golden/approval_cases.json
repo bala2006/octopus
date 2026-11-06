@@ -1,0 +1,2466 @@
+{
+  "guard": [
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "ask",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "ask",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "ask",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "ask",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "ask",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "autonomous",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "step",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "step",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "finish",
+      "level": "auto",
+      "reason": "The user REJECTED finish: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "summary": "All done."
+        },
+        "kind": "finish",
+        "preview": "All done.",
+        "summary": "Golden Agent wants to finish"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "mcp_call",
+      "level": "auto",
+      "reason": "The user REJECTED mcp_call: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "arguments": {
+            "url": "http://127.0.0.1/"
+          },
+          "server": "browser",
+          "tool": "browser_navigate"
+        },
+        "kind": "mcp_call",
+        "preview": "{'url': 'http://127.0.0.1/'}",
+        "summary": "Golden Agent wants to call browser/browser_navigate"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "run_code",
+      "level": "auto",
+      "reason": "The user REJECTED run_code: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "command": "python -m pytest -q",
+          "cwd": ".",
+          "outside": []
+        },
+        "kind": "run_code",
+        "preview": "python -m pytest -q",
+        "summary": "Golden Agent wants to run `python -m pytest -q`"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "dangerous": false,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": null,
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "web_search",
+      "level": "auto",
+      "reason": "The user REJECTED web_search: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "query": "release notes"
+        },
+        "kind": "web_search",
+        "preview": "release notes",
+        "summary": "Golden Agent wants to search the web"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": false,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "supervised",
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "dangerous": true,
+      "kind": "write_file",
+      "level": "auto",
+      "reason": "The user REJECTED write_file: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "new": "print('hi')\n",
+          "note": "greeting",
+          "old": "print('bye')\n",
+          "path": "src/app.py"
+        },
+        "kind": "write_file",
+        "preview": "print('hi')\n",
+        "summary": "Golden Agent wants to modify src/app.py"
+      },
+      "run_mode": "supervised",
+      "user_decision": "rejected"
+    }
+  ],
+  "team_guard": [
+    {
+      "allowed": true,
+      "asked": true,
+      "kind": "create_agent",
+      "level": "ask",
+      "persist": true,
+      "persist_team": true,
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "department": "Engineering",
+          "name": "Rae",
+          "role": "Engineer"
+        },
+        "kind": "create_agent",
+        "preview": "{\n \"name\": \"Rae\",\n \"role\": \"Engineer\",\n \"department\": \"Engineering\"\n}",
+        "summary": "Golden Agent wants to hire Rae (Engineer, Engineering)"
+      },
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "kind": "create_agent",
+      "level": "ask",
+      "persist": false,
+      "persist_team": true,
+      "reason": "The user REJECTED create_agent: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "department": "Engineering",
+          "name": "Rae",
+          "role": "Engineer"
+        },
+        "kind": "create_agent",
+        "preview": "{\n \"name\": \"Rae\",\n \"role\": \"Engineer\",\n \"department\": \"Engineering\"\n}",
+        "summary": "Golden Agent wants to hire Rae (Engineer, Engineering)"
+      },
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": true,
+      "kind": "update_agent",
+      "level": "ask",
+      "persist": true,
+      "persist_team": true,
+      "reason": "",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "changes": {
+            "role": "Lead"
+          },
+          "reason": "focus",
+          "target": "Golden Agent"
+        },
+        "kind": "update_agent",
+        "preview": "{\n \"target\": \"Golden Agent\",\n \"changes\": {\n  \"role\": \"Lead\"\n },\n \"reason\": \"focus\"\n}",
+        "summary": "Golden Agent wants to update its own configuration"
+      },
+      "user_decision": "approved"
+    },
+    {
+      "allowed": false,
+      "asked": true,
+      "kind": "update_agent",
+      "level": "ask",
+      "persist": false,
+      "persist_team": true,
+      "reason": "The user REJECTED update_agent: golden rejection",
+      "request": {
+        "agent": "golden-agent",
+        "details": {
+          "changes": {
+            "role": "Lead"
+          },
+          "reason": "focus",
+          "target": "Golden Agent"
+        },
+        "kind": "update_agent",
+        "preview": "{\n \"target\": \"Golden Agent\",\n \"changes\": {\n  \"role\": \"Lead\"\n },\n \"reason\": \"focus\"\n}",
+        "summary": "Golden Agent wants to update its own configuration"
+      },
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "create_agent",
+      "level": "ask",
+      "persist": false,
+      "persist_team": false,
+      "reason": "",
+      "request": null,
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "create_agent",
+      "level": "ask",
+      "persist": false,
+      "persist_team": false,
+      "reason": "",
+      "request": null,
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "update_agent",
+      "level": "ask",
+      "persist": false,
+      "persist_team": false,
+      "reason": "",
+      "request": null,
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "update_agent",
+      "level": "ask",
+      "persist": false,
+      "persist_team": false,
+      "reason": "",
+      "request": null,
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "create_agent",
+      "level": "auto",
+      "persist": true,
+      "persist_team": true,
+      "reason": "",
+      "request": null,
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "create_agent",
+      "level": "auto",
+      "persist": true,
+      "persist_team": true,
+      "reason": "",
+      "request": null,
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "update_agent",
+      "level": "auto",
+      "persist": true,
+      "persist_team": true,
+      "reason": "",
+      "request": null,
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "update_agent",
+      "level": "auto",
+      "persist": true,
+      "persist_team": true,
+      "reason": "",
+      "request": null,
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "create_agent",
+      "level": "auto",
+      "persist": false,
+      "persist_team": false,
+      "reason": "",
+      "request": null,
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "create_agent",
+      "level": "auto",
+      "persist": false,
+      "persist_team": false,
+      "reason": "",
+      "request": null,
+      "user_decision": "rejected"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "update_agent",
+      "level": "auto",
+      "persist": false,
+      "persist_team": false,
+      "reason": "",
+      "request": null,
+      "user_decision": "approved"
+    },
+    {
+      "allowed": true,
+      "asked": false,
+      "kind": "update_agent",
+      "level": "auto",
+      "persist": false,
+      "persist_team": false,
+      "reason": "",
+      "request": null,
+      "user_decision": "rejected"
+    }
+  ]
+}

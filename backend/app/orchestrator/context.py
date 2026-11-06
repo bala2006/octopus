@@ -5,10 +5,10 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from app.llm.base import effective_max_tokens
+from app.capabilities.models.base import effective_max_tokens
 from app.orchestrator.actions import schema_doc
-from app.orchestrator.permissions import EdgeSpec, allowed_recipients
-from app.services import skills as SK
+from app.workflows.routing import EdgeSpec, allowed_recipients
+from app.capabilities.skills import library as SK
 from app.services.roles import resolve_prompt
 
 if TYPE_CHECKING:
@@ -297,11 +297,11 @@ def build_turn_prompts(runtime: RunRuntime, agent: AgentSpec, inbox_ids: set[str
         role_prompt=resolve_prompt(agent.behavior, agent.system_prompt, runtime.roles),
         skills_text=SK.prompt_section(runtime.skills, str(agent.behavior.get("template_key") or ""),
                                      list(agent.behavior.get("skills") or [])))
-    system += runtime.pinned_guidance.get("content", "") + memory_context + runtime.engineering_brief()
+    system += runtime.pinned_guidance.get("content", "") + memory_context + runtime.execution.engineering_brief()
     user = build_user_prompt(agent=agent, history=runtime.history, inbox_ids=inbox_ids, observations=observations,
         blackboard=runtime.blackboard(), names=runtime.names, recent_n=runtime.budget.context_recent,
         native=native, digest=runtime.digest(agent.id), team_status=team_status(runtime.agents, runtime.status))
-    from app.orchestrator.execution import ACTIVE_ATTEMPT
+    from app.core.execution_contracts import ACTIVE_ATTEMPT
     attempt = ACTIVE_ATTEMPT.get()
     if attempt:
         user += "\n\nYour immutable assignment for this turn:\n" + attempt.assignment.model_dump_json()

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.base import ProjectBase
 from app.db.session import make_engine
-from app.llm.router import set_provider_override
+from app.capabilities.models.router import set_provider_override
 from app.models import Company, Run
 from app.orchestrator.engine import ProjectRef, RunRuntime
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status
@@ -154,8 +154,8 @@ async def test_artifact_author_cannot_record_independent_review(client, workspac
 
 
 async def test_optional_review_is_a_required_independent_workflow_step(runtime_factory):
-    ordinary = runtime_factory(engineering_workflow="build", independent_review=False).workflow_contract()
-    reviewed = runtime_factory(engineering_workflow="build", independent_review=True).workflow_contract()
+    ordinary = runtime_factory(engineering_workflow="build", independent_review=False).execution.workflow_contract()
+    reviewed = runtime_factory(engineering_workflow="build", independent_review=True).execution.workflow_contract()
     assert [step.key for step in ordinary.steps] == ["acceptance", "design", "implement", "verify"]
     assert [step.key for step in reviewed.steps] == ["acceptance", "design", "implement", "verify", "review"]
     assert reviewed.steps[-1].independent_owner

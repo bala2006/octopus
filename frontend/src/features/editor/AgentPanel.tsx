@@ -34,7 +34,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, parseUtc } from "@/lib/utils";
 import {
   useCanvas,
   useCompanies,
@@ -283,7 +283,7 @@ function CompanyAgentPanel({
   const elapsed = Math.max(
     0,
     Math.floor(
-      (now - Date.parse(run.data?.started_at ?? run.data?.created_at ?? "")) /
+      (now - parseUtc(run.data?.started_at ?? run.data?.created_at ?? "")) /
         1000,
     ),
   );

@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_user
+from app.db.repositories import UserSkillRepository
+from app.channels.deps import current_user
 from app.db.session import get_registry_db
 from app.models import User, UserSkill
 from app.schemas import SkillIn, SkillOut
-from app.services import skills as S
+from app.capabilities.skills import library as S
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -20,7 +20,7 @@ def out(s: S.Skill) -> SkillOut:
 
 
 async def _row(db: AsyncSession, user: User, name: str) -> UserSkill | None:
-    return (await db.execute(select(UserSkill).where(UserSkill.user_id == user.id, UserSkill.name == name))).scalar_one_or_none()
+    return await UserSkillRepository(db).by_name(user.id, name)
 
 
 def _fill(row: UserSkill, body: SkillIn) -> None:

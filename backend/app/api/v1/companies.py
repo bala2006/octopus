@@ -2,31 +2,31 @@ from __future__ import annotations
 
 from fastapi.responses import Response
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
+from app.db.repositories import CompanyRepository
+from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.db.base import new_id
-from app.llm.base import LLMError
+from app.capabilities.models.base import LLMError
 from app.models import Company, User
 from app.schemas import (
     AgentIn, CanvasExport, CanvasOut, CanvasState, CompanyIn, CompanyOut, CompanyPatch, DepartmentSummary, EdgeIn, GenerateCompanyIn,
     GenerateCompanyOut, InstantiateTemplateIn, TemplateOut, UserTemplateIn,
 )
-from app.services.canvas import agent_out, canvas_out, company_out, departments_of, edge_out, sync_canvas
+from app.workflows.canvas import agent_out, canvas_out, company_out, departments_of, edge_out, sync_canvas
 from app.api.v1.templates import resolve_spec, user_template_out
 from app.db.session import get_registry_db
 from app.models import UserTemplate
-from app.services.org_generator import generate_org, spec_to_canvas
-from app.services.templates import summarize_departments
-from app.orchestrator.director import default_company_template
+from app.workflows.org_generator import generate_org, spec_to_canvas
+from app.workflows.templates import summarize_departments
+from app.workflows.director import default_company_template
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
 
 @router.get("", response_model=list[CompanyOut])
 async def list_companies(db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[CompanyOut]:
-    rows = (await db.execute(select(Company).where(Company.user_id == user.id).order_by(Company.updated_at.desc()))).scalars().all()
+    rows = await CompanyRepository(db).for_user(user.id)
     return [company_out(c) for c in rows]
 
 

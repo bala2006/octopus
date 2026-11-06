@@ -6,9 +6,9 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from app.llm.azure_v1 import AzureV1Provider, _body, _dropped
-from app.llm.base import LLMChunk, LLMRequest
-from app.llm.router import set_provider_override
+from app.capabilities.models.azure_v1 import AzureV1Provider, _body, _dropped
+from app.capabilities.models.base import LLMChunk, LLMRequest
+from app.capabilities.models.router import set_provider_override
 from conftest import NativeScriptedProvider, agent, events, make_company, start_run, wait_status
 
 

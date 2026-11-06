@@ -4,18 +4,18 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_user, get_pdb, owned_company
-from app.models import Agent, ChatSession, Message, User
+from app.db.repositories import AgentRepository, ChatSessionRepository, MessageRepository
+from app.channels.deps import current_user, get_pdb, owned_company
+from app.models import ChatSession, Message, User
 from app.schemas import MessageOut, SessionIn, SessionOut, SessionPatch
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 async def owned_session(session_id: str, db: AsyncSession, user: User) -> ChatSession:
-    s = await db.get(ChatSession, session_id)
+    s = await ChatSessionRepository(db).get(session_id)
     if s is None:
         raise HTTPException(404, "Session not found")
     await owned_company(s.company_id, db, user)
@@ -25,15 +25,14 @@ async def owned_session(session_id: str, db: AsyncSession, user: User) -> ChatSe
 @router.get("", response_model=list[SessionOut])
 async def list_sessions(company_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[ChatSession]:
     await owned_company(company_id, db, user)
-    return list((await db.execute(select(ChatSession).where(ChatSession.company_id == company_id)
-                                  .order_by(ChatSession.created_at.desc()))).scalars().all())
+    return await ChatSessionRepository(db).for_company(company_id)
 
 
 @router.post("", response_model=SessionOut, status_code=201)
 async def create_session(body: SessionIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> ChatSession:
     await owned_company(body.company_id, db, user)
     if body.mode == "direct":
-        a = await db.get(Agent, body.agent_id) if body.agent_id else None
+        a = await AgentRepository(db).get(body.agent_id) if body.agent_id else None
         if a is None or a.company_id != body.company_id:
             raise HTTPException(422, "Direct sessions need an agent from this company")
     s = ChatSession(company_id=body.company_id, title=body.title, mode=body.mode, agent_id=body.agent_id if body.mode == "direct" else None)
@@ -63,7 +62,7 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_pdb), u
 async def list_messages(session_id: str, limit: int = Query(500, le=5000), db: AsyncSession = Depends(get_pdb),
                         user: User = Depends(current_user)) -> list[Message]:
     await owned_session(session_id, db, user)
-    rows = (await db.execute(select(Message).where(Message.session_id == session_id).order_by(Message.created_at.desc()).limit(limit))).scalars().all()
+    rows = await MessageRepository(db).session_history(session_id, newest_first=True, limit=limit)
     return list(reversed(rows))
 
 
@@ -71,8 +70,8 @@ async def list_messages(session_id: str, limit: int = Query(500, le=5000), db: A
 async def export_session(session_id: str, format: str = Query("json", pattern="^(json|md)$"), db: AsyncSession = Depends(get_pdb),
                          user: User = Depends(current_user)) -> Response:
     s = await owned_session(session_id, db, user)
-    msgs = (await db.execute(select(Message).where(Message.session_id == session_id).order_by(Message.created_at))).scalars().all()
-    agents = {a.id: a.name for a in (await db.execute(select(Agent).where(Agent.company_id == s.company_id))).scalars().all()}
+    msgs = await MessageRepository(db).session_history(session_id)
+    agents = {a.id: a.name for a in await AgentRepository(db).for_company(s.company_id)}
     name = lambda aid: agents.get(aid or "", "Agent")  # noqa: E731
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in s.title)[:50] or "session"
     if format == "json":

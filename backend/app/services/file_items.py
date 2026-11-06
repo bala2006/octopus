@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 from app.services.editor import FileConflict
-from app.tools.workspace import IGNORED_DIRS, WORK_DIR, ProjectFS, WorkspaceError, is_secret
+from app.capabilities.workspace.project_fs import IGNORED_DIRS, WORK_DIR, ProjectFS, WorkspaceError, is_secret
 
 MAX_ITEM_ENTRIES = 10_000
 MAX_UPLOAD_BYTES = 20_000_000

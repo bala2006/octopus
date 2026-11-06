@@ -2,22 +2,23 @@ from __future__ import annotations
 
 from fastapi.responses import Response
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
+from app.db.repositories import MemoryRepository
+from app.db.repositories import AgentRepository, EdgeRepository
+from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
 from app.db.base import utcnow
 from app.models import Agent, Edge, User
-from app.models.scoped_memory import MemoryHead, MemoryRecord
+from app.models.scoped_memory import MemoryRecord
 from app.schemas import AgentIn, AgentOut, AgentPatch, EdgeIn, EdgeOut, MemoryIn, MemoryOut
-from app.services.canvas import agent_out, apply_agent, edge_out, validate_edges
-from app.services import scoped_memory as memory
+from app.workflows.canvas import agent_out, apply_agent, edge_out, validate_edges
+from app.capabilities.memory import scoped as memory
 
 router = APIRouter(tags=["agents & edges"])
 
 
 async def owned_agent(agent_id: str, db: AsyncSession, user: User) -> Agent:
-    a = await db.get(Agent, agent_id)
+    a = await AgentRepository(db).get(agent_id)
     if a is None:
         raise HTTPException(404, "Agent not found")
     await owned_company(a.company_id, db, user)
@@ -74,13 +75,8 @@ async def agent_memory_owner(agent_id: str, db: AsyncSession, user: User, ctx: P
 
 
 async def agent_memory_records(ctx: ProjectCtx, actor: memory.Actor, agent_id: str, key: str | None = None):
-    query = select(MemoryRecord, MemoryHead.key).join(MemoryHead, MemoryRecord.head_id == MemoryHead.id).where(
-        MemoryHead.company_id == actor.company_id, MemoryHead.scope == "agent", MemoryHead.scope_id == agent_id,
-        MemoryRecord.version == MemoryHead.version)
-    if key is not None:
-        query = query.where(MemoryHead.key == key)
     async with ctx.sf() as db:
-        return (await db.execute(query.order_by(MemoryHead.key))).all()
+        return await MemoryRepository(db).agent_records(actor.company_id, agent_id, key)
 
 
 async def legacy_memory_out(ctx: ProjectCtx, actor: memory.Actor, agent_id: str, key: str, record: MemoryRecord) -> MemoryOut:
@@ -159,7 +155,7 @@ async def create_edge(company_id: str, body: EdgeIn, db: AsyncSession = Depends(
 
 @router.patch("/edges/{edge_id}", response_model=EdgeOut)
 async def patch_edge(edge_id: str, body: EdgeIn, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> EdgeOut:
-    e = await db.get(Edge, edge_id)
+    e = await EdgeRepository(db).get(edge_id)
     if e is None:
         raise HTTPException(404, "Edge not found")
     c = await owned_company(e.company_id, db, user)
@@ -174,7 +170,7 @@ async def patch_edge(edge_id: str, body: EdgeIn, db: AsyncSession = Depends(get_
 
 @router.delete("/edges/{edge_id}", status_code=204, response_class=Response, response_model=None)
 async def delete_edge(edge_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> None:
-    e = await db.get(Edge, edge_id)
+    e = await EdgeRepository(db).get(edge_id)
     if e is None:
         raise HTTPException(404, "Edge not found")
     await owned_company(e.company_id, db, user)

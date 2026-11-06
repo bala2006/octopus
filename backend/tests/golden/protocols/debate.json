@@ -1,0 +1,1156 @@
+{
+  "consensus_then_reopen": {
+    "initial": {
+      "agreed": [],
+      "edge_id": "e-debate-1",
+      "history": [],
+      "max_rounds": 3,
+      "messages": 0,
+      "number": 1,
+      "outcome": "",
+      "participants": [
+        "alice",
+        "bob"
+      ],
+      "rounds": 0,
+      "status": "open",
+      "topic": ""
+    },
+    "steps": [
+      {
+        "input": {
+          "content": "Use SQLite for storage\nKeep one file per project.",
+          "sender": "alice",
+          "type": "proposal"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "Use SQLite for storage\nKeep one file per project.",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 1,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Debate round 1/3: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Concurrent writes need WAL.",
+          "sender": "bob",
+          "type": "objection"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "Use SQLite for storage\nKeep one file per project.",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Concurrent writes need WAL.",
+              "from": "bob",
+              "type": "objection"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 2,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "alice": "Debate round 1/3: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Use SQLite in WAL mode",
+          "sender": "alice",
+          "type": "proposal"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "Use SQLite for storage\nKeep one file per project.",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Concurrent writes need WAL.",
+              "from": "bob",
+              "type": "objection"
+            },
+            {
+              "content": "Use SQLite in WAL mode",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 3,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 2,
+          "status": "open",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Debate round 2/3: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Agreed.",
+          "sender": "bob",
+          "type": "agreement"
+        },
+        "state": {
+          "agreed": [
+            "bob"
+          ],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "Use SQLite for storage\nKeep one file per project.",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Concurrent writes need WAL.",
+              "from": "bob",
+              "type": "objection"
+            },
+            {
+              "content": "Use SQLite in WAL mode",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Agreed.",
+              "from": "bob",
+              "type": "agreement"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 4,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 2,
+          "status": "open",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "alice": "Your counterpart agreed. If you also accept the latest position, reply with `agreement` to close the debate."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Agreed.",
+          "sender": "alice",
+          "type": "agreement"
+        },
+        "state": {
+          "agreed": [
+            "bob",
+            "alice"
+          ],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "Use SQLite for storage\nKeep one file per project.",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Concurrent writes need WAL.",
+              "from": "bob",
+              "type": "objection"
+            },
+            {
+              "content": "Use SQLite in WAL mode",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Agreed.",
+              "from": "bob",
+              "type": "agreement"
+            },
+            {
+              "content": "Agreed.",
+              "from": "alice",
+              "type": "agreement"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 5,
+          "number": 1,
+          "outcome": "Use SQLite in WAL mode",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 3,
+          "status": "consensus",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": true,
+          "event": {
+            "kind": "debate",
+            "result": "consensus"
+          },
+          "notices": {
+            "alice": "Consensus reached: both sides explicitly agreed. The debate is closed; act on the agreed position.",
+            "bob": "Consensus reached: both sides explicitly agreed. The debate is closed; act on the agreed position."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Thanks.",
+          "sender": "bob",
+          "type": "agreement"
+        },
+        "state": {
+          "agreed": [
+            "bob",
+            "alice"
+          ],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "Use SQLite for storage\nKeep one file per project.",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Concurrent writes need WAL.",
+              "from": "bob",
+              "type": "objection"
+            },
+            {
+              "content": "Use SQLite in WAL mode",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Agreed.",
+              "from": "bob",
+              "type": "agreement"
+            },
+            {
+              "content": "Agreed.",
+              "from": "alice",
+              "type": "agreement"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 5,
+          "number": 1,
+          "outcome": "Use SQLite in WAL mode",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 3,
+          "status": "consensus",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {},
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Too late to object.",
+          "sender": "alice",
+          "type": "objection"
+        },
+        "state": {
+          "agreed": [
+            "bob",
+            "alice"
+          ],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "Use SQLite for storage\nKeep one file per project.",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Concurrent writes need WAL.",
+              "from": "bob",
+              "type": "objection"
+            },
+            {
+              "content": "Use SQLite in WAL mode",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Agreed.",
+              "from": "bob",
+              "type": "agreement"
+            },
+            {
+              "content": "Agreed.",
+              "from": "alice",
+              "type": "agreement"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 5,
+          "number": 1,
+          "outcome": "Use SQLite in WAL mode",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 3,
+          "status": "consensus",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": false,
+          "event": null,
+          "notices": {},
+          "reason": "The debate is closed (consensus). Start a new one with a `proposal` if needed."
+        }
+      },
+      {
+        "input": {
+          "content": "A new question: Postgres instead?",
+          "sender": "alice",
+          "type": "proposal"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "A new question: Postgres instead?",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 1,
+          "number": 2,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Debate round 1/3: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Is this final?",
+          "sender": "bob",
+          "type": "question"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-1",
+          "history": [
+            {
+              "content": "A new question: Postgres instead?",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Is this final?",
+              "from": "bob",
+              "type": "question"
+            }
+          ],
+          "max_rounds": 3,
+          "messages": 2,
+          "number": 2,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "Use SQLite for storage"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "alice": "Debate round 1/3: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      }
+    ]
+  },
+  "external_decision": {
+    "initial": {
+      "agreed": [],
+      "edge_id": "e-debate-5",
+      "history": [],
+      "max_rounds": 4,
+      "messages": 0,
+      "number": 1,
+      "outcome": "",
+      "participants": [
+        "alice",
+        "bob"
+      ],
+      "rounds": 0,
+      "status": "open",
+      "topic": ""
+    },
+    "steps": [
+      {
+        "input": {
+          "content": "Ship it on Friday",
+          "sender": "alice",
+          "type": "proposal"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-5",
+          "history": [
+            {
+              "content": "Ship it on Friday",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 1,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "Ship it on Friday"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Debate round 1/4: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "external_decision": "Ship it"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-5",
+          "history": [
+            {
+              "content": "Ship it on Friday",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 1,
+          "number": 1,
+          "outcome": "Ship it",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "decided",
+          "topic": "Ship it on Friday"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {},
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "external_decision": "Ship it again"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-5",
+          "history": [
+            {
+              "content": "Ship it on Friday",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 1,
+          "number": 1,
+          "outcome": "Ship it",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "decided",
+          "topic": "Ship it on Friday"
+        },
+        "verdict": {
+          "accept": false,
+          "event": null,
+          "notices": {},
+          "reason": ""
+        }
+      }
+    ]
+  },
+  "max_rounds_without_consensus": {
+    "initial": {
+      "agreed": [],
+      "edge_id": "e-debate-2",
+      "history": [],
+      "max_rounds": 2,
+      "messages": 0,
+      "number": 1,
+      "outcome": "",
+      "participants": [
+        "alice",
+        "bob"
+      ],
+      "rounds": 0,
+      "status": "open",
+      "topic": ""
+    },
+    "steps": [
+      {
+        "input": {
+          "content": "Option A",
+          "sender": "alice",
+          "type": "proposal"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-2",
+          "history": [
+            {
+              "content": "Option A",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 2,
+          "messages": 1,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "Option A"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Debate round 1/2: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "No, option B",
+          "sender": "bob",
+          "type": "objection"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-2",
+          "history": [
+            {
+              "content": "Option A",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "No, option B",
+              "from": "bob",
+              "type": "objection"
+            }
+          ],
+          "max_rounds": 2,
+          "messages": 2,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "Option A"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "alice": "Debate round 1/2: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Compromise C",
+          "sender": "alice",
+          "type": "proposal"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-2",
+          "history": [
+            {
+              "content": "Option A",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "No, option B",
+              "from": "bob",
+              "type": "objection"
+            },
+            {
+              "content": "Compromise C",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 2,
+          "messages": 3,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 2,
+          "status": "open",
+          "topic": "Option A"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Debate round 2/2: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Still no",
+          "sender": "bob",
+          "type": "objection"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-2",
+          "history": [
+            {
+              "content": "Option A",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "No, option B",
+              "from": "bob",
+              "type": "objection"
+            },
+            {
+              "content": "Compromise C",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Still no",
+              "from": "bob",
+              "type": "objection"
+            }
+          ],
+          "max_rounds": 2,
+          "messages": 4,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 2,
+          "status": "max_rounds",
+          "topic": "Option A"
+        },
+        "verdict": {
+          "accept": true,
+          "event": {
+            "kind": "debate",
+            "result": "max_rounds"
+          },
+          "notices": {
+            "alice": "The debate reached max_rounds=2 without consensus. It is now closed. Escalate (e.g. ask a moderator/manager for a decision) or proceed with the latest proposal.",
+            "bob": "The debate reached max_rounds=2 without consensus. It is now closed. Escalate (e.g. ask a moderator/manager for a decision) or proceed with the latest proposal."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Fine.",
+          "sender": "alice",
+          "type": "agreement"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-2",
+          "history": [
+            {
+              "content": "Option A",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "No, option B",
+              "from": "bob",
+              "type": "objection"
+            },
+            {
+              "content": "Compromise C",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Still no",
+              "from": "bob",
+              "type": "objection"
+            }
+          ],
+          "max_rounds": 2,
+          "messages": 4,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 2,
+          "status": "max_rounds",
+          "topic": "Option A"
+        },
+        "verdict": {
+          "accept": false,
+          "event": null,
+          "notices": {},
+          "reason": "This debate hit its round limit without consensus. Escalate to a decision-maker or accept the latest proposal via another channel."
+        }
+      }
+    ]
+  },
+  "must_open_with_proposal": {
+    "initial": {
+      "agreed": [],
+      "edge_id": "e-debate-3",
+      "history": [],
+      "max_rounds": 4,
+      "messages": 0,
+      "number": 1,
+      "outcome": "",
+      "participants": [
+        "alice",
+        "bob"
+      ],
+      "rounds": 0,
+      "status": "open",
+      "topic": ""
+    },
+    "steps": [
+      {
+        "input": {
+          "content": "Can we talk?",
+          "sender": "bob",
+          "type": "question"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-3",
+          "history": [],
+          "max_rounds": 4,
+          "messages": 0,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 0,
+          "status": "open",
+          "topic": ""
+        },
+        "verdict": {
+          "accept": false,
+          "event": null,
+          "notices": {},
+          "reason": "Open a debate with a `proposal` first."
+        }
+      },
+      {
+        "input": {
+          "content": "Start",
+          "sender": "alice",
+          "type": "proposal"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-3",
+          "history": [
+            {
+              "content": "Start",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 1,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "Start"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Debate round 1/4: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Go with A",
+          "sender": "bob",
+          "type": "decision"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-3",
+          "history": [
+            {
+              "content": "Start",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Go with A",
+              "from": "bob",
+              "type": "decision"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 2,
+          "number": 1,
+          "outcome": "Go with A",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "decided",
+          "topic": "Start"
+        },
+        "verdict": {
+          "accept": true,
+          "event": {
+            "kind": "debate",
+            "result": "decided"
+          },
+          "notices": {
+            "alice": "A decision was issued; the debate is closed.",
+            "bob": "A decision was issued; the debate is closed."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Closed now",
+          "sender": "alice",
+          "type": "objection"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-3",
+          "history": [
+            {
+              "content": "Start",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "Go with A",
+              "from": "bob",
+              "type": "decision"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 2,
+          "number": 1,
+          "outcome": "Go with A",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "decided",
+          "topic": "Start"
+        },
+        "verdict": {
+          "accept": false,
+          "event": null,
+          "notices": {},
+          "reason": "The debate is closed (decided). Start a new one with a `proposal` if needed."
+        }
+      }
+    ]
+  },
+  "one_sided_agreement_resets_on_objection": {
+    "initial": {
+      "agreed": [],
+      "edge_id": "e-debate-4",
+      "history": [],
+      "max_rounds": 4,
+      "messages": 0,
+      "number": 1,
+      "outcome": "",
+      "participants": [
+        "alice",
+        "bob"
+      ],
+      "rounds": 0,
+      "status": "open",
+      "topic": ""
+    },
+    "steps": [
+      {
+        "input": {
+          "content": "P",
+          "sender": "alice",
+          "type": "proposal"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-4",
+          "history": [
+            {
+              "content": "P",
+              "from": "alice",
+              "type": "proposal"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 1,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "P"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Debate round 1/4: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "I agree",
+          "sender": "alice",
+          "type": "agreement"
+        },
+        "state": {
+          "agreed": [
+            "alice"
+          ],
+          "edge_id": "e-debate-4",
+          "history": [
+            {
+              "content": "P",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "I agree",
+              "from": "alice",
+              "type": "agreement"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 2,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 1,
+          "status": "open",
+          "topic": "P"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "bob": "Your counterpart agreed. If you also accept the latest position, reply with `agreement` to close the debate."
+          },
+          "reason": ""
+        }
+      },
+      {
+        "input": {
+          "content": "Not yet",
+          "sender": "bob",
+          "type": "objection"
+        },
+        "state": {
+          "agreed": [],
+          "edge_id": "e-debate-4",
+          "history": [
+            {
+              "content": "P",
+              "from": "alice",
+              "type": "proposal"
+            },
+            {
+              "content": "I agree",
+              "from": "alice",
+              "type": "agreement"
+            },
+            {
+              "content": "Not yet",
+              "from": "bob",
+              "type": "objection"
+            }
+          ],
+          "max_rounds": 4,
+          "messages": 3,
+          "number": 1,
+          "outcome": "",
+          "participants": [
+            "alice",
+            "bob"
+          ],
+          "rounds": 2,
+          "status": "open",
+          "topic": "P"
+        },
+        "verdict": {
+          "accept": true,
+          "event": null,
+          "notices": {
+            "alice": "Debate round 2/4: respond with `agreement`, `objection` (with reasons) or a compromise `proposal`."
+          },
+          "reason": ""
+        }
+      }
+    ]
+  }
+}

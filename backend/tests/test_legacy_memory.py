@@ -5,11 +5,11 @@ import asyncio
 
 from sqlalchemy import select
 
-from app.core.deps import get_or_create_single_user, load_project
+from app.channels.deps import get_or_create_single_user, load_project
 from app.db.session import registry_factory
 from app.models import Agent, AgentMemory, Company, Run
 from app.models.scoped_memory import MemoryHead, MemoryRecord
-from app.services import scoped_memory as memory
+from app.capabilities.memory import scoped as memory
 from conftest import agent, make_company
 
 

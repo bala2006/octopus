@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from app.services.skills import Skill
-from app.services.skill_contracts import (
+from app.capabilities.skills.library import Skill
+from app.capabilities.skills.contracts import (
     ContractError, SkillBundle, pin_project_guidance, pin_skill_bundle, workflow_spec,
 )
 

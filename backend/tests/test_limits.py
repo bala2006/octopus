@@ -5,8 +5,8 @@ import asyncio
 import itertools
 import random
 
-from app.llm.router import set_provider_override
-from app.orchestrator.protocols import LoopDetector
+from app.capabilities.models.router import set_provider_override
+from app.workflows.protocols import LoopDetector
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status
 
 

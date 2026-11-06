@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.llm.base import LLMRequest
-from app.llm.router import set_provider_override
+from app.capabilities.models.base import LLMRequest
+from app.capabilities.models.router import set_provider_override
 from app.orchestrator import engine as E
 from app.orchestrator.context import build_system_prompt
 from conftest import NativeScriptedProvider, agent, edge, events, make_company, run_messages, start_run, wait_status

@@ -9,24 +9,25 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
-from app.core.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
-from app.models import Artifact, ChatSession, Message, Run, RunEvent, Task, User, Company
+from app.db.repositories import ArtifactRepository, ChatSessionRepository, CompanyRepository, MessageRepository, RunEventRepository, RunRepository, TaskRepository
+from app.channels.deps import ProjectCtx, current_user, get_pdb, owned_company, project_ctx
+from app.models import Artifact, ChatSession, Message, Run, RunEvent, Task, User
 from app.orchestrator.engine import ACTIVE_STATES, OPEN_TASK_STATES, ProjectRef, RunRuntime, manager
 from app.schemas import (
     ApprovalIn, ArtifactContentOut, ArtifactOut, InterjectIn, MessageOut, RevertIn, RunCreate, RunDetail, RunEventOut, RunOut,
     RunOutcome, TaskOut,
 )
-from app.orchestrator.permissions import normalize_mode
+from app.core.approval_modes import normalize_mode
 from app.services import run_attachments
-from app.services.canvas import snapshot
-from app.tools.workspace import ProjectFS, WorkspaceError
+from app.workflows.canvas import snapshot
+from app.capabilities.workspace.project_fs import ProjectFS, WorkspaceError
 from app.orchestrator.runtime_store import RuntimeStore, Conflict
-from app.orchestrator.contracts import choose_lead, route_target
-from app.orchestrator.evidence import capture_manifest, validate_evidence, RevisionEvidence
+from app.agents.chief import choose_lead, route_target
+from app.capabilities.workspace.manifests import capture_manifest
+from app.core.evidence import validate_evidence, RevisionEvidence
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -36,7 +37,7 @@ def ref(ctx: ProjectCtx) -> ProjectRef:
 
 
 async def owned_run(run_id: str, db: AsyncSession, user: User) -> Run:
-    run = await db.get(Run, run_id)
+    run = await RunRepository(db).get(run_id)
     if run is None:
         raise HTTPException(404, "Run not found")
     await owned_company(run.company_id, db, user)
@@ -52,9 +53,8 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
     company = await owned_company(body.company_id, db, user)
     if body.client_request_id:
         # Serialize initial request deduplication in the same project transaction.
-        await db.execute(update(Company).where(Company.id == company.id).values(revision=Company.revision))
-        existing = await db.scalar(select(Run).where(Run.company_id == company.id,
-            func.json_extract(Run.state_json, "$.initial_client_id") == body.client_request_id))
+        await CompanyRepository(db).bump_revision_lock(company.id)
+        existing = await RunRepository(db).by_client_request(company.id, body.client_request_id)
         if existing:
             if (existing.state_json or {}).get("initial_content_hash") != initial_hash:
                 raise HTTPException(409, "The initial request ID was already used for different content")
@@ -64,7 +64,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
             return existing
     from app.core.config import get_settings
     from app.schemas import RunModel
-    from app.services.opencode import discover
+    from app.capabilities.models.opencode import discover
     if body.budget.model is None and get_settings().default_provider == "opencode":
         body.budget.model = RunModel(provider="opencode", model=get_settings().default_model)
     if body.budget.model and body.budget.model.provider == "opencode":
@@ -79,7 +79,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
             raise HTTPException(422, "OpenCode conversations use autonomous mode with OpenCode permission requests.")
     if body.budget.model is not None and body.budget.model.provider == "azure":
         from app.db.session import registry_factory
-        from app.llm.router import allowed_models, is_configured, resolve_credentials
+        from app.capabilities.models.router import allowed_models, is_configured, resolve_credentials
 
         async with registry_factory()() as registry:
             key, base, options = await resolve_credentials(registry, user.id, "azure")
@@ -88,7 +88,7 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
         if body.budget.model.model not in allowed_models(options):
             raise HTTPException(422, "This deployment is no longer configured. Choose a model again in Model settings.")
     company = await owned_company(body.company_id, db, user)
-    from app.orchestrator.contracts import validate_reporting, choose_lead, route_target
+    from app.agents.chief import validate_reporting, choose_lead, route_target
     try:
         validate_reporting(snapshot(company)["agents"])
         lead = choose_lead(snapshot(company)["agents"])
@@ -99,12 +99,12 @@ async def create_run(body: RunCreate, db: AsyncSession = Depends(get_pdb), user:
         raise HTTPException(422, "No verified restricted worker is configured. Trusted-host execution is not a sandbox.")
     if not company.agents:
         raise HTTPException(422, "Add at least one agent to the company before running it")
-    live = (await db.execute(select(func.count()).select_from(Run).where(Run.company_id == company.id, Run.status.in_(["running", "queued"])))).scalar()
+    live = await RunRepository(db).live_count(company.id)
     if live and live >= 3:
         raise HTTPException(429, "Too many concurrent runs for this company")
     session_id = body.session_id
     if session_id:
-        s = await db.get(ChatSession, session_id)
+        s = await ChatSessionRepository(db).get(session_id)
         if s is None or s.company_id != company.id:
             raise HTTPException(422, "Invalid session")
     else:
@@ -139,8 +139,7 @@ async def run_outcomes(db: AsyncSession, run_ids: list[str]) -> dict[str, RunOut
     out = {rid: RunOutcome() for rid in run_ids}
     if not run_ids:
         return out
-    for rid, status, n in (await db.execute(select(Task.run_id, Task.status, func.count()).where(Task.run_id.in_(run_ids))
-                                            .group_by(Task.run_id, Task.status))).all():
+    for rid, status, n in await TaskRepository(db).status_counts(run_ids):
         o = out[rid]
         o.tasks_total += n
         if status == "done":
@@ -149,25 +148,20 @@ async def run_outcomes(db: AsyncSession, run_ids: list[str]) -> dict[str, RunOut
             o.tasks_open += n
             if status == "blocked":
                 o.tasks_blocked += n
-    for rid, n in (await db.execute(select(Artifact.run_id, func.count(func.distinct(Artifact.path))).where(Artifact.run_id.in_(run_ids))
-                                    .group_by(Artifact.run_id))).all():
+    for rid, n in await ArtifactRepository(db).distinct_paths_by_run(run_ids):
         out[rid].files = n
-    kind = func.json_extract(RunEvent.payload_json, "$.kind")
-    for rid, n in (await db.execute(select(RunEvent.run_id, func.count()).where(RunEvent.run_id.in_(run_ids), RunEvent.type == "error",
-                                                                              kind.in_(ERROR_KINDS)).group_by(RunEvent.run_id))).all():
+    for rid, n in await RunEventRepository(db).error_counts(run_ids, ERROR_KINDS):
         out[rid].errors = n
-    for (rid,) in (await db.execute(select(Message.run_id).where(Message.run_id.in_(run_ids), Message.type == "final_report").distinct())).all():
+    for rid in await MessageRepository(db).final_report_run_ids(run_ids):
         out[rid].final_report = True
     return out
 
 
 @router.get("", response_model=list[RunOut])
 async def list_runs(company_id: str | None = None, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[RunOut]:
-    q = select(Run).order_by(Run.created_at.desc()).limit(200)
     if company_id:
         await owned_company(company_id, db, user)
-        q = q.where(Run.company_id == company_id)
-    runs = list((await db.execute(q)).scalars().all())
+    runs = await RunRepository(db).recent(company_id)
     outcomes = await run_outcomes(db, [r.id for r in runs])
     result = []
     for r in runs:
@@ -202,7 +196,7 @@ async def delete_run(run_id: str, db: AsyncSession = Depends(get_pdb), user: Use
         raise HTTPException(409, "Stop the run before deleting it")
     await db.delete(run)
     await db.commit()
-    from app.services import browser_frames
+    from app.capabilities.browser import frames as browser_frames
 
     browser_frames.delete_run(run_id)
     run_attachments.delete_run(ctx.root, run_id)
@@ -342,7 +336,7 @@ async def execution_summary(run_id: str, ctx: ProjectCtx, run: Run) -> dict:
             item["validity"] = {"valid": False, "status": "unknown", "reasons": ["Evidence record is invalid or legacy"]}
     result.update(plan_revision=revision, manifest_hash=manifest.content_hash, manifest_complete=manifest.complete)
     if runtime:
-        result.update(engineering_checkpoints=runtime.engineering_checkpoints, engineering_blockers=runtime.engineering_blockers(),
+        result.update(engineering_checkpoints=runtime.engineering_checkpoints, engineering_blockers=runtime.execution.engineering_blockers(),
                       recovery_required=runtime.recovery_required, lead_agent_id=runtime.lead_agent_id,
                       engineering_workflow=runtime.engineering_workflow, execution_mode=runtime.budget.execution_mode)
     return result
@@ -376,7 +370,7 @@ async def recover_request(run_id: str, request_id: str, body: RequestRecovery, d
         raise HTTPException(409, str(exc)) from exc
     runtime = manager.get(run_id)
     if runtime:
-        await runtime.adopt_recovery()
+        await runtime.execution.adopt_recovery()
     if body.action == "retry":
         await manager.notify_requests(run_id, ref(ctx))
     return record
@@ -395,7 +389,7 @@ async def recover_execution(run_id: str, body: ExecutionRecovery, db: AsyncSessi
         # Stop before reconciling: adopting the cleared state can resume the loop, which must not start another turn.
         if body.action == "cancel":
             runtime.stop()
-        await runtime.adopt_recovery()
+        await runtime.execution.adopt_recovery()
         if body.action != "cancel":
             runtime.resume()
             runtime.wake.set()
@@ -415,7 +409,7 @@ async def approve(run_id: str, body: ApprovalIn, db: AsyncSession = Depends(get_
 async def events(run_id: str, after: int = 0, limit: int = Query(5000, le=20000), db: AsyncSession = Depends(get_pdb),
                  user: User = Depends(current_user)) -> list[RunEvent]:
     await owned_run(run_id, db, user)
-    return list((await db.execute(select(RunEvent).where(RunEvent.run_id == run_id, RunEvent.id > after).order_by(RunEvent.id).limit(limit))).scalars().all())
+    return await RunEventRepository(db).after(run_id, after, limit)
 
 
 @router.get("/{run_id}/messages", response_model=list[MessageOut])
@@ -423,7 +417,7 @@ async def messages(run_id: str, db: AsyncSession = Depends(get_pdb), user: User 
     await owned_run(run_id, db, user)
     out: list[Message] = []
     seen: set[str] = set()
-    for m in (await db.execute(select(Message).where(Message.run_id == run_id).order_by(Message.created_at))).scalars().all():
+    for m in await MessageRepository(db).for_run(run_id):
         group = (m.meta_json or {}).get("broadcast")
         if group:  # a message to everyone is stored once per recipient (their inboxes) but listed once, to everyone
             if group in seen:
@@ -438,7 +432,7 @@ async def messages(run_id: str, db: AsyncSession = Depends(get_pdb), user: User 
 @router.get("/{run_id}/tasks", response_model=list[TaskOut])
 async def tasks(run_id: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> list[Task]:
     await owned_run(run_id, db, user)
-    return list((await db.execute(select(Task).where(Task.run_id == run_id).order_by(Task.key))).scalars().all())
+    return await TaskRepository(db).for_run_by_key(run_id)
 
 
 @router.get("/{run_id}/report")
@@ -463,7 +457,7 @@ def _art_out(a: Artifact) -> ArtifactOut:
 async def list_artifacts(run_id: str, all_versions: bool = False, db: AsyncSession = Depends(get_pdb),
                          user: User = Depends(current_user)) -> list[ArtifactOut]:
     await owned_run(run_id, db, user)
-    rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.path, Artifact.version))).scalars().all()
+    rows = await ArtifactRepository(db).for_run_by_path(run_id)
     if not all_versions:
         latest: dict[str, Artifact] = {}
         for a in rows:
@@ -478,14 +472,12 @@ async def get_artifact(run_id: str, path: str, version: int | None = None, db: A
     """Version content. ``version=0`` returns the file as it was before the run touched it."""
     await owned_run(run_id, db, user)
     if version == 0:
-        first = (await db.execute(select(Artifact).where(Artifact.run_id == run_id, Artifact.path == path).order_by(Artifact.version).limit(1))).scalar_one_or_none()
+        first = await ArtifactRepository(db).first_version(run_id, path)
         if first is None:
             raise HTTPException(404, "Artifact not found")
         o = _art_out(first)
         return ArtifactContentOut(**{**o.model_dump(), "version": 0, "change_note": "original", "deleted": first.previous_content is None}, content=first.previous_content or "")
-    q = select(Artifact).where(Artifact.run_id == run_id, Artifact.path == path)
-    q = q.where(Artifact.version == version) if version else q.order_by(Artifact.version.desc())
-    a = (await db.execute(q.limit(1))).scalar_one_or_none()
+    a = await ArtifactRepository(db).version(run_id, path, version)
     if a is None:
         raise HTTPException(404, "Artifact not found")
     return ArtifactContentOut(**_art_out(a).model_dump(), content=a.content)
@@ -496,7 +488,7 @@ async def revert_artifact(run_id: str, body: RevertIn, db: AsyncSession = Depend
                           ctx: ProjectCtx = Depends(project_ctx)) -> dict[str, str]:
     """Restore a file in the project to an earlier version (0 = before the run). Deletes files the run created."""
     await owned_run(run_id, db, user)
-    rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id, Artifact.path == body.path).order_by(Artifact.version))).scalars().all()
+    rows = await ArtifactRepository(db).versions_of(run_id, body.path)
     if not rows:
         raise HTTPException(404, "Artifact not found")
     fs = ProjectFS(ctx.root)
@@ -525,7 +517,7 @@ async def download_zip(run_id: str, db: AsyncSession = Depends(get_pdb), user: U
                        ctx: ProjectCtx = Depends(project_ctx)) -> Response:
     """ZIP of every file the run produced (latest version) plus the run report."""
     run = await owned_run(run_id, db, user)
-    rows = (await db.execute(select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.path, Artifact.version))).scalars().all()
+    rows = await ArtifactRepository(db).for_run_by_path(run_id)
     latest: dict[str, Artifact] = {}
     for a in rows:
         latest[a.path] = a
@@ -546,7 +538,7 @@ async def download_zip(run_id: str, db: AsyncSession = Depends(get_pdb), user: U
 @router.get("/{run_id}/browser/{name}")
 async def browser_frame(run_id: str, name: str, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user)) -> Response:
     """One screenshot of an agent's browser tab (named by a browser_action event)."""
-    from app.services import browser_frames
+    from app.capabilities.browser import frames as browser_frames
 
     await owned_run(run_id, db, user)
     p = browser_frames.path(run_id, name)
@@ -573,7 +565,7 @@ async def run_attachment(run_id: str, name: str, db: AsyncSession = Depends(get_
 async def preview(run_id: str, path: str, request: Request, db: AsyncSession = Depends(get_pdb), user: User = Depends(current_user),
                   ctx: ProjectCtx = Depends(project_ctx)) -> Response:
     """Serve the project as it is on disk, for the sandboxed live preview."""
-    from app.services.preview import serve
+    from app.capabilities.workspace.preview import serve
 
     await owned_run(run_id, db, user)
     fs = ProjectFS(ctx.root)

@@ -13,7 +13,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import ProjectBase, RegistryBase, new_id, utcnow
-from app.llm.base import DEFAULT_AGENT_MAX_TOKENS
+from app.capabilities.models.base import DEFAULT_AGENT_MAX_TOKENS
 
 
 
