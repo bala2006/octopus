@@ -54,7 +54,7 @@ def evaluate(folder: Path, checks: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 async def run_case(client: httpx.AsyncClient, *, folder: Path, template: str, task: dict[str, Any], budget: dict[str, Any] | None = None,
                    timeout_s: float = 1800, path_for_api: str | None = None) -> dict[str, Any]:
-    """Run one task with one template. ``path_for_api``: the folder as the backend should see it (e.g. a laptop path in Docker)."""
+    """Run one task with one template. ``path_for_api``: the folder path the backend should use."""
     setup_project(folder, task)
     t0 = time.monotonic()
     r = await client.put("/api/v1/settings/approval-mode", json={"approval_mode": "auto"})  # benchmarks run unattended

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from app.foundation.config import get_settings
 from app.plugins.sandbox.commands import SandboxError, _resolve_exe, command_environment, parse_command, stop_process
 from app.sdk.projectfs import ProjectFS, WorkspaceError
 
@@ -60,8 +59,6 @@ class ManagedProcesses:
             return {**result, "directory": relative}
 
     async def _start(self, key: str, root: Path, command: str, *, timeout: int) -> dict:
-        if get_settings().sandbox_mode == "docker":
-            raise SandboxError("Managed processes are available in local subprocess mode. Use an external terminal or server with Docker.")
         if key in self._starting or (key in self.records and self.records[key].process.returncode is None):
             raise SandboxError(f"A {self.kind} is already running for this project. Stop it before starting another.")
         if len(self._starting) + sum(r.process.returncode is None for r in self.records.values()) >= MAX_SERVERS:

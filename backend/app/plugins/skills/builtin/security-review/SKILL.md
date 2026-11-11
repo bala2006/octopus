@@ -11,7 +11,7 @@ phases: review
 2. Cryptographic failures: TLS assumed, passwords hashed (bcrypt/argon2), no secrets in code or logs.
 3. Injection: parameterised SQL, no shell with user input, output encoding against XSS, safe templating.
 4. Insecure design: rate limits, lockouts, abuse cases from the spec.
-5. Misconfiguration: debug off, CORS restricted, security headers, default credentials gone.
+5. Misconfiguration: debug off, CORS disabled unless required (then exact origins only), security headers, default credentials gone.
 6. Vulnerable components: pinned dependencies, known CVEs (`npm audit` / `pip-audit` if available).
 7. Auth failures: session handling, token expiry, password reset flow.
 8. Integrity: unsigned updates, untrusted deserialisation.

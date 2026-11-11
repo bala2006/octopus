@@ -48,26 +48,18 @@ class Settings(BaseSettings):
     # false = always use the JSON action envelope.
     native_tools: bool = True
 
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8080"])
     rate_limit_per_minute: int = 1200
 
     # sandbox
-    sandbox_mode: str = "subprocess"  # subprocess | docker
     sandbox_timeout_s: int = 60
     sandbox_memory_mb: int = 1024
-    sandbox_docker_image: str = "python:3.11-slim"
 
-    # URL the browser uses to reach this backend (agents open project previews here); updated from real requests
-    public_url: str = "http://127.0.0.1:8000"
+    # URL the browser uses to reach this backend (agents open project previews here). The default follows the one public
+    # port and real requests refine it, so it is correct in both the single-process and the hot-reload layout.
+    public_url: str = Field(default_factory=lambda: f"http://127.0.0.1:{os.environ.get('OCTOPUS_PORT', '8000')}")
 
     # Open the operating system's folder dialog from the local backend (off for shared / remote deployments)
     native_dialogs: bool = True
-    # Docker: the laptop folder shared into the container (HOST_DIR, e.g. C:\Users\me or /Users/me) and where it is
-    # mounted (HOST_DIR_MOUNT, e.g. /host). Paths are shown and accepted as laptop paths and translated both ways.
-    host_dir: str = ""
-    host_dir_mount: str = ""
-    # The laptop-side folder-picker helper (scripts/folder_bridge.py) the browser calls when the backend has no desktop.
-    folder_bridge_url: str = "http://127.0.0.1:8765"
 
     # Built-in browser for agents: Playwright MCP, started and managed by Octopus on 127.0.0.1
     browser_enabled: bool = True

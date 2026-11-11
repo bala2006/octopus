@@ -26,4 +26,4 @@ On Windows, run `./octopus.ps1 setup`, then `./octopus.ps1 test`. Browser checks
 
 Live Azure agent quality and performance against Codex or Claude Code have not been benchmarked. These checks establish the local development workflows and regression coverage, not product parity or hosted CI results.
 
-Workspace commands stream output, accept line input, and have a one-hour limit. Managed servers are separate, persist across page navigation, and run until stopped or backend shutdown. Docker deployments cannot start these managed local processes. Full-screen terminal applications requiring a TTY still need a system terminal.
+Workspace commands stream output, accept line input, and have a one-hour limit. Managed servers are separate, persist across page navigation, and run until stopped or backend shutdown. Full-screen terminal applications requiring a TTY still need a system terminal.

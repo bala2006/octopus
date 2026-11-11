@@ -64,8 +64,7 @@ SMOKE_TEXT = "Browser ready"
 _LAUNCH_FAILURE = re.compile(r"error while loading shared libraries|exit(?:ed)?(?: with)?(?: code)?[ =:]*127|exitCode=127|"
                              r"Target page, context or browser has been closed|Failed to launch|browserType\.launch|"
                              r"Executable doesn't exist|is not installed|initializeServer", re.I)
-DEPS_HINT = ("Install Chromium's system libraries: rebuild the Octopus Docker image (it includes them), or run "
-             "`npx playwright install-deps chromium` on this machine.")
+DEPS_HINT = ("Install Chromium's system libraries: run `npx playwright install-deps chromium` on this machine.")
 
 
 def is_launch_failure(out: str) -> bool:

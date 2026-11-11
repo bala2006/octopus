@@ -1,9 +1,9 @@
 """CLI channel: the developer command line (decision D4: the dev scripts stay the CLI for now).
 
-The scripts are not moved, because the start scripts and the Makefile reference them. The start entry points are
-``start.sh``, ``start.bat``, and ``octopus.ps1`` at the repo root, plus the Makefile targets. The dev tools are in the
-repo-root ``scripts/`` folder: ``bench.py``, ``evaluate_runtime.py``, ``folder_bridge.py``, ``runtime_doctor.py``, and
-``visual/``. This module holds the manifest only and has no HTTP routes.
+``python -m app.cli`` (``backend/app/cli.py``) is the one launcher: setup, start, dev, check and test. The repo-root
+``octopus.ps1``, ``start.bat``, ``start.sh`` and the Makefile are thin shims that call it. The dev tools are in the
+repo-root ``scripts/`` folder: ``bench.py``, ``evaluate_runtime.py``, ``runtime_doctor.py``, and ``visual/``. This module
+holds the manifest only and has no HTTP routes.
 """
 from __future__ import annotations
 

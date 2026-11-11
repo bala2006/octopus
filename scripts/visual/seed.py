@@ -47,7 +47,7 @@ def app_env(home: Path, projects_root: Path) -> dict[str, str]:
     depend on the developer's shell: provider keys, Octopus overrides, browser and dialog helpers, and .env files
     (the caller also runs the backend from an empty working directory)."""
     drop = ("KEY", "TOKEN", "SECRET", "PASSWORD", "AZURE", "OPENAI", "ANTHROPIC", "GEMINI", "OLLAMA", "OCTOPUS",
-            "PLAYWRIGHT", "BROWSER", "FOLDER_BRIDGE", "HOST_DIR", "PUBLIC_URL", "OPENCODE", "DEFAULT_", "MCP_", "NATIVE_",
+            "PLAYWRIGHT", "BROWSER", "PUBLIC_URL", "OPENCODE", "DEFAULT_", "MCP_", "NATIVE_",
             "SANDBOX", "SINGLE_USER", "REGISTRY", "WORKSPACE_", "RATE_LIMIT", "LOG_")
     env = {k: v for k, v in os.environ.items() if not any(t in k.upper() for t in drop)}
     env.update({

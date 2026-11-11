@@ -1,11 +1,8 @@
 """Sandboxed command execution pinned to the project directory.
 
-Backends:
-- ``subprocess`` (default, local): no shell, scrubbed environment, POSIX rlimits (CPU, memory, file size,
-  processes), wall-clock timeout, output caps, ``cwd`` = project root. Network is disabled with
-  ``unshare -n`` when the OS allows it.
-- ``docker``: throwaway container, ``--network none``, memory/CPU/pids caps, read-only root FS,
-  project mounted at /work.
+Backend: ``subprocess`` (local): no shell, scrubbed environment, POSIX rlimits (CPU, memory, file size,
+processes), wall-clock timeout, output caps, ``cwd`` = project root. Network is disabled with
+``unshare -n`` when the OS allows it.
 
 Every approval mode uses the same rules: one allowlisted program, no shell, no network. Arguments that point outside the
 project folder are returned to the caller, which asks the user before running that command. ``.git`` and Octopus data
@@ -274,7 +271,7 @@ async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: i
         exe = [shutil.which("unshare") or "unshare", "-rn", "--", *exe]
         backend = "subprocess+netns"
     # V8 and Go reserve large virtual address ranges without using that much RAM.
-    # RLIMIT_AS prevents these runtimes from starting; Docker caps resident memory.
+    # RLIMIT_AS prevents these runtimes from starting, so they only get the wall-clock timeout.
     virtual_runtime = Path(argv[0]).name in {"node", "npm", "npx", "go", "java", "dart", "flutter"}
     preexec = _limits(memory_mb, timeout, address_space=not virtual_runtime) if os.name == "posix" else None
     try:
@@ -295,31 +292,8 @@ async def _run_subprocess(argv: list[str], cwd: Path, timeout: int, memory_mb: i
     return ExecResult(proc.returncode == 0, proc.returncode or 0, text, backend=backend)
 
 
-async def _run_docker(argv: list[str], cwd: Path, timeout: int, memory_mb: int) -> ExecResult:
-    s = get_settings()
-    local_env_args: list[str] = []
-    venv = environment_directory(cwd)
-    if venv:
-        env_rel = venv.relative_to(cwd.resolve()).as_posix()
-        local_env_args = ["-e", f"PATH=/work/{env_rel}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                          "-e", f"VIRTUAL_ENV=/work/{env_rel}"]
-    cmd = ["docker", "run", "--rm", "--network", "none", "--memory", f"{memory_mb}m", "--cpus", "1",
-           "--pids-limit", "256", "--read-only", "--tmpfs", "/tmp", *local_env_args, "-v", f"{cwd}:/work", "-w", "/work",
-           "--user", f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "1000:1000", s.sandbox_docker_image, *argv]
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-    try:
-        text = await asyncio.wait_for(bounded_output(proc), timeout=timeout + 15)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return ExecResult(False, -9, f"Timed out after {timeout}s", timed_out=True, backend="docker")
-    return ExecResult(proc.returncode == 0, proc.returncode or 0, text, backend="docker")
-
-
 async def run_command(command: str, cwd: Path, *, allow_outside: bool = False, timeout: int | None = None) -> ExecResult:
     s = get_settings()
     argv = parse_command(command, allow_outside=allow_outside)
     t = min(timeout or s.sandbox_timeout_s, s.sandbox_timeout_s)
-    if s.sandbox_mode == "docker" and shutil.which("docker"):
-        return await _run_docker(argv, cwd, t, s.sandbox_memory_mb)
     return await _run_subprocess(argv, cwd, t, s.sandbox_memory_mb)

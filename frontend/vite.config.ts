@@ -3,7 +3,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
-const API = process.env.OCTOPUS_API ?? "http://127.0.0.1:8000";
+// One public origin in every mode: this dev server owns the public port and forwards API requests to the backend's
+// internal port. `changeOrigin: false` keeps the browser's Host header, which the backend records as its public URL.
+const PORT = Number(process.env.OCTOPUS_PORT ?? 8000);
+const API = process.env.OCTOPUS_API ?? `http://127.0.0.1:${PORT + 1}`;
 
 export default defineConfig({
   plugins: [react()],
@@ -14,10 +17,14 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    host: "127.0.0.1",
+    port: PORT,
+    strictPort: true,
     proxy: {
-      "/api": { target: API, changeOrigin: true },
-      "/ws": { target: API.replace("http", "ws"), ws: true },
+      "/api": { target: API, changeOrigin: false },
+      "/ws": { target: API.replace("http", "ws"), changeOrigin: false, ws: true },
+      "/docs": { target: API, changeOrigin: false },
+      "/openapi.json": { target: API, changeOrigin: false },
     },
   },
   build: {

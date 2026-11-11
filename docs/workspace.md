@@ -65,7 +65,7 @@ For a program that asks a simple question, type into **Command input** and choos
 3. Choose **Start server**. Its live output appears below the command.
 4. Enter the address from your server output, then choose **Open preview**.
 
-One server can run per project. It stays active when you leave Workspace or switch projects. Return to the Dev server panel to see its current output or choose **Stop server**. Octopus stops managed processes when the backend shuts down. This feature uses local subprocess mode; Docker deployments can preview an externally started server.
+One server can run per project. It stays active when you leave Workspace or switch projects. Return to the Dev server panel to see its current output or choose **Stop server**. Octopus stops managed processes when the backend shuts down.
 
 Managed servers use project command permissions and the project folder. They have no interactive input. The panel keeps the latest 24,000 characters of output and indicates when older output has been removed. Start servers on a loopback address such as `127.0.0.1` for local development.
 

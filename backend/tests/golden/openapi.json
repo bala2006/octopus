@@ -1031,11 +1031,6 @@
       },
       "BrowseOut": {
         "properties": {
-          "display_path": {
-            "default": "",
-            "title": "Display Path",
-            "type": "string"
-          },
           "entries": {
             "items": {
               "$ref": "#/components/schemas/DirEntryOut"
@@ -1064,13 +1059,6 @@
               }
             ],
             "title": "Path"
-          },
-          "root_labels": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Root Labels",
-            "type": "object"
           },
           "roots": {
             "items": {
@@ -1609,11 +1597,6 @@
       },
       "DirEntryOut": {
         "properties": {
-          "display_path": {
-            "default": "",
-            "title": "Display Path",
-            "type": "string"
-          },
           "is_git": {
             "title": "Is Git",
             "type": "boolean"
@@ -2832,16 +2815,6 @@
           "available": {
             "title": "Available",
             "type": "boolean"
-          },
-          "bridge_url": {
-            "default": "",
-            "title": "Bridge Url",
-            "type": "string"
-          },
-          "host_dir": {
-            "default": "",
-            "title": "Host Dir",
-            "type": "string"
           },
           "method": {
             "default": "",
@@ -4679,10 +4652,6 @@
             "title": "Providers",
             "type": "array"
           },
-          "sandbox_mode": {
-            "title": "Sandbox Mode",
-            "type": "string"
-          },
           "single_user_mode": {
             "title": "Single User Mode",
             "type": "boolean"
@@ -4692,7 +4661,6 @@
           "single_user_mode",
           "default_provider",
           "default_model",
-          "sandbox_mode",
           "providers",
           "keys"
         ],
@@ -5278,11 +5246,6 @@
           "created_at": {
             "format": "date-time",
             "title": "Created At",
-            "type": "string"
-          },
-          "display_path": {
-            "default": "",
-            "title": "Display Path",
             "type": "string"
           },
           "existing_project": {
@@ -12328,7 +12291,7 @@
         ]
       },
       "post": {
-        "description": "Select a directory as a project. Creates ``<dir>/.octopus`` (or re-opens an existing one with all its data).\n\nIn Docker ``path`` may be a laptop path (e.g. picked with the laptop's own folder dialog); it is translated to the\nshared folder inside the container.",
+        "description": "Select a directory as a project. Creates ``<dir>/.octopus`` (or re-opens an existing one with all its data).",
         "operationId": "create_workspace_api_v1_workspaces_post",
         "requestBody": {
           "content": {

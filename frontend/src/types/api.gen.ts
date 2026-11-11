@@ -568,9 +568,6 @@ export interface paths {
         /**
          * Create Workspace
          * @description Select a directory as a project. Creates ``<dir>/.octopus`` (or re-opens an existing one with all its data).
-         *
-         *     In Docker ``path`` may be a laptop path (e.g. picked with the laptop's own folder dialog); it is translated to the
-         *     shared folder inside the container.
          */
         post: operations["create_workspace_api_v1_workspaces_post"];
         delete?: never;
@@ -2629,15 +2626,6 @@ export interface components {
             entries: components["schemas"]["DirEntryOut"][];
             /** Roots */
             roots: string[];
-            /**
-             * Display Path
-             * @default
-             */
-            display_path: string;
-            /** Root Labels */
-            root_labels?: {
-                [key: string]: string;
-            };
         };
         /** BrowserStatusOut */
         BrowserStatusOut: {
@@ -2874,11 +2862,6 @@ export interface components {
             is_project: boolean;
             /** Is Git */
             is_git: boolean;
-            /**
-             * Display Path
-             * @default
-             */
-            display_path: string;
         };
         /** Document */
         Document: {
@@ -3383,16 +3366,6 @@ export interface components {
              * @default
              */
             reason: string;
-            /**
-             * Bridge Url
-             * @default
-             */
-            bridge_url: string;
-            /**
-             * Host Dir
-             * @default
-             */
-            host_dir: string;
         };
         /** NativeOpenIn */
         NativeOpenIn: Record<string, never>;
@@ -4226,8 +4199,6 @@ export interface components {
             default_provider: string;
             /** Default Model */
             default_model: string;
-            /** Sandbox Mode */
-            sandbox_mode: string;
             /**
              * Approval Mode
              * @default ask
@@ -4494,11 +4465,6 @@ export interface components {
              * @default false
              */
             existing_project: boolean;
-            /**
-             * Display Path
-             * @default
-             */
-            display_path: string;
         };
         /** WorkspacePatch */
         WorkspacePatch: {

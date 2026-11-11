@@ -12,7 +12,7 @@ phases: build
 3. Errors are consistent JSON (`{"error": {"code", "message"}}` or the framework's standard); never leak stack traces
    or secrets. 401 vs 403 vs 404 used correctly.
 4. Security: parameterised queries only, hash passwords (bcrypt/argon2), secrets from environment, authorisation checked
-   per resource, rate limits on auth endpoints, CORS restricted.
+   per resource, rate limits on auth endpoints. Enable CORS only for supported cross-origin clients, with exact origins.
 5. Data: explicit schema/migrations, transactions for multi-step writes, indexes for lookups you query by.
 6. Tests: one happy path and the main failure paths per endpoint (pytest + test client, or the framework's equivalent).
    Run them with `run_code` and fix until green.

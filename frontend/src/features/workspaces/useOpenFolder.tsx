@@ -8,7 +8,6 @@ import { api, unwrap } from "@/lib/api";
 import { qk } from "@/hooks/queries";
 import type { WorkspaceOut } from "@/types";
 import { CreateProjectDialog, type ProjectFolder } from "./CreateProjectDialog";
-import { bridgeAvailable, bridgePick } from "./folderBridge";
 
 export function useOpenFolder() {
   const queryClient = useQueryClient();
@@ -35,7 +34,7 @@ export function useOpenFolder() {
       {
         description: workspace.existing_project
           ? "Found its .octopus folder: everything is restored."
-          : `Octopus created ${workspace.display_path || workspace.path}/.octopus for this project.`,
+          : `Octopus created ${workspace.path}/.octopus for this project.`,
       },
     );
     navigate(`/w/${workspace.id}/agent`);
@@ -60,17 +59,7 @@ export function useOpenFolder() {
       const availability = native.data ?? (await native.refetch()).data;
       if (availability?.available) {
         const picked = await unwrap(api.POST("/api/v1/fs/native/pick", {}));
-        return picked.cancelled || !picked.path
-          ? null
-          : { path: picked.path, displayPath: picked.path };
-      }
-
-      if (availability?.bridge_url) {
-        if (!(await bridgeAvailable(availability.bridge_url))) {
-          throw new Error("The local folder picker is unavailable. You can paste a folder path instead.");
-        }
-        const path = await bridgePick(availability.bridge_url);
-        return path ? { path, displayPath: path } : null;
+        return picked.cancelled || !picked.path ? null : { path: picked.path };
       }
 
       throw new Error("The local folder picker is unavailable. You can paste a folder path instead.");
@@ -86,7 +75,6 @@ export function useOpenFolder() {
       onOpenChange={setDialogOpen}
       onChooseFolder={chooseFolder}
       onCreateProject={(folder, name) => create.mutateAsync({ folder, name }).then(() => undefined)}
-      initialPath={native.data?.host_dir || undefined}
       choosingFolder={choosingFolder}
       creatingProject={create.isPending}
     />

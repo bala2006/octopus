@@ -40,7 +40,7 @@ async def get_settings_view(db: AsyncSession = Depends(get_registry_db), user: U
         providers.append(ProviderInfo(provider=name, label=info["label"], models=models, configured=is_configured(name, key, base, extra),
                                       needs_key=info["needs_key"], needs_base=info.get("needs_base", False)))
     return SettingsOut(single_user_mode=s.single_user_mode, default_provider=s.default_provider,
-                       default_model=s.default_model, sandbox_mode=s.sandbox_mode, approval_mode=normalize_mode(user.approval_mode),
+                       default_model=s.default_model, approval_mode=normalize_mode(user.approval_mode),
                        providers=providers, keys=keys)
 
 

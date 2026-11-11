@@ -219,14 +219,9 @@ async def git_status(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
 
 @router.get("/local-environment")
 async def get_local_environment(ctx: ProjectCtx = Depends(project_ctx)) -> dict:
-    from app.application import hostpaths
     from app.plugins.workspace import worktrees as local_environment
     try:
-        result = await local_environment.inspect(ctx.root)
-        for worktree in result["worktrees"]:
-            worktree["display_path"] = hostpaths.to_host(worktree["path"])
-        result["display_root"] = hostpaths.to_host(str(ctx.root))
-        return result
+        return await local_environment.inspect(ctx.root)
     except (WorkspaceError, OSError, TimeoutError) as exc:
         raise HTTPException(400, str(exc) or "Local repository settings could not be read.") from exc
 
@@ -247,7 +242,6 @@ async def switch_local_branch(body: LocalBranchIn, ctx: ProjectCtx = Depends(pro
 async def create_local_worktree(body: LocalWorktreeIn, ctx: ProjectCtx = Depends(project_ctx),
                                 db: AsyncSession = Depends(get_registry_db)) -> dict:
     from app.channels.api.routes.workspaces import _register
-    from app.application import hostpaths
     from app.plugins.workspace import git as git_review
     from app.plugins.workspace import worktrees as local_environment
     from app.application.projects import ProjectPathError, validate_project_dir
@@ -256,7 +250,7 @@ async def create_local_worktree(body: LocalWorktreeIn, ctx: ProjectCtx = Depends
             path, branch = await local_environment.create_worktree(ctx.root, body.base_branch, ctx.workspace.id)
             validate_project_dir(str(path.parent))
             opened = await _register(path, f"{ctx.workspace.name} · {branch}", db, ctx.user)
-            return {"workspace": opened, "branch": branch, "display_path": hostpaths.to_host(str(path))}
+            return {"workspace": opened, "branch": branch}
     except (WorkspaceError, ProjectPathError, OSError, TimeoutError) as exc:
         raise HTTPException(400, str(exc) or "The local worktree could not be created.") from exc
 

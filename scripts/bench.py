@@ -5,7 +5,7 @@
         --templates solo_engineer,engineer_reviewer,software_startup
 
 Each (template, task) case gets a fresh folder under --projects-root (it must be a folder the backend may open: inside
-WORKSPACE_ALLOWED_ROOTS, or inside the shared laptop folder in Docker). Results: a Markdown table on stdout and a JSON file.
+WORKSPACE_ALLOWED_ROOTS). Results: a Markdown table on stdout and a JSON file.
 """
 from __future__ import annotations
 

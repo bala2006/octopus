@@ -1,8 +1,11 @@
 """Octopus API entrypoint. Runs fully locally: ``uvicorn app.main:app`` (serves the built UI too).
 
-This file builds the app-wide pieces: the kernel, the lifespan, middleware, CORS and the error handler, and mounts the
-channel plugins. Mount order matters: a channel that requires another is mounted after it, so the web shell's catch-all
-route comes last.
+This file builds the app-wide pieces: the kernel, the lifespan, middleware, the public-URL recorder and the error
+handler, and mounts the channel plugins. Mount order matters: a channel that requires another is mounted after it, so
+the web shell's catch-all route comes last.
+
+There is no CORS: in both modes the browser only ever talks to one origin. In production uvicorn serves the built UI
+itself; in development Vite serves the UI on that same port and proxies ``/api`` and ``/ws`` here.
 """
 from __future__ import annotations
 
@@ -10,7 +13,6 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.bootstrap import build_kernel
@@ -47,12 +49,12 @@ def create_app(kernel: Kernel | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def remember_origin(request: Request, call_next):  # type: ignore[no-untyped-def]
-        # the agents' browser opens project previews on the same host:port the user's browser uses
+        # Agents open project previews on the same origin the user's browser uses. The Host header is the public one
+        # because the dev proxy forwards it unchanged (changeOrigin: false).
         host = request.headers.get("host", "")
         if request.url.path.startswith("/api/") and host.split(":")[0] in ("127.0.0.1", "localhost"):
             s.public_url = f"{request.url.scheme}://{host}"
         return await call_next(request)
-    app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
     for channel in kernel.host.active("channel"):  # dependency order: the web shell's catch-all route is added last
         mount = getattr(channel, "mount", None)

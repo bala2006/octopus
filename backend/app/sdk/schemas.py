@@ -570,7 +570,6 @@ class SettingsOut(BaseModel):
     single_user_mode: bool
     default_provider: str
     default_model: str
-    sandbox_mode: str
     approval_mode: ApprovalMode = "ask"
     providers: list[ProviderInfo]
     keys: list[ProviderKeyOut]
@@ -636,9 +635,6 @@ class NativeDialogOut(BaseModel):
     available: bool  # the backend itself can show the OS dialog (Octopus running natively on this machine)
     method: str = ""
     reason: str = ""
-    # Docker: the browser can ask the laptop-side helper (scripts/folder_bridge.py) at this URL to show the dialog
-    bridge_url: str = ""
-    host_dir: str = ""  # the laptop folder shared with the container (only folders inside it can be opened)
 
 
 class NativePickOut(BaseModel):
@@ -658,7 +654,6 @@ class WorkspaceOut(ORM):
     last_opened_at: datetime
     exists: bool = True
     existing_project: bool = False
-    display_path: str = ""  # the path as the user knows it on their laptop (differs from `path` in Docker)
 
 
 class NativeOpenOut(BaseModel):
@@ -671,7 +666,6 @@ class DirEntryOut(BaseModel):
     path: str
     is_project: bool
     is_git: bool
-    display_path: str = ""
 
 
 class BrowseOut(BaseModel):
@@ -679,8 +673,6 @@ class BrowseOut(BaseModel):
     parent: str | None
     entries: list[DirEntryOut]
     roots: list[str]
-    display_path: str = ""  # `path` as a laptop path
-    root_labels: dict[str, str] = Field(default_factory=dict)  # root → laptop path
 
 
 class MkdirIn(BaseModel):

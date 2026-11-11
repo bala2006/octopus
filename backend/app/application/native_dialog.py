@@ -7,9 +7,7 @@ reveal real paths). Every picker used here lets the user create a new folder too
 * Windows — PowerShell and the Explorer-style ``IFileOpenDialog`` in folder mode
 * Linux   — ``zenity``, ``kdialog`` or ``yad``; falls back to Tk's ``askdirectory``
 
-When no desktop is available (Docker, SSH, CI) :func:`availability` says so. With Docker, the browser then asks the
-laptop-side helper ``scripts/folder_bridge.py`` (which imports this module, so it must stay standard-library only), and
-otherwise falls back to its built-in folder browser.
+When no desktop is available (SSH, CI) :func:`availability` says so, and the UI falls back to its built-in folder browser.
 """
 from __future__ import annotations
 
@@ -62,7 +60,7 @@ def availability(enabled: bool | None = None) -> Availability:
         ps = shutil.which("powershell") or shutil.which("pwsh")
         return Availability(bool(ps), "powershell", "" if ps else "PowerShell not found")
     if not _has_display():
-        return Availability(False, reason="No desktop session (DISPLAY / WAYLAND_DISPLAY not set), e.g. Docker or SSH")
+        return Availability(False, reason="No desktop session (DISPLAY / WAYLAND_DISPLAY not set), e.g. SSH or CI")
     for tool in ("zenity", "kdialog", "yad"):
         if shutil.which(tool):
             return Availability(True, tool)

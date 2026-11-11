@@ -131,7 +131,7 @@ The Bus keeps the current event names and payloads. Topics are declared once in 
 |---|---|
 | Channels / API + WebSocket | `api/v1/*.py`, `api/ws.py`, router list in `main.py` |
 | Channels / Web shell | `frontend/`, static serving in `main.py` |
-| Channels / CLI & desktop | `scripts/*.py`, `start.sh`, `start.bat`, `octopus.ps1`, `services/native_dialog.py`, `scripts/folder_bridge.py` |
+| Channels / CLI & desktop | `scripts/*.py`, `start.sh`, `start.bat`, `octopus.ps1`, `services/native_dialog.py` |
 | Channels / Chat apps | none (placeholder) |
 | Agents / Chief orchestrator | `engine.py` (lead), `workflow.py` (head), `contracts.choose_lead` |
 | Agents / Product & architect | `prompts/roles.py`: pm, architect, techlead |
