@@ -1,3 +1,11 @@
+## Risk
+
+<!-- Tier from plan.md section 8 (P8). Unknown paths count as tier 2. Tier 2 needs a human approval. -->
+
+- [ ] Tier 0: documentation, comments, or test additions only
+- [ ] Tier 1: a change inside one plugin package, with no contract or permission change
+- [ ] Tier 2: kernel, SDK, storage or migrations, sandbox, browser, MCP, providers, secrets, CI or gate files, dependency files, golden or manifest changes, or more than one plugin package
+
 ## Summary
 
 <!-- What changed, and why? Link the relevant issue if there is one. -->
