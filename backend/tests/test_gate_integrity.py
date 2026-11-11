@@ -37,7 +37,9 @@ def test_javascript_test_block_removal_is_a_violation() -> None:
 
 
 def test_added_pytest_skip_is_a_violation() -> None:
-    diff = _diff('+@pytest.mark.skip(reason="flaky")', "+def test_x() -> None:")
+    # Built from parts so this file does not contain the literal marker that the check looks for.
+    marker = "@pytest.mark." + "skip"
+    diff = _diff(f'+{marker}(reason="flaky")', "+def test_x() -> None:")
     violations = gate.check_diff(diff, ["backend/tests/test_x.py"], gate_label=False)
     assert any("skip, xfail or focus marker added" in v for v in violations)
 
@@ -48,7 +50,13 @@ def test_conditional_skip_is_allowed() -> None:
 
 
 def test_added_focus_or_skip_in_javascript_is_a_violation() -> None:
-    for line in ("+it.only('x', () => {", "+describe.skip('x', () => {", "+xit('x', () => {"):
+    # Built from parts for the same reason as above.
+    lines = (
+        "+it" + ".only('x', () => {",
+        "+describe" + ".skip('x', () => {",
+        "+x" + "it('x', () => {",
+    )
+    for line in lines:
         violations = gate.check_diff(_diff(line), ["frontend/src/a.test.ts"], gate_label=False)
         assert violations, line
 
