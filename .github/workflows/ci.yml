@@ -125,10 +125,49 @@ jobs:
             exit 1
           fi
 
+  visual:
+    name: Visual · Windows baseline (26 gated screens)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install --upgrade pip
+          .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Install Chromium for Playwright
+        run: backend\.venv\Scripts\python.exe -m playwright install chromium
+      - name: Capture screens
+        run: backend\.venv\Scripts\python.exe scripts\visual\capture.py --out visual-run
+      - name: Compare with the committed baseline
+        run: backend\.venv\Scripts\python.exe scripts\visual\compare.py --captures visual-run --baseline scripts\visual\baseline
+      - name: Upload captures
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visual-captures
+          path: visual-run
+          retention-days: 7
+
   ci-passed:
     name: CI passed
     if: always()
-    needs: [backend, frontend, api-types]
+    needs: [backend, frontend, api-types, visual]
     runs-on: ubuntu-latest
     steps:
       - name: All required jobs succeeded

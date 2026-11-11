@@ -24,7 +24,7 @@
 /backend/tests/golden/              @bala2006
 /backend/pytest.ini                 @bala2006
 /backend/.importlinter              @bala2006
-/scripts/visual/manifest.json       @bala2006
+/scripts/visual/                      @bala2006
 /frontend/vite.config.ts            @bala2006
 /frontend/tsconfig.json             @bala2006
 

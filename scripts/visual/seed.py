@@ -59,6 +59,11 @@ def app_env(home: Path, projects_root: Path) -> dict[str, str]:
         "SINGLE_USER_MODE": "true",
         "RATE_LIMIT_PER_MINUTE": "100000",
         "LOG_LEVEL": "WARNING",
+        # The backend must see the same machine on every run. OpenCode is found through PATH and, on Windows, through
+        # %APPDATA%\npm, and its model list changes with the install. Hide both, so the screens show "not installed"
+        # on every machine, including CI.
+        "PATH": str(Path(sys.executable).parent),
+        "APPDATA": str(home / "appdata"),
     })
     return env
 
