@@ -1,6 +1,6 @@
 """Durable execution records. Existing runs and artifacts are preserved."""
 from alembic import op
-from app.models.runtime_records import RunRequest, TaskAttempt, ExecutionEvidence, Consultation
+from app.storage.models.runtime_records import RunRequest, TaskAttempt, ExecutionEvidence, Consultation
 
 revision = "0004_runtime_contracts"
 down_revision = "0003_project"

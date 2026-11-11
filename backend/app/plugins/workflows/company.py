@@ -1,0 +1,358 @@
+"""The company workflow: defined phases with owners, document handoffs and exit gates (an SOP the engine enforces).
+
+Research basis: MetaGPT (SOPs + structured documents between roles), ChatDev (design → code → test → document phases),
+AgentCoder (independent test designer feeding failures back to the programmer), MAST (most multi-agent failures are
+specification, misalignment and missing verification: fixed by structure, not prompts).
+
+Flow of a run with a workflow:
+
+1. **Intake**: the goal goes to the company head, who reads it and calls ``set_track`` (quick / standard / large, plus
+   whether research is needed). The head never retells the goal: every phase owner gets the original text and images.
+2. The engine starts each phase in order: it picks the owner (the agent whose role fits; the head can override), sends
+   the brief (goal verbatim, the documents of earlier phases by path, the phase's skill, the done-when), and waits.
+3. When the owner calls ``finish``, the phase's **gate** is checked (the document exists, the build changed and was
+   exercised, tests reported pass…). A failed gate sends the owner back once or twice with what is missing.
+4. Test or review ``finish`` with ``outcome: "fail"`` loops back to Build with the findings (at most MAX_FIX_LOOPS),
+   then Test/Review again: the AgentCoder loop.
+5. **Accept**: the head checks the result against the acceptance criteria and finishes the run.
+
+Phases without anyone suited to own them are skipped (e.g. no QA on the team: the builder's own verification counts).
+Companies run free-form when the run's ``workflow`` option is ``off`` (or ``auto`` and the team can't staff a build and
+an independent test).
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from app.sdk import actions as A
+from app.sdk.agents import AgentSpec
+from app.sdk.text import clip
+from app.plugins.workflows.director import profile_goal, quality_brief, specialist_bonus
+
+if TYPE_CHECKING:  # pragma: no cover
+    from app.sdk.run import RunContext
+
+WORK = ".octopus/work"
+MAX_GATE_BOUNCES = 2
+MAX_FIX_LOOPS = 3
+
+
+@dataclass(frozen=True)
+class Phase:
+    key: str
+    title: str
+    roles: tuple[str, ...]  # role keys that own it, best first
+    title_re: str  # fallback: role titles that fit
+    skill: str
+    doc: str = ""  # the document this phase hands over (relative path), if any
+    done_when: str = ""
+
+
+PHASES: dict[str, Phase] = {p.key: p for p in [
+    Phase("intake", "Intake", (), "", "intake-and-plan", done_when="You called set_track."),
+    Phase("research", "Research", ("researcher", "research_director", "ux_researcher", "data_analyst", "growth_analyst"),
+          r"research|analyst", "research-brief", f"{WORK}/research.md",
+          "research.md answers the open questions and ends in a recommendation with sources."),
+    Phase("spec", "Spec", ("pm", "product_manager", "head_of_product", "game_designer", "game_director"),
+          r"product|\bpm\b|game design", "write-spec", f"{WORK}/spec.md",
+          "spec.md has scope, non-goals and numbered, testable acceptance criteria."),
+    Phase("design", "Design", ("architect", "techlead", "eng_manager", "data_science_lead", "ux_designer", "designer"),
+          r"architect|tech lead|design", "technical-design", f"{WORK}/design.md",
+          "design.md maps every acceptance criterion to a file/module and says how to run and test it."),
+    Phase("build", "Build", ("fullstack_dev", "developer", "gameplay_programmer", "frontend", "backend", "mobile_dev", "data_engineer",
+                             "ml_engineer", "devops", "sre", "security_engineer"),
+          r"engineer|developer|programmer|\bdev\b|builder", "implement-feature",
+          done_when="The deliverable exists, passes the automatic checks, and you ran or opened it and saw it work."),
+    Phase("test", "Test", ("qa", "qa_engineer", "e2e_tester", "playtester", "qa_lead"), r"\bqa\b|test|quality",
+          "write-tests-from-spec", f"{WORK}/test-report.md",
+          "test-report.md lists every acceptance criterion with pass/fail and the commands or checks you ran; "
+          "finish with outcome \"pass\" or \"fail\" (failures go back to the builder)."),
+    Phase("review", "Review", ("techlead", "architect", "eng_manager", "security_lead", "qa_lead"), r"tech lead|review|architect|lead",
+          "code-review", done_when="You reviewed the change against the goal and spec and ran it; finish with outcome "
+          "\"pass\" (approve) or \"fail\" with numbered, concrete fixes."),
+    Phase("accept", "Accept", (), "", "release-checklist",
+          done_when="Every acceptance criterion is met with evidence; finish the run with what shipped and how it was verified."),
+]}
+TRACKS: dict[str, list[str]] = {
+    "quick": ["intake", "build", "test", "review", "accept"],  # review only when nobody can test
+    "standard": ["intake", "research", "spec", "design", "build", "test", "review", "accept"],
+    "large": ["intake", "research", "spec", "design", "build", "test", "review", "accept"],
+}
+TRACK_HELP = {"quick": "one coherent deliverable (a fix, a script, one page, a single-file game)",
+              "standard": "a feature or app with a few parts", "large": "several independent parts built in parallel"}
+
+
+def _fits(agent: AgentSpec, phase: Phase) -> int:
+    """How well an agent fits a phase: 2 = its role is made for it, 1 = its title matches, 0 = no."""
+    key = str(agent.behavior.get("template_key") or "")
+    if key in phase.roles:
+        return 2 + (len(phase.roles) - phase.roles.index(key)) / 100
+    if phase.title_re and re.search(phase.title_re, agent.role or "", re.I):
+        if phase.key == "build" and re.search(r"\bqa\b|test|quality", agent.role or "", re.I):
+            return 0
+        return 1
+    return 0
+
+
+def pick_owner(agents: list[AgentSpec], phase: Phase, *, exclude: set[str] = frozenset(),
+               goal: str = "") -> AgentSpec | None:  # type: ignore[assignment]
+    eligible = [(a, _fits(a, phase)) for a in agents if a.active and a.id not in exclude]
+    eligible = [(a, score) for a, score in eligible if score > 0]
+    if not eligible:
+        return None
+    return max(eligible, key=lambda item: (
+        specialist_bonus(item[0].role, str(item[0].behavior.get("template_key") or ""), phase.key, goal),
+        item[1]))[0]
+
+
+def can_staff(agents: list[AgentSpec], head: AgentSpec | None) -> bool:
+    """``auto`` turns the workflow on when the team has a builder and someone else to test or review the build."""
+    others = [a for a in agents if a.active and (head is None or a.id != head.id)]
+    builder = pick_owner(others, PHASES["build"])
+    if builder is None:
+        return False
+    return any(pick_owner(others, PHASES[k], exclude={builder.id}) for k in ("test", "review"))
+
+
+class CompanyWorkflow:
+    """Runs the company workflow for one run. ``self.rt`` is the RunContext; the state lives in ``self.rt.wf``
+    (persisted in the run state)."""
+
+    def __init__(self, rt: RunContext) -> None:
+        self.rt = rt
+
+    # ------------------------------------------------------------ state
+    def wf_active(self) -> bool:
+        return bool(self.rt.wf) and not self.rt.wf.get("ended")
+
+    def wf_phase(self) -> dict[str, Any] | None:
+        if not self.wf_active():
+            return None
+        i = self.rt.wf["index"]
+        return self.rt.wf["phases"][i] if 0 <= i < len(self.rt.wf["phases"]) else None
+
+    def wf_enabled_for_run(self) -> bool:
+        mode = getattr(self.rt.budget, "workflow", "auto")
+        if mode == "off":
+            return False
+        heads = self.rt.entry_agents()
+        if len(heads) != 1:
+            return False
+        return mode == "on" or can_staff(list(self.rt.agents.values()), self.rt.agents[heads[0]])
+
+    def wf_tool_exclusions(self, agent: AgentSpec) -> set[str]:
+        ph = self.wf_phase()
+        out = set()
+        if not (ph and ph["key"] == "intake" and agent.is_entry):
+            out.add("set_track")
+        if ph and ph["key"] != "accept" and agent.is_entry:
+            out.add("delegate")  # the engine hands work to phase owners; the head plans and accepts
+        return out
+
+    def wf_owner_of_active(self, agent_id: str) -> bool:
+        ph = self.wf_phase()
+        return bool(ph and ph["owner"] == agent_id and ph["key"] not in ("intake", "accept"))
+
+    async def wf_emit(self) -> None:
+        if self.rt.wf:
+            await self.rt.emit("workflow_updated", {"workflow": self.wf_view()})
+
+    def wf_view(self) -> dict[str, Any]:
+        w = self.rt.wf or {}
+        return {"track": w.get("track"), "index": w.get("index", 0), "ended": bool(w.get("ended")), "reason": w.get("reason", ""),
+                "phases": [{"key": p["key"], "title": PHASES[p["key"]].title, "owner": p["owner"], "status": p["status"],
+                            "loops": p.get("loops", 0), "summary": p.get("summary", "")[:300]} for p in w.get("phases", [])]}
+
+    def wf_blackboard(self) -> str:
+        if not self.rt.wf:
+            return ""
+        marks = {"done": "✓", "active": "▶", "pending": "·", "skipped": "–", "failed": "✗"}
+        rows = [f"{marks.get(p['status'], '?')} {PHASES[p['key']].title}"
+                + (f" ({self.rt.names.get(p['owner'], '?')})" if p.get("owner") else "")
+                + (f": {PHASES[p['key']].doc}" if PHASES[p["key"]].doc and p["status"] == "done" else "")
+                for p in self.rt.wf["phases"]]
+        return f"Workflow (track: {self.rt.wf.get('track') or 'choosing'}):\n" + "\n".join(f"- {r}" for r in rows)
+
+    # ------------------------------------------------------------ start
+    def wf_init(self) -> None:
+        head = self.rt.entry_agents()[0]
+        self.rt.wf = {"track": None, "index": 0, "ended": False, "reason": "",
+                   "phases": [{"key": "intake", "owner": head, "status": "active", "bounces": 0, "loops": 0, "summary": ""}]}
+
+    def wf_intake_note(self) -> str:
+        tracks = "; ".join(f"{k} = {v}" for k, v in TRACK_HELP.items())
+        profile = profile_goal(self.rt.goal)
+        hint = (f"\nTask director suggests {profile.suggested_track} ({profile.reason}); "
+                f"specialist checks: {', '.join(profile.checks) or 'standard checks'}. "
+                "Inspect the repository before deciding; override when evidence warrants it.\n")
+        return ("\n\n--- How this company works ---\nYou run the intake. Read the goal, any images and the project, then call "
+                f"`set_track` with the track ({tracks}) and whether research is needed "
+                '(JSON: {"action":"set_track","track":"quick|standard|large","research":false,"reason":"…"}). '
+                "Octopus then hands each phase (spec → design → build → test → review) to the teammate whose role fits, with this goal verbatim, and comes "
+                "back to you for acceptance. Load the `intake-and-plan` skill first. Don't delegate the phases yourself. " + hint)
+
+    async def act_set_track(self, agent: AgentSpec, a: A.SetTrack) -> None:
+        from app.plugins.workflows import workflow_actions
+        await workflow_actions.act_set_track(self.rt, agent, a)
+
+    # ------------------------------------------------------------ transitions
+    async def wf_advance(self) -> None:
+        """Move to the next phase that has an owner and brief it."""
+        w = self.rt.wf
+        i = w["index"] + 1
+        while i < len(w["phases"]) and w["phases"][i]["status"] == "skipped":
+            i += 1
+        w["index"] = i
+        if i >= len(w["phases"]):
+            w["ended"] = True
+            await self.wf_emit()
+            return
+        await self.wf_start(w["phases"][i])
+
+    async def wf_start(self, ph: dict[str, Any], *, extra: str = "") -> None:
+        ph["status"], ph["bounces"] = "active", 0
+        ph["start_versions"] = {p: v["version"] for p, v in self.rt.artifacts.items()}
+        ph["evidence_cursor"] = len(self.rt.execution_records)
+        ph["evidence_version"] = 1
+        phase = PHASES[ph["key"]]
+        owner = self.rt.agents[ph["owner"]]
+        head_id = self.rt.wf["phases"][0]["owner"]
+        await self.rt.post_message(sender="agent", from_id=head_id, to_id=owner.id, type_="task", content=self.wf_brief(ph) + extra,
+                                meta={"workflow_phase": ph["key"], "task_id": None})
+        self.rt.log(head_id, f"workflow: {phase.title} → {owner.name}")
+        await self.wf_emit()
+
+    def wf_brief(self, ph: dict[str, Any]) -> str:
+        phase = PHASES[ph["key"]]
+        docs = [f"- {PHASES[p['key']].title}: {PHASES[p['key']].doc}" for p in self.rt.wf["phases"]
+                if p["status"] == "done" and PHASES[p["key"]].doc]
+        summaries = [f"- {PHASES[p['key']].title} ({self.rt.names.get(p['owner'], '?')}): {p['summary'][:600]}" for p in self.rt.wf["phases"]
+                     if p["status"] == "done" and p.get("summary") and p["key"] != "intake"]
+        if ph["key"] == "accept":
+            lead = "All phases are done. Accept the result: check it against the goal and the acceptance criteria, with evidence."
+        else:
+            lead = f"You own the **{phase.title}** phase of this goal."
+        parts = [f"Workflow phase: {phase.title} (track {self.rt.wf['track']}). {lead}",
+                 "The goal, verbatim (attached images are shown to you as well):\n> "
+                 + clip(getattr(self.rt, "goal_content", "") or self.rt.goal, 20000).replace("\n", "\n> ")]
+        if docs:
+            parts.append("Documents from earlier phases (read them first):\n" + "\n".join(docs))
+        if summaries:
+            parts.append("What earlier phases reported:\n" + "\n".join(summaries))
+        # The authoritative product contract is shared directly, not only via paraphrased handoffs.
+        for source in (f"{WORK}/spec.md", f"{WORK}/design.md"):
+            if source == phase.doc:
+                continue
+            try:
+                contract = self.rt.fs_for(ph["owner"]).current(source)
+            except (OSError, ValueError):
+                contract = None
+            if contract:
+                parts.append(f"Shared contract ({source}):\n" + clip(contract, 2200, "read the file for more"))
+        if self.rt.decisions:
+            parts.append("Recorded decisions:\n" + "\n".join(f"- {d}" for d in self.rt.decisions[-8:]))
+        if ph["key"] in ("test", "review", "accept", "design"):
+            parts.append("Relevant specialist quality checks (supply real evidence):\n" + quality_brief(self.rt.goal))
+        if phase.doc:
+            parts.append(f"Your deliverable: `{phase.doc}`" + ("" if ph["key"] != "test" else " plus the tests themselves"))
+        parts.append(f"First load the `{phase.skill}` skill (use_skill) and follow it.")
+        parts.append(f"Done when: {phase.done_when}")
+        if ph["key"] != "accept":
+            parts.append("Then call `finish` with a short summary (what you produced, where, how you verified it). Don't ask "
+                         "teammates for specs: everything you need is in the goal and the documents above.")
+        return "\n\n".join(parts)
+
+    def wf_gate(self, agent: AgentSpec, ph: dict[str, Any], a: A.Finish) -> str | None:
+        """What's missing before this phase can close, or None."""
+        phase = PHASES[ph["key"]]
+        fs = self.rt.fs_for(agent.id)
+        if phase.doc:
+            try:
+                text = fs.current(fs.resolve(phase.doc)[0])
+            except Exception:  # noqa: BLE001
+                text = None
+            if not text or len(text.strip()) < 80:
+                return f"`{phase.doc}` doesn't exist yet (or is nearly empty): write it with write_file, following the `{phase.skill}` skill."
+            if ph["key"] == "spec" and "acceptance" not in text.lower():
+                return "spec.md has no acceptance criteria section: add numbered, testable acceptance criteria."
+        if ph["key"] == "build":
+            before = ph.get("start_versions") or {}
+            changed = [p for p, v in self.rt.artifacts.items() if not p.startswith(".octopus/") and before.get(p) != v["version"]]
+            if not changed:
+                return "Nothing was built in this phase: no project file changed. Build the deliverable, run or open it, then finish."
+        if ph["key"] in ("test", "review") and a.outcome not in ("pass", "fail"):
+            return 'Finish with outcome "pass" or "fail" and concrete evidence.'
+        if (ph["key"] in ("test", "review") and a.outcome == "pass" and self.rt.budget.verify_before_finish):
+            from app.sdk.evidence import RevisionEvidence, validate_evidence
+            current = self.rt._last_manifest
+            cursor = ph.get("evidence_cursor", 0) if ph.get("evidence_version") == 1 else 0
+            proofs = [RevisionEvidence.model_validate(raw) for raw in self.rt.execution_records[cursor:]]
+            if not current or not any(proof.producer == agent.id and validate_evidence(proof, current,
+                    task_revision=self.rt.plan_revision, environment=self.rt._proof_environment, criterion="requested_outcome").valid for proof in proofs):
+                return "No independent current execution evidence. Run covered acceptance tests or record an observed UI interaction before passing."
+        if ph["key"] == "build" and self.rt.budget.verify_before_finish and self.rt.unverified:
+            return "Built files remain unverified: " + ", ".join(sorted(self.rt.unverified)[:8])
+        return None
+
+    async def wf_on_finish(self, agent: AgentSpec, a: A.Finish) -> str | None:
+        """Called for a phase owner's finish. Returns a refusal (the owner keeps working) or None (phase closed)."""
+        ph = self.wf_phase()
+        assert ph is not None
+        why = self.wf_gate(agent, ph, a)
+        if why:
+            if ph["bounces"] < MAX_GATE_BOUNCES:
+                ph["bounces"] += 1
+                return f"Phase {PHASES[ph['key']].title} isn't done yet: {why}"
+            ph["status"] = "failed"
+            ph["summary"] = f"Unverified phase: {why}"[:2000]
+            for later in self.rt.wf["phases"][self.rt.wf["index"] + 1:]:
+                if later["key"] != "accept" and later["status"] == "pending":
+                    later["status"] = "skipped"
+            self.rt.mark_progress()
+            await self.wf_advance()
+            return None
+        ph["summary"] = (a.summary or "")[:2000]
+        if ph["key"] in ("test", "review") and a.outcome == "fail":
+            build = next((p for p in self.rt.wf["phases"] if p["key"] == "build"), None)
+            if build and build.get("loops", 0) < MAX_FIX_LOOPS:
+                build["loops"] = build.get("loops", 0) + 1
+                ph["status"] = "pending"
+                for p in self.rt.wf["phases"][self.rt.wf["phases"].index(build) + 1:]:
+                    if p["status"] == "done":
+                        p["status"] = "pending"
+                self.rt.wf["index"] = self.rt.wf["phases"].index(build)
+                self.rt.log(agent.id, f"workflow: {PHASES[ph['key']].title} failed, back to Build (fix round {build['loops']})")
+                await self.wf_start(build, extra=f"\n\n--- Fix round {build['loops']}/{MAX_FIX_LOOPS}: {PHASES[ph['key']].title} "
+                                                 f"by {agent.name} FAILED ---\n{a.summary[:4000]}\nFix every point, re-verify, then finish.")
+                return None
+            ph["status"] = "failed"
+            for later in self.rt.wf["phases"][self.rt.wf["index"] + 1:]:
+                if later["key"] != "accept" and later["status"] == "pending":
+                    later["status"] = "skipped"
+        else:
+            ph["status"] = "done"
+        self.rt.mark_progress()
+        self.rt.log(agent.id, f"workflow: {PHASES[ph['key']].title} {ph['status']}")
+        await self.wf_advance()
+        return None
+
+    async def nudge_workflow(self) -> bool:
+        """Nobody has work but the workflow isn't over: remind the active phase's owner once, then hand it to the head."""
+        ph = self.wf_phase()
+        if ph is None:
+            return False
+        if ph.get("nudged", 0) >= 2:
+            if ph["key"] in ("intake", "accept"):
+                return False
+            ph["status"] = "failed"
+            ph["summary"] = (ph.get("summary") or "") + " (stalled: the owner stopped without finishing)"
+            await self.wf_advance()
+            return True
+        ph["nudged"] = ph.get("nudged", 0) + 1
+        what = "call `set_track`" if ph["key"] == "intake" else "call `finish`"
+        self.rt.notice(ph["owner"], f"The workflow is waiting on you: phase {PHASES[ph['key']].title}. Continue the work, then {what}.",
+                    activate=True)
+        await self.rt.set_agent_status(ph["owner"], "waiting")
+        return True

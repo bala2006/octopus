@@ -11,10 +11,9 @@ type LocalEnvironment = {
   branch: string;
   branches: string[];
   dirty_count: number;
-  worktrees: { path: string; display_path: string; branch: string }[];
+  worktrees: { path: string; branch: string }[];
   environments: { id: string; label: string; path: string }[];
   selected_environment: string | null;
-  display_root: string;
 };
 
 type Selection = { newWorktree: boolean; branch: string };
@@ -22,7 +21,6 @@ type Selection = { newWorktree: boolean; branch: string };
 type WorktreeResult = {
   workspace: { id: string; name: string };
   branch: string;
-  display_path: string;
 };
 
 async function localRequest<T>(url: string, init?: RequestInit): Promise<T> {
@@ -148,7 +146,7 @@ export function LocalEnvironmentPicker({ workspaceId, value, onChange }: {
               <p className="px-1 pt-1 text-[11px] leading-relaxed text-muted-foreground">On your next message, Octopus creates a sibling worktree and a new local branch from {branch || data.branch}. Uncommitted files stay in this folder.</p>
             )}
             <div className="mt-2 border-t border-border px-1 pt-2 text-[10px] text-muted-foreground">
-              {data.worktrees.length} local worktree{data.worktrees.length === 1 ? "" : "s"} · {data.display_root}
+              {data.worktrees.length} local worktree{data.worktrees.length === 1 ? "" : "s"}
             </div>
           </div>
         )}

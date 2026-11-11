@@ -13,7 +13,8 @@ import os
 import re
 from collections.abc import AsyncIterator
 
-from app.llm.base import LLMChunk, LLMRequest, Usage, estimate_tokens
+from app.sdk.llm import LLMChunk, LLMRequest, Usage
+from app.plugins.providers.base import estimate_tokens
 from fakes.scripted_policy import decide
 
 
@@ -90,7 +91,7 @@ class FakeProvider:
                 await asyncio.sleep(delay)
         prompt_tokens = estimate_tokens("".join(m.get("content", "") for m in req.messages))
         completion_tokens = estimate_tokens(text)
-        from app.llm.pricing import apply
+        from app.plugins.providers.pricing import apply
 
         # Estimated token counts, priced like the real deployment so cost assertions stay realistic
         yield LLMChunk(usage=apply(Usage(prompt_tokens, completion_tokens, estimated=True), "gpt-6-luna"))

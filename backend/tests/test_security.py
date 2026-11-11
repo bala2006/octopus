@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from app.core.security import hash_password, verify_password
-from app.llm.router import set_provider_override
-from app.tools.sandbox import SandboxError, parse_command, run_command
-from app.tools.workspace import ProjectFS, WorkspaceError, normalize_path
+from app.foundation.security import hash_password, verify_password
+from app.plugins.providers.router import set_provider_override
+from app.plugins.sandbox.commands import SandboxError, parse_command, run_command
+from app.sdk.projectfs import ProjectFS, WorkspaceError, normalize_path
 from conftest import ScriptedProvider, agent, env, events, make_company, start_run, wait_status
 
 
@@ -88,7 +88,7 @@ def test_command_paths_cannot_bypass_checks_with_windows_separators(argument: st
 @pytest.mark.parametrize("cmd", ['node -e "const f = (a, b) => a && b || a > b; console.log(f(1, 2))"',
                                  "python3 -c 'import sys\nif 1 < 2: print(\"ok | fine; done\")'"])
 def test_operators_inside_quotes_are_not_shell_ops(cmd: str) -> None:
-    from app.tools.sandbox import shell_operators
+    from app.plugins.sandbox.commands import shell_operators
 
     assert shell_operators(cmd) == []  # the operators are data, so the only rule left is inline code, which is refused
     with pytest.raises(SandboxError, match="Inline code"):
@@ -103,7 +103,7 @@ def test_shell_operators_are_never_allowed() -> None:
 
 
 def test_unquoted_operators_detected() -> None:
-    from app.tools.sandbox import shell_operators
+    from app.plugins.sandbox.commands import shell_operators
 
     assert shell_operators("node a.js | head") == ["|"]
     assert shell_operators("echo 'a|b' \"c>d\"") == []
@@ -127,7 +127,7 @@ async def test_sandbox_runs_in_project(tmp_path: Path) -> None:
 
 
 async def test_command_output_is_bounded_and_keeps_start_and_end(tmp_path: Path) -> None:
-    from app.tools.sandbox import MAX_OUTPUT
+    from app.plugins.sandbox.commands import MAX_OUTPUT
     (tmp_path / "noisy.py").write_text("import sys\nsys.stdout.write('START\\n' + '\\u00e9' * 2000000 + '\\nEND')\n", encoding="utf-8")
     result = await run_command("python noisy.py", tmp_path)
     assert result.ok
@@ -139,7 +139,7 @@ async def test_command_output_is_bounded_and_keeps_start_and_end(tmp_path: Path)
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows batch launcher behavior")
 async def test_windows_sdk_launcher_resolves_and_preserves_quoted_arguments(tmp_path: Path, monkeypatch) -> None:
-    import app.tools.sandbox as sandbox
+    import app.plugins.sandbox.commands as sandbox
 
     launcher = tmp_path / "sdk-probe.cmd"
     launcher.write_text('@echo off\necho ARG=%~1\n')
@@ -283,8 +283,8 @@ async def test_concurrent_first_requests_share_the_single_user(tmp_path) -> None
 
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-    from app.core.deps import get_or_create_single_user
-    from app.db.migrate import upgrade_registry
+    from app.channels.deps import get_or_create_single_user
+    from app.storage.migrate import upgrade_registry
 
     url = f"sqlite+aiosqlite:///{tmp_path / 'registry.db'}"
     upgrade_registry(url)

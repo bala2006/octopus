@@ -26,7 +26,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/overlays";
 
-export type ProjectFolder = { path: string; displayPath: string };
+export type ProjectFolder = { path: string };
 
 function folderName(path: string) {
   return path.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -93,7 +93,7 @@ export function CreateProjectDialog({
         setManualPathOpen(false);
       }
     } catch {
-      setNotice("Windows folder picker is unavailable. Start Octopus with start.bat to open the native picker, or browse folders here.");
+      setNotice("The system folder picker is unavailable here. Browse folders below, or paste a folder path.");
       setBrowserOpen(true);
       setBrowsePath(initialPath);
     }
@@ -144,9 +144,9 @@ export function CreateProjectDialog({
                 <div className="create-project-folder-row">
                   <FolderOpen className="h-[18px] w-[18px] shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{folderName(folder.displayPath || folder.path)}</span>
-                    <span className="block truncate text-xs text-muted-foreground" title={folder.displayPath}>
-                      {folder.displayPath}
+                    <span className="block truncate text-sm font-medium">{folderName(folder.path)}</span>
+                    <span className="block truncate text-xs text-muted-foreground" title={folder.path}>
+                      {folder.path}
                     </span>
                   </span>
                   <Button
@@ -206,17 +206,17 @@ export function CreateProjectDialog({
                     >
                       <ArrowUp />
                     </Button>
-                    <span className="min-w-0 flex-1 truncate" title={browse.data?.display_path || "This computer"}>
-                      {browse.data?.display_path || "This computer"}
+                    <span className="min-w-0 flex-1 truncate" title={browse.data?.path || "This computer"}>
+                      {browse.data?.path || "This computer"}
                     </span>
                     {browse.data?.path && (
                       <Button
                         type="button"
                         size="xs"
                         onClick={() => {
-                          const selectedPath = browse.data?.display_path || browse.data?.path;
+                          const selectedPath = browse.data?.path;
                           if (selectedPath) {
-                            setFolder({ path: selectedPath, displayPath: selectedPath });
+                            setFolder({ path: selectedPath });
                             setBrowserOpen(false);
                             setManualPathOpen(false);
                             setError("");
@@ -248,7 +248,7 @@ export function CreateProjectDialog({
                             <Icon />
                             <span className="min-w-0 flex-1">
                               <span className="block truncate">{label}</span>
-                              <small className="block truncate">{entry.display_path || entry.path}</small>
+                              <small className="block truncate">{entry.path}</small>
                             </span>
                             {entry.is_project && <span className="create-project-browser-tag">Project</span>}
                             <ChevronRight />
@@ -287,7 +287,7 @@ export function CreateProjectDialog({
                     onClick={() => {
                       const path = manualPath.trim();
                       if (!path) return;
-                      setFolder({ path, displayPath: path });
+                      setFolder({ path });
                       setError("");
                     }}
                   >Use folder</Button>

@@ -8,11 +8,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.llm.azure_v1 import AzureV1Provider
-from app.llm.base import LLMChunk, LLMOutputTruncated, LLMRequest, Usage
-from app.llm.router import set_provider_override
-from app.orchestrator.actions import WriteFile, parse_envelope
-from app.prompts.roles import agent_from_role
+from app.plugins.providers.azure_v1 import AzureV1Provider
+from app.sdk.llm import LLMChunk, LLMOutputTruncated, LLMRequest, Usage
+from app.plugins.providers.router import set_provider_override
+from app.sdk.actions import WriteFile, parse_envelope
+from app.plugins.roles.prompts import agent_from_role
 from conftest import ScriptedProvider, agent, env, events, make_company, start_run, wait_status
 
 
@@ -83,8 +83,8 @@ async def test_agents_use_the_models_full_output_budget(client, workspace) -> No
 
 
 def test_output_cap_never_exceeds_the_model_limit() -> None:
-    from app.llm.azure_v1 import _body
-    from app.llm.base import effective_max_tokens, output_cap
+    from app.plugins.providers.azure_v1 import _body
+    from app.sdk.llm import effective_max_tokens, output_cap
 
     req = LLMRequest(provider="azure", model="gpt-6-luna", messages=[], max_tokens=128_000, extra={"reasoning_effort": "xhigh"})
     assert _body(req, "responses", set())["max_output_tokens"] == 128_000, "headroom never pushes past the model maximum"
@@ -189,7 +189,7 @@ def test_migration_upgrades_saved_default_budgets(tmp_path) -> None:
 
     from alembic import command
 
-    from app.db.migrate import _config, upgrade_project
+    from app.storage.migrate import _config, upgrade_project
 
     url = f"sqlite+aiosqlite:///{tmp_path / 'octopus.db'}"
     command.upgrade(_config("project", url), "0002_project")

@@ -1,9 +1,8 @@
-from pathlib import Path
 
 import pytest
 
-from app.orchestrator import workspaces as W
-from app.services.skill_contracts import ContractError
+from app.plugins.workspace import stages as W
+from app.sdk.contracts import ContractError
 
 
 def project(tmp_path):

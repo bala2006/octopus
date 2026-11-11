@@ -6,9 +6,9 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from app.llm.azure_v1 import AzureV1Provider, _body, _dropped
-from app.llm.base import LLMChunk, LLMRequest
-from app.llm.router import set_provider_override
+from app.plugins.providers.azure_v1 import AzureV1Provider, _body, _dropped
+from app.sdk.llm import LLMChunk, LLMRequest
+from app.plugins.providers.router import set_provider_override
 from conftest import NativeScriptedProvider, agent, events, make_company, start_run, wait_status
 
 
@@ -64,7 +64,7 @@ class ThinkingProvider(NativeScriptedProvider):
 
 
 async def test_engine_streams_and_keeps_the_thought(client, workspace) -> None:
-    from app.orchestrator.bus import EPHEMERAL
+    from app.kernel.eventlog import EPHEMERAL
 
     assert "thinking_stream" in EPHEMERAL, "live deltas aren't persisted one by one"
     set_provider_override(ThinkingProvider({"Ann": [[("finish", {"summary": "ok"})]]}))
@@ -95,7 +95,7 @@ class SlowThinker(NativeScriptedProvider):
 
 
 async def test_long_call_that_keeps_streaming_is_not_cut_off(client, workspace, monkeypatch) -> None:
-    from app.orchestrator import engine
+    from app.kernel.runtime import engine
 
     monkeypatch.setattr(engine, "LLM_IDLE_TIMEOUT_S", 0.4)
     set_provider_override(SlowThinker({"Ann": [[("finish", {"summary": "ok"})]]}, gap=0.1, chunks=10))  # ~1s in total
@@ -107,7 +107,7 @@ async def test_long_call_that_keeps_streaming_is_not_cut_off(client, workspace, 
 
 
 async def test_silent_call_times_out_with_a_clear_reason(client, workspace, monkeypatch) -> None:
-    from app.orchestrator import engine
+    from app.kernel.runtime import engine
 
     monkeypatch.setattr(engine, "LLM_IDLE_TIMEOUT_S", 0.3)
     set_provider_override(SlowThinker({"Ann": [[("finish", {"summary": "ok"})]] * 4}, gap=0.8, chunks=1))

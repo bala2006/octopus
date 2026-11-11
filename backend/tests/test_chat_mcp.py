@@ -5,11 +5,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from app.core.deps import get_or_create_single_user
-from app.db.session import registry_factory
-from app.llm.router import set_provider_override
+from app.channels.deps import get_or_create_single_user
+from app.storage.session import registry_factory
+from app.plugins.providers.router import set_provider_override
 from fakes.fake_provider import FakeProvider
-from app.services.chat import ChatConnection
+from app.application.chat import ChatConnection
 from conftest import ScriptedProvider, agent, env, events, make_company, start_run, wait_status
 
 MCP_SERVER = '''
@@ -39,7 +39,7 @@ async def test_direct_chat_stream_tool_and_regenerate(client, workspace) -> None
     cid = await make_company(client, workspace, [agent("a1", "Ava", role="CEO")], [])
     base = f"/api/v1/w/{workspace['id']}"
     s = (await client.post(f"{base}/sessions", json={"company_id": cid, "mode": "direct", "agent_id": "a1"})).json()
-    from app.core.deps import load_project
+    from app.channels.deps import load_project
 
     async with registry_factory()() as rdb:
         user = await get_or_create_single_user(rdb)

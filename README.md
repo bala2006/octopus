@@ -7,7 +7,6 @@
 
 <p align="center">
   <a href="https://github.com/bala2006/octopus/actions/workflows/ci.yml"><img src="https://github.com/bala2006/octopus/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://github.com/bala2006/octopus/actions/workflows/cd.yml"><img src="https://github.com/bala2006/octopus/actions/workflows/cd.yml/badge.svg" alt="CD"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2f855a" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/runs-locally-6B8440" alt="Runs locally">
   <img src="https://img.shields.io/badge/model-Azure%20OpenAI%20gpt--6--luna-66839A" alt="Azure OpenAI gpt-6-luna">
@@ -48,23 +47,25 @@ On **Windows**, use PowerShell from this folder:
 
 ```powershell
 .\octopus.ps1 setup       # create the Python venv and install locked frontend dependencies
-.\octopus.ps1 start       # build and serve http://127.0.0.1:8000; Ctrl+C stops it
-.\octopus.ps1 dev         # live UI updates at :5173 and backend reload at :8000
+.\octopus.ps1 start       # build when stale, then serve http://127.0.0.1:8000; Ctrl+C stops it
+.\octopus.ps1 dev         # same URL, hot reload (UI patches live, backend restarts)
 .\octopus.ps1 check       # inspect installed prerequisites without installing anything
 .\octopus.ps1 test        # backend and frontend checks
 ```
 
-If PowerShell blocks a downloaded script, run it with `powershell -ExecutionPolicy Bypass -File .\octopus.ps1 setup`. To use a particular Python installation, add `-Python C:\path\to\python.exe`. Subsequent starts can use `-SkipBuild` until you change frontend code. Use `-Port 8001` when port 8000 is already occupied.
+If PowerShell blocks a downloaded script, run it with `powershell -ExecutionPolicy Bypass -File .\octopus.ps1 setup`. To use a particular Python installation, add `-Python C:\path\to\python.exe`. `start` rebuilds the UI only when a frontend file is newer than the build; `-SkipBuild` forces it to use the existing build. Use `-Port 8001`, or set `OCTOPUS_PORT`, when port 8000 is already occupied.
 
 On **macOS or Linux**:
 
 ```bash
 cp .env.example .env        # optional: Azure endpoint and key
 make setup                  # backend venv + frontend deps
-make start                  # build the UI and serve everything on http://localhost:8000
-# or, for development with hot reload:
-make dev                    # API :8000 (docs at /docs) + UI :5173
+make start                  # build when stale, then serve http://127.0.0.1:8000
+# or, for development with hot reload on the same URL:
+make dev                    # UI + API on http://127.0.0.1:8000
 ```
+
+Every mode has **one address**: `http://127.0.0.1:8000`. In development Vite serves the UI on that port and forwards `/api`, `/ws` and `/docs` to the backend on the next free port (8001 unless something else is using it), so hot reload works without a second URL to remember. In production the backend serves the built UI itself. `start.sh`, `start.bat` and the Makefile all call the same launcher, `python -m app.cli`.
 
 1. **Open project folder** and pick or create a folder in the dialog that opens.
 2. **Create company** and choose a template, for example *Software Startup*.
@@ -77,7 +78,7 @@ Octopus starts the OpenCode already installed on the backend computer using its 
 
 The model picker lists models reported by `opencode models`. **OpenCode default** uses the model configured in OpenCode; selecting a specific model applies it to that conversation. Messages and follow-ups share a persisted OpenCode session, and responses stream into Octopus. Stop terminates the backend-owned process. Token usage feeds the personal Activity dashboard.
 
-Run the backend natively on the computer with OpenCode installed. A Docker container cannot execute a Windows or macOS host installation. If PATH discovery fails, set `OPENCODE_EXECUTABLE` in `.env` to the absolute path of the existing executable. Model settings shows connection status and the resolved executable. This host integration is available in local single-user mode. OpenCode's own tools and permission rules apply; its execution is outside Octopus's agent command sandbox. Read-only and plan conversations select OpenCode's plan agent.
+Run the backend on the computer with OpenCode installed: Octopus executes that local installation. If PATH discovery fails, set `OPENCODE_EXECUTABLE` in `.env` to the absolute path of the existing executable. Model settings shows connection status and the resolved executable. This host integration is available in local single-user mode. OpenCode's own tools and permission rules apply; its execution is outside Octopus's agent command sandbox. Read-only and plan conversations select OpenCode's plan agent.
 
 ## Configuration
 
@@ -111,33 +112,11 @@ Octopus starts `@playwright/mcp` on `127.0.0.1` the first time an agent needs a 
 |---|---|---|
 | `AZURE_API_BASE`, `AZURE_API_KEY` | – | Azure endpoint and key (the Settings page wins) |
 | `DEFAULT_MODEL` | `gpt-6-luna` | Deployment for new agents |
+| `OCTOPUS_PORT` | `8000` | The one public port (dev: Vite; production: uvicorn) |
+| `OCTOPUS_SKIP_BUILD` | `false` | Use the existing UI build instead of rebuilding it |
 | `NATIVE_DIALOGS` | `true` | Use the OS folder dialog (off: the in-app browser) |
 | `BROWSER_ENABLED`, `PLAYWRIGHT_BROWSER`, `PLAYWRIGHT_HEADLESS` | `true`, auto, `true` | Agents' built-in browser |
-| `SANDBOX_MODE` | `subprocess` | Use `docker` for container isolation of commands |
 | `WORKSPACE_ALLOWED_ROOTS` | home, `/projects` | Folders the in-app browser may show |
-
-### Docker (optional, still local)
-
-```bash
-./start.sh        # macOS / Linux      UI: http://localhost:8080
-start.bat         # Windows
-```
-
-A container can't open your laptop's folder dialog and can only see folders shared with it. The start scripts handle
-both:
-
-- **Your laptop folders.** `OCTOPUS_HOST_DIR` (default: your home folder) is shared with the container at `/host`, so
-  any folder inside it can be opened as a project. Paths are shown, and can be pasted, as laptop paths
-  (`C:\Users\me\code\game`). To share less, set e.g. `OCTOPUS_HOST_DIR=C:\Users\me\code` before starting.
-  Whatever you share is reachable from inside the container, so share only what Octopus should see.
-- **Your system folder dialog.** They also start `scripts/folder_bridge.py` on the laptop (Python 3.9+, standard library
-  only). On Windows, `start.bat` checks PATH and then `%USERPROFILE%\py313\python.exe`. The Add button opens the native
-  Explorer-style folder picker, and the folder you pick opens through the shared folder. It listens on
-  `127.0.0.1:8765` and only answers the Octopus UI. Without Python you get the in-app browser,
-  which browses the shared folder.
-
-Plain `docker compose up --build` works too; you just get the in-app browser instead of the system dialog. Running
-natively (`make setup && make start`) needs neither: the backend opens the dialog itself.
 
 ### Benchmark templates
 
@@ -162,10 +141,11 @@ flowchart LR
   subgraph API["FastAPI (local)"]
     REST["REST /api/v1<br/>(OpenAPI → TS types)"]
     WS["WebSockets<br/>runs · chats"]
-    ORC["Orchestrator<br/>one runtime per run"]
-    BUS["Event bus<br/>persist + fan-out"]
+    ORC["Kernel<br/>one runtime per run"]
+    BUS["Event log<br/>group commit + fan-out"]
+    PLG["Plugins<br/>providers · tools · workflows · roles"]
     LLM["Azure OpenAI v1"]
-    TOOLS["Tools<br/>files · sandbox · MCP · browser"]
+    TOOLS["Tool plugins<br/>files · sandbox · MCP · browser"]
   end
   PW["Playwright MCP<br/>127.0.0.1"]
   REG[("~/.octopus/registry.db<br/>keys · MCP · projects")]
@@ -176,17 +156,18 @@ flowchart LR
   REST --> ORC
   WS <--> BUS
   ORC --> BUS --> PDB
-  ORC --> LLM
-  ORC --> TOOLS --> DIR
+  ORC --> PLG
+  PLG --> LLM
+  PLG --> TOOLS --> DIR
   TOOLS --> PW
   REST --> REG & PDB
 ```
 
-Agents reply with a validated JSON action schema. The server only delivers messages along channels, and every action goes through the permission gate. Details (the orchestrator loop, protocols, continuation, pricing and the security model) are in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+Agents reply with a validated JSON action schema. The server only delivers messages along channels, and every action goes through the permission gate. Octopus is a small kernel plus plugins; each one can be switched off in **Settings → Plugins**. Details (the kernel, the plugin host, the run loop, protocols, the event log and the security model) are in **[ARCHITECTURE.md](ARCHITECTURE.md)**, and the guide for writing a plugin is **[docs/plugins.md](docs/plugins.md)**.
 
 ```
 octopus/
-├─ backend/app/{api,core,db,models,schemas,services,orchestrator,llm,tools,prompts}
+├─ backend/app/{sdk,foundation,storage,kernel,plugins,application,channels}   main.py and bootstrap.py compose them
 │  ├─ migrations/{registry,project}   Alembic (applied automatically)
 │  └─ tests/                          pytest: routing, protocols, limits, security, MCP, teams, scripted company runs, continuation
 ├─ frontend/src/{components,features/{canvas,chat,runs,artifacts,settings,workspaces,guide,onboarding},hooks,stores,lib,types}
@@ -196,7 +177,8 @@ octopus/
 ## Development
 
 ```bash
-make test-backend     # pytest (68 tests)
+make test-backend     # pytest
+make lint-arch        # import-linter: layers and plugin independence
 make test-frontend    # tsc strict + vitest
 make gen-api          # regenerate the typed API client after changing backend schemas
 ```
@@ -205,13 +187,8 @@ make gen-api          # regenerate the typed API client after changing backend s
 - backend lint and tests
 - frontend typecheck, unit tests and build
 - a check that the generated API types are up to date
-- Docker builds
 
 Require the **CI passed** check on `main`.
-
-**CD** (`.github/workflows/cd.yml`) publishes `ghcr.io/bala2006/octopus-{backend,frontend}`:
-- `main` and `sha-<commit>` after CI passes on `main`
-- `X.Y.Z`, `X.Y` and `latest` for `vX.Y.Z` tags
 
 Dependabot keeps actions and dependencies up to date.
 
@@ -233,13 +210,13 @@ The doodle octopus lives in [`docs/brand/`](docs/brand): `logo.svg` (full), `log
 
 - **Execution boundary.** The desktop worker runs in trusted-host mode. Filesystem tools enforce project paths, but an unrestricted host command or inherited OpenCode integration is not contained by those application checks. Restricted execution is rejected until an enforceable runner is configured. Staging folders separate cooperative edits; they are not OS sandboxes.
 - **File access.** Octopus file tools reject absolute paths, `..` and symlinks that escape the folder on real paths. `.octopus/` and `.git/` are off-limits except `.octopus/work/`, where agents keep their working documents. Secret-looking filenames are blocked outside danger mode.
-- **Agent commands.** They run without a shell, with a scrubbed environment, bounded output, and a timeout. POSIX also applies CPU, file-size, and process limits. Address-space limits apply to compatible runtimes; Node, Go, Java, Dart, and Flutter are exempt because their large virtual reservations prevent startup under that limit. Network is disabled with `unshare -n` where available. An allowlist applies outside danger mode; `SANDBOX_MODE=docker` supplies container isolation and memory limits.
-- **Workspace commands and servers.** These start only from explicit user actions and run as local processes. They keep your user home and SDK path settings so Git identity, package configuration, and SDK discovery work, while omitting provider keys from the environment. They retain command restrictions, bounded live output, and owned-process start/stop controls. They can access the network for package installs and development servers; these managed processes require subprocess mode.
+- **Agent commands.** They run without a shell, with a scrubbed environment, bounded output, and a timeout. POSIX also applies CPU, file-size, and process limits. Address-space limits apply to compatible runtimes; Node, Go, Java, Dart, and Flutter are exempt because their large virtual reservations prevent startup under that limit. Network is disabled with `unshare -n` where available. An allowlist applies outside danger mode.
+- **Workspace commands and servers.** These start only from explicit user actions and run as local processes. They keep your user home and SDK path settings so Git identity, package configuration, and SDK discovery work, while omitting provider keys from the environment. They retain command restrictions, bounded live output, and owned-process start/stop controls. They can access the network for package installs and development servers.
 - **Folder dialog.** It only opens for browsers on the same machine. The backend registers the chosen folder itself, so the browser never sends a path.
 - **Preview.** Project previews run in a CSP sandbox with an opaque origin and no access to the Octopus API.
 - **Browser.** The agents' browser uses an isolated, in-memory profile, so none of your cookies or logins.
 - **MCP.** stdio MCP servers run commands **you** configure (`MCP_ALLOW_STDIO=false` disables them).
-- **API.** It binds to `127.0.0.1`, with rate limiting, strict CORS and Pydantic validation. Single-user mode is on by default; set `SINGLE_USER_MODE=false` for JWT login.
+- **API.** It binds to `127.0.0.1`, serves the UI and API from one origin, and uses rate limiting and Pydantic validation. No cross-origin access is enabled. Single-user mode is on by default; set `SINGLE_USER_MODE=false` for JWT login.
 
 ## Agent workflows and memory
 

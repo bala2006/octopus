@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.tools.workspace import MAX_FILE_BYTES, ProjectFS, WorkspaceError
+from app.sdk.projectfs import MAX_FILE_BYTES, ProjectFS, WorkspaceError
 
 
 @pytest.mark.asyncio

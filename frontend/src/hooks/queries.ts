@@ -52,6 +52,7 @@ export const useCanvas = (w: string, c: string) =>
 export const useTemplates = () => useQuery({ queryKey: ["templates"], staleTime: Infinity, queryFn: () => unwrap(api.GET("/api/v1/templates")) });
 export const useRoleTemplates = () => useQuery({ queryKey: ["roles"], staleTime: Infinity, queryFn: () => unwrap(api.GET("/api/v1/templates/roles")) });
 export const useSkills = () => useQuery({ queryKey: ["skills"], staleTime: 60_000, queryFn: () => unwrap(api.GET("/api/v1/skills")) });
+export const usePlugins = () => useQuery({ queryKey: ["plugins"], staleTime: 10_000, queryFn: () => unwrap(api.GET("/api/v1/plugins")) });
 
 export const useSessions = (w: string, c: string) =>
   useQuery({ queryKey: qk.sessions(w, c), enabled: !!w && !!c, queryFn: () => unwrap(api.GET("/api/v1/w/{workspace_id}/sessions", { params: { path: { workspace_id: w }, query: { company_id: c } } })) });

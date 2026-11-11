@@ -1,5 +1,5 @@
-from app.llm import router
-from app.llm.router import set_provider_override
+from app.plugins.providers import router
+from app.plugins.providers.router import set_provider_override
 from conftest import ScriptedProvider, agent, make_company, start_run, wait_status
 
 

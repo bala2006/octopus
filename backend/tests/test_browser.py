@@ -1,12 +1,11 @@
 """Built-in browser health is honest: "ready" means a browser launched, failures degrade it with a diagnosis (issue #30)."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app.services import browser as B
+from app.plugins.browser import service as B
 
 # What Playwright MCP returned in the reported container (abridged): the cause is buried under Chromium's command line.
 LAUNCH_FAILURE = """### Error: async initializeServer: Target page, context or browser has been closed
@@ -113,11 +112,3 @@ async def test_recheck_recovers_after_the_environment_is_fixed(svc) -> None:  # 
 async def test_status_endpoint_separates_server_from_browser_health(client) -> None:
     body = (await client.get("/api/v1/settings/browser")).json()
     assert {"status", "verified", "error", "tools"} <= set(body)
-
-
-def test_docker_image_installs_chromium_system_libraries() -> None:
-    """The backend image must carry the libraries Chromium links against, and a Node that Playwright supports."""
-    dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text()
-    for lib in ("libglib2.0-0", "libnss3", "libgbm1", "libatk-bridge2.0-0", "libxkbcommon0", "libasound2"):
-        assert lib in dockerfile, lib
-    assert "FROM node:22" in dockerfile and "nodejs npm" not in dockerfile

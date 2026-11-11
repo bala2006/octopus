@@ -1,0 +1,893 @@
+{
+  "infer_verdict": {
+    "Approved": "approve",
+    "Changes requested: fix the tests": "request_changes",
+    "I have a few thoughts": "request_changes",
+    "LGTM": "approve",
+    "Rejected": "request_changes",
+    "The code is fine.": "request_changes",
+    "looks good to me": "approve",
+    "needs work": "request_changes",
+    "not approved yet": "request_changes"
+  },
+  "scenarios": {
+    "approve_first_time": {
+      "initial": {
+        "author": "dev",
+        "cycles": 0,
+        "edge_id": "e-review-1",
+        "history": [],
+        "max_revisions": 3,
+        "reviewer": "qa",
+        "revisions": 0,
+        "status": "idle"
+      },
+      "steps": [
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [
+              "Looks good"
+            ],
+            "op": "result",
+            "verdict": "approve"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "Looks good"
+                ],
+                "event": "review_result",
+                "verdict": "approve"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "approved"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "approved"
+            },
+            "notices": {
+              "dev": "Your change was APPROVED. Proceed to the next step (e.g. hand off to QA)."
+            },
+            "reason": ""
+          }
+        }
+      ]
+    },
+    "changes_then_approve": {
+      "initial": {
+        "author": "dev",
+        "cycles": 0,
+        "edge_id": "e-review-1",
+        "history": [],
+        "max_revisions": 3,
+        "reviewer": "qa",
+        "revisions": 0,
+        "status": "idle"
+      },
+      "steps": [
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [
+              "Add tests",
+              "Fix the typo"
+            ],
+            "op": "result",
+            "verdict": "request_changes"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "Add tests",
+                  "Fix the typo"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 1,
+            "status": "changes_requested"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "changes_requested"
+            },
+            "notices": {
+              "dev": "Changes requested (revision 1/3). Address every comment, then send a new review_request."
+            },
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "Add tests",
+                  "Fix the typo"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              },
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 1,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [],
+            "op": "result",
+            "verdict": "approve"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "Add tests",
+                  "Fix the typo"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              },
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [],
+                "event": "review_result",
+                "verdict": "approve"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 1,
+            "status": "approved"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "approved"
+            },
+            "notices": {
+              "dev": "Your change was APPROVED. Proceed to the next step (e.g. hand off to QA)."
+            },
+            "reason": ""
+          }
+        }
+      ]
+    },
+    "duplicate_request_while_pending": {
+      "initial": {
+        "author": "dev",
+        "cycles": 0,
+        "edge_id": "e-review-1",
+        "history": [],
+        "max_revisions": 3,
+        "reviewer": "qa",
+        "revisions": 0,
+        "status": "idle"
+      },
+      "steps": [
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": null,
+            "notices": {
+              "dev": "A review is already pending; wait for the result instead of re-requesting."
+            },
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [],
+            "op": "result",
+            "verdict": "approve"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [],
+                "event": "review_result",
+                "verdict": "approve"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "approved"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "approved"
+            },
+            "notices": {
+              "dev": "Your change was APPROVED. Proceed to the next step (e.g. hand off to QA)."
+            },
+            "reason": ""
+          }
+        }
+      ]
+    },
+    "max_revisions": {
+      "initial": {
+        "author": "dev",
+        "cycles": 0,
+        "edge_id": "e-review-1",
+        "history": [],
+        "max_revisions": 2,
+        "reviewer": "qa",
+        "revisions": 0,
+        "status": "idle"
+      },
+      "steps": [
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 2,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [
+              "A"
+            ],
+            "op": "result",
+            "verdict": "request_changes"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "A"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              }
+            ],
+            "max_revisions": 2,
+            "reviewer": "qa",
+            "revisions": 1,
+            "status": "changes_requested"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "changes_requested"
+            },
+            "notices": {
+              "dev": "Changes requested (revision 1/2). Address every comment, then send a new review_request."
+            },
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "A"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              },
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 2,
+            "reviewer": "qa",
+            "revisions": 1,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [
+              "B"
+            ],
+            "op": "result",
+            "verdict": "request_changes"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "A"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              },
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "B"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              }
+            ],
+            "max_revisions": 2,
+            "reviewer": "qa",
+            "revisions": 2,
+            "status": "max_revisions"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "max_revisions"
+            },
+            "notices": {
+              "dev": "Review reached max_revisions=2. Treat the current version as accepted with outstanding comments, record them, and move on.",
+              "qa": "Review reached max_revisions=2. Treat the current version as accepted with outstanding comments, record them, and move on."
+            },
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "A"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              },
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "B"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              }
+            ],
+            "max_revisions": 2,
+            "reviewer": "qa",
+            "revisions": 2,
+            "status": "max_revisions"
+          },
+          "verdict": {
+            "accept": false,
+            "event": null,
+            "notices": {},
+            "reason": "Max revisions already reached for this review; proceed with the last version or escalate."
+          }
+        }
+      ]
+    },
+    "new_cycle_after_approval": {
+      "initial": {
+        "author": "dev",
+        "cycles": 0,
+        "edge_id": "e-review-1",
+        "history": [],
+        "max_revisions": 3,
+        "reviewer": "qa",
+        "revisions": 0,
+        "status": "idle"
+      },
+      "steps": [
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [],
+            "op": "result",
+            "verdict": "approve"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [],
+                "event": "review_result",
+                "verdict": "approve"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "approved"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "approved"
+            },
+            "notices": {
+              "dev": "Your change was APPROVED. Proceed to the next step (e.g. hand off to QA)."
+            },
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 1,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [],
+                "event": "review_result",
+                "verdict": "approve"
+              },
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [
+              "Rename"
+            ],
+            "op": "result",
+            "verdict": "request_changes"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 1,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [],
+                "event": "review_result",
+                "verdict": "approve"
+              },
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "Rename"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 1,
+            "status": "changes_requested"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "changes_requested"
+            },
+            "notices": {
+              "dev": "Changes requested (revision 1/3). Address every comment, then send a new review_request."
+            },
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "op": "request"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 1,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [],
+                "event": "review_result",
+                "verdict": "approve"
+              },
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "Rename"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              },
+              {
+                "event": "review_request"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 1,
+            "status": "pending"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "requested"
+            },
+            "notices": {},
+            "reason": ""
+          }
+        },
+        {
+          "input": {
+            "comments": [],
+            "op": "result",
+            "verdict": "approve"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 1,
+            "edge_id": "e-review-1",
+            "history": [
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [],
+                "event": "review_result",
+                "verdict": "approve"
+              },
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [
+                  "Rename"
+                ],
+                "event": "review_result",
+                "verdict": "request_changes"
+              },
+              {
+                "event": "review_request"
+              },
+              {
+                "comments": [],
+                "event": "review_result",
+                "verdict": "approve"
+              }
+            ],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 1,
+            "status": "approved"
+          },
+          "verdict": {
+            "accept": true,
+            "event": {
+              "kind": "review",
+              "result": "approved"
+            },
+            "notices": {
+              "dev": "Your change was APPROVED. Proceed to the next step (e.g. hand off to QA)."
+            },
+            "reason": ""
+          }
+        }
+      ]
+    },
+    "result_without_request": {
+      "initial": {
+        "author": "dev",
+        "cycles": 0,
+        "edge_id": "e-review-1",
+        "history": [],
+        "max_revisions": 3,
+        "reviewer": "qa",
+        "revisions": 0,
+        "status": "idle"
+      },
+      "steps": [
+        {
+          "input": {
+            "comments": [],
+            "op": "result",
+            "verdict": "approve"
+          },
+          "state": {
+            "author": "dev",
+            "cycles": 0,
+            "edge_id": "e-review-1",
+            "history": [],
+            "max_revisions": 3,
+            "reviewer": "qa",
+            "revisions": 0,
+            "status": "idle"
+          },
+          "verdict": {
+            "accept": false,
+            "event": null,
+            "notices": {},
+            "reason": "There is no pending review request from this author to respond to."
+          }
+        }
+      ]
+    }
+  }
+}

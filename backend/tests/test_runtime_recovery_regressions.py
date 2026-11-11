@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import io
 import zipfile
-from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -13,16 +12,18 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.db.base import ProjectBase
-from app.db.session import make_engine
-from app.models import Agent, Artifact, Company, Run, RunEvent
-from app.orchestrator import actions as A
-from app.orchestrator import opencode as adapter
-from app.orchestrator.contracts import Assignment, ExecutionPolicy
-from app.orchestrator.engine import ProjectRef, RunRuntime, manager
-from app.orchestrator.execution import ACTIVE_ATTEMPT, AttemptContext
-from app.services import opencode
-from app.services.scoped_memory import Actor, MemoryDenied, Target, get, owner_put, put
+from app.storage.base import ProjectBase
+from app.storage.session import make_engine
+from app.storage.models import Agent, Artifact, Company, Run, RunEvent
+from app.sdk import actions as A
+from app.plugins.providers import opencode_turn as adapter
+from app.sdk.contracts import Assignment, ExecutionPolicy
+from app.kernel.run_manager import ProjectRef
+from app.kernel.runtime.engine import RunRuntime
+from app.kernel.current import current
+from app.sdk.execution_contracts import ACTIVE_ATTEMPT, AttemptContext
+from app.plugins.providers import opencode
+from app.plugins.memory.scoped import Actor, MemoryDenied, Target, get, owner_put, put
 from conftest import agent, make_company, start_run, wait_status
 
 
@@ -110,7 +111,7 @@ async def test_chat_memory_rejects_active_company_agent_outside_run_snapshot(ins
 
 @pytest.mark.parametrize("deletion", [False, True])
 async def test_stage_terminal_results_publish_canonical_content_and_original_history(inspection_runtime, monkeypatch, deletion):
-    from app.api.v1 import runs
+    from app.channels.api.routes import runs
     runtime = inspection_runtime
     if deletion:
         program = "from pathlib import Path\nPath('app.py').unlink()\n"
@@ -123,7 +124,7 @@ async def test_stage_terminal_results_publish_canonical_content_and_original_his
             await runtime.execute(worker, A.WriteFile(action="write_file", path="app.py", content="VALUE = 2\n"))
         await runtime.execute(worker, A.RunCode(action="run_code", command="python mutate.py"))
     monkeypatch.setattr(runtime, "_turn", turn)
-    await runtime.owned_turn("reviewer")
+    await runtime.execution.owned_turn("reviewer")
     async with runtime.db() as db:
         versions = (await db.scalars(select(Artifact).where(Artifact.run_id == "run", Artifact.path == "app.py")
                                     .order_by(Artifact.version))).all()
@@ -131,7 +132,7 @@ async def test_stage_terminal_results_publish_canonical_content_and_original_his
         assert versions[0].previous_content == "VALUE = 1\n"
         assert versions[0].content == ("" if deletion else "VALUE = 3\n")
         assert versions[0].deleted is deletion
-        from app.services.report import build_report
+        from app.plugins.observers.report import build_report
         report = await build_report("run", runtime.sf)
         assert ("| deleted |" in report) is deletion
         user = SimpleNamespace(id="owner")
@@ -164,7 +165,7 @@ async def test_post_integration_command_can_verify_deleted_file_absence(inspecti
     async def turn(aid):
         await runtime.execute(runtime.agents[aid], A.RunCode(action="run_code", command="python remove.py"))
     monkeypatch.setattr(runtime, "_turn", turn)
-    await runtime.owned_turn("reviewer")
+    await runtime.execution.owned_turn("reviewer")
     assert "app.py" in runtime.unverified
     await execute(runtime, "lead", A.RunCode(action="run_code", command="python -m unittest test_absence",
                   covered_paths=["app.py", "test_absence.py"], criterion_ids=["requested_outcome"]))
@@ -235,7 +236,7 @@ async def test_acknowledged_request_retry_resumes_and_starts_fresh_opencode_sess
     request_id = queued.json()["id"]
     paused = await wait_status(client, workspace, run["id"], statuses={"paused"}, timeout=15)
     assert paused["state"]["recovery_required"]
-    runtime = manager.get(run["id"])
+    runtime = current().runs.get(run["id"])
     assert runtime.paused
     old_session = runtime.worker_sessions["lead"]["session_id"]
     for _ in range(150):

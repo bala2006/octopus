@@ -6,11 +6,11 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from app.llm.base import LLMChunk, LLMRequest
-from app.llm.router import set_provider_override
+from app.sdk.llm import LLMChunk, LLMRequest
+from app.plugins.providers.router import set_provider_override
 from fakes.fake_provider import FakeProvider
-from app.tools.workspace import ProjectFS
-from conftest import NativeScriptedProvider, ScriptedProvider, agent, edge, env, events, make_company, run_messages, start_run, wait_status
+from app.sdk.projectfs import ProjectFS
+from conftest import NativeScriptedProvider, ScriptedProvider, agent, edge, env, make_company, run_messages, start_run, wait_status
 
 TEAM = [agent("a", "Ann", entry=True), agent("b", "Ben"), agent("c", "Cy")]
 EDGES = [edge("ab", "a", "b"), edge("ac", "a", "c")]
@@ -202,7 +202,7 @@ async def test_small_team_templates(client, workspace) -> None:
 
 # ------------------------------------------------------------------ benchmark harness
 def test_bench_checks(tmp_path: Path) -> None:
-    from app.services.bench import evaluate, setup_project
+    from app.application.bench import evaluate, setup_project
 
     setup_project(tmp_path, {"files": {"a.py": "print('hi')\n"}})
     res = evaluate(tmp_path, [{"type": "file_exists", "path": "a.py"}, {"type": "file_contains", "path": "a.py", "text": ["print", "hi"]},
@@ -213,7 +213,7 @@ def test_bench_checks(tmp_path: Path) -> None:
 
 async def test_bench_case_end_to_end(client, tmp_root: Path) -> None:
     """The harness opens a fresh project, seeds it, runs a template, checks the folder and reports efficiency."""
-    from app.services.bench import run_case, summarize
+    from app.application.bench import run_case, summarize
 
     set_provider_override(FakeProvider())
     tasks = json.loads((Path(__file__).resolve().parents[2] / "bench" / "tasks.json").read_text())

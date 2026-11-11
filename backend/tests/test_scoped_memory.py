@@ -8,13 +8,11 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.db.base import ProjectBase
-from app.db.session import make_engine
-from app.models import Agent, AgentMemory, Company, Message, Run
-from app.models.scoped_memory import MemoryHead, MemoryRecord
-from app.services.scoped_memory import (
-    Actor, MemoryConflict, MemoryDenied, SourceRef, Target, context, get, import_legacy, owner_group, owner_put, put,
-)
+from app.storage.base import ProjectBase
+from app.storage.session import make_engine
+from app.storage.models import Agent, AgentMemory, Company, Message, Run
+from app.storage.models.scoped_memory import MemoryRecord
+from app.plugins.memory.scoped import Actor, MemoryConflict, MemoryDenied, SourceRef, Target, context, get, import_legacy, owner_group, owner_put, put
 
 
 @pytest_asyncio.fixture
@@ -179,9 +177,9 @@ async def memory_client(memory):
     from types import SimpleNamespace
     import httpx
     from fastapi import FastAPI
-    from app.api.v1.memory import router
-    from app.core.deps import current_user, get_pdb, project_ctx
-    from app.models import User
+    from app.channels.api.routes.memory import router
+    from app.channels.deps import current_user, get_pdb, project_ctx
+    from app.storage.models import User
 
     sf, _, _ = memory
     application = FastAPI()
@@ -271,7 +269,7 @@ async def test_search_checks_acl_before_returning_matching_memory(memory):
 
 
 async def test_runtime_never_silently_truncates_pinned_constraints(memory):
-    from app.services.scoped_memory import runtime_context
+    from app.plugins.memory.scoped import runtime_context
     sf, owner, _ = memory
     record = await owner_put(sf, owner, Target("project", "company"), "critical", "A" * 17000, expected_version=0, pinned=True)
     with pytest.raises(MemoryConflict, match="Pinned constraints exceed"):

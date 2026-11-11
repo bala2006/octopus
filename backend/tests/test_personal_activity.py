@@ -4,9 +4,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.api.v1.activity import summarize
-from app.db.session import project_factory
-from app.models import Company, Run, RunEvent
+from app.channels.api.routes.activity import summarize
+from app.storage.session import project_factory
+from app.storage.models import Company, Run, RunEvent
 
 
 def test_usage_deltas_local_days_and_streaks():

@@ -1,0 +1,149 @@
+"""Provider selection, key resolution and retry-with-backoff streaming."""
+from __future__ import annotations
+
+import asyncio
+import random
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.storage.repositories import ProviderKeyRepository
+from app.foundation.config import get_settings
+from app.foundation.logging import get_logger
+from app.foundation.security import decrypt_secret
+from app.sdk.llm import LLMChunk, LLMError, LLMRequest
+from app.plugins.providers.base import LLMProvider
+
+log = get_logger("llm")
+
+# Octopus is wired to a single real provider: Azure OpenAI (v1 API) with the gpt-6-luna deployment.
+DEFAULT_DEPLOYMENT = "gpt-6-luna"
+PROVIDER_CATALOG: dict[str, dict] = {
+    "azure": {"label": "Azure OpenAI", "needs_key": True, "needs_base": True, "models": [DEFAULT_DEPLOYMENT]},
+}
+# Rows saved by earlier versions for other providers; the Azure credentials may live under "azure_ai" (Foundry card).
+LEGACY_AZURE_ROWS = ("azure_ai",)
+
+# Tests inject a fake provider here. The product code never sets it.
+_override: LLMProvider | None = None
+
+
+def set_provider_override(provider: LLMProvider | None) -> None:
+    global _override
+    _override = provider
+
+
+@dataclass(frozen=True)
+class _Registered:
+    name: str
+    priority: int
+    accepts: Callable[[str, LLMRequest | None], bool]
+    factory: Callable[[], LLMProvider]
+
+
+_registered: list[_Registered] = []
+
+
+def register_provider(name: str, accepts: Callable[[str, LLMRequest | None], bool], factory: Callable[[], LLMProvider], *, priority: int = 50) -> None:
+    """Add a model provider plugin. The lowest ``priority`` whose ``accepts(provider_name, request)`` is true serves the request."""
+    unregister_provider(name)
+    _registered.append(_Registered(name, priority, accepts, factory))
+    _registered.sort(key=lambda r: r.priority)
+
+
+def unregister_provider(name: str) -> None:
+    _registered[:] = [r for r in _registered if r.name != name]
+
+
+def get_provider(name: str, req: LLMRequest | None = None) -> LLMProvider:
+    if _override is not None:
+        return _override
+    for entry in _registered:
+        if entry.accepts(name, req):
+            return entry.factory()
+    raise LLMError("No model provider plugin is enabled. Enable one in Settings → Plugins.", retryable=False)
+
+
+async def resolve_credentials(db: AsyncSession, user_id: str, provider: str) -> tuple[str | None, str | None, dict]:
+    """Return (api_key, base_url, extra). Stored (encrypted) keys win over env keys. Never sent to the client.
+
+    ``db`` must be a *registry* session.
+    """
+    s = get_settings()
+    row = await ProviderKeyRepository(db).get(user_id, provider)
+    if row is None and provider == "azure":  # credentials entered on the old "Azure AI Foundry" card
+        for legacy in LEGACY_AZURE_ROWS:
+            row = await ProviderKeyRepository(db).get(user_id, legacy)
+            if row is not None:
+                break
+    key = decrypt_secret(row.encrypted_key) if row and row.encrypted_key else None
+    base = (row.base_url if row else "") or None
+    extra = dict(row.extra_json or {}) if row else {}
+    env_keys = {"openai": s.openai_api_key, "anthropic": s.anthropic_api_key, "gemini": s.gemini_api_key,
+                "azure": s.azure_api_key, "azure_ai": s.azure_ai_api_key}
+    env_bases = {"azure": s.azure_api_base, "azure_ai": s.azure_ai_api_base, "ollama": s.ollama_base_url}
+    key = key or env_keys.get(provider)
+    base = base or env_bases.get(provider)
+    if provider == "azure":
+        extra.setdefault("api_version", s.azure_api_version)
+    if provider in ("azure", "azure_ai") and not row and s.azure_use_entra:
+        extra.setdefault("auth", "entra")
+    return key, base, extra
+
+
+def allowed_models(extra: dict) -> list[str]:
+    """Deployment names the user configured, else the default deployment."""
+    return [d for d in (extra.get("deployments") or []) if d] or [DEFAULT_DEPLOYMENT]
+
+
+def is_configured(provider: str, key: str | None, base: str | None, extra: dict) -> bool:
+    info = PROVIDER_CATALOG.get(provider, {})
+    if info.get("needs_base") and not base:
+        return False
+    if extra.get("auth") == "entra":
+        return True
+    return bool(key) or not info.get("needs_key", True)
+
+
+async def prepare_request(db: AsyncSession, user_id: str, req: LLMRequest) -> tuple[LLMRequest, str | None]:
+    """Fill credentials (``db`` is a registry session). Raises when Azure is not connected. Returns (request, warning)."""
+    req.provider = "azure"  # the only real provider; agents saved with openai/anthropic/azure_ai/... are routed here too
+    key, base, extra = await resolve_credentials(db, user_id, req.provider)
+    if not is_configured(req.provider, key, base, extra):
+        raise LLMError("Azure OpenAI is not connected. Connect it in Settings → Model.", retryable=False)
+    req.api_key, req.base_url = key, base
+    req.extra = {**extra, **req.extra}
+    allowed = allowed_models(extra)
+    warning = None
+    if req.model not in allowed:  # e.g. gpt-4.1-mini from older templates → the configured deployment
+        warning = (f"Model '{req.model}' is not a deployment on your Azure resource; using '{allowed[0]}' instead "
+                   "(Settings → Model → deployments).")  # never swap a model silently: the replacement may be weaker or stronger
+        req.model = allowed[0]
+    if req.model in (extra.get("reasoning_models") or []):
+        req.extra["reasoning_model"] = True
+    return req, warning
+
+
+async def stream_with_retry(
+    req: LLMRequest, *, retries: int = 3, base_delay: float = 0.8, on_retry: Callable[[int, str], None] | None = None,
+) -> AsyncIterator[LLMChunk]:
+    """Stream with exponential backoff. Retries only if the failure happened before any token was yielded."""
+    provider = get_provider(req.provider, req)
+    attempt = 0
+    while True:
+        yielded = False
+        try:
+            async for chunk in provider.stream(req):
+                yielded = True
+                yield chunk
+            return
+        except LLMError as exc:
+            attempt += 1
+            if yielded or not exc.retryable or attempt > retries:
+                raise
+            delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.3)
+            log.warning("llm_retry", attempt=attempt, delay=round(delay, 2), error=str(exc))
+            if on_retry:
+                on_retry(attempt, str(exc))
+            await asyncio.sleep(delay)

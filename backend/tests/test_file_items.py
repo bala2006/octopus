@@ -61,7 +61,7 @@ async def test_folder_operations_refuse_private_descendants(client, workspace, p
 
 @pytest.mark.asyncio
 async def test_upload_size_boundary_leaves_no_partial_file(client, workspace, monkeypatch):
-    from app.services import file_items
+    from app.application import file_items
     monkeypatch.setattr(file_items, "MAX_UPLOAD_BYTES", 8)
     base = f"/api/v1/w/{workspace['id']}/editor"
     result = await client.post(f"{base}/asset", params={"path": "large.dat"}, files={"file": ("large.dat", b"012345678")})

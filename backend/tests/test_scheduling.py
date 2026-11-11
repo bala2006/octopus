@@ -1,8 +1,8 @@
 """The scheduler is task-aware: open tasks wake their owners, a stuck board never reports "completed" (issue #27)."""
 from __future__ import annotations
 
-from app.llm.router import set_provider_override
-from app.orchestrator.engine import MAX_SELF_TURNS
+from app.plugins.providers.router import set_provider_override
+from app.kernel.runtime.run_control import MAX_SELF_TURNS
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, run_messages, start_run, wait_status
 
 TEAM = [agent("ceo", "Cleo", entry=True, role="CEO"), agent("dev", "Dev", role="Engineer")]

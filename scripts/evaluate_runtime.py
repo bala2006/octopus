@@ -42,7 +42,7 @@ def junit_counts(path: Path) -> dict:
 def source_hashes() -> dict[str, str]:
     paths = {BACKEND / file for selectors in SUITES.values() for file in selectors}
     paths.update((BACKEND / "app").rglob("*.py"))
-    paths.update((BACKEND / "app/skills").rglob("SKILL.md"))
+    paths.update((BACKEND / "app/plugins/skills/builtin").rglob("SKILL.md"))
     paths.update({BACKEND / "tests/conftest.py", Path(__file__), ROOT / "scripts/runtime_doctor.py"})
     return {str(path.relative_to(ROOT)).replace("\\", "/"): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in sorted(paths) if path.is_file()}

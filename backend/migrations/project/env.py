@@ -4,8 +4,8 @@ from __future__ import annotations
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-import app.models  # noqa: F401  (register tables)
-from app.db.base import ProjectBase
+import app.storage.models  # noqa: F401  (register tables)
+from app.storage.base import ProjectBase
 
 config = context.config
 target_metadata = ProjectBase.metadata

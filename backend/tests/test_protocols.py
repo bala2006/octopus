@@ -1,8 +1,11 @@
 """Debate termination (explicit consensus / decision / max rounds) and review loops."""
 from __future__ import annotations
 
-from app.llm.router import set_provider_override
-from app.orchestrator.protocols import DebateState, ReviewState, debate_on_message, review_on_request, review_on_result
+from app.plugins.providers.router import set_provider_override
+from app.sdk.protocols import DebateState
+from app.plugins.workflows.boardroom import debate_on_message
+from app.sdk.protocols import ReviewState
+from app.plugins.workflows.review import review_on_request, review_on_result
 from conftest import ScriptedProvider, agent, edge, env, events, make_company, msg, start_run, wait_status
 
 

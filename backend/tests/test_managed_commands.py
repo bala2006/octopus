@@ -36,7 +36,7 @@ async def test_live_command_prompt_input_persistence_and_clear(client, workspace
 
 @pytest.mark.asyncio
 async def test_managed_command_timeout_stop_permissions_and_shutdown(client, workspace):
-    from app.services.processes import commands
+    from app.plugins.sandbox.processes import commands
     root = Path(workspace["path"])
     (root / "wait.py").write_text("import time\nprint('Waiting', flush=True)\ntime.sleep(30)\n")
     base = f"/api/v1/w/{workspace['id']}/editor/commands"

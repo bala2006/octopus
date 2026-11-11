@@ -8,7 +8,7 @@ Model choice and reasoning effort belong to the composer and persist per project
 
 | Problem | Change | Acceptance |
 | --- | --- | --- |
-| Folder dialog obscures the action | Compact browser, recent projects, sticky footer, concise Docker explanation | Open and create folders at desktop and phone sizes |
+| Folder dialog obscures the action | Compact browser, recent projects, sticky footer, concise folder-source explanation | Open and create folders at desktop and phone sizes |
 | Model label cannot select a model | Real provider/deployment picker and reasoning control | Selected values reach model requests and survive reload |
 | Home has no model setup | Global settings route and Home model selector | Configure providers without creating a project |
 | Empty project cannot send | Create a coding agent on the first explicit send | Prompt survives setup failures and starts exactly one run |
@@ -20,7 +20,7 @@ Validation covers real API model routing, project entry, draft preservation, com
 
 - The backend suite passed 273 tests with 2 optional checks skipped. After the last message-display change, all 12 model, attachment and continuation checks passed again.
 - All 73 frontend tests passed. TypeScript checking and the production build passed.
-- Git review passed 11 focused checks, including two new cases for Docker ownership and rejecting an ancestor repository. The running editor displayed the mounted repository's changes after the fix.
+- Git review passed 11 focused checks, including two new cases for worktree ownership and rejecting an ancestor repository. The running editor displayed the mounted repository's changes after the fix.
 - Browser checks covered folder creation and opening, Windows paths, Home prompt handoff, automatic coding-agent creation, model and mode selection, file upload and removal, follow-ups, restored history, editor file opening, Git changes, team canvas, activity, artifacts and global settings.
 - At 390 x 720, the folder picker's Open action remained visible and document width stayed at 390 pixels. Desktop checks used 1366 x 900.
 - The chat composer also fit at 390 x 844 with no horizontal overflow. The sidebar closed on Escape and returned focus to its toggle. Reasoning selection survived a reload.

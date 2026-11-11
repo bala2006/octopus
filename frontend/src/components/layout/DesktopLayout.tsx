@@ -347,7 +347,7 @@ function ProjectSidebar({
                     w === project.id && "is-selected",
                     !project.exists && "opacity-40",
                   )}
-                  title={project.display_path || project.path}
+                  title={project.path}
                 >
                   {w === project.id ? <FolderOpen /> : <Folder />}
                   <span>{project.name}</span>

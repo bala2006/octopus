@@ -1,0 +1,737 @@
+"""Pydantic v2 API schemas (source of the generated TypeScript types)."""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.sdk.llm import DEFAULT_AGENT_MAX_TOKENS, MAX_AGENT_MAX_TOKENS
+
+EdgeType = Literal["delegate", "review", "debate", "report", "consult"]
+# "incomplete": the run stopped with unfinished tasks on the board (it is never reported as "completed")
+RunStatus = Literal["queued", "running", "paused", "awaiting_user", "completed", "incomplete", "failed", "cancelled"]
+RunMode = Literal["autonomous", "step", "supervised"]
+# "ask": Ask for permission. "auto": Approve for me. One global setting per user.
+ApprovalMode = Literal["ask", "auto"]
+TaskStatus = Literal["todo", "in_progress", "in_review", "done", "blocked"]
+MessageType = Literal[
+    "task", "question", "answer", "proposal", "critique", "agreement", "objection", "decision",
+    "review_request", "review_result", "status_update", "artifact_created", "user_interjection",
+    "final_report", "chat", "system",
+]
+DebateStyle = Literal["agreeable", "balanced", "devils_advocate"]
+
+
+class ORM(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------- auth ----------
+class AuthConfig(BaseModel):
+    single_user_mode: bool
+
+
+class Credentials(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=6, max_length=200)
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserOut(ORM):
+    id: str
+    email: str
+    created_at: datetime
+
+
+# ---------- agents ----------
+class AgentTools(BaseModel):
+    file_read: bool = True
+    file_write: bool = True
+    list_files: bool = True
+    terminal: bool = False  # sandboxed code execution (allowlisted commands)
+    web_search: bool = False
+    calculator: bool = True
+    ask_user: bool = False
+    send_message: bool = True
+    manage_team: bool = False  # create_agent / update_agent for reports (hiring & org design)
+    browser: bool = True  # built-in Playwright browser (Octopus-managed MCP server "browser")
+    mcp_servers: list[str] = Field(default_factory=list)  # ids of the user's registered MCP servers
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy(cls, data: Any) -> Any:
+        """Accept the older {file_rw, code_exec} shape."""
+        if isinstance(data, dict):
+            data = dict(data)
+            if "file_rw" in data:
+                v = bool(data.pop("file_rw"))
+                data.setdefault("file_read", v)
+                data.setdefault("file_write", v)
+            if "code_exec" in data:
+                data.setdefault("terminal", bool(data.pop("code_exec")))
+        return data
+
+
+ReasoningEffort = Literal["default", "none", "low", "medium", "high", "xhigh", "max"]
+
+
+class AgentBehavior(BaseModel):
+    assertiveness: float = Field(0.5, ge=0, le=1)
+    creativity: float = Field(0.5, ge=0, le=1)
+    strictness: float = Field(0.5, ge=0, le=1)
+    debate_style: DebateStyle = "balanced"
+    max_autonomous_turns: int = Field(12, ge=1, le=200)
+    template_key: str = ""  # the agent's role in the role library (Settings → Roles)
+    # True: the system prompt follows the role (edits in Settings → Roles apply); False: the agent has its own prompt;
+    # None (agents from before roles were linked): linked while the prompt is still the built-in text
+    prompt_linked: bool | None = None
+    extra_instructions: str = Field("", max_length=8000)  # appended to the role prompt for this agent only
+    skills: list[str] = Field(default_factory=list, max_length=20)  # skills picked for this agent (on top of its role's)
+    # reasoning effort for reasoning models (gpt-6-luna supports none..max); "default" = the model's own default (medium)
+    reasoning_effort: ReasoningEffort = "default"
+
+
+class AgentBase(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    role: str = Field("", max_length=120)
+    description: str = ""
+    avatar: str = ""
+    color: str = Field("#6366f1", pattern=r"^#[0-9a-fA-F]{6}$")
+    system_prompt: str = ""
+    provider: str = "azure"
+    model: str = "gpt-6-luna"
+    temperature: float = Field(0.4, ge=0, le=2)
+    max_tokens: int = Field(DEFAULT_AGENT_MAX_TOKENS, ge=64, le=MAX_AGENT_MAX_TOKENS)
+    tools: AgentTools = Field(default_factory=AgentTools)
+    behavior: AgentBehavior = Field(default_factory=AgentBehavior)
+    department: str = Field("", max_length=80)
+    is_manager: bool = False
+    reports_to: str | None = None
+    active: bool = True
+    created_by: str | None = None
+    is_entry: bool = False
+    position_x: float = 0
+    position_y: float = 0
+
+
+class AgentIn(AgentBase):
+    id: str | None = None
+
+
+class AgentPatch(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    description: str | None = None
+    avatar: str | None = None
+    color: str | None = None
+    system_prompt: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    tools: AgentTools | None = None
+    behavior: AgentBehavior | None = None
+    department: str | None = None
+    is_manager: bool | None = None
+    reports_to: str | None = None
+    active: bool | None = None
+    is_entry: bool | None = None
+    position_x: float | None = None
+    position_y: float | None = None
+
+
+class AgentOut(AgentBase):
+    id: str
+    company_id: str
+
+
+# ---------- edges ----------
+class EdgeConfig(BaseModel):
+    max_turns: int = Field(20, ge=1, le=500)
+    handoff_instructions: str = ""
+    condition: str = ""
+    max_rounds: int = Field(4, ge=1, le=50)  # debate
+    max_revisions: int = Field(3, ge=1, le=50)  # review
+
+
+class EdgeBase(BaseModel):
+    source_agent_id: str
+    target_agent_id: str
+    bidirectional: bool = False
+    type: EdgeType = "delegate"
+    label: str = ""
+    config: EdgeConfig = Field(default_factory=EdgeConfig)
+
+    @field_validator("target_agent_id")
+    @classmethod
+    def _no_self_loop(cls, v: str, info: Any) -> str:
+        if info.data.get("source_agent_id") == v:
+            raise ValueError("Self-loops are not allowed")
+        return v
+
+
+class EdgeIn(EdgeBase):
+    id: str | None = None
+
+
+class EdgeOut(EdgeBase):
+    id: str
+    company_id: str
+
+
+# ---------- companies / canvas ----------
+class CompanyIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+
+
+class CompanyPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class CompanyOut(ORM):
+    id: str
+    name: str
+    description: str
+    created_at: datetime
+    updated_at: datetime
+    agent_count: int = 0
+
+
+class DepartmentMeta(BaseModel):
+    color: str = Field("#6366f1", pattern=r"^#[0-9a-fA-F]{6}$")
+    description: str = ""
+
+
+class CanvasState(BaseModel):
+    agents: list[AgentIn]
+    edges: list[EdgeIn]
+    viewport: dict[str, float] | None = None
+    departments: dict[str, DepartmentMeta] | None = None
+    revision: int | None = None  # optimistic concurrency: must match the server's current revision
+
+
+class CanvasOut(BaseModel):
+    company: CompanyOut
+    agents: list[AgentOut]
+    edges: list[EdgeOut]
+    viewport: dict[str, float] | None = None
+    departments: dict[str, DepartmentMeta] = Field(default_factory=dict)
+    revision: int = 0
+
+
+class CanvasExport(BaseModel):
+    format: str = "octopus.company/v1"
+    name: str
+    description: str = ""
+    agents: list[AgentIn]
+    edges: list[EdgeIn]
+    departments: dict[str, DepartmentMeta] = Field(default_factory=dict)
+
+
+class DepartmentSummary(BaseModel):
+    name: str
+    color: str
+    manager: str | None
+    members: list[str]
+
+
+class TemplateOut(BaseModel):
+    key: str
+    name: str
+    description: str
+    agent_count: int
+    edge_count: int
+    source: Literal["builtin", "user"] = "builtin"
+    departments: list[DepartmentSummary] = Field(default_factory=list)
+    updated_at: datetime | None = None
+    workflow: bool = False  # the team can run the defined workflow (head + builder + an independent tester/reviewer)
+
+
+class UserTemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    company_id: str | None = None  # snapshot an existing company …
+    spec: CanvasExport | None = None  # … or provide the spec directly (import)
+
+
+class GenerateCompanyIn(BaseModel):
+    prompt: str = Field(min_length=3, max_length=4000)
+    max_agents: int = Field(14, ge=2, le=40)
+    provider: str | None = None
+    model: str | None = None
+
+
+class GenerateCompanyOut(BaseModel):
+    spec: CanvasExport
+    departments: list[DepartmentSummary]
+    source: Literal["ai"]
+    warning: str = ""
+
+
+class RoleTemplateOut(BaseModel):
+    key: str
+    role: str
+    default_name: str
+    color: str
+    avatar: str
+    description: str
+    system_prompt: str
+    tools: AgentTools
+    category: str = "General"
+    source: Literal["builtin", "modified", "custom"] = "builtin"  # modified = a built-in role the user edited
+
+
+class SkillOut(BaseModel):
+    name: str
+    description: str
+    body: str
+    roles: list[str] = Field(default_factory=list)
+    phases: list[str] = Field(default_factory=list)
+    source: Literal["builtin", "modified", "custom", "project"] = "builtin"
+
+
+class SkillIn(BaseModel):
+    name: str = Field(min_length=2, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
+    description: str = Field(min_length=1, max_length=400)
+    body: str = Field(min_length=1, max_length=40000)
+    roles: list[str] = Field(default_factory=list, max_length=60)
+    phases: list[str] = Field(default_factory=list, max_length=12)
+
+
+class RoleIn(BaseModel):
+    """Create a custom role (POST) or edit a role (PUT; for a built-in role this saves an override)."""
+    role: str = Field(min_length=1, max_length=120)
+    category: str = Field(default="", max_length=40)
+    description: str = Field(default="", max_length=2000)
+    system_prompt: str = Field(min_length=1, max_length=40000)
+    default_name: str = Field(default="", max_length=60)
+    color: str = Field(default="", max_length=20)
+    avatar: str = Field(default="", max_length=40)
+    tools: AgentTools | None = None
+
+
+class InstantiateTemplateIn(BaseModel):
+    template_key: str
+    name: str | None = None
+    goal: str | None = Field(default=None, max_length=20000)  # optional adaptive company staffing
+
+
+# ---------- sessions / messages ----------
+class SessionIn(BaseModel):
+    company_id: str
+    title: str = "New chat"
+    mode: Literal["direct", "company"] = "direct"
+    agent_id: str | None = None
+
+
+class SessionPatch(BaseModel):
+    title: str
+
+
+class SessionOut(ORM):
+    id: str
+    company_id: str
+    agent_id: str | None
+    title: str
+    mode: str
+    created_at: datetime
+
+
+class MessageOut(ORM):
+    id: str
+    run_id: str | None
+    session_id: str | None
+    sender: str
+    from_agent_id: str | None
+    to_agent_id: str | None
+    edge_id: str | None
+    type: str
+    content: str
+    meta: dict[str, Any] = Field(default_factory=dict, validation_alias="meta_json")
+    turn_no: int
+    created_at: datetime
+
+
+class ParsedFileOut(BaseModel):
+    filename: str
+    chars: int
+    text: str
+    truncated: bool
+    kind: Literal["text", "image"] = "text"
+    mime: str = ""  # images: image/png | image/jpeg | image/gif | image/webp
+    data: str = ""  # images: base64 content (sent back with the run / message that uses it)
+
+
+# ---------- runs ----------
+class RunModel(BaseModel):
+    provider: Literal["azure", "opencode"]
+    model: str = Field(min_length=1, max_length=200)
+
+
+class RunBudget(BaseModel):
+    max_turns: int = Field(60, ge=1, le=2000)
+    max_tokens: int = Field(400_000, ge=1000)
+    max_cost_usd: float = Field(2.0, ge=0)
+    timeout_s: int = Field(900, ge=10, le=86400)  # active time: seconds spent working (paused / waiting for you is not counted)
+    loop_threshold: float = Field(0.92, ge=0.5, le=1.0)
+    max_loop_strikes: int = Field(3, ge=1, le=20)
+    # pause for a human after this many turns without a file change / task-board move (0 = off)
+    stall_turns: int = Field(30, ge=0, le=2000)
+    max_tool_rounds: int = Field(40, ge=1, le=200)  # model calls per agent turn with native tools (each returns tool results)
+    # an agent that can run code or browse is sent back once to verify when it finishes with unexercised code changes
+    verify_before_finish: bool = True
+    # how the team works: "on" = the defined workflow (intake → spec → design → build → test → review → accept with owners
+    # and gates), "off" = free-form, "auto" = the workflow when the team can staff a build and an independent check
+    workflow: Literal["auto", "on", "off"] = "auto"
+    context_recent: int = Field(30, ge=2, le=200)  # own messages kept verbatim; older ones are summarised
+    max_agents: int = Field(24, ge=1, le=100)  # team size cap including agents hired during the run
+    persist_team: bool = True  # save agents hired / edited during the run back to the company
+    reasoning_effort: ReasoningEffort = "default"  # run-wide override; "default" = each agent's own setting
+    model: RunModel | None = None
+    model_scope: Literal["lead", "team"] = "lead"
+    engineering_workflow: Literal["auto", "explain", "fix", "build", "review"] = "auto"
+    execution_mode: Literal["trusted_host", "restricted"] = "trusted_host"
+    independent_review: bool = False
+    max_concurrency: int = Field(3, ge=1, le=3)
+    max_delegation_depth: int = Field(2, ge=0, le=2)
+
+
+class RunCreate(BaseModel):
+    company_id: str
+    goal: str = Field(min_length=1, max_length=20000)
+    session_id: str | None = None
+    mode: RunMode = "autonomous"
+    budget: RunBudget = Field(default_factory=RunBudget)
+    attachments: list[dict[str, str]] = Field(default_factory=list)
+    client_request_id: str | None = Field(None, min_length=1, max_length=100)
+
+
+class RunOutcome(BaseModel):
+    """What a run actually produced, so a list can tell a delivered run from a no-op (filled by the runs list)."""
+    tasks_total: int = 0
+    tasks_done: int = 0
+    tasks_open: int = 0  # todo / in_progress / in_review / blocked
+    tasks_blocked: int = 0
+    files: int = 0  # distinct paths written
+    errors: int = 0  # llm / parse / limit / loop / stall / permission errors
+    final_report: bool = False  # the entry agent called finish
+    # efficiency: agent turns, turns that changed a deliverable or ran something, when the first deliverable appeared
+    agent_turns: int = 0
+    work_turns: int = 0
+    first_deliverable_turn: int | None = None
+    delegations: int = 0
+
+
+class RunOut(ORM):
+    id: str
+    company_id: str
+    session_id: str | None
+    goal: str
+    status: str
+    mode: str
+    permission_level: ApprovalMode
+
+    @field_validator("permission_level", mode="before")
+    @classmethod
+    def _legacy_levels_are_ask(cls, value: Any) -> str:
+        return "auto" if value == "auto" else "ask"  # runs recorded under read_only, plan or danger show as ask
+
+    budget: dict[str, Any] = Field(default_factory=dict, validation_alias="budget_json")
+    tokens_used: int
+    cost_usd: float
+    turns: int
+    halt_reason: str
+    summary: str
+    created_at: datetime
+    started_at: datetime | None
+    ended_at: datetime | None
+    outcome: RunOutcome | None = None  # filled by the runs list
+
+
+class RunDetail(RunOut):
+    snapshot: dict[str, Any] = Field(default_factory=dict, validation_alias="snapshot_json")
+    state: dict[str, Any] = Field(default_factory=dict, validation_alias="state_json")
+    report_md: str
+
+
+class InterjectIn(BaseModel):
+    content: str = Field(min_length=1, max_length=20000)
+    to_agent_id: str | None = None
+    attachments: list[dict[str, str]] = Field(default_factory=list)
+    client_request_id: str | None = Field(default=None, min_length=1, max_length=100)
+    delivery: Literal["immediate", "queue", "steer"] = "immediate"
+
+
+class ApprovalIn(BaseModel):
+    approval_id: str
+    approved: bool
+    reason: str = ""
+    scope: Literal["once", "always"] = "once"  # "always": auto-approve this action kind for this agent for the rest of the run
+
+
+class RunEventOut(ORM):
+    id: int
+    run_id: str
+    type: str
+    payload: dict[str, Any] = Field(default_factory=dict, validation_alias="payload_json")
+    created_at: datetime
+
+
+class TaskOut(ORM):
+    id: str
+    run_id: str
+    key: str
+    title: str
+    description: str
+    assignee_agent_id: str | None
+    status: str
+    acceptance_criteria: str
+    constraints_json: dict[str, Any] = Field(default_factory=dict)
+    created_by: str | None
+    updated_at: datetime
+
+
+class ArtifactOut(ORM):
+    id: str
+    run_id: str
+    path: str
+    version: int
+    deleted: bool = False
+    author_agent_id: str | None
+    change_note: str
+    created_at: datetime
+    size: int = 0
+
+
+class ArtifactContentOut(ArtifactOut):
+    content: str
+
+
+# ---------- memory ----------
+class AgentMemoryIn(BaseModel):
+    key: str = Field(min_length=1, max_length=200)
+    value: str
+
+
+class MemoryOut(ORM):
+    id: str
+    agent_id: str
+    key: str
+    value: str
+    updated_at: datetime
+
+
+# ---------- settings ----------
+ProviderName = Literal["azure"]
+
+
+class ProviderOptions(BaseModel):
+    api_version: str = ""  # Azure OpenAI (legacy API only)
+    api_style: Literal["auto", "responses", "chat", "legacy"] = "auto"  # Azure OpenAI: v1 Responses / v1 Chat / legacy api-version
+    auth: Literal["key", "entra"] = "key"  # Azure: API key or Microsoft Entra ID (az login / managed identity)
+    deployments: list[str] = Field(default_factory=list)  # Azure deployment / Foundry model names shown in pickers
+    reasoning_models: list[str] = Field(default_factory=list)  # deployments that need max_completion_tokens (o-series, gpt-5)
+    deployment_type: Literal["global", "data_zone", "regional"] = "global"  # Data Zone / regional deployments cost +10%
+    pricing: dict[str, float] = Field(default_factory=dict)  # USD per 1M tokens override: input / cached_input / cache_write / output
+
+
+class ProviderKeyIn(BaseModel):
+    provider: ProviderName
+    api_key: str = ""  # empty = keep the stored key
+    base_url: str = ""
+    options: ProviderOptions = Field(default_factory=ProviderOptions)
+
+
+class ProviderKeyOut(BaseModel):
+    provider: str
+    masked_key: str
+    base_url: str
+    options: ProviderOptions
+    updated_at: datetime
+
+
+class ProviderInfo(BaseModel):
+    provider: str
+    label: str
+    models: list[str]
+    configured: bool
+    needs_key: bool
+    needs_base: bool = False
+
+
+class SettingsOut(BaseModel):
+    single_user_mode: bool
+    default_provider: str
+    default_model: str
+    approval_mode: ApprovalMode = "ask"
+    providers: list[ProviderInfo]
+    keys: list[ProviderKeyOut]
+
+
+class ApprovalModeIn(BaseModel):
+    approval_mode: ApprovalMode
+
+
+class ApprovalModeOut(BaseModel):
+    approval_mode: ApprovalMode
+
+
+class FxRateOut(BaseModel):
+    base: str = "USD"
+    currency: str
+    rate: float  # 1 USD = rate × currency
+    date: str = ""
+    source: str = ""
+    stale: bool = False  # true when offline and the last known rate is used
+
+
+class BrowserStatusOut(BaseModel):
+    enabled: bool
+    # stopped | starting | installing | server_ready (MCP server up, browser launch not verified yet) | ready | error
+    status: str
+    verified: bool = False  # a real browser launched and rendered a test page
+    error: str = ""  # diagnosis (e.g. which system library is missing), not the raw Chromium command line
+    browser: str = ""
+    package: str = ""
+    tools: list[str] = Field(default_factory=list)
+    node: bool = True  # npx found
+
+
+class BrowserTestOut(BaseModel):
+    ok: bool
+    detail: str
+    latency_ms: int = 0
+
+
+class TestProviderIn(BaseModel):
+    provider: str
+    model: str
+
+
+class TestProviderOut(BaseModel):
+    ok: bool
+    detail: str
+    latency_ms: int = 0
+
+
+# ---------- workspaces (project directories) ----------
+class WorkspaceIn(BaseModel):
+    path: str = Field(min_length=1, max_length=1000)
+    name: str | None = Field(None, max_length=200)
+
+
+class NativeOpenIn(BaseModel):
+    pass
+
+
+class NativeDialogOut(BaseModel):
+    available: bool  # the backend itself can show the OS dialog (Octopus running natively on this machine)
+    method: str = ""
+    reason: str = ""
+
+
+class NativePickOut(BaseModel):
+    cancelled: bool
+    path: str | None = None  # the selected directory as the user sees it on their computer
+
+
+class WorkspacePatch(BaseModel):
+    name: str | None = Field(None, max_length=200)
+
+
+class WorkspaceOut(ORM):
+    id: str
+    name: str
+    path: str
+    created_at: datetime
+    last_opened_at: datetime
+    exists: bool = True
+    existing_project: bool = False
+
+
+class NativeOpenOut(BaseModel):
+    cancelled: bool
+    workspace: WorkspaceOut | None = None
+
+
+class DirEntryOut(BaseModel):
+    name: str
+    path: str
+    is_project: bool
+    is_git: bool
+
+
+class BrowseOut(BaseModel):
+    path: str | None
+    parent: str | None
+    entries: list[DirEntryOut]
+    roots: list[str]
+
+
+class MkdirIn(BaseModel):
+    parent: str
+    name: str = Field(min_length=1, max_length=120)
+
+
+class FileNode(BaseModel):
+    path: str
+    size: int
+    modified: bool = False  # changed by agents in the selected run
+    area: Literal["project", "work"] = "project"  # "work": the agents' working documents in .octopus/work/
+    generated: bool = False  # written by an Octopus run at some point (else: the user's own file)
+
+
+class ProjectTreeOut(BaseModel):
+    root: str  # absolute path of the project folder
+    name: str
+    files: list[FileNode]
+    truncated: bool = False
+
+
+class FileContentOut(BaseModel):
+    path: str
+    content: str
+    size: int
+
+
+class RevertIn(BaseModel):
+    path: str
+    to_version: int = 0  # 0 = state before the run touched the file
+
+
+# ---------- MCP servers ----------
+class McpServerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_\-. ]+$")
+    transport: Literal["stdio", "http"] = "stdio"
+    command: str = ""  # stdio: executable, e.g. "npx"
+    args: list[str] = Field(default_factory=list)  # stdio args, e.g. ["-y", "@modelcontextprotocol/server-everything"]
+    url: str = ""  # http: streamable-HTTP endpoint
+    env: dict[str, str] = Field(default_factory=dict)  # stored encrypted
+    enabled: bool = True
+
+
+class McpToolOut(BaseModel):
+    name: str
+    description: str = ""
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class McpServerOut(BaseModel):
+    id: str
+    name: str
+    transport: str
+    command: str
+    args: list[str]
+    url: str
+    env_keys: list[str]
+    enabled: bool
+    tools: list[McpToolOut] = Field(default_factory=list)
+    last_error: str = ""
+    updated_at: datetime

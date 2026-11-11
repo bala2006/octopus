@@ -1,0 +1,2916 @@
+[
+  {
+    "description": "Evaluate an arithmetic expression exactly.",
+    "enabled_by": "calculator",
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "calculate",
+          "title": "Action",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "expression"
+      ],
+      "title": "Calculate",
+      "type": "object"
+    },
+    "name": "calculate",
+    "parameters": {
+      "properties": {
+        "expression": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Hire a new teammate into the company (you can only grant tools you have yourself).",
+    "enabled_by": "manage_team",
+    "input_schema": {
+      "$defs": {
+        "ConnectSpec": {
+          "properties": {
+            "bidirectional": {
+              "default": true,
+              "title": "Bidirectional",
+              "type": "boolean"
+            },
+            "label": {
+              "default": "",
+              "title": "Label",
+              "type": "string"
+            },
+            "to": {
+              "maxLength": 120,
+              "minLength": 1,
+              "title": "To",
+              "type": "string"
+            },
+            "type": {
+              "default": "consult",
+              "enum": [
+                "delegate",
+                "review",
+                "debate",
+                "report",
+                "consult"
+              ],
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "to"
+          ],
+          "title": "ConnectSpec",
+          "type": "object"
+        }
+      },
+      "description": "Hire a new agent into the running company.",
+      "properties": {
+        "action": {
+          "const": "create_agent",
+          "title": "Action",
+          "type": "string"
+        },
+        "brief": {
+          "anyOf": [
+            {
+              "maxLength": 8000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brief"
+        },
+        "connect": {
+          "items": {
+            "$ref": "#/$defs/ConnectSpec"
+          },
+          "maxItems": 8,
+          "title": "Connect",
+          "type": "array"
+        },
+        "department": {
+          "default": "",
+          "maxLength": 80,
+          "title": "Department",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "is_manager": {
+          "default": false,
+          "title": "Is Manager",
+          "type": "boolean"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "name": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "reports_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reports To"
+        },
+        "role": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "role_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Template"
+        },
+        "system_prompt": {
+          "default": "",
+          "maxLength": 20000,
+          "title": "System Prompt",
+          "type": "string"
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "boolean"
+              },
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tools"
+        }
+      },
+      "required": [
+        "action",
+        "name",
+        "role"
+      ],
+      "title": "CreateAgent",
+      "type": "object"
+    },
+    "name": "create_agent",
+    "parameters": {
+      "description": "Hire a new agent into the running company.",
+      "properties": {
+        "brief": {
+          "anyOf": [
+            {
+              "maxLength": 8000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "connect": {
+          "items": {
+            "properties": {
+              "bidirectional": {
+                "default": true,
+                "type": "boolean"
+              },
+              "label": {
+                "default": "",
+                "type": "string"
+              },
+              "to": {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": {
+                "default": "consult",
+                "enum": [
+                  "delegate",
+                  "review",
+                  "debate",
+                  "report",
+                  "consult"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "to"
+            ],
+            "type": "object"
+          },
+          "maxItems": 8,
+          "type": "array"
+        },
+        "department": {
+          "default": "",
+          "maxLength": 80,
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "type": "string"
+        },
+        "is_manager": {
+          "default": false,
+          "type": "boolean"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "maxLength": 60,
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reports_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "role": {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        "role_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "system_prompt": {
+          "default": "",
+          "maxLength": 20000,
+          "type": "string"
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "boolean"
+              },
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "role"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Create a folder (and its parents) in the project.",
+    "enabled_by": "file_write",
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "create_folder",
+          "title": "Action",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "path"
+      ],
+      "title": "CreateFolder",
+      "type": "object"
+    },
+    "name": "create_folder",
+    "parameters": {
+      "properties": {
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Hand a piece of work to a teammate you have a delegate channel to. The teammate starts right away; its result (summary, files changed, task status) comes back as this call's result. Several delegate calls in one reply run at the same time: only send several together when the pieces are independent and can all start now (no review or test of something that doesn't exist yet).",
+    "enabled_by": "send_message",
+    "input_schema": {
+      "description": "Hand a piece of work to a teammate you have a delegate channel to. With native tools the teammate starts right away and\nits result (summary, files changed, task status) comes back as this call's result; several delegate calls in one reply\nrun at the same time.",
+      "properties": {
+        "action": {
+          "const": "delegate",
+          "title": "Action",
+          "type": "string"
+        },
+        "context": {
+          "default": "",
+          "description": "Facts, decisions and file paths the teammate needs",
+          "maxLength": 20000,
+          "title": "Context",
+          "type": "string"
+        },
+        "deliverable": {
+          "default": "",
+          "description": "What to hand back, e.g. files and where they go",
+          "maxLength": 4000,
+          "title": "Deliverable",
+          "type": "string"
+        },
+        "done_when": {
+          "default": "",
+          "description": "How the teammate can tell the work is finished",
+          "maxLength": 4000,
+          "title": "Done When",
+          "type": "string"
+        },
+        "objective": {
+          "description": "What to achieve",
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "to": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "to",
+        "objective"
+      ],
+      "title": "Delegate",
+      "type": "object"
+    },
+    "name": "delegate",
+    "parameters": {
+      "description": "Hand a piece of work to a teammate you have a delegate channel to. With native tools the teammate starts right away and\nits result (summary, files changed, task status) comes back as this call's result; several delegate calls in one reply\nrun at the same time.",
+      "properties": {
+        "context": {
+          "default": "",
+          "description": "Facts, decisions and file paths the teammate needs",
+          "maxLength": 20000,
+          "type": "string"
+        },
+        "deliverable": {
+          "default": "",
+          "description": "What to hand back, e.g. files and where they go",
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "done_when": {
+          "default": "",
+          "description": "How the teammate can tell the work is finished",
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "objective": {
+          "description": "What to achieve",
+          "maxLength": 8000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "to": {
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "objective"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Change part of an existing file. Each edit replaces old_string (exact current text, including whitespace) with new_string; old_string must occur exactly once unless replace_all. Edits apply in order and all succeed or none do.",
+    "enabled_by": "file_write",
+    "input_schema": {
+      "$defs": {
+        "Edit": {
+          "properties": {
+            "new_string": {
+              "description": "Text to put in its place (empty to delete)",
+              "title": "New String",
+              "type": "string"
+            },
+            "old_string": {
+              "description": "Exact text currently in the file (including whitespace and indentation)",
+              "minLength": 1,
+              "title": "Old String",
+              "type": "string"
+            },
+            "replace_all": {
+              "default": false,
+              "description": "Replace every occurrence instead of requiring exactly one",
+              "title": "Replace All",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "old_string",
+            "new_string"
+          ],
+          "title": "Edit",
+          "type": "object"
+        }
+      },
+      "description": "Change part of an existing file by exact text replacement. Edits apply in order; all of them succeed or none do.",
+      "properties": {
+        "action": {
+          "const": "edit_file",
+          "title": "Action",
+          "type": "string"
+        },
+        "edits": {
+          "items": {
+            "$ref": "#/$defs/Edit"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Edits",
+          "type": "array"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "path",
+        "edits"
+      ],
+      "title": "EditFile",
+      "type": "object"
+    },
+    "name": "edit_file",
+    "parameters": {
+      "description": "Change part of an existing file by exact text replacement. Edits apply in order; all of them succeed or none do.",
+      "properties": {
+        "edits": {
+          "items": {
+            "properties": {
+              "new_string": {
+                "description": "Text to put in its place (empty to delete)",
+                "type": "string"
+              },
+              "old_string": {
+                "description": "Exact text currently in the file (including whitespace and indentation)",
+                "minLength": 1,
+                "type": "string"
+              },
+              "replace_all": {
+                "default": false,
+                "description": "Replace every occurrence instead of requiring exactly one",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "old_string",
+              "new_string"
+            ],
+            "type": "object"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "type": "array"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "edits"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Report that your part is done, with a summary. For the entry agent this completes the run. In a workflow Test or Review phase set outcome \"pass\" or \"fail\" (fail sends your findings back to the builder).",
+    "enabled_by": null,
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "finish",
+          "title": "Action",
+          "type": "string"
+        },
+        "outcome": {
+          "default": "done",
+          "enum": [
+            "done",
+            "pass",
+            "fail"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "Finish",
+      "type": "object"
+    },
+    "name": "finish",
+    "parameters": {
+      "properties": {
+        "outcome": {
+          "default": "done",
+          "enum": [
+            "done",
+            "pass",
+            "fail"
+          ],
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "terminal": true
+  },
+  {
+    "description": "See every teammate: department, manager, active/inactive and live status.",
+    "enabled_by": null,
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "list_agents",
+          "title": "Action",
+          "type": "string"
+        },
+        "department": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Department"
+        },
+        "include_inactive": {
+          "default": true,
+          "title": "Include Inactive",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ListAgents",
+      "type": "object"
+    },
+    "name": "list_agents",
+    "parameters": {
+      "properties": {
+        "department": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "include_inactive": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "List the files in the project (or under a folder prefix).",
+    "enabled_by": "list_files",
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "list_files",
+          "title": "Action",
+          "type": "string"
+        },
+        "prefix": {
+          "default": "",
+          "title": "Prefix",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ListFiles",
+      "type": "object"
+    },
+    "name": "list_files",
+    "parameters": {
+      "properties": {
+        "prefix": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Call a tool on an MCP server granted to you.",
+    "enabled_by": null,
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "mcp_call",
+          "title": "Action",
+          "type": "string"
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "server": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Server",
+          "type": "string"
+        },
+        "tool": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "server",
+        "tool"
+      ],
+      "title": "McpCall",
+      "type": "object"
+    },
+    "name": "mcp_call",
+    "parameters": {
+      "properties": {
+        "arguments": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "server": {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        "tool": {
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "tool"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Move or rename a file or a whole folder inside the project.",
+    "enabled_by": "file_write",
+    "input_schema": {
+      "description": "Move or rename a file or a whole folder inside the project (organise files).",
+      "properties": {
+        "action": {
+          "const": "move_file",
+          "title": "Action",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "source",
+        "destination"
+      ],
+      "title": "MoveFile",
+      "type": "object"
+    },
+    "name": "move_file",
+    "parameters": {
+      "description": "Move or rename a file or a whole folder inside the project (organise files).",
+      "properties": {
+        "destination": {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "destination"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Read a file from the project. Large files come in pages; the result says which offset to read next.",
+    "enabled_by": "file_read",
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "read_file",
+          "title": "Action",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "path"
+      ],
+      "title": "ReadFile",
+      "type": "object"
+    },
+    "name": "read_file",
+    "parameters": {
+      "properties": {
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Retrieve authorized originals referenced by condensed context.",
+    "enabled_by": null,
+    "input_schema": {
+      "description": "Retrieve authorized originals referenced by condensed context.",
+      "properties": {
+        "action": {
+          "const": "recall_context",
+          "title": "Action",
+          "type": "string"
+        },
+        "memory_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Id"
+        },
+        "message_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Message Ids",
+          "type": "array"
+        },
+        "query": {
+          "default": "",
+          "description": "Find matching authorized original messages and memory; empty retrieves exact references only",
+          "maxLength": 200,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "RecallContext",
+      "type": "object"
+    },
+    "name": "recall_context",
+    "parameters": {
+      "description": "Retrieve authorized originals referenced by condensed context.",
+      "properties": {
+        "memory_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "type": "array"
+        },
+        "query": {
+          "default": "",
+          "description": "Find matching authorized original messages and memory; empty retrieves exact references only",
+          "maxLength": 200,
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Record an engineering workflow output using the required output keys from your brief. Cite real tool_call_ids. Unavailable checks remain unverified. This grants no permission or completion authority.",
+    "enabled_by": null,
+    "input_schema": {
+      "description": "Submit a workflow output. Verification references must point to observed tool calls, never invented checks.",
+      "properties": {
+        "action": {
+          "const": "record_checkpoint",
+          "title": "Action",
+          "type": "string"
+        },
+        "outputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "maxProperties": 20,
+          "title": "Outputs",
+          "type": "object"
+        },
+        "step": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Step",
+          "type": "string"
+        },
+        "tool_call_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Tool Call Ids",
+          "type": "array"
+        },
+        "unavailable": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Unavailable",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "step"
+      ],
+      "title": "RecordCheckpoint",
+      "type": "object"
+    },
+    "name": "record_checkpoint",
+    "parameters": {
+      "description": "Submit a workflow output. Verification references must point to observed tool calls, never invented checks.",
+      "properties": {
+        "outputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "maxProperties": 20,
+          "type": "object"
+        },
+        "step": {
+          "maxLength": 40,
+          "minLength": 1,
+          "type": "string"
+        },
+        "tool_call_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "unavailable": {
+          "default": "",
+          "maxLength": 2000,
+          "type": "string"
+        }
+      },
+      "required": [
+        "step"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Certify a UI scenario from successful browser actions and a final observed assertion, never a screenshot alone.",
+    "enabled_by": null,
+    "input_schema": {
+      "description": "Certify a UI scenario from successful browser actions and a final observed assertion, never a screenshot alone.",
+      "properties": {
+        "action": {
+          "const": "record_interaction",
+          "title": "Action",
+          "type": "string"
+        },
+        "covered_paths": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3000,
+          "minItems": 1,
+          "title": "Covered Paths",
+          "type": "array"
+        },
+        "criterion_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Criterion Ids",
+          "type": "array"
+        },
+        "scenario": {
+          "maxLength": 2000,
+          "minLength": 10,
+          "title": "Scenario",
+          "type": "string"
+        },
+        "tool_call_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 2,
+          "title": "Tool Call Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "scenario",
+        "tool_call_ids",
+        "covered_paths",
+        "criterion_ids"
+      ],
+      "title": "RecordInteraction",
+      "type": "object"
+    },
+    "name": "record_interaction",
+    "parameters": {
+      "description": "Certify a UI scenario from successful browser actions and a final observed assertion, never a screenshot alone.",
+      "properties": {
+        "covered_paths": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "criterion_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        "scenario": {
+          "maxLength": 2000,
+          "minLength": 10,
+          "type": "string"
+        },
+        "tool_call_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "scenario",
+        "tool_call_ids",
+        "covered_paths",
+        "criterion_ids"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Save a long-term memory note that you will see in future runs.",
+    "enabled_by": null,
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "remember",
+          "title": "Action",
+          "type": "string"
+        },
+        "expected_version": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "scope": {
+          "default": "self",
+          "description": "\"self\": your own notes; \"project\": shared with every agent in this project, in this and future runs",
+          "enum": [
+            "self",
+            "project",
+            "group",
+            "chat"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "scope_id": {
+          "anyOf": [
+            {
+              "maxLength": 36,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Group ID required for group scope",
+          "title": "Scope Id"
+        },
+        "sources": {
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "maxItems": 100,
+          "title": "Sources",
+          "type": "array"
+        },
+        "value": {
+          "maxLength": 5000,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "key",
+        "value"
+      ],
+      "title": "Remember",
+      "type": "object"
+    },
+    "name": "remember",
+    "parameters": {
+      "properties": {
+        "expected_version": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "scope": {
+          "default": "self",
+          "description": "\"self\": your own notes; \"project\": shared with every agent in this project, in this and future runs",
+          "enum": [
+            "self",
+            "project",
+            "group",
+            "chat"
+          ],
+          "type": "string"
+        },
+        "scope_id": {
+          "anyOf": [
+            {
+              "maxLength": 36,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Group ID required for group scope"
+        },
+        "sources": {
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "value": {
+          "maxLength": 5000,
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Ask the user a question and pause until they answer. Offer concrete options and mark the one you recommend.",
+    "enabled_by": "ask_user",
+    "input_schema": {
+      "$defs": {
+        "Choice": {
+          "properties": {
+            "description": {
+              "default": "",
+              "maxLength": 500,
+              "title": "Description",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "recommended": {
+              "default": false,
+              "title": "Recommended",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "title": "Choice",
+          "type": "object"
+        }
+      },
+      "description": "Ask the user. Always offer 2-5 concrete options (mark the best one recommended); the user can also type their own answer.",
+      "properties": {
+        "action": {
+          "const": "request_user_input",
+          "title": "Action",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/Choice"
+          },
+          "maxItems": 6,
+          "title": "Options",
+          "type": "array"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "question"
+      ],
+      "title": "RequestUserInput",
+      "type": "object"
+    },
+    "name": "request_user_input",
+    "parameters": {
+      "description": "Ask the user. Always offer 2-5 concrete options (mark the best one recommended); the user can also type their own answer.",
+      "properties": {
+        "options": {
+          "items": {
+            "properties": {
+              "description": {
+                "default": "",
+                "maxLength": 500,
+                "type": "string"
+              },
+              "label": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "recommended": {
+                "default": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "type": "object"
+          },
+          "maxItems": 6,
+          "type": "array"
+        },
+        "question": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "type": "object"
+    },
+    "terminal": true
+  },
+  {
+    "description": "Run one command in the project's sandboxed terminal, from the project root (e.g. python -m pytest, node script.js, npm test). There is no shell: quoted arguments may contain any characters, but pipes, &&, ;, redirects and $(...) are not allowed. Paths outside the project need the user's approval.",
+    "enabled_by": "terminal",
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "run_code",
+          "title": "Action",
+          "type": "string"
+        },
+        "command": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "covered_paths": {
+          "description": "Files this check actually covers; empty means no artifact proof",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3000,
+          "title": "Covered Paths",
+          "type": "array"
+        },
+        "criterion_ids": {
+          "description": "Acceptance criterion IDs addressed by this check",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Criterion Ids",
+          "type": "array"
+        },
+        "whole_project": {
+          "default": false,
+          "title": "Whole Project",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "command"
+      ],
+      "title": "RunCode",
+      "type": "object"
+    },
+    "name": "run_code",
+    "parameters": {
+      "properties": {
+        "command": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        "covered_paths": {
+          "description": "Files this check actually covers; empty means no artifact proof",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3000,
+          "type": "array"
+        },
+        "criterion_ids": {
+          "description": "Acceptance criterion IDs addressed by this check",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "whole_project": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Search the project's files and the team's working docs (.octopus/work/) for text or a regex; returns path:line matches.",
+    "enabled_by": "file_read",
+    "input_schema": {
+      "description": "Search the project's files (and the team's working docs in .octopus/work/) for text.",
+      "properties": {
+        "action": {
+          "const": "search_project",
+          "title": "Action",
+          "type": "string"
+        },
+        "max_results": {
+          "default": 80,
+          "maximum": 300,
+          "minimum": 1,
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "path_prefix": {
+          "default": "",
+          "description": "Only search under this folder",
+          "maxLength": 300,
+          "title": "Path Prefix",
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "regex": {
+          "default": false,
+          "title": "Regex",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "query"
+      ],
+      "title": "SearchProject",
+      "type": "object"
+    },
+    "name": "search_project",
+    "parameters": {
+      "description": "Search the project's files (and the team's working docs in .octopus/work/) for text.",
+      "properties": {
+        "max_results": {
+          "default": 80,
+          "maximum": 300,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path_prefix": {
+          "default": "",
+          "description": "Only search under this folder",
+          "maxLength": 300,
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        "regex": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Send a message to a teammate you have a channel with (or \"all\"). Tasks you send go on the task board.",
+    "enabled_by": "send_message",
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "send_message",
+          "title": "Action",
+          "type": "string"
+        },
+        "comments": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Comments",
+          "type": "array"
+        },
+        "content": {
+          "maxLength": 40000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "to": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "To",
+          "type": "string"
+        },
+        "type": {
+          "default": "answer",
+          "enum": [
+            "task",
+            "question",
+            "answer",
+            "proposal",
+            "critique",
+            "agreement",
+            "objection",
+            "decision",
+            "review_request",
+            "review_result",
+            "status_update",
+            "final_report"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "approve",
+                "request_changes"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verdict"
+        }
+      },
+      "required": [
+        "action",
+        "to",
+        "content"
+      ],
+      "title": "SendMessage",
+      "type": "object"
+    },
+    "name": "send_message",
+    "parameters": {
+      "properties": {
+        "comments": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "content": {
+          "maxLength": 40000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "to": {
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "default": "answer",
+          "enum": [
+            "task",
+            "question",
+            "answer",
+            "proposal",
+            "critique",
+            "agreement",
+            "objection",
+            "decision",
+            "review_request",
+            "review_result",
+            "status_update",
+            "final_report"
+          ],
+          "type": "string"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "approve",
+                "request_changes"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "to",
+        "content"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Company head, at intake only: pick the track for this goal (quick = one coherent deliverable; standard = a feature or app; large = several independent parts) and whether a research phase is needed. Octopus then briefs each phase owner in order and comes back to you to accept. Ends your turn.",
+    "enabled_by": null,
+    "input_schema": {
+      "description": "Company head, during intake: choose how the goal is worked (Octopus then runs the phases with the right owners).",
+      "properties": {
+        "action": {
+          "const": "set_track",
+          "title": "Action",
+          "type": "string"
+        },
+        "owners": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Owners",
+          "type": "object"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Reason",
+          "type": "string"
+        },
+        "research": {
+          "default": false,
+          "title": "Research",
+          "type": "boolean"
+        },
+        "track": {
+          "enum": [
+            "quick",
+            "standard",
+            "large"
+          ],
+          "title": "Track",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "track"
+      ],
+      "title": "SetTrack",
+      "type": "object"
+    },
+    "name": "set_track",
+    "parameters": {
+      "description": "Company head, during intake: choose how the goal is worked (Octopus then runs the phases with the right owners).",
+      "properties": {
+        "owners": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 2000,
+          "type": "string"
+        },
+        "research": {
+          "default": false,
+          "type": "boolean"
+        },
+        "track": {
+          "enum": [
+            "quick",
+            "standard",
+            "large"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "track"
+      ],
+      "type": "object"
+    },
+    "terminal": true
+  },
+  {
+    "description": "Change your own configuration (target \"self\") or that of an agent you manage.",
+    "enabled_by": null,
+    "input_schema": {
+      "$defs": {
+        "AgentChanges": {
+          "properties": {
+            "active": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Active"
+            },
+            "append_to_prompt": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Append To Prompt"
+            },
+            "behavior": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Behavior"
+            },
+            "department": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Department"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "is_manager": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Is Manager"
+            },
+            "max_tokens": {
+              "anyOf": [
+                {
+                  "maximum": 128000,
+                  "minimum": 256,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Tokens"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "maxLength": 60,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Name"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Role"
+            },
+            "system_prompt": {
+              "anyOf": [
+                {
+                  "maxLength": 20000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "System Prompt"
+            },
+            "temperature": {
+              "anyOf": [
+                {
+                  "maximum": 2,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Temperature"
+            },
+            "tools": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "type": "object"
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Tools"
+            }
+          },
+          "title": "AgentChanges",
+          "type": "object"
+        }
+      },
+      "description": "Edit your own configuration (target \"self\") or that of an agent you manage/hired.",
+      "properties": {
+        "action": {
+          "const": "update_agent",
+          "title": "Action",
+          "type": "string"
+        },
+        "changes": {
+          "$ref": "#/$defs/AgentChanges"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Reason",
+          "type": "string"
+        },
+        "target": {
+          "default": "self",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "changes"
+      ],
+      "title": "UpdateAgent",
+      "type": "object"
+    },
+    "name": "update_agent",
+    "parameters": {
+      "description": "Edit your own configuration (target \"self\") or that of an agent you manage/hired.",
+      "properties": {
+        "changes": {
+          "properties": {
+            "active": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "append_to_prompt": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "behavior": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "department": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "is_manager": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "max_tokens": {
+              "anyOf": [
+                {
+                  "maximum": 128000,
+                  "minimum": 256,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "maxLength": 60,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "system_prompt": {
+              "anyOf": [
+                {
+                  "maxLength": 20000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "temperature": {
+              "anyOf": [
+                {
+                  "maximum": 2,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "tools": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "type": "object"
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "type": "object"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 1000,
+          "type": "string"
+        },
+        "target": {
+          "default": "self",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changes"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Create tasks (omit key) or update existing ones (status, assignee, description, acceptance criteria).",
+    "enabled_by": null,
+    "input_schema": {
+      "$defs": {
+        "AcceptanceCriterion": {
+          "additionalProperties": false,
+          "properties": {
+            "check_kinds": {
+              "default": [
+                "command",
+                "ui"
+              ],
+              "items": {
+                "enum": [
+                  "command",
+                  "ui",
+                  "review",
+                  "source",
+                  "human"
+                ],
+                "type": "string"
+              },
+              "title": "Check Kinds",
+              "type": "array"
+            },
+            "description": {
+              "title": "Description",
+              "type": "string"
+            },
+            "id": {
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "required_paths": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Required Paths",
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "description"
+          ],
+          "title": "AcceptanceCriterion",
+          "type": "object"
+        },
+        "TaskContract": {
+          "additionalProperties": false,
+          "properties": {
+            "criteria": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/AcceptanceCriterion"
+              },
+              "title": "Criteria",
+              "type": "array"
+            },
+            "dependencies": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Dependencies",
+              "type": "array"
+            },
+            "max_turns": {
+              "default": 30,
+              "maximum": 300,
+              "minimum": 1,
+              "title": "Max Turns",
+              "type": "integer"
+            },
+            "workflow_hash": {
+              "default": "",
+              "title": "Workflow Hash",
+              "type": "string"
+            },
+            "write_paths": {
+              "default": [
+                "*"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "title": "Write Paths",
+              "type": "array"
+            }
+          },
+          "title": "TaskContract",
+          "type": "object"
+        },
+        "TaskItem": {
+          "properties": {
+            "acceptance_criteria": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Acceptance Criteria"
+            },
+            "assignee": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Assignee"
+            },
+            "constraints": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TaskContract"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Key"
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "todo",
+                    "in_progress",
+                    "in_review",
+                    "done",
+                    "blocked"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Title"
+            }
+          },
+          "title": "TaskItem",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "action": {
+          "const": "update_task_board",
+          "title": "Action",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskItem"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "tasks"
+      ],
+      "title": "UpdateTaskBoard",
+      "type": "object"
+    },
+    "name": "update_task_board",
+    "parameters": {
+      "properties": {
+        "tasks": {
+          "items": {
+            "properties": {
+              "acceptance_criteria": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "constraints": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "criteria": {
+                        "default": [],
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "check_kinds": {
+                              "default": [
+                                "command",
+                                "ui"
+                              ],
+                              "items": {
+                                "enum": [
+                                  "command",
+                                  "ui",
+                                  "review",
+                                  "source",
+                                  "human"
+                                ],
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "required_paths": {
+                              "default": [],
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "description"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "dependencies": {
+                        "default": [],
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "max_turns": {
+                        "default": 30,
+                        "maximum": 300,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "workflow_hash": {
+                        "default": "",
+                        "type": "string"
+                      },
+                      "write_paths": {
+                        "default": [
+                          "*"
+                        ],
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "key": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "status": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "todo",
+                      "in_progress",
+                      "in_review",
+                      "done",
+                      "blocked"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "tasks"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Load one of the skills listed in your instructions (a step-by-step playbook for a kind of work: spec, design, implementation, testing, review…). The full steps come back; follow them.",
+    "enabled_by": null,
+    "input_schema": {
+      "description": "Load a skill (a step-by-step playbook) by name; its full instructions come back as the result.",
+      "properties": {
+        "action": {
+          "const": "use_skill",
+          "title": "Action",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact path of a reference within the pinned bundle",
+          "title": "Resource"
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "title": "UseSkill",
+      "type": "object"
+    },
+    "name": "use_skill",
+    "parameters": {
+      "description": "Load a skill (a step-by-step playbook) by name; its full instructions come back as the result.",
+      "properties": {
+        "name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact path of a reference within the pinned bundle"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "End your turn without acting; you are woken when a new message arrives.",
+    "enabled_by": null,
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "wait",
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "Wait",
+      "type": "object"
+    },
+    "name": "wait",
+    "parameters": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "terminal": true
+  },
+  {
+    "description": "Search the web.",
+    "enabled_by": "web_search",
+    "input_schema": {
+      "properties": {
+        "action": {
+          "const": "web_search",
+          "title": "Action",
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "query"
+      ],
+      "title": "WebSearch",
+      "type": "object"
+    },
+    "name": "web_search",
+    "parameters": {
+      "properties": {
+        "query": {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  },
+  {
+    "description": "Create or replace a file in the project with the given content. Parent folders are created. mode \"append\" adds to the end of the file instead; partial=true gives you another turn right away.",
+    "enabled_by": "file_write",
+    "input_schema": {
+      "description": "Write a file. ``mode=\"append\"`` adds to the end of the file, so a large file can be built in parts across turns.",
+      "properties": {
+        "action": {
+          "const": "write_file",
+          "title": "Action",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 1000000,
+          "title": "Content",
+          "type": "string"
+        },
+        "mode": {
+          "default": "overwrite",
+          "enum": [
+            "overwrite",
+            "append"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "partial": {
+          "default": false,
+          "title": "Partial",
+          "type": "boolean"
+        },
+        "path": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "path",
+        "content"
+      ],
+      "title": "WriteFile",
+      "type": "object"
+    },
+    "name": "write_file",
+    "parameters": {
+      "description": "Write a file. ``mode=\"append\"`` adds to the end of the file, so a large file can be built in parts across turns.",
+      "properties": {
+        "content": {
+          "maxLength": 1000000,
+          "type": "string"
+        },
+        "mode": {
+          "default": "overwrite",
+          "enum": [
+            "overwrite",
+            "append"
+          ],
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "partial": {
+          "default": false,
+          "type": "boolean"
+        },
+        "path": {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "type": "object"
+    },
+    "terminal": false
+  }
+]

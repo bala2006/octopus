@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from app.llm.router import set_provider_override
-from app.orchestrator import actions as A
-from app.orchestrator.engine import apply_edits
-from app.services.checks import check_file
+from app.plugins.providers.router import set_provider_override
+from app.sdk import actions as A
+from app.plugins.tools.files import apply_edits
+from app.plugins.workspace.checks import check_file
 from conftest import NativeScriptedProvider, agent, make_company, start_run, wait_status
 
 needs_node = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")

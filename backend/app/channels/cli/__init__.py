@@ -1,0 +1,17 @@
+"""CLI channel: the developer command line (decision D4: the dev scripts stay the CLI for now).
+
+``python -m app.cli`` (``backend/app/cli.py``) is the one launcher: setup, start, dev, check and test. The repo-root
+``octopus.ps1``, ``start.bat``, ``start.sh`` and the Makefile are thin shims that call it. The dev tools are in the
+repo-root ``scripts/`` folder: ``bench.py``, ``evaluate_runtime.py``, ``runtime_doctor.py``, and ``visual/``. This module
+holds the manifest only and has no HTTP routes.
+"""
+from __future__ import annotations
+
+from app.sdk.manifest import Manifest
+from app.channels import Channel
+
+
+class CliChannel(Channel):
+    manifest = Manifest(id="channel.cli", slot="channel", kind="cli", version="1.0.0", title="Command line",
+                       description="The start scripts and developer tools. They call the same HTTP API as the web app.",
+                       provides=("cli.dev",), requires=("http.api",), status="partly")

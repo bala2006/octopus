@@ -31,10 +31,10 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
-from app.core.config import get_settings  # noqa: E402
-from app.db.migrate import upgrade_registry  # noqa: E402
-from app.llm.base import LLMChunk, LLMRequest, Usage  # noqa: E402
-from app.llm.router import set_provider_override  # noqa: E402
+from app.foundation.config import get_settings  # noqa: E402
+from app.storage.migrate import upgrade_registry  # noqa: E402
+from app.sdk.llm import LLMChunk, LLMRequest, Usage  # noqa: E402
+from app.plugins.providers.router import set_provider_override  # noqa: E402
 from app.main import app  # noqa: E402
 from fakes.fake_provider import FakeProvider  # noqa: E402
 
@@ -87,7 +87,7 @@ class NativeScriptedProvider:
         return True
 
     async def stream(self, req: LLMRequest) -> AsyncIterator[LLMChunk]:
-        from app.llm.base import ToolCall
+        from app.sdk.llm import ToolCall
 
         ctx = req.metadata.get("turn_context")
         if ctx is None:
@@ -143,14 +143,6 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
-    set_provider_override(None)
-
-
-@pytest.fixture(autouse=True)
-def default_fake_provider():
-    """Every test answers from the offline fake provider unless it injects its own scripted provider."""
-    set_provider_override(FakeProvider())
-    yield
     set_provider_override(None)
 
 

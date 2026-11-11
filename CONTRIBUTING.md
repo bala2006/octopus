@@ -17,14 +17,14 @@ On macOS/Linux:
 
 ```bash
 make setup
-make dev
+make dev     # hot reload; open http://127.0.0.1:8000
 ```
 
 On Windows (PowerShell):
 
 ```powershell
 .\octopus.ps1 setup
-.\octopus.ps1 start
+.\octopus.ps1 start   # open http://127.0.0.1:8000
 ```
 
 Tests run without Azure credentials: the backend suite answers from a scripted fake provider. For environment configuration, consult the README. Never commit API keys, .env files, user data, model credentials, or other secrets.
