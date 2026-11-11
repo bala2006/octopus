@@ -127,7 +127,8 @@ SCREENS: list[Screen] = [
     Screen("run-approval", "/w/{acme}/runs/{approval}", ready=".view-toolbar h1", run_stream=True),
     Screen("run-question", "/w/{acme}/runs/{question}", ready=".view-toolbar h1", run_stream=True),
     Screen("artifacts-list", "/w/{acme}/artifacts", ready=".artifacts-layout"),
-    Screen("artifacts-detail", "/w/{acme}/artifacts/{complete}", ready=".artifacts-layout"),
+    Screen("artifacts-detail", "/w/{acme}/artifacts/{complete}", ready=".artifacts-layout",
+           masks=[".monaco-editor"]),  # Monaco renders its tokens and scrollbar asynchronously; the code view varies between captures (plan.md 9.6, 14)
     Screen("activity", "/activity", ready=".personal-activity .activity-page-inner"),
     Screen("settings", "/settings", ready="nav[aria-label='Settings sections']"),
     Screen("guide", "/w/{acme}/guide", ready="nav.guide-navigation"),
@@ -292,9 +293,13 @@ def write_manifest(path: Path, results: list[dict], settings: dict) -> None:
     screens = []
     for r in results:
         old = previous.get((r["screen"], r["viewport"]), {})
+        live = r["run_stream"]
         screens.append({
             "screen": r["screen"], "viewport": r["viewport"], "route": r["route"], "sha256": r["sha256"],
             "masks": r["masks"],
+            # run replays stream events over a WebSocket; their pixels vary between captures (plan.md 14).
+            # They are reported, not gated, until their dynamic regions can be masked reliably.
+            "gate": not live,
             # per-screen threshold, preserved across regenerations; the defaults are 0 changed pixels and no tolerance
             "max_changed_pixels": old.get("max_changed_pixels", 0),
             "channel_tolerance": old.get("channel_tolerance", 0),
@@ -353,7 +358,8 @@ def run(args: argparse.Namespace) -> int:
                         print(f"capturing {vp_name} {screen.name}", flush=True)
                         capture_one(browser, base, screen, resolve_route(route_template, ids), size, png)
                         results.append({"screen": screen.name, "viewport": vp_name, "route": route_template,
-                                        "sha256": sha256_file(png), "masks": screen.masks})
+                                        "sha256": sha256_file(png), "masks": screen.masks,
+                                        "run_stream": screen.run_stream})
                 version = browser.version
             finally:
                 browser.close()

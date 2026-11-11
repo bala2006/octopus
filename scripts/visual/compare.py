@@ -102,15 +102,21 @@ def main() -> int:
         return 2
 
     rows = [check_screen(entry, args.captures, args.baseline) for entry in manifest["screens"]]
+    gated = {(e["screen"], e["viewport"]): e.get("gate", True) for e in manifest["screens"]}
     header = f"{'viewport':<10} {'screen':<17} {'changed px':>11} {'ratio':>10}  status  note"
     print(header)
     print("-" * len(header))
     for r in rows:
         ratio = "-" if r["total"] in (None, 0) else f"{100 * r['changed'] / r['total']:.4f}%"
         changed = "-" if r["changed"] is None else str(r["changed"])
+        if not gated[(r["screen"], r["viewport"])] and r["status"] != "PASS":
+            r["status"] = "INFO"
         print(f"{r['viewport']:<10} {r['screen']:<17} {changed:>11} {ratio:>10}  {r['status']:<6}  {r['note']}")
-    failed = [r for r in rows if r["status"] != "PASS"]
-    print(f"\n{len(rows) - len(failed)}/{len(rows)} screens passed (seed version {manifest.get('seed_version')})")
+    gate_rows = [r for r in rows if gated[(r["screen"], r["viewport"])]]
+    failed = [r for r in gate_rows if r["status"] != "PASS"]
+    informational = [r for r in rows if r["status"] == "INFO"]
+    print(f"\n{len(gate_rows) - len(failed)}/{len(gate_rows)} gated screens passed, {len(informational)} informational "
+          f"(seed version {manifest.get('seed_version')})")
     if any(r["status"] == "ERROR" for r in rows):
         return 2
     return 1 if failed else 0

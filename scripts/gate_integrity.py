@@ -26,7 +26,7 @@ GATE_PATHS = (
     "backend/pytest.ini",
     "backend/.importlinter",
     "backend/tests/golden/",
-    "scripts/visual/manifest.json",
+    "scripts/visual/",
     "frontend/vite.config.ts",
     "frontend/tsconfig.json",
     "scripts/gate_integrity.py",
