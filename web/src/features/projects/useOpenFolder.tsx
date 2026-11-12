@@ -2,7 +2,7 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useWorkbenchStore } from "@/features/editor/workbenchStore";
+import { useWorkbenchStore } from "@/features/conversation/workbenchStore";
 import { usePendingAttachments } from "@/features/chat/attachments";
 import { api, unwrap } from "@/lib/api";
 import { qk } from "@/hooks/queries";

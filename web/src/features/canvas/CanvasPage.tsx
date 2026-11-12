@@ -22,7 +22,7 @@ import {
   ContextMenuTrigger, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Tip,
 } from "@/components/ui/overlays";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
-import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
+import { NewCompanyDialog } from "@/features/projects/NewCompanyDialog";
 import { RunDialog } from "@/features/runs/RunDialog";
 import { edgeTypes, nodeTypes } from "./flowTypes";
 import { EdgeAnchorsProvider } from "./edgeAnchors";
@@ -34,7 +34,8 @@ import { EdgeEditor } from "./EdgeEditor";
 import { Inspector } from "./Inspector";
 import { DND_MIME, Palette } from "./Palette";
 import { useAutosave, type SaveState } from "./useAutosave";
-import { useLiveHires } from "@/features/runs/liveHires";
+import { useLiveRun } from "@/features/runs/liveRun";
+import { LiveContext } from "./live";
 
 
 export default function CanvasPage({ embedded = false, rightInset = 0, leftInset = 0 }: { embedded?: boolean; rightInset?: number; leftInset?: number }) {
@@ -59,7 +60,8 @@ export default function CanvasPage({ embedded = false, rightInset = 0, leftInset
 function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset }: { workspaceId: string; companyId: string; embedded: boolean; rightInset: number; leftInset: number }) {
   const q = useCanvasQuery(workspaceId, companyId);
   const s = useCanvas();
-  const liveHires = useLiveHires((h) => h.agents);
+  const liveHires = useLiveRun((l) => l.hires);
+  const overlay = useLiveRun((l) => l.overlay);
   React.useEffect(() => { useCanvas.getState().setLiveHires(liveHires); }, [liveHires]);
   const rf = useReactFlow();
   const nodesInitialized = useNodesInitialized();
@@ -174,6 +176,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
         <ContextMenu onOpenChange={(o) => !o && setMenuNode(null)}>
           <ContextMenuTrigger asChild>
             <div className="h-full w-full" onContextMenu={(e) => { menuPos.current = { x: e.clientX, y: e.clientY }; }}>
+              <LiveContext.Provider value={embedded ? overlay : null}>
               <EdgeAnchorsProvider>
               <ReactFlow<AgentNodeT, ChannelEdgeT>
                 nodes={s.nodes} edges={s.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
@@ -200,6 +203,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
                 <CanvasMiniMap departments={s.departments} position={embedded ? "top-right" : "bottom-right"} onPick={(id) => useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: n.id === id })) })} />
               </ReactFlow>
               </EdgeAnchorsProvider>
+              </LiveContext.Provider>
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>

@@ -292,10 +292,8 @@ const SECTIONS: Section[] = [
   {
     id: "companies", title: "Create a team (company)", icon: Building2,
     body: <>
-      <p>A <b>company</b> is a team of agents. Start with one of 14 <b>templates</b>: <i>Software Startup</i>, <i>Web App Studio</i>, <i>Indie Game Studio</i>,
-        <i>Mobile App Team</i>, <i>SaaS Launch</i>, <i>Data Science Team</i>, <i>Security Audit</i>, <i>Content &amp; Marketing Studio</i>,
-        <i>Customer Support Desk</i> and more. Or describe your goal and let AI design the team.
-        You can keep several companies in one project and switch between them in the top bar.</p>
+      <p>A <b>company</b> is a team of agents. The default, <i>Self-organizing</i>, starts with only the orchestrator, <b>Octopus</b>, which hires exactly the specialists each request needs. You can also start from a template (<i>Software Startup</i>, <i>Web App Studio</i>, <i>Mobile App Team</i>, <i>SaaS Launch</i>, <i>Full Company</i> and more), describe a team and let AI design it, or import one.</p>
+      <p>Octopus still hires when a request needs expertise the team does not have. New people appear on the canvas as they join, labelled <b>AI hire</b>, and stay in the company for later requests.</p>
       <Shot name="new-company" alt="New company dialog with templates" caption="Templates are just starting points. Everything can be edited afterwards." />
     </>,
   },
@@ -343,12 +341,13 @@ const SECTIONS: Section[] = [
   {
     id: "runs", title: "Work with your team", icon: Play,
     body: <>
-      <p>Send a message in <b>Conversation</b> (for example <i>"Build a todo app with login"</i>). The orchestrator chooses who should help and routes work through your team's communication channels. Follow up in the same conversation to steer or extend the work.</p>
-      <p>Pick how Octopus handles actions with the approval control under the message box. The choice applies to the next run you start.</p>
+      <p>Send a message in <b>Conversation</b> (for example <i>"Build a todo app with login"</i>). Octopus reads the request and your project, then either answers you directly, asks a question with suggested answers, or staffs the work: it hires the specialists it needs and gives each one a task with acceptance criteria and an order.</p>
+      <p>Tasks run in parallel when they can. Every change is reviewed by someone other than its author; requested changes go back to the author. Your project's own tests, type checks and lint run after changes, and failures become fix tasks. Then Octopus reports what changed, how it was verified and what is open. The progress bar above the feed shows these steps: Plan, Build, Review, Verify, Report.</p>
+      <p>Reply in the same box to continue. A message sent while the team works is planned in alongside the running tasks; start it with <b>@Name</b> to give it straight to one teammate.</p>
+      <p>While your team works, the canvas shows who is thinking, messages moving between agents and files being written. Open Team activity for the full collaboration view and the replay timeline.
+        Click the <b>tokens / cost</b> meter for the exact usage Azure reported. You can pause, send a message to the team, or stop their work at any time.</p>
+      <p>The approval control under the message box decides what needs your OK:</p>
       <ApprovalModes />
-      <p>While your team works, you see who is thinking, messages moving between agents, and files being written. You can open Team activity for the full collaboration view.
-        Click the <b>tokens / cost</b> meter for the exact usage Azure reported: uncached input, cached input, cache writes and output (reasoning
-        included), each with its cost. If an agent needs your approval, the team pauses and a <b>Needs you</b> badge appears in the top bar. You can pause, send a message to the team, or stop their work at any time.</p>
       <Shot name="run" alt="Live team activity with the company graph and message feed" />
     </>,
   },
@@ -383,8 +382,10 @@ const SECTIONS: Section[] = [
   {
     id: "safety", title: "Staying in control", icon: ShieldCheck,
     body: <Tips items={[
-      <>Agents are sandboxed to the project folder, including terminal commands.</>,
-      <>Every run has limits: turns, tokens, cost and time. You'll find them under <i>Limits</i> in the Run dialog.</>,
+      <>Agents can only touch files inside the project folder. <code>.git</code> and Octopus's own data are off-limits.</>,
+      <>Every change is versioned: <b>Changes</b> reverts any file to any version, and deleted files go to a recoverable trash.</>,
+      <>Commands run without a shell and without your keys. Destructive ones (<code>rm</code>, <code>git reset --hard</code>, force pushes, <code>sudo</code>) are always refused.</>,
+      <>Every conversation has limits: model calls, tokens, cost and time. Set them under <i>Advanced</i> in the new-conversation dialog.</>,
       <>The approval control under the message box shows how Octopus handles actions: <b>Ask for permission</b> or <b>Approve for me</b>.</>,
       <>API keys are encrypted on your machine and never sent back to the browser.</>,
     ]} />,

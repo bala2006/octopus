@@ -44,13 +44,13 @@ export interface ApprovalModeMeta { label: string; description: string; caption:
 export const APPROVAL_MODES: Record<ApprovalMode, ApprovalModeMeta> = {
   ask: {
     label: "Ask for permission",
-    description: "Octopus asks before every command, file change, external tool, web search and team change.",
-    caption: "Octopus asks before edits, commands and other actions.",
+    description: "Octopus asks before the team edits or deletes files you already had, installs packages, changes Git history, runs unfamiliar programs or uses an MCP server. New files, builds and tests run without asking.",
+    caption: "Octopus asks before edits to your files, installs and other risky actions.",
   },
   auto: {
     label: "Approve for me",
-    description: "Octopus runs commands, edits, external tools and web searches without asking. It still asks before dangerous edits (moves, renames, CI workflow files) and before commands that run outside this project folder.",
-    caption: "Octopus approves edits, commands and tools. It still asks before risky ones.",
+    description: "Octopus approves edits, installs, Git commits and tools for you. It still asks before high-risk actions such as pushing, publishing, deploying or reading secret files. Destructive commands are always refused.",
+    caption: "Octopus approves edits, commands and tools. It still asks before high-risk ones.",
   },
 };
 /** The server stores one of two modes. Any other value (legacy data) is treated as "ask". */

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useLiveHires } from "@/features/runs/liveHires";
+import { useLiveRun } from "@/features/runs/liveRun";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -66,7 +66,7 @@ import {
 } from "@/components/ui/overlays";
 import { PromptComposer } from "@/components/ui/surfaces";
 import { ConnectionDot } from "@/components/common";
-import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
+import { NewCompanyDialog } from "@/features/projects/NewCompanyDialog";
 import {
   useAttachments,
   AttachmentChips,
@@ -82,8 +82,8 @@ import { ReportView } from "@/features/runs/RunReport";
 import { ApprovalCard } from "@/features/runs/ApprovalCard";
 import { QuestionCard } from "@/features/runs/QuestionCard";
 import { useRunStream } from "@/features/runs/useRunStream";
-import { TERMINAL } from "@/features/runs/runState";
-import { useEditorStore } from "./editorStore";
+import { liveOverlay, TERMINAL } from "@/features/runs/runState";
+import { useEditorStore } from "@/features/code/editorStore";
 import { contextGoal, type CodeContext } from "./agentContext";
 import { APPROVAL_MODES, approvalModeOf } from "@/lib/meta";
 import {
@@ -238,11 +238,12 @@ function CompanyAgentPanel({
     [base],
   );
   const { state, conn } = useRunStream(w, run.data ? runId : undefined, names);
-  const setLiveHires = useLiveHires((h) => h.setHires);
+  const publishLive = useLiveRun((l) => l.publish);
   React.useEffect(() => {
-    setLiveHires(runId ?? null, state.extraAgents);
-  }, [runId, state.extraAgents, setLiveHires]);
-  React.useEffect(() => () => setLiveHires(null, []), [setLiveHires]);
+    const team = [...base, ...state.extraAgents];
+    publishLive(runId ?? null, state.extraAgents, runId ? liveOverlay(state, team, { ...canvas.data?.departments, ...state.departments }) : null);
+  }, [runId, state, base, canvas.data?.departments, publishLive]);
+  React.useEffect(() => () => publishLive(null, [], null), [publishLive]);
   const agents = Object.fromEntries(
     [...base, ...state.extraAgents].map((a) => [
       a.id,

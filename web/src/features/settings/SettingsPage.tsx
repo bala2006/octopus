@@ -11,7 +11,7 @@ import { SkillsSection } from "./SkillsSection";
 import { download } from "@/lib/utils";
 import { CURRENCIES, formatMoney, useFxRate } from "@/lib/money";
 import { useTemplates } from "@/hooks/queries";
-import { DepartmentChips } from "@/features/workspaces/NewCompanyDialog";
+import { DepartmentChips } from "@/features/projects/NewCompanyDialog";
 import { api, unwrap } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { qk, useMcpServers, useSettings, useWorkspace, useWorkspaceId } from "@/hooks/queries";

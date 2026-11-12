@@ -63,10 +63,10 @@ export function revertFile(db: ProjectDb, fs: ProjectFs, runId: string, rel: str
     target = first.created ? first : !first.author_agent_id ? first : versions[i - 1] ?? first;
     content = first.created ? null : target.content;
   }
-  const abs = fs.abs(rel, "user");
+  const abs = fs.abs(rel);
   const current = existsSync(abs) ? readFileSync(abs, "utf8") : null;
   if (content === null) {
-    if (current !== null) trash(fs, rel, "user");
+    if (current !== null) trash(fs, rel, "agent");
   } else {
     mkdirSync(path.dirname(abs), { recursive: true });
     writeFileSync(abs, content);

@@ -4,8 +4,8 @@ import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/overlays";
 import { ErrorBoundary } from "@/components/common";
 import { useApp } from "@/stores/app";
-import { useEditorStore } from "@/features/editor/editorStore";
-import { buildRoutes } from "@/plugins/routes";
+import { useEditorStore } from "@/features/code/editorStore";
+import { routes } from "@/routes";
 
 function PageFallback() {
   return (
@@ -40,7 +40,7 @@ export function App() {
       <BrowserRouter>
         <ErrorBoundary>
           <React.Suspense fallback={<PageFallback />}>
-            <Routes>{buildRoutes()}</Routes>
+            <Routes>{routes}</Routes>
           </React.Suspense>
         </ErrorBoundary>
       </BrowserRouter>

@@ -47,9 +47,9 @@ import { TrashPanel } from "./TrashPanel";
 import { FileActionDialogs, useFileActions } from "./FileActions";
 import { PanelResize, usePanelSize } from "./PanelResize";
 import { emptyProject, useEditorStore, type Document } from "./editorStore";
-import { AgentPanel } from "./AgentPanel";
-import type { CodeContext } from "./agentContext";
-import { threadKey, useWorkbenchStore } from "./workbenchStore";
+import { AgentPanel } from "@/features/conversation/AgentPanel";
+import type { CodeContext } from "@/features/conversation/agentContext";
+import { threadKey, useWorkbenchStore } from "@/features/conversation/workbenchStore";
 import { useCompanyId } from "@/hooks/queries";
 
 type FileAction = { kind: "create" } | { kind: "folder" };

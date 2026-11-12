@@ -12,7 +12,7 @@ import {
 import { useWorkspaceId } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
 import { AgentPanel, type FloatingChatState } from "./AgentPanel";
-import { PanelResize, usePanelSize } from "./PanelResize";
+import { PanelResize, usePanelSize } from "@/features/code/PanelResize";
 import {
   DropdownMenu,
   DropdownMenuContent,

@@ -1,6 +1,7 @@
 import type { AwaitingQuestion } from "./QuestionCard";
 /** Pure reducer turning run events (live or replayed) into view state. Used for live runs and timeline scrubbing. */
 import type { AgentOut, EdgeOut, MessageOut, PendingApproval, RunEvent, TaskOut } from "@/types";
+import type { LiveOverlay } from "@/features/canvas/live";
 import { appendStream } from "./streamView";
 
 export interface ToolCall { call_id: string; agent_id: string; tool: string; args: Record<string, unknown>; ok?: boolean; output?: string; turn_no?: number; seq?: number }
@@ -217,3 +218,13 @@ export function replayTo(events: RunEvent[], cursor: number, names: Record<strin
 }
 
 export const TERMINAL = new Set(["completed", "incomplete", "failed", "cancelled"]);
+
+/** What the canvas shows of a live run: statuses, last messages, active channels, fresh hires. */
+export function liveOverlay(s: RunLive, agents: AgentOut[], departments: Record<string, { color: string }>): LiveOverlay {
+  return {
+    status: s.agentStatus, activity: s.activity, lastMessage: s.lastMessage, streaming: s.streaming, thinking: s.thinking,
+    activeEdges: s.activeEdges, tokens: s.usage.per_agent ?? {}, pendingApprovalAgent: s.pendingApproval?.agent_id ?? null,
+    departments, names: Object.fromEntries(agents.map((a) => [a.id, a.name])),
+    fresh: Object.fromEntries(Object.entries(s.fresh).filter(([, t]) => Date.now() - t < 3000).map(([k]) => [k, true])),
+  };
+}

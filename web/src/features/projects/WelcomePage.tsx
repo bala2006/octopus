@@ -26,9 +26,9 @@ import { DesktopLayout } from "@/components/layout/DesktopLayout";
 import {
   defaultComposerSettings,
   useWorkbenchStore,
-} from "@/features/editor/workbenchStore";
-import { ModelPicker } from "@/features/editor/ModelPicker";
-import { ApprovalModePicker } from "@/features/editor/ApprovalModePicker";
+} from "@/features/conversation/workbenchStore";
+import { ModelPicker } from "@/features/conversation/ModelPicker";
+import { ApprovalModePicker } from "@/features/conversation/ApprovalModePicker";
 import { useOpenFolder } from "./useOpenFolder";
 import { createLocalWorktree, LocalEnvironmentPicker } from "./LocalEnvironmentPicker";
 

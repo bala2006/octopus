@@ -71,12 +71,12 @@ export function conversationRoutes(route: RouteFn, app: FastifyInstance, reg: Re
   route("GET", `${W}/runs/{run_id}/artifacts`, ({ params, query }) => listArtifacts(runOf(params.workspace_id, params.run_id).p.db, params.run_id, !!query.all_versions));
   route("GET", `${W}/runs/{run_id}/artifacts/file`, ({ params, query }) => {
     const { p } = runOf(params.workspace_id, params.run_id);
-    const row = artifactVersion(p.db, p.fs.rel(query.path, "user"), query.version);
+    const row = artifactVersion(p.db, p.fs.rel(query.path), query.version);
     return { ...artifactOut(row), content: row.content ?? "" };
   });
   route("POST", `${W}/runs/{run_id}/artifacts/revert`, RevertInSchema, ({ params, body }) => {
     const { p, row } = runOf(params.workspace_id, params.run_id);
-    const rel = p.fs.rel(body.path, "user");
+    const rel = p.fs.rel(body.path);
     const version = revertFile(p.db, p.fs, row.id, rel, body.to_version ?? 0);
     return { status: artifactVersion(p.db, rel, version).deleted ? "deleted" as const : "restored" as const, path: rel, version };
   });

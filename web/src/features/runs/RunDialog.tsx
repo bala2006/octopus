@@ -30,8 +30,8 @@ import {
   AttachmentChips,
   attachmentPayload,
 } from "@/features/chat/attachments";
-import { ModelPicker } from "@/features/editor/ModelPicker";
-import type { ComposerSettings } from "@/features/editor/workbenchStore";
+import { ModelPicker } from "@/features/conversation/ModelPicker";
+import type { ComposerSettings } from "@/features/conversation/workbenchStore";
 
 const MODES = [
   {

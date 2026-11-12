@@ -43,10 +43,10 @@ import {
   Tip,
 } from "@/components/ui/overlays";
 import { ErrorBoundary } from "@/components/common";
-import { NewCompanyDialog } from "@/features/workspaces/NewCompanyDialog";
+import { NewCompanyDialog } from "@/features/projects/NewCompanyDialog";
 import { ProcessIndicator } from "./ProcessIndicator";
 import { DesktopLayout } from "./DesktopLayout";
-import { threadKey, useWorkbenchStore } from "@/features/editor/workbenchStore";
+import { threadKey, useWorkbenchStore } from "@/features/conversation/workbenchStore";
 
 const VIEWS = [
   { to: "agent", label: "Conversation", shortcut: "0" },

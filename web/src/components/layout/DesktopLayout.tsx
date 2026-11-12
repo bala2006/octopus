@@ -34,13 +34,13 @@ import { useApp } from "@/stores/app";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/overlays";
-import { useOpenFolder } from "@/features/workspaces/useOpenFolder";
-import { threadKey, useWorkbenchStore } from "@/features/editor/workbenchStore";
+import { useOpenFolder } from "@/features/projects/useOpenFolder";
+import { threadKey, useWorkbenchStore } from "@/features/conversation/workbenchStore";
 import { CommandPalette } from "./CommandPalette";
 
 const VIEWS = [
   { to: "agent", label: "Chats", icon: MessageSquare },
-  { to: "runs", label: "Activity", icon: History },
+  { to: "activity", label: "Activity", icon: History },
 ];
 
 export function DesktopLayout({
@@ -286,12 +286,12 @@ function ProjectSidebar({
       <div className="sidebar-scroll">
       <nav className="sidebar-navigation sidebar-mobile-navigation" aria-label="Main navigation">
         <Link to="/" className={cn("sidebar-nav-item", !w && "is-active")}><Home /><span>All projects</span></Link>
-        {VIEWS.map(({ to, label, icon: Icon }) => to === "runs" ? (
+        {VIEWS.map(({ to, label, icon: Icon }) => to === "activity" ? (
           <Link key={to} to="/activity" className={cn("sidebar-nav-item", location.pathname === "/activity" && "is-active")}><Icon /><span>{label}</span></Link>
         ) : target ? (
           <Link key={to} to={`/w/${target}/${to}`} className={cn("sidebar-nav-item", w && location.pathname.split("/")[3] === to && "is-active")}><Icon /><span>{label}</span></Link>
         ) : (
-          <Link key={to} to={to === "runs" ? "/activity" : "/"} className="sidebar-nav-item"><Icon /><span>{label}</span></Link>
+          <Link key={to} to="/" className="sidebar-nav-item"><Icon /><span>{label}</span></Link>
         ))}
         <Link to={w ? `/w/${w}/guide` : "/guide"} className="sidebar-nav-item"><BookOpen /><span>Guide</span></Link>
         <Link to={w ? `/w/${w}/settings` : "/settings"} className="sidebar-nav-item"><Settings /><span>Settings</span></Link>

@@ -26,7 +26,7 @@ import { QuestionCard, type AwaitingQuestion } from "./QuestionCard";
 import { TaskBoard, Timeline, UsageMeter } from "./RunWidgets";
 import { TeamView } from "./TeamView";
 import { ReportView } from "./RunReport";
-import { replayTo, TERMINAL } from "./runState";
+import { replayTo, TERMINAL, liveOverlay } from "./runState";
 import { useRunStream } from "./useRunStream";
 
 export default function LiveRunPage() {
@@ -65,12 +65,7 @@ export default function LiveRunPage() {
 
   React.useEffect(() => { if (liveState.pendingApproval && cursor !== null) setCursor(null); }, [liveState.pendingApproval]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const overlay = React.useMemo(() => ({
-    status: state.agentStatus, activity: state.activity, lastMessage: state.lastMessage, streaming: state.streaming, thinking: state.thinking,
-    activeEdges: state.activeEdges, tokens: state.usage.per_agent ?? {}, pendingApprovalAgent: state.pendingApproval?.agent_id ?? null,
-    departments, names: Object.fromEntries(agentsList.map((a) => [a.id, a.name])),
-    fresh: Object.fromEntries(Object.entries(state.fresh).filter(([, t]) => Date.now() - t < 3000).map(([k]) => [k, true])),
-  }), [state, departments, agentsList]);
+  const overlay = React.useMemo(() => liveOverlay(state, agentsList, departments), [state, departments, agentsList]);
 
   const control = (action: "pause" | "resume" | "step" | "stop") => { send({ type: "control", action }); };
 
