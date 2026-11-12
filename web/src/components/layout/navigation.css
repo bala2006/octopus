@@ -1,10 +1,10 @@
 /*
- * Navigation: the shared top bar, app rail, project sidebar, and settings sections.
+ * Navigation: the menu bar, the rail of project spaces, the project sidebar, the page header and settings sections.
  * One shared left inset (--side) and one row system, so every icon and label lines up
  * and every selectable row has the same height, text size, radius and highlight.
  */
 
-/* Top bar. One row above the sidebar and the page, split at the sidebar edge. */
+/* Menu bar: one row above everything. */
 .app-top-rail { position: absolute; inset: 0 0 auto; display: flex; height: 38px; align-items: center; gap: 2px; padding: 0 10px; color: hsl(var(--muted-foreground)); }
 .app-top-navigation { display: flex; align-items: center; gap: 5px; margin-right: 10px; }
 .app-top-rail button { display: flex; height: 28px; align-items: center; justify-content: center; border-radius: 5px; font-size: 13px; font-weight: 400; cursor: default; }
@@ -14,9 +14,6 @@
 .desktop-surface { --nav: 300px; }
 .desktop-topbar { position: relative; z-index: 1; display: flex; height: 56px; min-height: 56px; flex-shrink: 0; align-items: stretch; background: linear-gradient(to bottom, hsl(var(--background)) 0%, hsl(var(--background) / .92) 45%, hsl(var(--background) / .45) 100%); backdrop-filter: blur(12px); }
 .desktop-topbar::after { position: absolute; inset: 100% 0 auto; height: 18px; background: linear-gradient(to bottom, hsl(var(--background) / .45), hsl(var(--background) / 0)); content: ""; pointer-events: none; }
-.topbar-identity { display: flex; width: var(--nav); min-width: 0; flex: 0 0 var(--nav); align-items: center; gap: 4px; padding: 0 8px; border-right: 1px solid hsl(var(--border) / .7); }
-.topbar-brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 0 7px; font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
-.topbar-brand img { width: 25px; height: 25px; }
 .desktop-header > .topbar-project { max-width: min(240px, 24vw); }
 .topbar-project { display: flex; min-width: 0; height: 32px; align-items: center; padding: 0 5px 0 8px; font-size: 15px; font-weight: 500; letter-spacing: -.012em; }
 .topbar-project > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -26,7 +23,14 @@
 .topbar-action svg { width: 17px; height: 17px; stroke-width: 1.7; }
 .topbar-action.has-alert { color: hsl(var(--warning)); }
 .topbar-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 999px; background: hsl(var(--warning)); box-shadow: 0 0 0 2px hsl(var(--background)); }
-.topbar-divider { width: 1px; height: 18px; flex: 0 0 1px; margin: 0 4px 0 2px; background: hsl(var(--border)); }
+/* Team status: the only live indicator in the header. Hidden while nothing runs. */
+.team-pulse { display: flex; height: 28px; align-items: center; gap: 6px; margin-right: 4px; padding: 0 10px; border: 1px solid hsl(var(--primary) / .35); border-radius: 999px; background: hsl(var(--primary) / .08); color: hsl(var(--primary)); font-size: 12px; font-weight: 500; white-space: nowrap; transition: background 150ms; }
+.team-pulse:hover { background: hsl(var(--primary) / .16); }
+.team-pulse svg { width: 13px; height: 13px; }
+.team-pulse.is-waiting { border-color: hsl(var(--warning) / .5); background: hsl(var(--warning) / .1); color: hsl(var(--warning)); animation: pulse-ring 2s ease-out infinite; }
+.team-pulse-dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 hsl(var(--warning) / .35); } 100% { box-shadow: 0 0 0 8px hsl(var(--warning) / 0); } }
+@media (prefers-reduced-motion: reduce) { .team-pulse.is-waiting { animation: none; } }
 .topbar-breadcrumb-separator { flex-shrink: 0; color: hsl(var(--muted-foreground) / .6); font-size: 16px; font-weight: 400; }
 
 /* App rail */
@@ -34,9 +38,11 @@
 .rail-item { display: flex; width: 42px; height: 42px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 12px; color: hsl(var(--muted-foreground)); transition: background 150ms, color 150ms; }
 .rail-item svg { width: 20px; height: 20px; stroke-width: 1.6; }
 .rail-item:hover, .rail-item.is-active { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
-.rail-toggle { margin-bottom: 2px; transition: background 160ms ease, color 160ms ease; }
-.rail-toggle img { width: 23px; height: 23px; transition: transform 220ms ease; }
-.rail-toggle:hover img { transform: scale(1.08); }
+.rail-item.is-active { box-shadow: inset 3px 0 0 hsl(var(--primary)); }
+.rail-home img { width: 24px; height: 24px; transition: transform 220ms ease; }
+.rail-home:hover img { transform: scale(1.08); }
+.rail-home.is-active { box-shadow: none; }
+.rail-divider { width: 24px; height: 1px; margin: 3px 0; background: hsl(var(--border)); }
 .rail-profile { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; margin-top: 8px; border-radius: 50%; background: hsl(var(--teal-panel)); color: hsl(var(--background)); font-size: 11px; font-weight: 700; transition: box-shadow 150ms, transform 150ms; }
 .rail-profile:hover { box-shadow: 0 0 0 3px hsl(var(--teal-panel) / .25); transform: translateY(-1px); }
 
@@ -76,9 +82,8 @@
   .settings-layout .section-navigation .sidebar-nav-item { width: auto; height: 34px; flex-shrink: 0; margin: 0; }
 }
 @media (max-width: 767px) {
-  .activity-rail, .rail-toggle { display: none; }
-  .topbar-identity { display: none; }
-  /* inline project switcher: leave room for the view title */
+  .activity-rail { display: none; }
+    /* inline project switcher: leave room for the view title */
   .desktop-header > .topbar-project { max-width: 34vw; }
   .project-sidebar { position: absolute; inset: 0 auto 0 0; width: min(320px, 88vw); min-width: 0; flex-basis: auto; transition: none; }
   .sidebar-mobile-navigation { display: block; padding-bottom: 12px; }

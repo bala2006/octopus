@@ -6,8 +6,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  AlertCircle, Check, ClipboardPaste, Cloud, CloudOff, Copy, Download, Flag, Grid3x3, LayoutGrid, Loader2, Maximize, MessageSquare, Network, Play,
-  Plus, Redo2, Settings2, Trash2, Undo2, Upload, Wand2, CopyPlus, MousePointerSquareDashed, Building2, BookmarkPlus, MoreHorizontal, FolderOpen,
+  AlertCircle, Check, ClipboardPaste, Cloud, CloudOff, Download, Flag, Grid3x3, LayoutGrid, Loader2, Maximize, MessageSquare, Network,
+  Plus, Redo2, Settings2, Trash2, Undo2, Upload, CopyPlus, MousePointerSquareDashed, Building2, BookmarkPlus, MoreHorizontal,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, unwrap } from "@/lib/api";
@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/overlays";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { NewCompanyDialog } from "@/features/projects/NewCompanyDialog";
-import { RunDialog } from "@/features/runs/RunDialog";
+import { useOpenConversation } from "@/features/conversation/useOpenConversation";
 import { edgeTypes, nodeTypes } from "./flowTypes";
 import { EdgeAnchorsProvider } from "./edgeAnchors";
 import { DepartmentBuilder } from "./DepartmentBuilder";
@@ -47,8 +47,8 @@ export default function CanvasPage({ embedded = false, rightInset = 0, leftInset
     return (
       <>
         <EmptyState icon={Network} title="Create your first team"
-          description="A company is a team of AI agents that talk to each other. Pick a ready-made template (you can change everything later) or describe your goal and let AI design one."
-          action={<Button onClick={() => setCreating(true)} data-testid="new-company"><Plus />Create company</Button>} />
+          description="A team is a group of AI agents led by Octopus, the team lead. Pick a ready-made template (you can change everything later) or describe your goal and let AI design one."
+          action={<Button onClick={() => setCreating(true)} data-testid="new-company"><Plus />Create team</Button>} />
         {!embedded && <div className="pointer-events-none fixed bottom-4 left-4 z-10"><GettingStarted /></div>}
         <NewCompanyDialog open={creating} onOpenChange={setCreating} />
       </>
@@ -70,7 +70,9 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   const nav = useNavigate();
   const qc = useQueryClient();
   const autosave = useAutosave(workspaceId, companyId);
-  const [runOpen, setRunOpen] = React.useState(false);
+  const openConversation = useOpenConversation();
+  // The canvas designs the team; the work happens in Conversation, with a fresh thread for this team.
+  const talkToTeam = () => { void autosave.saveNow(); openConversation(workspaceId, null, companyId); };
   const [deptOpen, setDeptOpen] = React.useState(false);
   const [tplOpen, setTplOpen] = React.useState(false);
   const wrapper = React.useRef<HTMLDivElement>(null);
@@ -144,7 +146,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   const exportJson = async () => {
     const data = await unwrap(api.GET("/api/v1/w/{workspace_id}/companies/{company_id}/export", { params: { path: { workspace_id: workspaceId, company_id: companyId } } }));
     download(`${data.name.replace(/\W+/g, "-").toLowerCase()}.octopus.json`, JSON.stringify(data, null, 2), "application/json");
-    toast.success("Exported company");
+    toast.success("Exported team");
   };
   const importJson = async (f: File) => {
     try {
@@ -168,7 +170,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   return (
     <div className={`flex h-full${embedded ? " conversation-embedded-canvas" : ""}`}
       style={canvasStyle}>
-      {!embedded && <Palette onAdd={(k) => addRole(k)} onAddDepartment={() => setDeptOpen(true)} />}
+      {!embedded && <Palette onAdd={(k) => addRole(k)} />}
       <div className="relative min-w-0 flex-1" ref={wrapper}
         tabIndex={embedded ? 0 : undefined} aria-label={embedded ? "Canvas editor" : undefined}
         onDragOver={(e) => { if (e.dataTransfer.types.includes(DND_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
@@ -213,7 +215,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
                 <ContextMenuItem onSelect={() => s.setQuickConfig(menuNode.id)}><Settings2 />Configure</ContextMenuItem>
                 <ContextMenuItem onSelect={() => s.setInspector(menuNode.id)}><Maximize />Open inspector</ContextMenuItem>
                 <ContextMenuItem onSelect={() => nav(`/w/${workspaceId}/chat?agent=${menuNode.id}`)}><MessageSquare />Chat with agent</ContextMenuItem>
-                <ContextMenuItem onSelect={() => s.setEntry(menuNode.id, !menuNode.data.is_entry)}><Flag />{menuNode.data.is_entry ? "Unset entry" : "Set as entry"}</ContextMenuItem>
+                <ContextMenuItem onSelect={() => s.setEntry(menuNode.id, !menuNode.data.is_entry)}><Flag />{menuNode.data.is_entry ? "Remove as team lead" : "Make team lead"}</ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem onSelect={() => s.duplicate([menuNode.id])}><CopyPlus />Duplicate<span className="ml-auto kbd">Ctrl D</span></ContextMenuItem>
                 <ContextMenuItem destructive onSelect={() => s.deleteNodes([menuNode.id])}><Trash2 />Delete<span className="ml-auto kbd">Del</span></ContextMenuItem>
@@ -233,8 +235,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
                 <ContextMenuItem disabled={!s.clipboard} onSelect={() => menuPos.current && s.paste(rf.screenToFlowPosition(menuPos.current))}><ClipboardPaste />Paste<span className="ml-auto kbd">Ctrl V</span></ContextMenuItem>
                 <ContextMenuItem onSelect={() => s.selectAll()}><MousePointerSquareDashed />Select all<span className="ml-auto kbd">Ctrl A</span></ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem onSelect={() => { s.autoLayout(); setTimeout(() => fitCanvas(400), 30); }}><Wand2 />Auto-layout</ContextMenuItem>
-                <ContextMenuItem onSelect={() => fitCanvas(300)}><Maximize />Fit view</ContextMenuItem>
+                <ContextMenuItem onSelect={() => { s.autoLayout(); setTimeout(() => fitCanvas(400), 30); }}><LayoutGrid />Tidy up</ContextMenuItem>
               </>
             )}
           </ContextMenuContent>
@@ -248,8 +249,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
             <ToolBtn tip="Undo (Ctrl+Z)" onClick={s.undo} disabled={!s.past.length}><Undo2 /></ToolBtn>
             <ToolBtn tip="Redo (Ctrl+Y)" onClick={s.redo} disabled={!s.future.length}><Redo2 /></ToolBtn>
             <Divider />
-            <ToolBtn tip="Tidy up: auto-layout" onClick={() => { s.autoLayout(); setTimeout(() => fitCanvas(400), 30); }}><LayoutGrid /></ToolBtn>
-            <ToolBtn tip="Fit to screen" onClick={() => fitCanvas(300)}><Maximize /></ToolBtn>
+            <ToolBtn tip="Tidy up: arrange agents by department" onClick={() => { s.autoLayout(); setTimeout(() => fitCanvas(400), 30); }}><LayoutGrid /></ToolBtn>
             <Divider />
             <Tip content="Add a department: a manager plus a small team" side="bottom">
               <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setDeptOpen(true)} aria-label="Add department"><Building2 />Department</Button>
@@ -262,13 +262,10 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
                 </DropdownMenuTrigger>
               </Tip>
               <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuItem disabled={!s.nodes.some((n) => n.selected)} onSelect={() => s.copy()}><Copy />Copy selection<span className="ml-auto kbd">Ctrl C</span></DropdownMenuItem>
-                <DropdownMenuItem disabled={!s.clipboard} onSelect={() => s.paste()}><ClipboardPaste />Paste<span className="ml-auto kbd">Ctrl V</span></DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => s.selectAll()}><MousePointerSquareDashed />Select all<span className="ml-auto kbd">Ctrl A</span></DropdownMenuItem>
                 <DropdownMenuItem onSelect={(e) => { e.preventDefault(); s.toggleSnap(); }}><Grid3x3 />Snap to grid{s.snapToGrid && <Check className="ml-auto !text-primary" />}</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => void exportJson()}><Download />Export company (JSON)</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => fileRef.current?.click()}><Upload />Import company (JSON)</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void exportJson()}><Download />Export team (JSON)</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => fileRef.current?.click()}><Upload />Import team (JSON)</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importJson(f); e.target.value = ""; }} />
@@ -279,26 +276,23 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
                 <span className="flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] font-medium text-warning"><Flag className="h-3 w-3" />No team lead</span>
               </Tip>
             )}
-            <span className="rounded-md border border-border bg-elevated/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm">{s.nodes.length} agents · {s.edges.length} channels</span>
-            <Button onClick={() => { void autosave.saveNow(); setRunOpen(true); }} disabled={!s.nodes.length} className="shadow-lg" data-testid="run-company"><Play />Run</Button>
+            <span className="rounded-md border border-border bg-elevated/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm">{s.nodes.length} {s.nodes.length === 1 ? "agent" : "agents"} · {s.edges.length} {s.edges.length === 1 ? "channel" : "channels"}</span>
+            <Button onClick={talkToTeam} disabled={!s.nodes.length} className="shadow-lg" data-testid="talk-to-team"><MessageSquare />Talk to the team</Button>
           </div>
         </div>}
 
         {embedded && <div className="conversation-canvas-toolbar">
           <div className="canvas-toolbar-actions">
-            <span className="canvas-toolbar-title">Canvas</span>
+            <span className="canvas-toolbar-title">Team</span>
             <SaveIndicator state={autosave.state} error={autosave.error} savedAt={autosave.savedAt} onRetry={() => void autosave.saveNow()} />
             <Divider />
-            <ToolBtn tip="Fit canvas to screen" onClick={() => fitCanvas(300)}><Maximize /></ToolBtn>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label="Canvas actions"><MoreHorizontal /></Button></DropdownMenuTrigger>
+              <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label="Team actions"><MoreHorizontal /></Button></DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-64">
                 <DropdownMenuItem onSelect={() => setDeptOpen(true)}><Building2 />Add department</DropdownMenuItem>
                 {roles.data?.map((role) => <DropdownMenuItem key={role.key} onSelect={() => addRole(role.key)}><Plus />Add {role.role}</DropdownMenuItem>)}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => { s.autoLayout(); requestAnimationFrame(() => fitCanvas(300)); }}><LayoutGrid />Arrange agents</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => nav(`/w/${workspaceId}/canvas`)}><Network />Open full canvas</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => nav(`/w/${workspaceId}/workspace`)}><FolderOpen />Open workspace</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => { s.autoLayout(); requestAnimationFrame(() => fitCanvas(300)); }}><LayoutGrid />Tidy up</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -309,19 +303,18 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
             <div className="rounded-xl border border-dashed border-border bg-surface/80 p-6 text-center backdrop-blur animate-fade-up">
               <Network className="mx-auto mb-2 h-6 w-6 text-primary" />
               <p className="text-sm font-medium">Your canvas is empty</p>
-              <p className="text-xs text-muted-foreground">{embedded ? "Add an agent from Canvas actions, or start a conversation." : <>Add a <b>Department</b> from the toolbar, or drag a role from <b>Roles</b> on the left.</>}</p>
+              <p className="text-xs text-muted-foreground">{embedded ? "Send a request and the team lead hires the agents it needs, or add one from Team actions." : <>Add a <b>Department</b> from the toolbar, or drag a role from <b>Roles</b> on the left.</>}</p>
             </div>
           </div>
         )}
         {!embedded && <div className="pointer-events-none absolute bottom-3 left-14 z-10">
-          <GettingStarted onRun={s.nodes.length ? () => { void autosave.saveNow(); setRunOpen(true); } : undefined} />
+          <GettingStarted onRun={s.nodes.length ? talkToTeam : undefined} />
         </div>}
         <EdgeEditor />
       </div>
       {embedded ? <div className="conversation-canvas-inspector"><Inspector /></div> : <Inspector />}
-      <RunDialog open={runOpen} onOpenChange={setRunOpen} companyId={companyId} />
       <DepartmentBuilder open={deptOpen} onOpenChange={setDeptOpen} />
-      <SaveTemplateDialog open={tplOpen} onOpenChange={setTplOpen} companyId={companyId} defaultName={q.data?.company.name ?? "Company"} flush={autosave.saveNow} />
+      <SaveTemplateDialog open={tplOpen} onOpenChange={setTplOpen} companyId={companyId} defaultName={q.data?.company.name ?? "Team"} flush={autosave.saveNow} />
     </div>
   );
 }

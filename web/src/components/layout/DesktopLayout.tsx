@@ -1,61 +1,40 @@
 import * as React from "react";
 import "./navigation.css";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
-  Bell,
-  BookOpen,
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  History,
-  Home,
-  MessageSquare,
-  Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
-  CircleHelp,
-  Plus,
-  Settings,
-  SquarePen,
-  Sun,
-  X,
-  User,
-  Pencil,
-  Trash2,
+  ChevronDown, ChevronRight, CircleAlert, Folder, FolderOpen, Home, Loader2, Moon, Pencil, Plus, Settings,
+  SquarePen, Sun, Trash2, User, UserRound, X,
 } from "lucide-react";
-import {
-  qk,
-  useCompanyId,
-  useRuns,
-  useWorkspaceId,
-  useWorkspaces,
-} from "@/hooks/queries";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { qk, useCompanyId, useRuns, useWorkspaceId, useWorkspaces } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
 import { cn, initials } from "@/lib/utils";
-import { toast } from "sonner";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrap } from "@/lib/api";
-import { ConfirmDialog, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/overlays";
+import {
+  ConfirmDialog, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/overlays";
 import { Input } from "@/components/ui/primitives";
-import type { WorkspaceOut } from "@/types";
-import { AppMenuBar } from "./AppMenuBar";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/overlays";
+import type { WorkspaceOut } from "@/types";
 import { useOpenFolder } from "@/features/projects/useOpenFolder";
 import { threadKey, useWorkbenchStore } from "@/features/conversation/workbenchStore";
+import { useOpenConversation } from "@/features/conversation/useOpenConversation";
+import { AppMenuBar } from "./AppMenuBar";
 import { CommandPalette } from "./CommandPalette";
+import { SPACES, spaceOf } from "./spaces";
 
-const VIEWS = [
-  { to: "agent", label: "Chats", icon: MessageSquare },
-  { to: "activity", label: "Activity", icon: History },
-];
+const LIVE = ["running", "paused", "awaiting_user", "queued"];
 
-export function DesktopLayout({
-  children,
-  header,
-  hideHeader = false,
-}: {
+/**
+ * The frame around every page:
+ * - the menu bar (history, the one sidebar toggle, File / Edit / View / Help);
+ * - the rail: Home, the project's spaces, and your profile menu;
+ * - the sidebar: projects and recent conversations;
+ * - the page header: project / page title, the page's own controls, team status and quick open.
+ */
+export function DesktopLayout({ children, header, hideHeader = false }: {
   children: React.ReactNode;
   header: React.ReactNode;
   hideHeader?: boolean;
@@ -63,162 +42,69 @@ export function DesktopLayout({
   const location = useLocation();
   const w = useWorkspaceId();
   const { data: projects } = useWorkspaces();
-  // The project sidebar is shown only on the workspace Chats view.
-  const chatsView = Boolean(w) && location.pathname.split("/")[3] === "agent";
-  const { theme, toggleTheme } = useApp();
-  const [sidebar, setSidebar] = React.useState(() => window.innerWidth >= 768);
-  const [showChats, setShowChats] = React.useState(false);
+  const sidebarOpen = useApp((s) => s.sidebarOpen);
+  const setSidebarOpen = useApp((s) => s.setSidebarOpen);
   const [mobile, setMobile] = React.useState(() => window.innerWidth < 768);
-  const sidebarView = chatsView || showChats;
+  const [drawer, setDrawer] = React.useState(false);
+  const open = mobile ? drawer : sidebarOpen;
   const sidebarRef = React.useRef<HTMLElement>(null);
-  const toggleRef = React.useRef<HTMLButtonElement>(null);
-  const closeSidebar = React.useCallback(() => {
-    setSidebar(false);
-    setShowChats(false);
-    if (mobile) toggleRef.current?.focus();
-    else requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-label="Expand navigation bar"]')?.focus());
-  }, [mobile]);
+  const toggleSidebar = React.useCallback(() => (mobile ? setDrawer((v) => !v) : setSidebarOpen(!sidebarOpen)), [mobile, sidebarOpen, setSidebarOpen]);
   React.useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
-    const resize = () => {
-      setMobile(media.matches);
-      setSidebar(!media.matches);
-    };
+    const resize = () => setMobile(media.matches);
     media.addEventListener("change", resize);
     return () => media.removeEventListener("change", resize);
   }, []);
+  React.useEffect(() => setDrawer(false), [location.pathname]);
+  // On mobile the sidebar is a modal drawer: Escape closes it and Tab stays inside.
   React.useEffect(() => {
-    if (mobile) setSidebar(false);
-  }, [location.pathname, mobile]);
-  React.useEffect(() => {
-    if (!mobile || !sidebar) return;
-    sidebarRef.current
-      ?.querySelector<HTMLButtonElement>('button[aria-label="Close sidebar"]')
-      ?.focus();
+    if (!mobile || !drawer) return;
+    sidebarRef.current?.querySelector<HTMLButtonElement>('button[aria-label="Close sidebar"]')?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeSidebar();
-      }
+      if (event.key === "Escape") { event.preventDefault(); setDrawer(false); }
       if (event.key !== "Tab") return;
-      const elements = sidebarRef.current?.querySelectorAll<HTMLElement>(
-        "a[href],button:not([disabled]),input,select",
-      );
+      const elements = sidebarRef.current?.querySelectorAll<HTMLElement>("a[href],button:not([disabled]),input,select");
       if (!elements?.length) return;
       const first = elements[0];
       const last = elements[elements.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [mobile, sidebar, closeSidebar]);
+  }, [mobile, drawer]);
 
   const folder = useOpenFolder();
-  const navigate = useNavigate();
   const { companyId } = useCompanyId();
-  const selectThread = useWorkbenchStore((st) => st.selectThread);
-  const profileName = useApp((st) => st.profileName);
-  const toggleProjects = () => { if (sidebarView && sidebar) closeSidebar(); else { setShowChats(true); setSidebar(true); } };
-  const newConversation = () => {
-    if (!w) { navigate("/"); return; }
-    selectThread(threadKey(w, companyId), null);
-    navigate(`/w/${w}/agent`);
-  };
+  const openConversation = useOpenConversation();
+  const navigate = useNavigate();
+  const newConversation = () => (w ? openConversation(w, null, companyId) : navigate("/"));
   const project = projects?.find((item) => item.id === w);
-  // The project sidebar owns a column on desktop. Elsewhere (mobile drawer,
-  // collapsed sidebar, non-chat views) the identity and actions share the bar.
-  const sidebarColumn = chatsView && !mobile && sidebar;
-  const identity = w ? (
-    <span className="topbar-project" title={project?.name}><span>{project?.name ?? "Project"}</span></span>
-  ) : null;
-  const actions = w ? (
-    <TopBarActions
-      chatsView={chatsView}
-      sidebar={sidebar}
-      mobile={mobile}
-      onToggleSidebar={() => setSidebar((open) => !open)}
-      toggleRef={toggleRef}
-    />
-  ) : null;
 
   return (
     <div className="desktop-layout">
-      <AppMenuBar onToggleSidebar={toggleProjects} onNewConversation={newConversation} onOpenFolder={folder.openPicker} />
+      <AppMenuBar onToggleSidebar={toggleSidebar} onNewConversation={newConversation} onOpenFolder={folder.openPicker} />
       {folder.element}
-      <nav className="activity-rail" aria-label="Main navigation">
-        {chatsView && !sidebar && <Button variant="ghost" size="icon" className="rail-item rail-toggle" aria-label="Expand navigation bar" aria-expanded={false} onClick={() => setSidebar(true)}><img src="/octopus.svg" alt="" /></Button>}
-        <Link to="/" aria-label="All projects" className={cn("rail-item", location.pathname === "/" && "is-active")}><Home /></Link>
-        {VIEWS.map(({ to, label, icon: Icon }) => to === "agent" ? (
-          <button key={to} className={cn("rail-item", sidebarView && sidebar && "is-active")} aria-label="Projects and conversations" title="Projects and conversations" aria-expanded={sidebarView && sidebar} onClick={toggleProjects}><Icon /></button>
-        ) : (
-          <Link key={to} to="/activity" aria-label={label} title={label} className={cn("rail-item", location.pathname === "/activity" && "is-active")}><Icon /></Link>
-        ))}
-        <div className="flex-1" />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="rail-profile" aria-label="Open profile menu" title={profileName || "Your profile"}>{profileName ? <span>{initials(profileName)}</span> : <User className="h-4 w-4" />}</button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="right" className="w-64">
-            <DropdownMenuLabel className="flex flex-col gap-1"><span className="text-foreground">{profileName || "You"}</span><span className="font-normal">Everything stays on this computer</span></DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild><Link to="/activity"><History />Activity and profile</Link></DropdownMenuItem>
-            <DropdownMenuItem onSelect={toggleTheme}>{theme === "dark" ? <Sun /> : <Moon />}{theme === "dark" ? "Light mode" : "Dark mode"}</DropdownMenuItem>
-            <DropdownMenuItem asChild><Link to={w ? `/w/${w}/settings` : "/settings"}><Settings />Settings</Link></DropdownMenuItem>
-            <DropdownMenuItem asChild><Link to={w ? `/w/${w}/guide` : "/guide"}><CircleHelp />Help</Link></DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </nav>
+      <Rail />
       <div className="desktop-surface">
-        {sidebarView && sidebar && mobile && (
-          <button
-            className="sidebar-backdrop"
-            tabIndex={-1}
-            aria-label="Close project sidebar"
-            onClick={closeSidebar}
-          />
-        )}
-        {!hideHeader && (
-          <header className="desktop-topbar">
-            {sidebarColumn && (
-              <div className="topbar-identity">
-                <Link to="/" className="topbar-brand" aria-label="Octopus home"><img src="/octopus.svg" alt="" /><span>Octopus</span></Link>
-                <span className="flex-1" />
-                {actions}
-              </div>
-            )}
-            <div className="desktop-header">
-              {identity}
-              {identity && (
-                chatsView ? <span className="topbar-breadcrumb-separator" aria-hidden>/</span> : <span className="topbar-divider" aria-hidden />
-              )}
-              {header}
-              {!sidebarColumn && actions}
-            </div>
-          </header>
-        )}
+        {open && mobile && <button className="sidebar-backdrop" tabIndex={-1} aria-label="Close project sidebar" onClick={() => setDrawer(false)} />}
         <div className="desktop-body">
-          {sidebarView && (!mobile || sidebar) && (
-            <ProjectSidebar
-              mobile={mobile}
-              sidebarCollapsed={!sidebar}
-              onClose={closeSidebar}
-              panelRef={sidebarRef}
-            />
+          {(!mobile || drawer) && (
+            <ProjectSidebar mobile={mobile} collapsed={!open} onClose={() => setDrawer(false)} onNewConversation={newConversation} panelRef={sidebarRef} />
           )}
           <div className="desktop-main">
-            <main
-              id="main-content"
-              className="min-h-0 min-w-0 flex-1 overflow-hidden"
-            >
-              {children}
-            </main>
+            {!hideHeader && (
+              <header className="desktop-topbar">
+                <div className="desktop-header">
+                  {project && <span className="topbar-project" title={project.path}><span>{project.name}</span></span>}
+                  {project && <span className="topbar-breadcrumb-separator" aria-hidden>/</span>}
+                  {header}
+                  {w && <div className="topbar-actions"><TeamPulse /><CommandPalette /></div>}
+                </div>
+              </header>
+            )}
+            <main id="main-content" className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
           </div>
         </div>
       </div>
@@ -226,179 +112,143 @@ export function DesktopLayout({
   );
 }
 
-function ProjectSidebar({
-  mobile,
-  sidebarCollapsed,
-  onClose,
-  panelRef,
-}: {
+/** Home, then one icon per project space, then you. */
+function Rail() {
+  const w = useWorkspaceId();
+  const location = useLocation();
+  const { theme, toggleTheme } = useApp();
+  const profileName = useApp((s) => s.profileName);
+  return (
+    <nav className="activity-rail" aria-label="Main navigation">
+      <Link to="/" aria-label="Home: all projects" title="Home" className={cn("rail-item rail-home", location.pathname === "/" && "is-active")}>
+        <img src="/octopus.svg" alt="" />
+      </Link>
+      {w && <span className="rail-divider" aria-hidden />}
+      {w && SPACES.map((s) => (
+        <NavLink key={s.to} to={`/w/${w}/${s.to}`} aria-label={s.label} title={`${s.label} (Alt+${s.key})`}
+          className={() => cn("rail-item", spaceOf(location.pathname)?.to === s.to && "is-active")}>
+          <s.icon />
+        </NavLink>
+      ))}
+      <div className="flex-1" />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="rail-profile" aria-label="Open profile menu" title={profileName || "Your profile"}>
+            {profileName ? <span>{initials(profileName)}</span> : <User className="h-4 w-4" />}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" side="right" className="w-64">
+          <DropdownMenuLabel className="flex flex-col gap-1"><span className="text-foreground">{profileName || "You"}</span><span className="font-normal">Everything stays on this computer</span></DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild><Link to="/activity"><UserRound />Profile and activity</Link></DropdownMenuItem>
+          <DropdownMenuItem asChild><Link to={w ? `/w/${w}/settings` : "/settings"}><Settings />Settings</Link></DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={toggleTheme}>{theme === "dark" ? <Sun /> : <Moon />}{theme === "dark" ? "Light mode" : "Dark mode"}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </nav>
+  );
+}
+
+function ProjectSidebar({ mobile, collapsed, onClose, onNewConversation, panelRef }: {
   mobile: boolean;
-  sidebarCollapsed: boolean;
+  collapsed: boolean;
   onClose: () => void;
+  onNewConversation: () => void;
   panelRef: React.Ref<HTMLElement>;
 }) {
   const w = useWorkspaceId();
   const location = useLocation();
-  const navigate = useNavigate();
   const projects = useWorkspaces();
-  const { companyId, setCompanyId } = useCompanyId();
+  const { companyId } = useCompanyId();
   const target = w || projects.data?.find((project) => project.exists)?.id;
   const runs = useRuns(w, companyId || undefined, true);
   const recentRuns = useRuns(target || "", undefined, false);
-  const store = useWorkbenchStore();
-  const key = threadKey(w, companyId);
-  const selected = store.threads[key];
+  const selected = useWorkbenchStore((s) => s.threads[threadKey(w, companyId)]);
   const activeRun = selected === undefined ? runs.data?.[0]?.id : selected;
+  const openConversation = useOpenConversation();
   const folder = useOpenFolder();
-  const [collapsed, setCollapsed] = React.useState(false);
-  const filtered = [...(projects.data ?? [])]
-    .sort((a, b) =>
-      String(b.last_opened_at ?? "").localeCompare(
-        String(a.last_opened_at ?? ""),
-      ),
-    )
-  const newChat = () => {
-    if (!w) {
-      navigate("/");
-      return;
-    }
-    store.selectThread(key, null);
-    navigate(`/w/${w}/agent`);
-  };
+  const [projectsCollapsed, setProjectsCollapsed] = React.useState(false);
+  const onConversation = spaceOf(location.pathname)?.to === "agent";
+  const sorted = [...(projects.data ?? [])].sort((a, b) => String(b.last_opened_at ?? "").localeCompare(String(a.last_opened_at ?? "")));
+  const targetName = projects.data?.find((p) => p.id === target)?.name;
   return (
-    <aside
-      ref={panelRef}
-      className={cn("project-sidebar", sidebarCollapsed && !mobile && "is-collapsed")}
-      aria-label="Projects and conversations"
-    >
+    <aside ref={panelRef} className={cn("project-sidebar", collapsed && !mobile && "is-collapsed")} aria-label="Projects and conversations">
       {mobile && (
         <div className="sidebar-heading">
-          <Link
-            to="/"
-            className="flex items-center gap-2.5 text-lg font-semibold tracking-tight"
-          >
-            <img src="/octopus.svg" alt="" className="h-6 w-6" />
-            Octopus
-          </Link>
+          <Link to="/" className="flex items-center gap-2.5 text-lg font-semibold tracking-tight"><img src="/octopus.svg" alt="" className="h-6 w-6" />Octopus</Link>
           <span className="flex-1" />
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Close sidebar"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Close sidebar" onClick={onClose}><X /></Button>
         </div>
       )}
-      <button className="sidebar-new-chat" onClick={newChat}>
+      <button className="sidebar-new-chat" onClick={onNewConversation}>
         <SquarePen className="h-4 w-4" />
         <span>New conversation</span>
-        <Plus className="ml-auto h-3.5 w-3.5 opacity-40" />
       </button>
 
       <div className="sidebar-scroll">
-      <nav className="sidebar-navigation sidebar-mobile-navigation" aria-label="Main navigation">
-        <Link to="/" className={cn("sidebar-nav-item", !w && "is-active")}><Home /><span>All projects</span></Link>
-        {VIEWS.map(({ to, label, icon: Icon }) => to === "activity" ? (
-          <Link key={to} to="/activity" className={cn("sidebar-nav-item", location.pathname === "/activity" && "is-active")}><Icon /><span>{label}</span></Link>
-        ) : target ? (
-          <Link key={to} to={`/w/${target}/${to}`} className={cn("sidebar-nav-item", w && location.pathname.split("/")[3] === to && "is-active")}><Icon /><span>{label}</span></Link>
-        ) : (
-          <Link key={to} to="/" className="sidebar-nav-item"><Icon /><span>{label}</span></Link>
-        ))}
-        <Link to={w ? `/w/${w}/guide` : "/guide"} className="sidebar-nav-item"><BookOpen /><span>Guide</span></Link>
-        <Link to={w ? `/w/${w}/settings` : "/settings"} className="sidebar-nav-item"><Settings /><span>Settings</span></Link>
-      </nav>
+        {/* On mobile the rail is hidden, so its destinations move here. */}
+        <nav className="sidebar-navigation sidebar-mobile-navigation" aria-label="Main navigation">
+          <Link to="/" className={cn("sidebar-nav-item", location.pathname === "/" && "is-active")}><Home /><span>Home</span></Link>
+          {w && SPACES.map((s) => (
+            <Link key={s.to} to={`/w/${w}/${s.to}`} className={cn("sidebar-nav-item", spaceOf(location.pathname)?.to === s.to && "is-active")}><s.icon /><span>{s.label}</span></Link>
+          ))}
+          <Link to={w ? `/w/${w}/settings` : "/settings"} className="sidebar-nav-item"><Settings /><span>Settings</span></Link>
+        </nav>
         <div className="sidebar-section-heading">
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            aria-expanded={!collapsed}
-            className="sidebar-section-title"
-          >
-            Projects
-            {collapsed ? <ChevronRight /> : <ChevronDown />}
+          <button onClick={() => setProjectsCollapsed(!projectsCollapsed)} aria-expanded={!projectsCollapsed} className="sidebar-section-title">
+            Projects{projectsCollapsed ? <ChevronRight /> : <ChevronDown />}
           </button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Add project"
-            title="Add project"
-            onClick={folder.openPicker}
-          >
-            <Plus />
-          </Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Open project folder" title="Open project folder" onClick={folder.openPicker}><Plus /></Button>
         </div>
-        {!collapsed && (
+        {!projectsCollapsed && (
           <div className="space-y-0.5">
-            {projects.isLoading && (
-              <div className="px-3 space-y-2">
-                <div className="skeleton h-8" />
-                <div className="skeleton h-8" />
-              </div>
-            )}
+            {projects.isLoading && <div className="space-y-2 px-3"><div className="skeleton h-8" /><div className="skeleton h-8" /></div>}
             {projects.isError && (
               <p className="px-5 py-2 text-xs text-destructive" role="alert">
-                Projects could not be loaded.{" "}
-                <button
-                  className="underline"
-                  onClick={() => void projects.refetch()}
-                >
-                  Retry
-                </button>
+                Projects could not be loaded. <button className="underline" onClick={() => void projects.refetch()}>Retry</button>
               </p>
             )}
-            {filtered.map((project) => (
+            {sorted.map((project) => (
               <ProjectItem key={project.id} project={project} selected={w === project.id}>
                 <Link
                   to={project.exists ? `/w/${project.id}/agent` : "/"}
                   aria-disabled={!project.exists}
+                  aria-current={w === project.id ? "page" : undefined}
                   onClick={(e) => {
-                    if (!project.exists) {
-                      e.preventDefault();
-                      toast.error(`${project.name}: folder not found`, { description: `${project.path} was moved or deleted. Right-click the project to remove it from Octopus.` });
-                    }
+                    if (project.exists) return;
+                    e.preventDefault();
+                    toast.error(`${project.name}: folder not found`, { description: `${project.path} was moved or deleted. Right-click the project to remove it from Octopus.` });
                   }}
-                  className={cn(
-                    "sidebar-project",
-                    w === project.id && "is-selected",
-                    !project.exists && "opacity-40",
-                  )}
-                  title={project.path}
+                  className={cn("sidebar-project", w === project.id && "is-selected", !project.exists && "opacity-40")}
+                  title={`${project.path}\nRight-click to rename or remove`}
                 >
                   {w === project.id ? <FolderOpen /> : <Folder />}
                   <span>{project.name}</span>
-                  {w === project.id && (
-                    <ChevronDown className="!h-3 !w-3 opacity-50" />
-                  )}
                 </Link>
               </ProjectItem>
             ))}
-            {!projects.isLoading && !projects.isError && !filtered.length && (
-              <p className="px-5 py-3 text-xs text-muted-foreground">
-                Open a folder to get started.
-              </p>
-            )}
+            {!projects.isLoading && !projects.isError && !sorted.length && <p className="px-5 py-3 text-xs text-muted-foreground">Open a folder to get started.</p>}
           </div>
         )}
         <div className="sidebar-section-heading sidebar-recents-heading">
-          <span>{w || !target ? "Recents" : `Recents in ${projects.data?.find((p) => p.id === target)?.name ?? "your last project"}`}</span>
+          <span>{w || !targetName ? "Recent conversations" : `Recent in ${targetName}`}</span>
         </div>
         <div className="sidebar-conversations">
-          {w && selected === null && location.pathname.endsWith("/agent") && (
-            <button className="sidebar-conversation is-selected" onClick={newChat}>
-              <span>New conversation</span>
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-            </button>
+          {w && selected === null && onConversation && (
+            <button className="sidebar-conversation is-selected" onClick={onNewConversation}><span>New conversation</span><span className="h-1.5 w-1.5 rounded-full bg-primary" /></button>
           )}
           {recentRuns.data?.slice(0, 20).map((run) => (
-            <button key={run.id} className={cn("sidebar-conversation", w && activeRun === run.id && location.pathname.endsWith("/agent") && "is-selected")} title={run.goal.split("\n")[0]} onClick={() => { if (run.company_id && target) { if (w === target) setCompanyId(run.company_id); store.selectThread(threadKey(target, run.company_id), run.id); } if (target) navigate(`/w/${target}/agent`); }}>
+            <button key={run.id} className={cn("sidebar-conversation", w && activeRun === run.id && onConversation && "is-selected")} title={run.goal.split("\n")[0]}
+              onClick={() => target && openConversation(target, run)}>
               <span>{run.goal.split("\n")[0] || "New conversation"}</span>
-              {["running", "queued", "awaiting_user"].includes(run.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+              {run.status === "awaiting_user" ? <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-label="Waiting on you" />
+                : LIVE.includes(run.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-label="Working" />}
             </button>
           ))}
-          {recentRuns.isError && <button className="px-3 py-2 text-xs text-muted-foreground" onClick={() => void recentRuns.refetch()}>Retry recents</button>}
-          {target && !recentRuns.isLoading && !recentRuns.data?.length && <p className="px-3 py-2 text-xs text-muted-foreground">Recent conversations will appear here.</p>}
+          {recentRuns.isError && <button className="px-3 py-2 text-xs text-muted-foreground" onClick={() => void recentRuns.refetch()}>Retry</button>}
+          {target && !recentRuns.isLoading && !recentRuns.data?.length && <p className="px-3 py-2 text-xs text-muted-foreground">Your conversations will appear here.</p>}
+          {target && (recentRuns.data?.length ?? 0) > 20 && <Link to={`/w/${target}/runs`} className="block px-3 py-2 text-xs text-muted-foreground hover:text-foreground">See all in History</Link>}
         </div>
       </div>
       {folder.element}
@@ -447,71 +297,25 @@ function ProjectItem({ project, selected, children }: { project: WorkspaceOut; s
   );
 }
 
-/** Notifications and quick open, plus the sidebar toggle. */
-function TopBarActions({
-  chatsView,
-  sidebar,
-  mobile,
-  onToggleSidebar,
-  toggleRef,
-}: {
-  chatsView: boolean;
-  sidebar: boolean;
-  mobile: boolean;
-  onToggleSidebar: () => void;
-  toggleRef: React.RefObject<HTMLButtonElement>;
-}) {
-  return (
-    <div className="topbar-actions">
-      <LiveBell />
-      <CommandPalette />
-      {chatsView && (
-        <button
-          ref={toggleRef}
-          type="button"
-          className="topbar-action"
-          aria-label={
-            mobile
-              ? sidebar
-                ? "Hide project sidebar"
-                : "Show project sidebar"
-              : sidebar
-                ? "Collapse navigation bar"
-                : "Expand navigation bar"
-          }
-          aria-expanded={sidebar}
-          onClick={onToggleSidebar}
-        >
-          {sidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** One bell for team activity: amber when the team waits on you. */
-function LiveBell() {
+/**
+ * The one place that shows what the team is doing right now. Hidden while nothing runs; amber when the team
+ * waits on you. Clicking it opens that conversation.
+ */
+function TeamPulse() {
   const w = useWorkspaceId();
   const { data } = useRuns(w, undefined, true);
-  const live =
-    data?.filter((run) =>
-      ["running", "paused", "awaiting_user", "queued"].includes(run.status),
-    ) ?? [];
-  const needsYou = live.some((run) => run.status === "awaiting_user");
-  const first = live.find((run) => run.status === "awaiting_user") ?? live[0];
-  const label = needsYou
-    ? "Notifications: your team is waiting for you"
-    : live.length
-      ? `Notifications: ${live.length} active conversation${live.length === 1 ? "" : "s"}`
-      : "Notifications";
+  const openConversation = useOpenConversation();
+  const live = data?.filter((run) => LIVE.includes(run.status)) ?? [];
+  if (!live.length) return null;
+  const waiting = live.filter((run) => run.status === "awaiting_user");
+  const first = waiting[0] ?? live[0];
+  const label = waiting.length ? (waiting.length === 1 ? "Needs you" : `${waiting.length} need you`)
+    : live.length === 1 ? (first.status === "paused" ? "Team paused" : "Team working") : `${live.length} working`;
   return (
-    <Link
-      to={first ? `/w/${w}/runs/${first.id}` : `/w/${w}/runs`}
-      aria-label={label}
-      className={cn("topbar-action", needsYou && "has-alert")}
-    >
-      <Bell />
-      {needsYou && <span className="topbar-dot" aria-hidden />}
-    </Link>
+    <button type="button" className={cn("team-pulse", waiting.length && "is-waiting")} onClick={() => openConversation(w, first)}
+      title={`${first.goal.split("\n")[0]}: open the conversation`} aria-label={`${label}: open the conversation`}>
+      {waiting.length ? <CircleAlert /> : first.status === "paused" ? <span className="team-pulse-dot" /> : <Loader2 className="animate-spin" />}
+      <span>{label}</span>
+    </button>
   );
 }

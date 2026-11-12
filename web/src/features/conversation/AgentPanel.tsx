@@ -6,14 +6,12 @@ import {
   ArrowUp,
   Bot,
   ChevronDown,
-  CircleStop,
   FileCode2,
   Folder,
   History,
   Laptop,
   Network,
   Pause,
-  Play,
   Plus,
   Settings2,
   ShieldCheck,
@@ -22,7 +20,7 @@ import {
   Check,
   Paperclip,
   MessageSquare,
-  UsersRound,
+  Globe,
   ListTodo,
   Wrench,
   FileText,
@@ -54,7 +52,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/primitives";
 import {
   ConfirmDialog,
-  Tip,
   Popover,
   PopoverTrigger,
   PopoverContent,
@@ -76,7 +73,9 @@ import {
 import { RunDialog } from "@/features/runs/RunDialog";
 import { defaultRunBudget } from "@/features/runs/runDefaults";
 import { RunFeed, ToolLog } from "@/features/runs/RunFeed";
-import { TeamView } from "@/features/runs/TeamView";
+import { BrowserView } from "@/features/runs/BrowserView";
+import { isBrowsing } from "@/features/runs/browserSteps";
+import { RunStrip, conversationStatus } from "./RunStrip";
 import { TaskBoard } from "@/features/runs/RunWidgets";
 import { ReportView } from "@/features/runs/RunReport";
 import { ApprovalCard } from "@/features/runs/ApprovalCard";
@@ -101,25 +100,6 @@ type PromptSubmission = {
   files: ParsedFileOut[];
   clientId: string;
 };
-
-function conversationStatus(status?: string, active = false): string {
-  if (status === "awaiting_user") return "Waiting on you";
-  if (status === "paused") return "Team paused";
-  if (active)
-    return status === "queued" ? "Preparing your team" : "Team is working";
-  switch (status) {
-    case "completed":
-      return "Ready for your next message";
-    case "incomplete":
-      return "Ready for follow-up";
-    case "failed":
-      return "Needs attention";
-    case "cancelled":
-      return "Stopped";
-    default:
-      return status?.replace(/_/g, " ") ?? "";
-  }
-}
 
 export type FloatingChatState =
   "full" | "expanded" | "compose" | "minimized" | "collapsed";
@@ -211,8 +191,6 @@ function CompanyAgentPanel({
 }) {
   const qc = useQueryClient();
   const companiesQuery = useCompanies(w);
-  const { data: companies } = companiesQuery;
-  const { setCompanyId } = useCompanyId();
   const canvas = useCanvas(w, companyId);
   const ws = useWorkspace(w);
   const settings = useSettings();
@@ -253,6 +231,7 @@ function CompanyAgentPanel({
   const status =
     state.replayDone || state.live ? state.status : run.data?.status;
   const active = !!runId && !!status && !TERMINAL.has(status);
+  const browsing = Object.values(state.activity).some(isBrowsing);
   const [now, setNow] = React.useState(Date.now);
   React.useEffect(() => {
     if (!active || !floatingWindow) return;
@@ -283,9 +262,8 @@ function CompanyAgentPanel({
   const [adding, setAdding] = React.useState(false);
   const [browsingFiles, setBrowsingFiles] = React.useState(false);
   const [fileSearch, setFileSearch] = React.useState("");
-  const [history, setHistory] = React.useState(false);
   const [conversationTab, setConversationTab] = React.useState<
-    "chat" | "team" | "tasks" | "tools" | "report"
+    "chat" | "tasks" | "browser" | "tools" | "report"
   >("chat");
   React.useEffect(() => setConversationTab("chat"), [runId]);
   const [advanced, setAdvanced] = React.useState(false);
@@ -496,7 +474,6 @@ function CompanyAgentPanel({
   };
   const newThread = () => {
     store.selectThread(key, null);
-    setHistory(false);
     setContexts([]);
     attachments.clear();
     setError("");
@@ -517,27 +494,17 @@ function CompanyAgentPanel({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="top" className="w-64">
         <DropdownMenuLabel>Conversation options</DropdownMenuLabel>
-        <DropdownMenuItem disabled={submit.isPending} onSelect={newThread}>
-          <Plus />
-          New conversation
-        </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!companyId}
           onSelect={() => setAdvanced(true)}
         >
           <Settings2 />
-          New conversation with limits
+          New conversation with limits…
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => setInternal(!internal)}>
           <History />
-          {internal ? "Show replies only" : "Show team activity"}
+          {internal ? "Show replies only" : "Show the team\u2019s internal messages"}
           {internal && <Check className="ml-auto" />}
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to={`/w/${w}/${companyId ? "canvas" : "settings#providers"}`}>
-            <Settings2 />
-            {companyId ? "Configure team models" : "Model settings"}
-          </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -585,47 +552,9 @@ function CompanyAgentPanel({
                 <Minus />
               </button>
               <ConnectionDot state={conn} />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="floating-chat-title"
-                    aria-label="Chat window view"
-                  >
-                    <span>
-                      {run.data?.goal.split("\n")[0] || "New conversation"}
-                    </span>
-                    <ChevronDown />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  {runs.data?.map((thread) => (
-                    <DropdownMenuItem
-                      key={thread.id}
-                      disabled={submit.isPending}
-                      onSelect={() => {
-                        store.selectThread(key, thread.id);
-                        floatingWindow.onStateChange("expanded");
-                      }}
-                    >
-                      {thread.id === runId ? <Check /> : <MessageSquare />}
-                      <span className="max-w-64 truncate">
-                        {thread.goal.split("\n")[0] || "Conversation"}
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
-                  <DropdownMenuItem
-                    disabled={submit.isPending}
-                    onSelect={() => {
-                      newThread();
-                      floatingWindow.onStateChange("compose");
-                    }}
-                  >
-                    <Plus />
-                    New side chat
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <span className="floating-chat-title" title={run.data?.goal}>
+                <span>{run.data?.goal.split("\n")[0] || "New conversation"}</span>
+              </span>
               {floatingWindow.menu}
             </div>
           )}
@@ -639,16 +568,6 @@ function CompanyAgentPanel({
             >
               <MessageSquare />
               Chat
-            </button>
-            <button
-              aria-pressed={conversationTab === "team"}
-              onClick={() => setConversationTab("team")}
-            >
-              <UsersRound />
-              Team{" "}
-              {!!Object.keys(agents).length && (
-                <span>{Object.keys(agents).length}</span>
-              )}
             </button>
             <button
               aria-pressed={conversationTab === "tasks"}
@@ -669,15 +588,25 @@ function CompanyAgentPanel({
               <Wrench />
               Tools
             </button>
+            {(!!state.browser.length || browsing) && (
+              <button
+                aria-pressed={conversationTab === "browser"}
+                onClick={() => setConversationTab("browser")}
+              >
+                <Globe className={cn(browsing && "animate-pulse text-success")} />
+                Browser
+              </button>
+            )}
             <button
               aria-pressed={conversationTab === "report"}
               disabled={!runId || active}
               onClick={() => setConversationTab("report")}
             >
               <FileText />
-              Report
+              Recap
             </button>
           </nav>
+          {runId && run.data && <RunStrip w={w} runId={runId} mode={run.data.mode} status={status} active={active} state={state} agents={agents} pending={control.isPending} onControl={(action) => control.mutate(action)} />}
         </header>
       )}
       {!conversation && (
@@ -698,44 +627,7 @@ function CompanyAgentPanel({
               ? (run.data?.goal.split("\n")[0] ?? "New conversation")
               : "Octopus"}
           </span>
-          {!conversation && (
-            <select
-              aria-label="Agent company"
-              value={companyId}
-              onChange={(e) => setCompanyId(e.target.value)}
-              className="min-w-0 max-w-44 flex-1 truncate bg-transparent text-[11px] text-muted-foreground"
-            >
-              {!companyId && <option value="">Your team</option>}
-              {companies?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          )}
           <div className="ml-auto flex gap-0.5">
-            <Tip content="Conversation history">
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Agent conversation history"
-                aria-pressed={history}
-                onClick={() => setHistory(!history)}
-              >
-                <History />
-              </Button>
-            </Tip>
-            <Tip content="New conversation">
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="New agent conversation"
-                onClick={newThread}
-                disabled={submit.isPending}
-              >
-                <Plus />
-              </Button>
-            </Tip>
             <Button
               size="icon-sm"
               variant="ghost"
@@ -749,108 +641,8 @@ function CompanyAgentPanel({
           </div>
         </header>
       )}
-      {history && (
-        <div
-          className="max-h-52 shrink-0 overflow-auto border-b p-2"
-          aria-label="Agent conversations"
-        >
-          {runs.isError && (
-            <p role="alert" className="p-2 text-xs text-destructive">
-              {runs.error.message}
-            </p>
-          )}
-          {!runs.data?.length && (
-            <p className="p-2 text-xs text-muted-foreground">
-              No conversations yet.
-            </p>
-          )}
-          {runs.data?.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => {
-                store.selectThread(key, r.id);
-                setHistory(false);
-                setError("");
-              }}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-accent",
-                r.id === runId && "bg-accent",
-              )}
-            >
-              <span className="min-w-0 flex-1 truncate">
-                {r.goal.split("\n")[0]}
-              </span>
-              <span className="text-[10px] text-muted-foreground">
-                {conversationStatus(r.status, !TERMINAL.has(r.status))}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
       {!conversation && runId && run.data && (
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3 text-[11px]">
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              active
-                ? "bg-primary"
-                : status === "failed"
-                  ? "bg-destructive"
-                  : status === "incomplete"
-                    ? "bg-warning"
-                    : status === "completed"
-                      ? "bg-success"
-                      : "bg-muted-foreground",
-            )}
-          />
-          <span>{conversationStatus(status, active)}</span>
-          <ConnectionDot state={conn} />
-          <Link
-            to={`/w/${w}/runs/${runId}`}
-            className="ml-auto text-muted-foreground hover:text-primary"
-          >
-            Team activity
-          </Link>
-          {active && (
-            <>
-              {run.data.mode === "step" ? (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  aria-label="Continue team work"
-                  disabled={control.isPending}
-                  onClick={() => control.mutate("step")}
-                >
-                  <Play />
-                  Next step
-                </Button>
-              ) : (
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={
-                    status === "paused" ? "Resume team work" : "Pause team work"
-                  }
-                  disabled={control.isPending}
-                  onClick={() =>
-                    control.mutate(status === "paused" ? "resume" : "pause")
-                  }
-                >
-                  {status === "paused" ? <Play /> : <Pause />}
-                </Button>
-              )}
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Stop team work"
-                disabled={control.isPending}
-                onClick={() => control.mutate("stop")}
-              >
-                <CircleStop />
-              </Button>
-            </>
-          )}
-        </div>
+        <RunStrip w={w} runId={runId} mode={run.data.mode} status={status} active={active} state={state} agents={agents} pending={control.isPending} onControl={(action) => control.mutate(action)} />
       )}
       <div className="agent-message-area min-h-0 flex-1 overflow-hidden">
         {conversation && conversationTab !== "chat" ? (
@@ -858,15 +650,8 @@ function CompanyAgentPanel({
             className="conversation-detail-panel h-full overflow-auto"
             aria-label={`${conversationTab} view`}
           >
-            {conversationTab === "team" && (
-              <TeamView
-                agents={Object.values(agents)}
-                state={state}
-                departments={{
-                  ...canvas.data?.departments,
-                  ...state.departments,
-                }}
-              />
+            {conversationTab === "browser" && runId && (
+              <div className="flex h-full flex-col"><BrowserView state={state} agents={agents} w={w} runId={runId} live={active} /></div>
             )}
             {conversationTab === "tasks" && (
               <TaskBoard tasks={Object.values(state.tasks)} agents={agents} compact />
@@ -874,7 +659,7 @@ function CompanyAgentPanel({
             {conversationTab === "tools" && (
               <ToolLog state={state} agents={agents} />
             )}
-            {conversationTab === "report" && runId && <ReportView w={w} runId={runId} enabled={!active} />}
+            {conversationTab === "report" && runId && <ReportView w={w} runId={runId} enabled={!active} downloadable />}
           </div>
         ) : runId && run.isLoading ? (
           <p
@@ -1315,7 +1100,7 @@ function CompanyAgentPanel({
             )}
             <Textarea
               ref={input}
-              aria-label="Message your company"
+              aria-label="Message the team lead"
               placeholder={
                 floatingWindow
                   ? active

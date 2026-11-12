@@ -14,6 +14,9 @@ interface AppState {
   currency: string;
   /** the name shown on your avatar and Activity page (stays on this device) */
   profileName: string;
+  /** the projects and conversations sidebar is open (desktop) */
+  sidebarOpen: boolean;
+  setSidebarOpen: (open: boolean) => void;
   setProfileName: (name: string) => void;
   setCurrency: (c: string) => void;
   setOnboarded: (v: boolean) => void;
@@ -37,6 +40,8 @@ export const useApp = create<AppState>()(
       onboarded: false,
       currency: "USD",
       profileName: "",
+      sidebarOpen: true,
+      setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setProfileName: (name) => set({ profileName: name.trim().slice(0, 60) }),
       setCurrency: (c) => set({ currency: c.toUpperCase() }),
       setOnboarded: (v) => set({ onboarded: v }),

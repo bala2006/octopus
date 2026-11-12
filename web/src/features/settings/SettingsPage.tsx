@@ -549,7 +549,7 @@ function TemplatesSection() {
     } catch (e) { toast.error("Import failed", { description: (e as Error).message }); }
   };
   return (
-    <Section title="Company templates" description="Templates are sets of departments. Each department has a manager and a small team. Design one on the canvas and use Save as template, generate one with AI in New company, or import a JSON file. Templates are available in every project.">
+    <Section title="Team templates" description="Templates are sets of departments. Each department has a manager and a small team. Design one on the canvas and use Save as template, generate one with AI in New company, or import a JSON file. Templates are available in every project.">
       <div className="flex justify-end gap-2">
         <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}><Upload />Import JSON</Button>
         <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importTpl(f); e.target.value = ""; }} />
@@ -557,7 +557,7 @@ function TemplatesSection() {
       <div className="space-y-2">
         <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">My templates</div>
         {isLoading ? <div className="skeleton h-16" /> : !mine.length ? (
-          <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No custom templates yet. Open a company on the canvas and click <b>Save as template</b>.</div>
+          <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No custom templates yet. Open a team on the canvas and click <b>Save as template</b>.</div>
         ) : mine.map((t) => (
           <div key={t.key} className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
             <LayoutTemplate className="h-4 w-4 text-primary" />
@@ -598,7 +598,7 @@ function TemplatesSection() {
         </DialogContent>
       </Dialog>
       <ConfirmDialog open={!!del} onOpenChange={(o) => !o && setDel(null)} title={`Delete "${del?.name}"?`} destructive confirmLabel="Delete"
-        description="Companies already created from it are not affected." onConfirm={() => del && remove.mutate(del.key)} />
+        description="Teams already created from it are not affected." onConfirm={() => del && remove.mutate(del.key)} />
     </Section>
   );
 }

@@ -1,8 +1,7 @@
 import * as React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   ArrowUp,
-  BookOpen,
   Check,
   ChevronDown,
   Folder,
@@ -96,15 +95,9 @@ export function WelcomePage() {
     <DesktopLayout
       header={
         <>
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-            New conversation
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+            Home
           </span>
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/guide">
-              <BookOpen />
-              Guide
-            </Link>
-          </Button>
         </>
       }
     >

@@ -29,7 +29,7 @@ export function SaveTemplateDialog({ open, onOpenChange, companyId, defaultName,
     },
     onSuccess: (t) => {
       qc.invalidateQueries({ queryKey: ["templates"] });
-      toast.success(`Saved "${t.name}"`, { description: `${t.agent_count} agents in ${(t.departments ?? []).length} departments. Available in New company in every project.` });
+      toast.success(`Saved "${t.name}"`, { description: `${t.agent_count} agents in ${(t.departments ?? []).length} departments. Available under New team in every project.` });
       onOpenChange(false);
     },
   });
@@ -41,7 +41,7 @@ export function SaveTemplateDialog({ open, onOpenChange, companyId, defaultName,
           <DialogDescription>{nodes.length} agents · {depts.size} departments. Prompts, tools, org chart and channels are included; run history is not.</DialogDescription>
         </DialogHeader>
         <Field label="Template name"><Input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && name.trim() && save.mutate()} /></Field>
-        <Field label="Description"><Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What kind of work is this company good at?" /></Field>
+        <Field label="Description"><Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What kind of work is this team good at?" /></Field>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={() => save.mutate()} disabled={!name.trim()} loading={save.isPending} data-testid="save-template"><BookmarkPlus />Save template</Button>

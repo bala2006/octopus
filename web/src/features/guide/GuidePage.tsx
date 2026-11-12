@@ -1,12 +1,13 @@
 import * as React from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
-  ArrowLeft, ArrowRight, BookOpen, Cloud, FileCode2, FolderOpen, History, Keyboard, LayoutTemplate, MessagesSquare, Network,
+  ArrowLeft, ArrowRight, BookOpen, Cloud, Code2, Compass, FileCode2, FolderOpen, History, Keyboard, LayoutTemplate, MessagesSquare, Network,
   Play, Plug, Settings2, ShieldCheck, Sparkles, type LucideIcon,
 } from "lucide-react";
 import { APPROVAL_MODES, CHANNEL_CHOICES, EDGE_TYPES } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/stores/app";
+import { SPACES } from "@/components/layout/spaces";
 import type { ApprovalMode, EdgeType } from "@/types";
 
 interface Section { id: string; title: string; icon: LucideIcon; body: React.ReactNode }
@@ -55,13 +56,10 @@ export default function GuidePage({ embedded = false }: { embedded?: boolean }) 
               <p className="text-xs font-medium text-primary">Octopus guide</p>
               <h1 className="page-title">How to work with Octopus</h1>
               <p className="text-[15px] leading-relaxed text-muted-foreground">
-                Octopus is a company of AI specialists that works in a folder on your computer. You say what you want, the way you would in a coding chat.
-                Octopus, the orchestrator, decides who the job needs, hires them onto the canvas, and runs the work. Every change is reviewed and checked
+                Octopus is a team of AI specialists that works in a folder on your computer. You say what you want, the way you would in a coding chat.
+                Octopus, the team lead, decides who the job needs, hires them onto the team, and runs the work. Every change is reviewed and checked
                 with your project's own tests before Octopus reports back. Then you reply, and the same team carries on.
               </p>
-              {base && (
-                <Link to={`${base}/agent`} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">Back to the conversation<ArrowRight className="h-3.5 w-3.5" /></Link>
-              )}
             </div>
             {SECTIONS.map((s, i) => (
               <section key={s.id} id={s.id} className="scroll-mt-6 space-y-4">
@@ -75,7 +73,7 @@ export default function GuidePage({ embedded = false }: { embedded?: boolean }) 
                 <div className="space-y-4 text-[14.5px] leading-relaxed text-muted-foreground [&_b]:font-semibold [&_b]:text-foreground">{s.body}</div>
               </section>
             ))}
-            <p className="border-t border-border pt-6 text-center text-xs text-muted-foreground">That's everything. Hover a button for a short hint, or use Help › Report an issue if something does not work as described.</p>
+            <p className="border-t border-border pt-6 text-center text-xs text-muted-foreground">That's everything. Hover any button for a short hint, or use Help › Report an issue if something does not work as described.</p>
           </article>
         </div>
       </div>
@@ -240,19 +238,33 @@ function EndpointExamples() {
   );
 }
 
+function SpaceTable() {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      {SPACES.map((sp) => (
+        <div key={sp.to} className="grid grid-cols-[150px_1fr_52px] items-center gap-3 border-b border-border px-3 py-2 text-[13px] last:border-0">
+          <span className="flex items-center gap-2 font-medium text-foreground"><sp.icon className="h-4 w-4 text-terracotta" />{sp.label}</span>
+          <span>{sp.hint}</span>
+          <span className="text-right font-mono text-[11px]">Alt {sp.key}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Shortcuts() {
   const rows = [
-    ["Alt 0 … 7", "Conversation, Canvas, Agent chats, History, Changes, Settings, Guide, Code workspace"],
-    ["Ctrl K or Ctrl P", "Find a file or page (inside a project)"],
+    ["Alt 1 … 6", SPACES.map((sp) => sp.label).join(", ")],
+    ["Ctrl K or Ctrl P", "Quick open: a file or page (inside a project)"],
     ["Ctrl L", "Jump to the message box"],
     ["Enter / Shift Enter", "Send / new line in the message box"],
     ["1 … 9, then Enter", "Pick an answer when an agent asks you something"],
     ["A / Shift A / R", "Approve once / always allow / reject a pending approval"],
-    ["Ctrl S / Ctrl Shift S", "Save / save all in the code workspace"],
-    ["Ctrl Shift F", "Search the project in the code workspace"],
-    ["Ctrl `", "Show or hide the terminal in the code workspace"],
-    ["Ctrl Z / Ctrl Y", "Undo / redo on the canvas"],
-    ["Ctrl C / V / D / A", "Copy, paste, duplicate, select all agents on the canvas"],
+    ["Ctrl S / Ctrl Shift S", "Save / save all in Code"],
+    ["Ctrl Shift F", "Search the project in Code"],
+    ["Ctrl `", "Show or hide the terminal in Code"],
+    ["Ctrl Z / Ctrl Y", "Undo / redo in Team"],
+    ["Ctrl C / V / D / A", "Copy, paste, duplicate, select all agents in Team"],
     ["Delete", "Remove the selected agents or channel"],
     ["Double-click an agent", "Open the full inspector"],
   ];
@@ -284,9 +296,21 @@ const SECTIONS: Section[] = [
     </>,
   },
   {
+    id: "layout", title: "Find your way around", icon: Compass,
+    body: <>
+      <p>Each job in a project has exactly one place. The rail on the left switches between them:</p>
+      <SpaceTable />
+      <Tips items={[
+        <>The <b>sidebar</b> lists your projects and recent conversations. Show or hide it with the panel button at the top left.</>,
+        <>The top bar shows where you are, which <b>team</b> works in this project, and a status pill while the team works. It turns amber when the team needs you.</>,
+        <><b>Ctrl K</b> opens any file or page. Your avatar at the bottom of the rail holds your profile, Settings and the theme; <b>Help</b> holds this guide.</>,
+      ]} />
+    </>,
+  },
+  {
     id: "projects", title: "Projects are folders", icon: FolderOpen,
     body: <>
-      <p>A project is a folder on your computer. Choose <b>Open project folder</b> (File menu, the <b>+</b> next to Projects, or Home), pick a folder, and give it a name. Agents can only read and write <b>inside that folder</b>.</p>
+      <p>A project is a folder on your computer. Choose <b>Open project folder</b> (File menu, the <b>+</b> next to Projects in the sidebar, or Home), pick a folder, and give it a name. Agents can only read and write <b>inside that folder</b>.</p>
       <p>Octopus keeps the project's teams, conversations, file history, agent notes and trash in a hidden <code className="mx-1 rounded bg-muted px-1 text-foreground">.octopus/</code> folder, ignored by Git.
         Open the same folder later and everything is back. Right-click a project in the sidebar to rename it or remove it from Octopus; removing never deletes your files.</p>
       <p>If the folder is a Git repository, Home lets you pick a branch or start a <b>new worktree</b>, so the team works on a separate branch and leaves your checkout untouched.</p>
@@ -316,29 +340,32 @@ const SECTIONS: Section[] = [
         <><b>Ask for permission / Approve for me</b> sets what needs your OK (see Safety).</>,
         <>The model button picks the Azure deployment and how long the team thinks: <b>Auto</b> uses each agent's own setting.</>,
         <>Start a message with <b>@Name</b> to give it straight to one teammate instead of Octopus.</>,
-        <>The conversation window floats over the canvas. Minimise, dock it left or right, or open a past conversation from its title.</>,
-        <><b>New conversation</b> in the sidebar or File menu starts fresh with the same team; <b>New conversation with limits</b> (in the message box options) lets you set budgets first.</>,
+        <>The conversation window floats over your team. Minimise it, dock it left or right, or open it full width from its window menu.</>,
+        <><b>New conversation</b> in the sidebar (or File menu) starts fresh with the same team. Past conversations are under <b>Recent conversations</b> in the sidebar, and all of them are in <b>History</b>.</>,
+        <><b>New conversation with limits…</b> in the message box options lets you set budgets and a step-by-step mode first.</>,
       ]} />
     </>,
   },
   {
     id: "runs", title: "While the team works", icon: Play,
     body: <>
-      <p>The conversation shows what matters to you: the plan, questions, approvals and the final report. <b>Show team activity</b> in the message box options adds the messages between agents.</p>
+      <p>Everything about a conversation is in one window. The chat shows what matters to you: the plan, questions, approvals and the final report. <b>Show the team's internal messages</b> in the message box options adds what agents say to each other.
+        Next to it, the team's cards light up as each agent thinks, writes or uses a tool.</p>
       <Tips items={[
-        <>The tabs above the chat show the <b>Team</b> (who is busy, who hired whom), <b>Tasks</b> (each task's owner, status and result), <b>Tools</b> (every command and tool call) and the <b>Report</b>.</>,
+        <>The tabs above the chat show <b>Tasks</b> (each task's owner, status and result), <b>Tools</b> (every command and tool call), <b>Browser</b> (what an agent sees, live, once one uses the browser) and the <b>Recap</b> when the team is done, which you can download as Markdown.</>,
+        <>The strip under the tabs shows the workflow phases, what the team is doing, and the calls, tokens and cost so far (click them for the exact breakdown). <b>Pause</b> or <b>Next step</b> is there too.</>,
         <>When an agent needs a decision, it asks with 2 to 5 answers and marks the one it recommends. Pick one or type your own; the rest of the team keeps working meanwhile.</>,
         <>Send a message at any time. While the team works, Octopus plans it in alongside the running tasks.</>,
-        <>Pause, step or stop from <b>Conversation history</b> or the live view. Each request has limits (model calls, tokens, cost, active time); when one is reached the team stops cleanly, and your next message continues with a fresh budget.</>,
-        <>The live view (<b>Conversation history</b> › a conversation) shows the team graph, the full feed, the browser screenshots and a timeline you can scrub.</>,
+        <>To stop the team, press the square send button while the message box is empty. Each request has limits (model calls, tokens, cost, active time); when one is reached the team stops cleanly, and your next message continues with a fresh budget.</>,
+        <>When the team needs you, the status pill at the top right turns amber and says <b>Needs you</b>, on every page. Click it to jump to that conversation.</>,
       ]} />
-      <Shot name="run" alt="The team at work: canvas with live status and the conversation" />
+      <Shot name="run" alt="The team at work next to the conversation" />
     </>,
   },
   {
-    id: "canvas", title: "Your team on the canvas", icon: Network,
+    id: "canvas", title: "Design your team", icon: Network,
     body: <>
-      <p>The canvas is your team as an org chart. Each card is an agent; coloured zones are <b>departments</b>, each with a lead (♛). The flag marks the <b>team lead</b>, usually Octopus, who plans every request and reports back to you.
+      <p><b>Team</b> shows your team as an org chart. Each card is an agent; coloured zones are <b>departments</b>, each with a lead (♛). The flag marks the <b>team lead</b>, usually Octopus, who plans every request and reports back to you.
         During a conversation the cards show who is thinking or writing, their last message and their token use.</p>
       <OrgDiagram />
       <p>The lines are <b>channels</b>. Octopus draws delegate and report lines when it hires someone; you can add your own by dragging from the dot on one card to another, and click a line to change it:</p>
@@ -346,10 +373,11 @@ const SECTIONS: Section[] = [
       <Tips items={[
         <>New team: <b>Self-organizing</b> starts with only Octopus, which hires as each request needs. Templates (Software Startup, Web App Studio, Mobile App Team, SaaS Launch, Full Company and more) start with a typical shape. You can also describe a team and let AI design it, or import one.</>,
         <>People Octopus hires show an <b>AI hire</b> badge and stay in the team for later requests.</>,
-        <>Use <b>Department</b> in the toolbar to add a lead and a small team at once, and the layout button to tidy everything. Changes save automatically.</>,
-        <>Switch, rename or delete teams from the team name in the top bar.</>,
+        <>Use <b>Department</b> in the toolbar to add a lead and a small team at once, and <b>Tidy up</b> to arrange everything. Zoom and fit are in the corner controls. Changes save automatically.</>,
+        <>Right-click an agent to configure it, chat with it, make it the team lead, duplicate or delete it.</>,
+        <>Switch, create, rename or delete teams from the team name in the top bar. <b>Talk to the team</b> opens a fresh conversation with it.</>,
       ]} />
-      <Shot name="canvas" alt="Canvas with departments, agents and channels" />
+      <Shot name="canvas" alt="Team: departments, agents and channels" />
     </>,
   },
   {
@@ -374,7 +402,7 @@ const SECTIONS: Section[] = [
       <ApprovalModes />
       <Tips items={[
         <>Agents only touch files inside the project. <code>.git</code> and Octopus's own data are off-limits, and so are symlinks that lead outside.</>,
-        <>Every change is versioned: <b>Changes</b> reverts any file to any version. Deleted files go to a trash you can restore from in the code workspace.</>,
+        <>Every change is versioned: <b>Changes</b> reverts any file to any version. Deleted files go to a trash you can restore from in Code.</>,
         <>Commands run without a shell and without your keys. Destructive ones (<code>rm</code>, <code>git reset --hard</code>, <code>git clean</code>, force pushes, <code>sudo</code>) are always refused, also when they are wrapped in other commands.</>,
         <>Approvals show the exact diff or command. <b>Always allow</b> applies to that exact action for the rest of the conversation.</>,
         <>Programs the team runs (your tests, scripts it wrote) run with your user's permissions. Use Git or a worktree for work you cannot afford to lose.</>,
@@ -386,22 +414,22 @@ const SECTIONS: Section[] = [
     body: <>
       <p><b>Changes</b> lists every file the team created or changed, with each version's author, reason and diff. Revert one file to any version, or to how it was before the conversation, and download the changes as a ZIP.
         <b> Project files</b> shows the whole folder; <b>Preview</b> runs HTML apps and renders Markdown, images and PDFs.</p>
-      <p><b>Conversation history</b> lists every conversation with its outcome. Open one to continue it, see its live view, download its report, or delete it.</p>
+      <p><b>History</b> lists every conversation with its outcome and cost. Open one to pick it up where you left off; from the row you can also ask again, review its changes, or delete it.</p>
       <Shot name="artifacts" alt="Changes: files, versions and diffs" />
     </>,
   },
   {
     id: "chat", title: "Chat with one agent", icon: MessagesSquare,
     body: <>
-      <p><b>Agent chats</b> are one-on-one conversations with a teammate: ask your designer about the colour palette or your backend developer how the API works. In a direct chat the agent can read the project and search the web but does not change files; ask in the main conversation for changes.</p>
-      <p><b>Company channel</b> in the same view shows your team conversations as a channel.</p>
+      <p><b>Direct chats</b> are one-on-one conversations with a single teammate: ask your designer about the colour palette or your backend developer how the API works. In a direct chat the agent can read the project and search the web but does not change files; ask in Conversation for changes.</p>
+      <p>Pick an agent from the list, or right-click its card in Team and choose <b>Chat with agent</b>.</p>
       <Shot name="chat" alt="Direct chat with an agent" />
     </>,
   },
   {
-    id: "workspace", title: "The code workspace", icon: FileCode2,
+    id: "workspace", title: "Edit code yourself", icon: Code2,
     body: <>
-      <p>Open <b>Code workspace</b> (View menu or Alt 7) to edit files next to a preview and the conversation.</p>
+      <p><b>Code</b> (Alt 5) is an editor with a preview, a terminal and Git. The <b>Agent</b> button opens the same conversation beside your code, so you can attach the current file or a selection.</p>
       <Tips items={[
         <>Open files from the explorer or <b>Ctrl K</b>; <b>Ctrl S</b> saves. If the file changed on disk meanwhile, Octopus shows both versions before you choose.</>,
         <>New file, new folder, rename, move and delete (with undo and a trash) are in the explorer.</>,
@@ -414,14 +442,14 @@ const SECTIONS: Section[] = [
   {
     id: "extras", title: "Roles, skills, templates and MCP", icon: LayoutTemplate,
     body: <>
-      <p>In <b>Settings</b> you can edit the <b>role library</b> Octopus hires from, write <b>skills</b> (Markdown playbooks), and manage <b>templates</b>: save your team as one from the canvas toolbar, and import or export them as JSON.</p>
+      <p>In <b>Settings</b> you can edit the <b>role library</b> Octopus hires from, write <b>skills</b> (Markdown playbooks), and manage <b>templates</b>: save your team as one from the Team toolbar, and import or export them as JSON.</p>
       <p className="flex gap-2"><Plug className="mt-1 h-4 w-4 shrink-0 text-terracotta" /><span><b>Built-in browser</b>: agents with the Browser tool get their own tab in an isolated browser on this computer. They open the project preview, click through it and read console errors. Use <b>Test browser</b> in Settings › MCP servers to check it works.</span></p>
       <p className="flex gap-2"><Plug className="mt-1 h-4 w-4 shrink-0 text-terracotta" /><span><b>MCP servers</b> give agents more tools (GitHub, databases, …). Add one in Settings › MCP servers, then grant it to specific agents in their tools.</span></p>
     </>,
   },
   {
-    id: "history", title: "Activity and profile", icon: History,
-    body: <p><b>Activity</b> (the clock icon on the left) shows your tokens over time, your projects and the tools your teams use most. Add your name there; it appears on your avatar. Everything stays on this computer.</p>,
+    id: "history", title: "Profile and activity", icon: History,
+    body: <p>Click your avatar at the bottom of the rail and choose <b>Profile and activity</b> to see your tokens over time, your projects and the tools your teams use most. Add your name there; it appears on your avatar. Settings and the light or dark theme are in the same menu. Everything stays on this computer.</p>,
   },
   {
     id: "shortcuts", title: "Keyboard shortcuts", icon: Keyboard,
