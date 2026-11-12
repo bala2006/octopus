@@ -171,8 +171,13 @@ async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderO
     }
   };
   const reader = stream.getReader();
+  const IDLE_MS = 180_000;
   for (;;) {
-    const { value, done } = await reader.read();
+    let timer: NodeJS.Timeout | undefined;
+    const idle = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new UserError("Azure OpenAI stopped responding for 3 minutes")), IDLE_MS); });
+    let chunk: { value?: Uint8Array; done: boolean };
+    try { chunk = await Promise.race([reader.read(), idle]); } catch (e) { void reader.cancel().catch(() => {}); throw e; } finally { clearTimeout(timer); }
+    const { value, done } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     let idx;

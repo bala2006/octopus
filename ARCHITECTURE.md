@@ -79,6 +79,8 @@ Agents work in your folder, so the server enforces what they can do, whatever th
 - **Approvals.** In *Ask for permission* mode, medium actions (editing files you already had, deleting, medium commands,
   MCP calls) wait for you with a diff or the exact command. In *Approve for me* mode only high-risk actions ask.
   Creating files and editing files the team created never ask. Reading secret-looking files always asks.
+- **Limit.** Programs the team runs (tests, scripts, builds, including code it wrote) run with your user's permissions.
+  The policy decides which command runs; it does not sandbox what that program does.
 - **The server** listens on 127.0.0.1, answers only requests addressed to `127.0.0.1` or `localhost`, and rejects
   cross-site requests. Keys are encrypted at rest and never returned to the browser. Previews run in a CSP sandbox.
 

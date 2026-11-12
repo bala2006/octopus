@@ -95,6 +95,7 @@ export class Conversation {
     this.tasks = p.db.tasks.find("run_id = ?", [row.id], "rowid");
     for (const t of this.tasks) if (t.status === "in_progress") t.status = "todo";
     this.loadTeam();
+    this.startRequest();
   }
 
   // ── lifecycle ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -155,7 +156,7 @@ export class Conversation {
 
   /** A user message: a new request, a follow-up, or the answer to a pending question. */
   submit(content: string, attachments: Attachment[], toAgentId: string | null): string {
-    if (this.row.status === "cancelled" || this.stopped) this.abort = new AbortController();
+    if (this.stopped && !this.driving) this.abort = new AbortController();
     const images = this.saveImages(attachments);
     const files = attachments.filter((a) => a.kind !== "image" && a.text).map((a) => `\n\n--- Attached file: ${a.filename} ---\n${clip(a.text!, 60_000)}`).join("");
     const mention = /(^|\s)@([\w-]+)/.exec(content)?.[2]?.toLowerCase();
@@ -306,13 +307,21 @@ export class Conversation {
 
   // ── running one agent ──────────────────────────────────────────────────────────────────────────────────────────────
 
+  /** Usage when the current request started: limits apply to each request, so a follow-up always has room to work. */
+  private requestStart = { turns: 0, tokens: 0, cost: 0, seconds: 0 };
+  private startRequest() {
+    const u = this.state.usage;
+    this.requestStart = { turns: u.turns, tokens: u.tokens, cost: u.cost_usd, seconds: u.active_seconds };
+  }
+
   private checkBudget() {
     const u = this.state.usage;
     const b = this.budget;
-    if (u.turns >= b.max_turns) throw new Halt(`Reached the limit of ${b.max_turns} model calls`);
-    if (u.tokens >= b.max_tokens) throw new Halt(`Reached the token limit (${b.max_tokens.toLocaleString()})`);
-    if (u.cost_usd >= b.max_cost_usd) throw new Halt(`Reached the cost limit ($${b.max_cost_usd})`);
-    if (u.active_seconds >= b.timeout_s) throw new Halt(`Reached the time limit (${Math.round(b.timeout_s / 60)} min)`);
+    const s = this.requestStart;
+    if (u.turns - s.turns >= b.max_turns) throw new Halt(`Reached the limit of ${b.max_turns} model calls for this request`);
+    if (u.tokens - s.tokens >= b.max_tokens) throw new Halt(`Reached the token limit (${b.max_tokens.toLocaleString()}) for this request`);
+    if (u.cost_usd - s.cost >= b.max_cost_usd) throw new Halt(`Reached the cost limit ($${b.max_cost_usd}) for this request`);
+    if (u.active_seconds - s.seconds >= b.timeout_s) throw new Halt(`Reached the time limit (${Math.round(b.timeout_s / 60)} min) for this request`);
   }
 
   private loopEvents(agent: AgentOut): LoopEvents {
@@ -458,6 +467,7 @@ export class Conversation {
         const msg = this.queue.shift();
         const pending = this.state.questions[0];
         let worked = false;
+        if (msg) this.startRequest();
         if (msg && pending) {
           this.state.questions.shift();
           if (pending.task_id) {
@@ -495,11 +505,20 @@ export class Conversation {
       }
     } finally {
       this.driving = false;
+      if (this.row.status === "running" && !this.queue.length) {
+        if (this.state.questions.length) this.setRunStatus("awaiting_user", { reason: "Waiting for your answer" });
+        else this.setRunStatus(this.tasks.some((t) => t.status === "blocked") ? "incomplete" : "completed", { reason: "" });
+      }
       this.save();
+      if (this.queue.length) {
+        if (this.stopped) this.abort = new AbortController();
+        queueMicrotask(() => void this.drive());
+      }
     }
   }
 
   private halt(reason: string, status: RunStatus = "incomplete") {
+    this.queue = [];
     this.abort.abort();
     for (const a of this.approvals.values()) a.done(false, "The conversation was stopped");
     this.gate?.resolve();
@@ -514,7 +533,6 @@ export class Conversation {
     this.pendingHalt = null;
     for (const t of this.tasks) if (t.status === "in_progress") this.saveTask({ ...t, status: "todo" });
     for (const a of this.team) this.setStatus(a, "idle");
-    this.queue = [];
     this.setRunStatus(h.status, { reason: h.reason, summary: h.status === "cancelled" ? "Stopped. Send a message to continue." : `${h.reason}. Send a message to continue.` });
   }
 
@@ -638,11 +656,13 @@ export class Conversation {
       : taskBrief(task, { goal: this.row.goal, deps, team: this.team, feedback: this.state.feedback[task.id], answer: this.state.answers[task.id] });
     let stop: Stop | null = null;
     let text = "";
+    let exhausted = false;
     try {
       const content = this.requestImages.length ? [{ type: "input_text", text: brief }, ...this.requestImages] : brief;
       const res = await this.turn(agent, mode, task, [{ role: "user", content }], { maxRounds: mode === "reviewer" ? 30 : 60 });
       stop = res.stop;
       text = res.text;
+      exhausted = !!res.exhausted;
     } catch (e) {
       if (e instanceof Halt || this.stopped) { this.pendingHalt ??= { reason: e instanceof Halt ? e.message : "Stopped", status: this.stopped && !(e instanceof Halt) ? "cancelled" : "incomplete" }; this.abort.abort(); return; }
       const message = (e as Error).message;
@@ -651,11 +671,16 @@ export class Conversation {
       this.saveTask({ ...task, status: "blocked", result: `Failed: ${message}` });
       return;
     }
-    await this.settle(task, agent, stop, text);
+    try {
+      await this.settle(task, agent, stop, text, exhausted);
+    } catch (e) {
+      this.emit("error", { message: `${agent.name}: ${(e as Error).message}`, kind: "error", agent_id: agent.id });
+      this.saveTask({ ...task, status: "blocked", result: `Could not be completed: ${(e as Error).message}` });
+    }
   }
 
   /** Apply how a task ended: done, review, fix round, question or blocked. */
-  private async settle(task: TaskOut, agent: AgentOut, stop: Stop | null, text: string) {
+  private async settle(task: TaskOut, agent: AgentOut, stop: Stop | null, text: string, exhausted = false) {
     const lead = this.lead;
     if (stop?.kind === "ask") {
       this.saveTask({ ...task, status: "waiting", result: `Waiting for the user: ${stop.question}` });
@@ -663,16 +688,22 @@ export class Conversation {
       if (this.state.questions.length === 1) this.askNext();
       return;
     }
-    if (stop?.kind === "block" || (!stop && task.kind !== "review" && !text)) {
-      const reason = stop?.kind === "block" ? stop.reason : "Stopped without finishing.";
+    if (task.kind === "review" && stop?.kind !== "review" && stop?.kind !== "block" && task.attempts < 2) {
+      this.saveTask({ ...task, status: "todo" }); // the reviewer did not give a verdict: ask again
+      return;
+    }
+    if (stop?.kind === "block" || (!stop && (exhausted || !text || task.kind === "review"))) {
+      const reason = stop?.kind === "block" ? stop.reason : task.kind === "review" ? "The reviewer did not give a verdict." : exhausted ? "Ran out of steps before finishing." : "Stopped without finishing.";
       this.saveTask({ ...task, status: "blocked", result: reason });
+      const work = task.kind === "review" ? this.tasks.find((x) => x.key === task.depends_on[0]) : undefined;
+      if (work?.status === "review") this.saveTask({ ...work, status: "blocked", result: `${work.result}\n\nNot reviewed: ${reason}` });
       this.post({ from: agent.id, to: lead.id, type: "status_update", content: `Blocked on ${task.key}: ${reason}`, meta: { task_id: task.key } });
       return;
     }
     if (task.kind === "review") {
       const work = this.tasks.find((x) => x.key === task.depends_on[0]);
-      const verdict = stop?.kind === "review" ? stop.verdict : "approve";
-      const comments = stop?.kind === "review" ? stop.comments : text;
+      if (stop?.kind !== "review") return;
+      const { verdict, comments } = stop;
       this.saveTask({ ...task, status: "done", result: `${verdict === "approve" ? "Approved" : "Changes requested"}: ${comments}` });
       if (!work) return;
       const rounds = this.state.revisions[work.id] ?? 0;

@@ -20,6 +20,13 @@ test.each([
   ["rm -rf .", "deny"], ["git reset --hard", "deny"], ["git clean -fd", "deny"], ["git push --force", "deny"], ["git checkout -- .", "deny"],
   ["sudo ls", "deny"], ["bash -c ls", "deny"], ["cat /etc/passwd", "deny"], ["ls ../..", "deny"], ["cat ~/.ssh/id_rsa", "deny"], ["find . -delete", "deny"],
   ["git -c core.hooksPath=x status", "deny"], ["docker system prune", "deny"],
+  // runners and wrappers are judged by the command they run
+  ["uv run rm -rf .", "deny"], ["poetry run rm -rf .", "deny"], ["bundle exec rm -rf .", "deny"], ["timeout 5 rm -rf .", "deny"], ["nice rm -rf .", "deny"],
+  ["uv run pytest -q", "low"], ["timeout 60 npm test", "low"], ["nice -n 10 npm test", "low"], ["pnpm dlx create-x", "medium"],
+  // inline code and scriptable editors
+  ["node -pe 1", "medium"], ["python3 -Ic 1", "medium"], ["deno eval 1", "medium"], ["sed -n e x", "medium"], ["awk 1 a", "medium"],
+  // paths glued to flags, sibling folders, secrets
+  ["cat ../proj-secrets/a", "deny"], ["gcc -o../x a.c", "deny"], ["cat .env", "high"], ["cat .env.example", "low"], ["ls .GIT", "deny"],
 ])("%s is %s", (cmd, expected) => expect(risk(cmd)).toBe(expected));
 
 test("paths stay inside the project and out of Git and Octopus internals", () => {
@@ -28,8 +35,12 @@ test("paths stay inside the project and out of Git and Octopus internals", () =>
   expect(fs.rel(".octopus/work/notes.md")).toBe(".octopus/work/notes.md");
   for (const bad of ["../x", "/etc/passwd", "C:\\x", ".git/config", ".octopus/octopus.db"]) expect(() => fs.rel(bad)).toThrow();
   expect(() => fs.rel(".octopus/work/a", "user")).toThrow();
+  expect(() => fs.rel(".GIT/hooks/pre-commit")).toThrow();
+  expect(() => fs.rel(".Octopus/work/x")).toThrow();
   symlinkSync("/", path.join(root, "escape"));
   expect(() => fs.abs("escape/etc/passwd")).toThrow(/outside/);
+  symlinkSync(path.join(path.dirname(root), "not-there-yet"), path.join(root, "dangling"));
+  expect(() => fs.abs("dangling")).toThrow(/outside/);
 });
 
 test("a database from Octopus 1.x is kept aside instead of breaking the project", async () => {

@@ -4,7 +4,7 @@
  */
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
-import { ApprovalInSchema, AttachmentSchema, type RunClientMessage, type RunEventEnvelope } from "@octopus/shared";
+import { ApprovalInSchema, AttachmentSchema, RUN_ACTIONS, type RunClientMessage, type RunEventEnvelope } from "@octopus/shared";
 import type { Registry } from "../db/registry";
 import { replay, subscribe } from "../engine/bus";
 import { ChatSession } from "../engine/chat";
@@ -56,7 +56,10 @@ export function wsRoutes(app: FastifyInstance, reg: Registry) {
             conv.submit(m.content.slice(0, 100_000), attachments.success ? attachments.data : [], m.to_agent_id ?? null);
             return;
           }
-          case "control": conv.control(m.action); return;
+          case "control":
+            if (!RUN_ACTIONS.includes(m.action)) throw new UserError("Unknown action");
+            conv.control(m.action);
+            return;
           case "approve": case "reject": {
             const a = ApprovalInSchema.parse({ ...m, approved: m.type === "approve" });
             conv.resolveApproval(a.approval_id, a.approved, a.scope ?? "once", a.reason);

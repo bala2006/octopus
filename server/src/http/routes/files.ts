@@ -1,7 +1,7 @@
 /** Project files as the team sees them, downloads, and the sandboxed preview of HTML apps. */
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { FileNode } from "@octopus/shared";
 import type { Registry } from "../../db/registry";
 import { notFound, UserError } from "../../lib/util";
@@ -56,7 +56,7 @@ export function fileRoutes(route: RouteFn, app: FastifyInstance, reg: Registry) 
     return zip(files);
   });
   // Previews run in a CSP sandbox with an opaque origin: the page can run its scripts but cannot reach the Octopus API.
-  app.get(`${P}/preview/*`, async (req, reply) => {
+  const preview = async (req: FastifyRequest, reply: FastifyReply) => {
     const params = req.params as Record<string, string>;
     const p = project(reg, params.workspace_id!);
     let rel = p.fs.rel(decodeURIComponent(params["*"] ?? ""), "user");
@@ -65,5 +65,8 @@ export function fileRoutes(route: RouteFn, app: FastifyInstance, reg: Registry) 
     const abs = p.fs.abs(rel, "user");
     if (!existsSync(abs) || !statSync(abs).isFile()) throw notFound(rel);
     return sendFile(reply, abs, { "content-security-policy": "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https:", "cache-control": "no-store" });
-  });
+  };
+  app.get(`${P}/preview/*`, preview);
+  // a conversation's preview shows the project as it is now (its files live in the project folder)
+  app.get(`${P}/runs/:run_id/preview/*`, preview);
 }

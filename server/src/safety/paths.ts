@@ -3,7 +3,7 @@
  * absolute paths, `..`, symlinks that leave the folder, and Octopus/Git internals. Listing skips dependency and build
  * folders so agents see the project, not its caches.
  */
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { UserError } from "../lib/util";
 
@@ -32,9 +32,10 @@ export class ProjectFs {
     if (path.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) throw new UserError(`Use a path relative to the project, not ${raw}`);
     const norm = path.posix.normalize(raw || ".").replace(/^\.\//, "").replace(/\/$/, "");
     if (norm === ".." || norm.startsWith("../")) throw new UserError(`${raw} is outside the project`);
-    const top = norm.split("/")[0];
+    const top = norm.split("/")[0]!.toLowerCase();
     if (top === ".git") throw new UserError("The .git folder is managed by Git; use Git commands instead");
     if (top === ".octopus" && !(actor === "agent" && (norm === WORK_DIR || norm.startsWith(`${WORK_DIR}/`)))) {
+      // the exact spelling matters: on case-insensitive disks ".Octopus/work" would still be the private folder
       throw new UserError(actor === "agent" ? `.octopus is private; use ${WORK_DIR}/ for working notes` : ".octopus is managed by Octopus");
     }
     return norm === "." ? "" : norm;
@@ -44,10 +45,19 @@ export class ProjectFs {
   abs(input: string, actor: Actor = "agent"): string {
     const rel = this.rel(input, actor);
     const full = path.join(this.root, rel);
-    let probe = full;
-    while (!existsSync(probe) && probe !== this.root) probe = path.dirname(probe);
-    const real = realpathSync(probe);
-    if (real !== this.root && !real.startsWith(this.root + path.sep)) throw new UserError(`${input} leads outside the project`);
+    const inside = (p: string) => p === this.root || p.startsWith(this.root + path.sep);
+    // Check every symlink on the way, including dangling ones (writing through them would create the target).
+    let cur = this.root;
+    for (const part of rel ? rel.split("/") : []) {
+      cur = path.join(cur, part);
+      let st;
+      try { st = lstatSync(cur); } catch { break; }
+      if (st.isSymbolicLink()) {
+        let target: string;
+        try { target = realpathSync(cur); } catch { target = path.resolve(path.dirname(cur), readlinkSync(cur)); }
+        if (!inside(target)) throw new UserError(`${input} leads outside the project`);
+      }
+    }
     return full;
   }
 

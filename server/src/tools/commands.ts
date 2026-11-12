@@ -28,7 +28,7 @@ export const commandTools = [
       if (verdict.risk === "deny") return { text: `Refused: ${verdict.reason}`, ok: false };
       if (verdict.risk !== "low") {
         await ctx.guard({ kind: "run_code", risk: verdict.risk === "high" ? "high" : "medium", summary: `Run \`${a.command}\`: ${verdict.reason}`, preview: a.command,
-          details: { command: a.command, cwd: a.cwd ?? "." }, key: `run:${argv.slice(0, 2).join(" ")}` });
+          details: { command: a.command, cwd: a.cwd ?? "." }, key: `run:${a.cwd ?? "."}:${argv.join(" ")}` });
       }
       ctx.setStatus("running", a.command.slice(0, 80));
       const venv = environmentPath(ctx.fs.root);

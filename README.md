@@ -51,6 +51,10 @@ Agents work in your real folder, so the server enforces the limits, not the mode
 - **Local only.** The server listens on `127.0.0.1`, rejects requests from other sites, and keeps your Azure key
   encrypted on your computer.
 
+One limit to know: when the team runs your project's code (`npm test`, `node script.js`), that program runs with your
+user's permissions. The policy checks which command runs, not what the program does, so use Git (or a worktree from
+the project picker) for work you cannot afford to lose.
+
 ## Quick start
 
 Requirements: **Node.js 22.22+** (24 recommended) and an **Azure OpenAI** deployment (`gpt-6-luna` by default).

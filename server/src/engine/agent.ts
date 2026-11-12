@@ -36,7 +36,8 @@ export interface LoopOptions {
   requireStop: boolean;
 }
 
-export interface LoopResult { stop: Stop | null; text: string; rounds: number }
+/** `exhausted`: the agent used every tool round without finishing. */
+export interface LoopResult { stop: Stop | null; text: string; rounds: number; exhausted?: boolean }
 
 const MAX_CONTEXT_CHARS = 450_000;
 
@@ -113,5 +114,5 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     if (stop) return { stop, text: lastText, rounds: round };
     if (images.length) input.push({ role: "user", content: [{ type: "input_text", text: "Screenshot from your last tool call:" }, ...images.slice(-2).map((url) => ({ type: "input_image", image_url: url }))] });
   }
-  return { stop: null, text: lastText || "Stopped after the maximum number of tool rounds.", rounds: o.maxRounds };
+  return { stop: null, text: lastText, rounds: o.maxRounds, exhausted: true };
 }

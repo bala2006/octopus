@@ -31,7 +31,10 @@ export async function buildServer(reg: Registry, opts: { logger?: boolean } = {}
   app.addHook("onRequest", async (req, reply) => {
     if (!LOCAL_HOST.test(req.headers.host ?? "")) return reply.code(421).send({ detail: "Octopus only answers requests addressed to 127.0.0.1 or localhost" });
     const origin = req.headers.origin;
-    if (origin && origin !== "null") {
+    // Sandboxed pages (including project previews) send "Origin: null": they may load files, never change anything.
+    const changes = req.method !== "GET" && req.method !== "HEAD" || !!req.headers.upgrade;
+    if (origin === "null") { if (changes) return reply.code(403).send({ detail: "Requests from sandboxed pages are not allowed" }); }
+    else if (origin) {
       try { if (!LOCAL_HOST.test(new URL(origin).host)) return reply.code(403).send({ detail: "Cross-site requests are not allowed" }); } catch { return reply.code(403).send({ detail: "Bad origin" }); }
     }
   });

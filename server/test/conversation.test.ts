@@ -118,7 +118,7 @@ test("review requests changes, the author revises, and the project's tests run",
       const revising = brief.includes("Review feedback to address");
       if (n === 0) return revising ? { calls: [{ name: "read_file", args: { path: "index.html" } }] } : { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] };
       if (revising && n === 1) return { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1>Acme</h1><p>Plans</p>" } }] };
-      return { calls: [{ name: "complete_task", args: { summary: revising ? "Added plans." : "Built it.", verification: "read it" } }] };
+      return { calls: [{ name: "complete_task", args: { summary: revising ? "Added the plans section." : "Built the landing page.", verification: "read it" } }] };
     }
     return buildScript(b);
   };
@@ -172,4 +172,49 @@ test("the canvas rejects a stale save after a hire", async () => {
   expect(saved.revision).toBe(team.revision + 1);
   const res = await app.inject({ method: "PUT", url: `${W()}/companies/${team.company.id}/canvas`, headers: { host: "127.0.0.1" }, payload: { agents: [], edges: [], revision: team.revision } });
   expect(res.statusCode).toBe(409);
+});
+
+test("a review without a verdict is retried, then blocks the work instead of approving it", async () => {
+  script = (b) => (turnKind(b) === "review" ? { text: "Looks fine I guess." } : buildScript(b));
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  const done = await until(run.id, ["completed", "incomplete"]);
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(done.status).toBe("incomplete");
+  expect(tasks.map((t) => [t.kind, t.status])).toEqual([["build", "blocked"], ["review", "blocked"]]);
+  expect(tasks[1]!.attempts).toBe(2);
+});
+
+test("limits apply per request: after a halt, the next message gets a fresh budget", async () => {
+  script = buildScript;
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page", budget: { max_turns: 4 } });
+  const halted = await until(run.id, ["incomplete", "completed"]);
+  expect(halted.halt_reason).toMatch(/limit of 4 model calls/);
+  script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Finishing the review now." } }] } : buildScript(b));
+  // the follow-up is answered, and the unfinished build resumes within the new request's budget
+  await call("POST", `${W()}/runs/${run.id}/continue`, { content: "Please finish." });
+  await new Promise((r) => setTimeout(r, 200));
+  const next = await until(run.id, ["completed", "incomplete"]);
+  expect(next.status).toBe("completed");
+  expect(readFileSync(path.join(dir, "index.html"), "utf8")).toContain("Acme");
+});
+
+test("resuming a finished conversation leaves it finished", async () => {
+  script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Hi" });
+  await until(run.id, ["completed"]);
+  await call("POST", `${W()}/runs/${run.id}/control/resume`);
+  await new Promise((r) => setTimeout(r, 100));
+  expect((await call<RunDetail>("GET", `${W()}/runs/${run.id}`)).status).toBe("completed");
+});
+
+test("sandboxed pages cannot change anything", async () => {
+  const res = await app.inject({ method: "POST", url: "/api/v1/workspaces", headers: { host: "127.0.0.1", origin: "null" }, payload: { path: dir } });
+  expect(res.statusCode).toBe(403);
+  const other = await app.inject({ method: "POST", url: "/api/v1/workspaces", headers: { host: "127.0.0.1", origin: "https://evil.example" }, payload: { path: dir } });
+  expect(other.statusCode).toBe(403);
+  const get = await app.inject({ method: "GET", url: "/api/health", headers: { host: "127.0.0.1", origin: "null" } });
+  expect(get.statusCode).toBe(200);
 });
