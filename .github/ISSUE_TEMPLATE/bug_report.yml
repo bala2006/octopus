@@ -39,7 +39,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      placeholder: OS, Python/Node versions, Octopus commit, real model or OpenCode
+      placeholder: OS, Node version, Octopus commit, Azure deployment name
     validations:
       required: true
   - type: textarea

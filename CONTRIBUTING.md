@@ -1,49 +1,45 @@
 # Contributing to Octopus
 
-Thanks for helping make Octopus more useful and reliable. Contributions of code, tests, documentation, reproducible bug reports, and usability improvements are welcome.
+Thanks for helping make Octopus more useful and reliable. Code, tests, documentation, reproducible bug reports and
+usability improvements are all welcome.
 
 ## Before you start
 
-- Read the [README](README.md) and [architecture](ARCHITECTURE.md).
-- Check existing [issues](https://github.com/bala2006/octopus/issues) and [pull requests](https://github.com/bala2006/octopus/pulls) to avoid duplicate work.
-- For substantial or breaking changes, propose the approach in an issue first so maintainers can discuss scope.
-- Follow our [Code of Conduct](CODE_OF_CONDUCT.md). **Do not report exploitable security issues publicly**; see [SECURITY.md](SECURITY.md).
+Open an issue for larger changes so the direction can be agreed first. For security problems, follow
+[SECURITY.md](SECURITY.md) instead of opening a public issue.
 
-## Development setup
+## Set up
 
-Use **Python 3.11+** and a supported **Node.js** release (Node 24.15+, Node 22.22.2+, or Node 26+).
-
-On macOS/Linux:
+You need **Node.js 22.22+** (24 recommended, see `.nvmrc`). Everything is TypeScript; there is no other runtime.
 
 ```bash
-make setup
-make dev     # hot reload; open http://127.0.0.1:8000
+npm install
+npm run dev     # hot reload; open http://127.0.0.1:8000
 ```
 
-On Windows (PowerShell):
+The repository is three npm workspaces: `shared/` (the contract), `server/` (the engine and API) and `web/` (the app).
+[ARCHITECTURE.md](ARCHITECTURE.md) explains how they fit together.
 
-```powershell
-.\octopus.ps1 setup
-.\octopus.ps1 start   # open http://127.0.0.1:8000
-```
+Tests never need Azure credentials: the server suite runs the real engine against a scripted stand-in for the
+Responses API (`server/test/fakeModel.ts`). Never commit API keys, `.env` files, user data or other secrets.
 
-Tests run without Azure credentials: the backend suite answers from a scripted fake provider. For environment configuration, consult the README. Never commit API keys, .env files, user data, model credentials, or other secrets.
+## Making a change
 
-## Submitting a change
+1. Branch from `main` and keep the change focused.
+2. Change the contract in `shared/` first when an API or event changes; both sides then fail to compile until they agree.
+3. Add or update tests for behaviour you change.
+4. Run the checks CI runs:
 
-1. Fork the project or create a short-lived branch.
-2. Keep your pull request focused. Add or update tests for behavioral changes.
-3. Run the checks relevant to your change. On macOS/Linux:
    ```bash
-   make test-backend
-   make test-frontend
+   npm run typecheck
+   npm test
+   npm run build
    ```
-   On Windows, `.\octopus.ps1 test` runs the supported backend and frontend checks.
-4. Update user-facing docs when functionality, configuration, or behavior changes.
-5. Submit a pull request to `main` using the PR template. Include what changed, why, how you verified it, and any known limitations.
 
-Please keep changes consistent with the existing Python/FastAPI and React/TypeScript architecture. Prefer straightforward, testable implementations; protect project-folder boundaries, permission gates, sensitive data, and agent budgets.
+5. Open a pull request with the template filled in.
 
-## Review and attribution
+## Guidelines
 
-Maintainers may request changes before merging. A submitted PR is not a promise of immediate review or acceptance. By contributing, you agree that your contribution can be distributed under the project's [MIT License](LICENSE) and affirm that you have the rights necessary to submit it. Third-party dependencies and assets retain their own licenses.
+Keep changes consistent with the existing structure and prefer simple, testable code. Protect the project-folder
+boundary, the command policy, approvals, secrets and conversation budgets: changes to `server/src/safety/` need a test
+for every new rule.

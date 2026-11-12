@@ -1,43 +1,20 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-*.egg-info/
-
-# Node
+# Dependencies and builds
 node_modules/
-npm-cache/
 dist/
 coverage/
-playwright-report/
-test-results/
 *.tsbuildinfo
 
-# Env / secrets
+# Env and secrets
 .env
 .env.local
 *.pem
 
-# Octopus local data (per-project data lives in <project>/.octopus/)
+# Octopus data (per-project data lives in <project>/.octopus/)
 .octopus/
-data/
+.octopus-worktrees/
+.playwright-mcp/
 
-# OS / editors
+# OS and editors
 .DS_Store
 .idea/
 .vscode/
-frontend/test-results/
-frontend/playwright-report/
-frontend/openapi.json
-
-# Playwright MCP output
-.playwright-mcp/
-
-.tmp/
-
-# import-linter cache
-.import_linter_cache/

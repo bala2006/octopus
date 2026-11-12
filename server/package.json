@@ -1,0 +1,30 @@
+{
+  "name": "@octopus/server",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Octopus server: projects, the agent company engine, Azure OpenAI, tools and safety.",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning --import tsx src/main.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --watch-path=src --watch-path=../shared/src --import tsx src/main.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest --run"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^10.1.8",
+    "@fastify/static": "^10.1.10",
+    "@fastify/websocket": "^11.3.7",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@octopus/shared": "*",
+    "fastify": "^5.12.8",
+    "tsx": "^4.23.15",
+    "unpdf": "^2.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.2",
+    "typescript": "~5.9.3",
+    "vitest": "^2.1.9"
+  }
+}

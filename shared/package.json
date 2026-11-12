@@ -1,0 +1,14 @@
+{
+  "name": "@octopus/shared",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "The contract between the Octopus server and web app: domain types, request schemas, REST routes and run events.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

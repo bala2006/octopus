@@ -1,0 +1,19 @@
+{
+  "name": "octopus",
+  "private": true,
+  "version": "2.0.0",
+  "description": "Your AI company in one folder: an orchestrator that staffs, plans, builds, reviews and verifies with a team of specialist agents.",
+  "type": "module",
+  "workspaces": ["shared", "server", "web"],
+  "scripts": {
+    "setup": "npm ci",
+    "dev": "node scripts/octopus.mjs dev",
+    "start": "node scripts/octopus.mjs start",
+    "build": "npm run build -w web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  }
+}

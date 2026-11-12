@@ -14,8 +14,7 @@ Closes #
 
 ## Verification
 
-- [ ] Relevant backend tests were run (`make test-backend`), or not applicable.
-- [ ] Relevant frontend checks were run (`make test-frontend`), or not applicable.
+- [ ] `npm run typecheck` and `npm test` pass.
 - [ ] User-facing docs were updated, or not applicable.
 - [ ] No secrets, personal data, or unrelated generated files are included.
 
