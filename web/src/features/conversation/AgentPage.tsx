@@ -19,12 +19,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/overlays";
+import { useChatFocus } from "./useOpenConversation";
 import "./conversation-layout.css";
 
 const CanvasPage = React.lazy(() => import("@/features/canvas/CanvasPage"));
 type ConversationStyle = React.CSSProperties & {
   "--conversation-chat-width": string;
 };
+
+/** The last "open this conversation" request the chat window has shown. */
+let consumedFocus = 0;
 
 export default function AgentPage() {
   const w = useWorkspaceId();
@@ -43,8 +47,14 @@ export default function AgentPage() {
   const split = React.useRef<HTMLDivElement>(null);
   const floatingChat = React.useRef<HTMLDivElement>(null);
   const chat = usePanelSize("floating-conversation-chat", 380, 340, 520);
+  const focus = useChatFocus((s) => s.token);
   const [windowState, setWindowState] =
-    React.useState<FloatingChatState>("minimized");
+    React.useState<FloatingChatState>(() => (focus > consumedFocus ? "expanded" : "minimized"));
+  React.useEffect(() => {
+    if (focus <= consumedFocus) return;
+    consumedFocus = focus;
+    setWindowState((v) => (v === "full" ? v : "expanded"));
+  }, [focus]);
   const [dock, setDock] = React.useState<"left" | "right">("right");
   const changeWindowState = React.useCallback((state: FloatingChatState) => {
     setWindowState(state);

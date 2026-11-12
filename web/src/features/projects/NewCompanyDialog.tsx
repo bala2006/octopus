@@ -122,7 +122,7 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>New company</DialogTitle>
+          <DialogTitle>New team</DialogTitle>
           <DialogDescription>Pick a starting team. Octopus, the team lead, plans each request and hires more specialists when it needs them. Everything stays editable on the canvas.</DialogDescription>
         </DialogHeader>
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
@@ -141,15 +141,15 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
               )}
             </div>
             <div className="flex items-end gap-2">
-              <Field label="Company name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={tpl?.name ?? "My company"} className="w-72" onKeyDown={(e) => e.key === "Enter" && create.mutate()} /></Field>
+              <Field label="Team name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={tpl?.name ?? "My team"} className="w-72" onKeyDown={(e) => e.key === "Enter" && create.mutate()} /></Field>
               <div className="ml-auto flex gap-2">
                 <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-                <Button loading={create.isPending} onClick={() => create.mutate()} data-testid="create-company"><Building2 />Create company</Button>
+                <Button loading={create.isPending} onClick={() => create.mutate()} data-testid="create-company"><Building2 />Create team</Button>
               </div>
             </div>
           </TabsContent>
           <TabsContent value="generate" className="mt-3 space-y-3">
-            <Field label="Describe the company you need" hint="An org designer (your connected Azure model) proposes departments, managers, specialists, prompts, tools and channels.">
+            <Field label="Describe the team you need" hint="An org designer (your connected Azure model) proposes departments, managers, specialists, prompts, tools and channels.">
               <Textarea autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)} className="min-h-[84px]" placeholder={EXAMPLES[0]} data-testid="generate-prompt"
                 onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && prompt.trim().length > 2) generate.mutate(); }} />
             </Field>
@@ -157,7 +157,7 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
             <div className="flex items-center gap-4">
               <Field label={`Max team size: ${maxAgents}`}><Slider className="w-56" min={3} max={30} step={1} value={[maxAgents]} onValueChange={([v]) => setMaxAgents(v)} aria-label="Max team size" /></Field>
               <Button className="ml-auto" onClick={() => generate.mutate()} loading={generate.isPending} disabled={prompt.trim().length < 3} data-testid="generate">
-                {gen ? <RefreshCw /> : <Wand2 />}{gen ? "Regenerate" : "Design company"}
+                {gen ? <RefreshCw /> : <Wand2 />}{gen ? "Regenerate" : "Design team"}
               </Button>
             </div>
             {generate.isPending && <div className="grid grid-cols-3 gap-2">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="skeleton h-20" style={{ animationDelay: `${i * 90}ms` }} />)}</div>}
@@ -171,10 +171,10 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
                 </div>
                 <div className="max-h-[30vh] overflow-y-auto"><OrgPreview departments={gen.departments} /></div>
                 <div className="flex items-end gap-2">
-                  <Field label="Company name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={gen.spec.name} className="w-64" /></Field>
+                  <Field label="Team name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={gen.spec.name} className="w-64" /></Field>
                   <div className="ml-auto flex gap-2">
                     <Button variant="outline" onClick={() => saveGenerated.mutate()} loading={saveGenerated.isPending}><BookmarkPlus />Save as template</Button>
-                    <Button onClick={() => createGenerated.mutate()} loading={createGenerated.isPending} data-testid="create-generated"><Building2 />Create company</Button>
+                    <Button onClick={() => createGenerated.mutate()} loading={createGenerated.isPending} data-testid="create-generated"><Building2 />Create team</Button>
                   </div>
                 </div>
               </div>

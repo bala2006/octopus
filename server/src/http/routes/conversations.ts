@@ -86,9 +86,10 @@ export function conversationRoutes(route: RouteFn, app: FastifyInstance, reg: Re
   app.get(`${W.replace("{workspace_id}", ":workspace_id")}/runs/:run_id/report`, async (req, reply) => {
     const { workspace_id, run_id } = wid(req);
     const { row } = runOf(workspace_id!, run_id!);
-    const md = `# ${row.goal.split("\n")[0]}\n\n${row.report_md || "_No report yet._"}\n`;
+    // Each request already has its own "## <request>" section, so the document title stays generic.
+    const md = `# Team recap\n\n${row.report_md || "_No recap yet._"}\n`;
     reply.type("text/markdown; charset=utf-8");
-    if ((req.query as Record<string, string>).download === "true") reply.header("content-disposition", `attachment; filename="octopus-report-${row.id}.md"`);
+    if ((req.query as Record<string, string>).download === "true") reply.header("content-disposition", `attachment; filename="team-recap-${row.id.slice(0, 8)}.md"`);
     return md;
   });
   app.get(`${W.replace("{workspace_id}", ":workspace_id")}/runs/:run_id/artifacts.zip`, async (req, reply) => {

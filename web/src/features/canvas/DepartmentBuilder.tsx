@@ -84,7 +84,7 @@ export function DepartmentBuilder({ open, onOpenChange }: { open: boolean; onOpe
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" />Add a department</DialogTitle>
-          <DialogDescription>One manager plus a small team. Channels are wired automatically: manager ⇄ members, manager ⇄ the company head, and peer-manager sync.</DialogDescription>
+          <DialogDescription>One manager plus a small team. Channels are wired automatically: manager ⇄ members, manager ⇄ the team lead, and peer-manager sync.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-[1fr_auto] items-end gap-3">

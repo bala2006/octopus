@@ -1,15 +1,14 @@
 import * as React from "react";
 import { useReactFlow } from "@xyflow/react";
-import { ChevronRight, Crown, Moon, Pencil, Plus, Power, Sparkles } from "lucide-react";
+import { ChevronRight, Crown, Moon, Pencil, Power, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DEPT_PALETTE, deptColor, useCanvas, type AgentNode } from "@/stores/canvas";
 import { AgentAvatar } from "@/components/common";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
 import { Popover, PopoverContent, PopoverTrigger, Tip } from "@/components/ui/overlays";
 
-/** Org chart of the company: departments → manager → members, with active/inactive state and quick actions. */
-export function OrgPanel({ onAddDepartment }: { onAddDepartment: () => void }) {
+/** Org chart of the team: departments → manager → members, with active/inactive state and quick actions. */
+export function OrgPanel() {
   const nodes = useCanvas((s) => s.nodes);
   const departments = useCanvas((s) => s.departments);
   const rf = useReactFlow();
@@ -31,11 +30,10 @@ export function OrgPanel({ onAddDepartment }: { onAddDepartment: () => void }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between px-3 py-2 text-[11px] text-muted-foreground">
         <span><span className="font-semibold text-foreground">{active}</span> active · {nodes.length - active} inactive</span>
-        <Button variant="ghost" size="xs" onClick={onAddDepartment} data-testid="add-department"><Plus />Department</Button>
       </div>
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2" role="tree" aria-label="Org chart">
         {groups.map((g) => <DeptGroup key={g.name || "__none"} name={g.name} nodes={g.nodes} color={g.name ? deptColor(g.name, departments) : "#64748b"} onFocus={focus} />)}
-        {!nodes.length && <p className="p-4 text-center text-xs text-muted-foreground">No agents yet. Add a department to start.</p>}
+        {!nodes.length && <p className="p-4 text-center text-xs text-muted-foreground">No agents yet. Add a department from the toolbar, or drag a role from Roles.</p>}
       </div>
     </div>
   );

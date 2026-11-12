@@ -12,24 +12,12 @@ import {
 } from "@/components/ui/overlays";
 import { Input } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
+import { SPACES } from "./spaces";
 
 const destinations = [
-  { name: "Conversation", hint: "Build with your company", to: "agent" },
-  {
-    name: "Workspace",
-    hint: "Edit files and preview your app",
-    to: "workspace",
-  },
-  { name: "Canvas", hint: "Design your agent team", to: "canvas" },
-  { name: "Chat", hint: "Talk to an agent", to: "chat" },
-  { name: "Runs", hint: "Goals, progress, and approvals", to: "runs" },
-  {
-    name: "Artifacts",
-    hint: "Review changes and file history",
-    to: "artifacts",
-  },
-  { name: "Settings", hint: "Models and tools", to: "settings" },
-  { name: "Guide", hint: "Learn Octopus", to: "guide" },
+  ...SPACES.map((s) => ({ name: s.label, hint: s.hint, to: s.to })),
+  { name: "Settings", hint: "Model, tools, roles and this project", to: "settings" },
+  { name: "Guide", hint: "How Octopus works", to: "guide" },
 ];
 
 /** Window event that opens quick open (used by the Edit menu). */
@@ -106,7 +94,8 @@ export function CommandPalette() {
   return (
     <>
       <button
-        aria-label="Search files and pages (Ctrl K)"
+        aria-label="Quick open: files and pages (Ctrl K)"
+        title="Quick open (Ctrl K)"
         onClick={() => setOpen(true)}
         className="topbar-action"
       >

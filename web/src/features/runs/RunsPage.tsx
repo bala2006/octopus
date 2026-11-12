@@ -2,9 +2,9 @@ import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDownUp, FileDown, FolderTree, History, MessageSquarePlus, Play, RotateCw, Search, Square, Trash2 } from "lucide-react";
-import { api, fetchRaw, unwrap } from "@/lib/api";
-import { cn, download, formatTokens, timeAgo, duration, parseUtc } from "@/lib/utils";
+import { AlertTriangle, ArrowDownUp, GitCompare, History, Play, RotateCw, Search, Square, Trash2 } from "lucide-react";
+import { api, unwrap } from "@/lib/api";
+import { cn, formatTokens, timeAgo, duration, parseUtc } from "@/lib/utils";
 import { useMoney } from "@/lib/money";
 import { qk, useCompanyId, useRuns, useWorkspaceId } from "@/hooks/queries";
 import type { RunOut } from "@/types";
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/surfaces";
 import { Badge, Input } from "@/components/ui/primitives";
 import { ConfirmDialog, Tip } from "@/components/ui/overlays";
-import { RunDialog } from "./RunDialog";
+import { useOpenConversation } from "@/features/conversation/useOpenConversation";
 import { TERMINAL } from "./runState";
 import { filterRuns, groupByDay, LIVE_STATES, outcomeFacts, outcomeOf, type RunFilter, type RunSort } from "./runsList";
 
@@ -23,7 +23,7 @@ export default function RunsPage() {
   const w = useWorkspaceId();
   const { companyId } = useCompanyId();
   const { data, isLoading } = useRuns(w, companyId || undefined, true);
-  const [open, setOpen] = React.useState(false);
+  const openConversation = useOpenConversation();
   const [del, setDel] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<RunFilter>("all");
   const [q, setQ] = React.useState("");
@@ -33,7 +33,7 @@ export default function RunsPage() {
   const refresh = () => qc.invalidateQueries({ queryKey: qk.runs(w) });
   const remove = useMutation({
     mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/w/{workspace_id}/runs/{run_id}", { params: { path: { workspace_id: w, run_id: id } } })),
-    onSuccess: () => { refresh(); toast.success("Run deleted"); },
+    onSuccess: () => { refresh(); toast.success("Conversation deleted"); },
   });
   const stop = useMutation({
     mutationFn: (id: string) => unwrap(api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/control/{action}", { params: { path: { workspace_id: w, run_id: id, action: "stop" } } })),
@@ -46,22 +46,16 @@ export default function RunsPage() {
     onSuccess: (r) => { refresh(); nav(`/w/${w}/runs/${r.id}`); },
     onError: (e: Error) => toast.error(e.message),
   });
-  const report = async (r: RunOut) => {
-    try {
-      const res = await fetchRaw(`/api/v1/w/${w}/runs/${r.id}/report?download=true`);
-      download(`run-report-${r.id.slice(0, 8)}.md`, await res.text(), "text/markdown");
-    } catch (e) { toast.error((e as Error).message); }
-  };
   const shown = React.useMemo(() => filterRuns(data ?? [], filter, q, sort), [data, filter, q, sort]);
   const groups = React.useMemo(() => groupByDay(shown), [shown]);
   const counts = React.useMemo(() => Object.fromEntries(FILTERS.map(([f]) => [f, filterRuns(data ?? [], f, "", "newest").length])), [data]);
 
   return (
     <div className="content-page flex h-full min-h-0 flex-col">
-      <PageHeader title="Conversation history" description="Every conversation with your team: open one to continue it, watch its live view, download its report or delete it." actions={<Button onClick={() => setOpen(true)} disabled={!companyId}><Play />New conversation</Button>} />
+      <PageHeader title="History" description="Every conversation in this project, with what it cost and how it ended. Open one to pick it up where you left off." />
       {!!data?.length && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div role="radiogroup" aria-label="Filter team activity" className="flex items-center gap-1">
+          <div role="radiogroup" aria-label="Filter conversations" className="flex items-center gap-1">
             {FILTERS.map(([f, label]) => (
               <button key={f} role="radio" aria-checked={filter === f} onClick={() => setFilter(f)}
                 className={cn("rounded-full border px-2.5 py-1 text-xs transition", filter === f ? "border-primary/50 bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-accent")}>
@@ -80,7 +74,7 @@ export default function RunsPage() {
       )}
       <div className="ui-surface min-h-0 overflow-y-auto" data-testid="runs-list">
         {isLoading ? <LoadingRows rows={5} /> : !data?.length ? (
-          <EmptyState icon={History} title="No team activity yet" description={w ? "Send a message from Conversation and the orchestrator will coordinate your agents." : "Open a project to see its team activity."} action={w ? <Button onClick={() => setOpen(true)} disabled={!companyId}><Play />Start a conversation</Button> : <Button asChild><Link to="/">Open a project</Link></Button>} />
+          <EmptyState icon={History} title="No conversations yet" description="Send your first request in Conversation. The team lead plans the work and brings in the right agents." action={<Button onClick={() => openConversation(w, null, companyId)}><Play />Start a conversation</Button>} />
         ) : !shown.length ? (
           <p className="p-6 text-center text-sm text-muted-foreground">No conversations match{q ? ` "${q}"` : ""}.</p>
         ) : (
@@ -89,14 +83,13 @@ export default function RunsPage() {
               <h2 className="sticky top-0 z-10 border-b border-border bg-surface/95 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">{g.day}</h2>
               <ul className="divide-y divide-border">
                 {g.runs.map((r) => (
-                  <RunRow key={r.id} r={r} w={w} onDelete={() => setDel(r.id)} onStop={() => stop.mutate(r.id)} onRerun={() => rerun.mutate(r)} onReport={() => void report(r)} />
+                  <RunRow key={r.id} r={r} w={w} onDelete={() => setDel(r.id)} onStop={() => stop.mutate(r.id)} onRerun={() => rerun.mutate(r)} />
                 ))}
               </ul>
             </section>
           ))
         )}
       </div>
-      {companyId && <RunDialog open={open} onOpenChange={setOpen} companyId={companyId} />}
       <ConfirmDialog open={!!del} onOpenChange={(o) => !o && setDel(null)} title="Delete this conversation?" destructive confirmLabel="Delete"
         description="Its messages, events, tasks and artifact history are removed from .octopus. Files in your project are not touched."
         onConfirm={() => del && remove.mutate(del)} />
@@ -104,7 +97,7 @@ export default function RunsPage() {
   );
 }
 
-function RunRow({ r, w, onDelete, onStop, onRerun, onReport }: { r: RunOut; w: string; onDelete: () => void; onStop: () => void; onRerun: () => void; onReport: () => void }) {
+function RunRow({ r, w, onDelete, onStop, onRerun }: { r: RunOut; w: string; onDelete: () => void; onStop: () => void; onRerun: () => void }) {
   const money = useMoney();
   const out = outcomeOf(r);
   const facts = outcomeFacts(r);
@@ -143,15 +136,10 @@ function RunRow({ r, w, onDelete, onStop, onRerun, onReport }: { r: RunOut; w: s
       <div className="shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} model calls · {formatTokens(r.tokens_used)} tok · {money(r.cost_usd)}</div>
       {/* always reachable (keyboard and touch); dimmed until the row is hovered or focused */}
       <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" aria-label="Conversation actions">
-        {live ? (
-          <Tip content="Stop team work"><Button variant="ghost" size="icon-sm" onClick={onStop} aria-label="Stop team work"><Square /></Button></Tip>
-        ) : (
-          <Tip content="Continue this conversation"><Button variant="ghost" size="icon-sm" asChild><Link to={`/w/${w}/runs/${r.id}`} aria-label="Continue conversation"><MessageSquarePlus /></Link></Button></Tip>
-        )}
-        <Tip content="Start a new conversation with the same message and settings"><Button variant="ghost" size="icon-sm" onClick={onRerun} aria-label="Start a new conversation"><RotateCw /></Button></Tip>
-        <Tip content="Files the team changed"><Button variant="ghost" size="icon-sm" asChild><Link to={`/w/${w}/artifacts/${r.id}`} aria-label="Open changed files"><FolderTree /></Link></Button></Tip>
-        <Tip content="Download report"><Button variant="ghost" size="icon-sm" onClick={onReport} aria-label="Download report"><FileDown /></Button></Tip>
-        {TERMINAL.has(r.status) && <Tip content="Delete conversation history"><Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete conversation history"><Trash2 /></Button></Tip>}
+        {live && <Tip content="Stop the team"><Button variant="ghost" size="icon-sm" onClick={onStop} aria-label="Stop the team"><Square /></Button></Tip>}
+        <Tip content="Ask again: a new conversation with the same request and settings"><Button variant="ghost" size="icon-sm" onClick={onRerun} aria-label="Ask again"><RotateCw /></Button></Tip>
+        <Tip content="Review the changes"><Button variant="ghost" size="icon-sm" asChild><Link to={`/w/${w}/artifacts/${r.id}`} aria-label="Review the changes"><GitCompare /></Link></Button></Tip>
+        {TERMINAL.has(r.status) && <Tip content="Delete conversation"><Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label="Delete conversation"><Trash2 /></Button></Tip>}
       </div>
     </li>
   );
