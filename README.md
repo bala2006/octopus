@@ -13,7 +13,7 @@
 </p>
 
 **Octopus** is a one-person company. You open a project folder and say what you want, the way you would in a coding
-chat. Octopus, the orchestrator, works out who the job needs, hires those specialists onto a live org chart, briefs
+chat. Octopus, the team lead, works out who the job needs, hires those specialists onto a live org chart, briefs
 them, and runs the work: designers, engineers, reviewers and QA, in parallel where they can be. Every change is reviewed
 by someone other than its author and checked with your project's own tests before Octopus reports back. Then you reply
 with feedback or the next request, and the same team carries on.
@@ -24,7 +24,7 @@ with feedback or the next request, and the same team carries on.
 2. **Octopus staffs the work.** It reads the request and your code, answers directly when no work is needed, asks
    when a decision is genuinely yours, and otherwise hires from the role library (frontend, backend, design, QA,
    security, data, writing, …) and creates tasks with owners, acceptance criteria and an order. New hires appear on
-   the canvas as they join.
+   the team's org chart as they join.
 3. **The team builds.** Each specialist works on their task with real tools: reading and editing files, running builds
    and tests, using a browser, searching the web, your MCP servers. They consult each other and keep notes that
    carry over to the next request.
@@ -34,8 +34,10 @@ with feedback or the next request, and the same team carries on.
 5. **You get a report** with what changed, where, how it was verified and what is open. Your next message continues
    the conversation.
 
-You can also design the team yourself on the canvas, start from a template (Software Startup, Web App Studio, Full
-Company, …), chat one-on-one with any agent, or work in the built-in code workspace (editor, Git, terminal, preview).
+Each job has one place in the app: **Conversation** (talk to the team lead and watch the team work), **Team** (design
+the org chart yourself or start from a template such as Software Startup or Web App Studio), **Direct chats** (one-on-one
+with a single agent), **Changes** (every file a conversation changed, with diffs and revert), **Code** (editor, Git,
+terminal, preview) and **History** (every conversation with its cost and outcome).
 
 ## Safe in your project
 
@@ -69,7 +71,7 @@ npm run dev
 1. Open **Settings → Model**, paste your Azure endpoint as the portal shows it, add the key (or use Microsoft Entra ID
    with `az login`), and press **Test connection**.
 2. **Open project folder**, then type what you want: *"Build a landing page with a pricing section"*.
-3. Watch the team on the canvas, approve what it asks, and reply when it reports.
+3. Watch the team work next to the chat, approve what it asks, and reply when it reports.
 
 Settings can also come from a `.env` file; see [`.env.example`](.env.example). Use `OCTOPUS_PORT` to change the port.
 
@@ -95,8 +97,8 @@ The code is TypeScript end to end: `shared/` holds the contract, `server/` the e
 | | |
 |---|---|
 | ![Home](web/public/guide/welcome-dark.jpg) | ![Live conversation](web/public/guide/run-dark.jpg) |
-| ![Team canvas](web/public/guide/canvas-dark.jpg) | ![Agent quick config](web/public/guide/quick-config-dark.jpg) |
-| ![Artifacts and diffs](web/public/guide/artifacts-dark.jpg) | ![Settings](web/public/guide/settings-dark.jpg) |
+| ![Team](web/public/guide/canvas-dark.jpg) | ![Agent quick config](web/public/guide/quick-config-dark.jpg) |
+| ![Changes and diffs](web/public/guide/artifacts-dark.jpg) | ![Settings](web/public/guide/settings-dark.jpg) |
 
 ## Community
 

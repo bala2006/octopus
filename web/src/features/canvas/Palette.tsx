@@ -9,7 +9,7 @@ import { OrgPanel } from "./OrgPanel";
 export const DND_MIME = "application/x-octopus-role";
 
 /** Left panel: role palette (drag onto the canvas) and the org chart (departments, active/inactive agents). */
-export function Palette({ onAdd, onAddDepartment }: { onAdd: (roleKey: string) => void; onAddDepartment: () => void }) {
+export function Palette({ onAdd }: { onAdd: (roleKey: string) => void }) {
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface" aria-label="Agents and org">
       <Tabs defaultValue="org" className="flex min-h-0 flex-1 flex-col">
@@ -19,7 +19,7 @@ export function Palette({ onAdd, onAddDepartment }: { onAdd: (roleKey: string) =
             <TabsTrigger value="roles"><UsersRound />Roles</TabsTrigger>
           </TabsList>
         </div>
-        <TabsContent value="org" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><OrgPanel onAddDepartment={onAddDepartment} /></TabsContent>
+        <TabsContent value="org" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><OrgPanel /></TabsContent>
         <TabsContent value="roles" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><RolePalette onAdd={onAdd} /></TabsContent>
       </Tabs>
     </aside>

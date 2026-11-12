@@ -6,11 +6,11 @@ import Editor, { DiffEditor } from "@monaco-editor/react";
 import { toast } from "sonner";
 import {
   ChevronRight, Download, Eye, FileCode2, FilePlus2, FilePen, FolderClosed, FolderOpen, GitCompare, History, Loader2, RotateCcw, Search,
-  ExternalLink, Code2, FolderTree, Bot, NotebookPen,
+  ExternalLink, Code2, Bot, NotebookPen,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
 import { cn, download, languageFor, timeAgo } from "@/lib/utils";
-import { qk, useArtifacts, useCompanyId, useProjectTree, useRun, useRuns, useWorkspaceId } from "@/hooks/queries";
+import { qk, useArtifacts, useCompanyId, useRun, useRuns, useWorkspaceId } from "@/hooks/queries";
 import { Markdown } from "@/components/Markdown";
 import { splitWork } from "./files";
 import { useApp } from "@/stores/app";
@@ -20,7 +20,6 @@ import { Button } from "@/components/ui/button";
 import { Badge, Input } from "@/components/ui/primitives";
 import { ConfirmDialog, Select, Tabs, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 
-type Source = "run" | "project";
 interface TreeNode { name: string; path: string; children: Map<string, TreeNode>; file?: { path: string; badge?: "created" | "modified" | "deleted"; versions?: number; area?: "project" | "work"; generated?: boolean } }
 
 function buildTree(files: TreeNode["file"][]): TreeNode {
@@ -55,11 +54,9 @@ export default function ArtifactsPage() {
   const nav = useNavigate();
   const { companyId } = useCompanyId();
   const runs = useRuns(w, companyId || undefined);
-  const [source, setSource] = React.useState<Source>(runId ? "run" : "run");
   const selectedRun = runId ?? runs.data?.[0]?.id ?? "";
   const run = useRun(w, selectedRun);
-  const arts = useArtifacts(w, source === "run" ? selectedRun : "");
-  const project = useProjectTree(w, source === "project");
+  const arts = useArtifacts(w, selectedRun);
   const [selected, setSelected] = React.useState<string | null>(null);
   const [version, setVersion] = React.useState<number | null>(null);
   const [mode, setMode] = React.useState<"view" | "diff" | "preview">("view");
@@ -73,35 +70,33 @@ export default function ArtifactsPage() {
     return m;
   }, [arts.data]);
   const files = React.useMemo(() => {
-    const list = source === "run"
-      ? [...byPath.entries()].map(([path, vs]) => ({ path, versions: vs.length, badge: vs[vs.length - 1].deleted ? ("deleted" as const) : undefined }))
-      : (project.data?.files ?? []).map((f) => ({ path: f.path, area: f.area, generated: f.generated, badge: byPath.has(f.path) ? ("modified" as const) : undefined }));
+    const list = [...byPath.entries()].map(([path, vs]) => ({ path, versions: vs.length, badge: vs[vs.length - 1].deleted ? ("deleted" as const) : undefined }));
     return list.filter((f) => f.path.toLowerCase().includes(q.toLowerCase()));
-  }, [source, byPath, project.data, q]);
-  // Project files: the deliverables (the project folder) and, separately, the agents' working documents (.octopus/work)
-  const [projectFiles, workFiles] = React.useMemo(() => splitWork(files, source === "project"), [files, source]);
+  }, [byPath, q]);
+  // The deliverables (the project folder) and, separately, the agents' working documents (.octopus/work)
+  const [projectFiles, workFiles] = React.useMemo(() => splitWork(files, true), [files]);
   const tree = React.useMemo(() => buildTree(projectFiles), [projectFiles]);
   const workTree = React.useMemo(() => buildTree(workFiles).children.get(".octopus")?.children.get("work"), [workFiles]);
 
-  React.useEffect(() => { setSelected(null); setVersion(null); }, [selectedRun, source]);
+  React.useEffect(() => { setSelected(null); setVersion(null); }, [selectedRun]);
   React.useEffect(() => { if (!selected && files.length) setSelected(files.find((f) => f.path.endsWith("README.md"))?.path ?? files[0].path); }, [files, selected]);
 
   const versions = selected ? byPath.get(selected) ?? [] : [];
   const latest = versions[versions.length - 1];
   const shownVersion = version ?? latest?.version ?? null;
-  const deleted = source === "run" && versions.find((item) => item.version === shownVersion)?.deleted;
+  const deleted = versions.find((item) => item.version === shownVersion)?.deleted;
   React.useEffect(() => { if (deleted && mode === "preview") setMode("diff"); }, [deleted, mode]);
 
   const content = useQuery({
-    queryKey: ["file", w, source, selectedRun, selected, shownVersion], enabled: !!selected,
+    queryKey: ["file", w, selectedRun, selected, shownVersion], enabled: !!selected,
     queryFn: async () => {
-      if (source === "run" && shownVersion !== null) return (await unwrap(api.GET("/api/v1/w/{workspace_id}/runs/{run_id}/artifacts/file", { params: { path: { workspace_id: w, run_id: selectedRun }, query: { path: selected!, version: shownVersion } } }))).content;
+      if (shownVersion !== null) return (await unwrap(api.GET("/api/v1/w/{workspace_id}/runs/{run_id}/artifacts/file", { params: { path: { workspace_id: w, run_id: selectedRun }, query: { path: selected!, version: shownVersion } } }))).content;
       return (await unwrap(api.GET("/api/v1/w/{workspace_id}/files/content", { params: { path: { workspace_id: w }, query: { path: selected! } } }))).content;
     },
   });
   const baseVersion = shownVersion !== null ? shownVersion - 1 : 0;
   const base = useQuery({
-    queryKey: ["file-base", w, selectedRun, selected, baseVersion], enabled: !!selected && mode === "diff" && source === "run",
+    queryKey: ["file-base", w, selectedRun, selected, baseVersion], enabled: !!selected && mode === "diff",
     queryFn: async () => (await unwrap(api.GET("/api/v1/w/{workspace_id}/runs/{run_id}/artifacts/file", { params: { path: { workspace_id: w, run_id: selectedRun }, query: { path: selected!, version: baseVersion } } }))).content,
   });
 
@@ -109,54 +104,40 @@ export default function ArtifactsPage() {
   const [revertTo, setRevertTo] = React.useState<number | null>(null);
   const revert = useMutation({
     mutationFn: (to: number) => unwrap(api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/artifacts/revert", { params: { path: { workspace_id: w, run_id: selectedRun } }, body: { path: selected!, to_version: to } })),
-    onSuccess: (r) => { toast.success(r.status === "deleted" ? `Deleted ${r.path} (it did not exist before the run)` : `Restored ${r.path}`); qc.invalidateQueries({ queryKey: qk.files(w) }); qc.invalidateQueries({ queryKey: ["file"] }); },
+    onSuccess: (r) => { toast.success(r.status === "deleted" ? `Deleted ${r.path} (it did not exist before the conversation)` : `Restored ${r.path}`); qc.invalidateQueries({ queryKey: qk.files(w) }); qc.invalidateQueries({ queryKey: ["file"] }); },
   });
   const zip = async () => {
-    const url = source === "run" ? `/api/v1/w/${w}/runs/${selectedRun}/artifacts.zip` : `/api/v1/w/${w}/files.zip`;
+    const url = `/api/v1/w/${w}/runs/${selectedRun}/artifacts.zip`;
     const t = toast.loading("Preparing ZIP…");
     try {
       const res = await fetchRaw(url);
-      download(source === "run" ? `octopus-run-${selectedRun.slice(0, 8)}.zip` : "project.zip", await res.blob(), "application/zip");
+      download(`octopus-changes-${selectedRun.slice(0, 8)}.zip`, await res.blob(), "application/zip");
       toast.success("Download ready", { id: t });
     } catch (e) { toast.error((e as Error).message, { id: t }); }
   };
   const pick = (p: string) => { setSelected(p); setVersion(null); setMode(previewKind(p) ? mode : mode === "preview" ? "view" : mode); };
   const kind = previewKind(selected);
-  const previewBase = source === "run" ? `/api/v1/w/${w}/runs/${selectedRun}/preview/` : `/api/v1/w/${w}/preview/`;
+  const previewBase = `/api/v1/w/${w}/runs/${selectedRun}/preview/`;
   const previewUrl = selected ? `${previewBase}${selected.split("/").map(encodeURIComponent).join("/")}` : "";
 
   return (
     <div className="artifacts-layout flex h-full min-h-0 flex-col">
       <div className="view-toolbar">
-        <Tabs value={source} onValueChange={(v) => setSource(v as Source)}>
-          <TabsList><TabsTrigger value="run"><History />Run changes</TabsTrigger><TabsTrigger value="project"><FolderTree />Project files</TabsTrigger></TabsList>
-        </Tabs>
-        {source === "run" && (
-          <Select ariaLabel="Run" value={selectedRun} onValueChange={(v) => nav(`/w/${w}/artifacts/${v}`)} className="h-8 w-full max-w-80 text-xs"
-            options={(runs.data ?? []).map((r) => ({ value: r.id, label: `${r.goal.slice(0, 48)}`, hint: `${r.status} · ${timeAgo(r.created_at)}` }))} placeholder="Select a run" />
-        )}
+        <History className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <Select ariaLabel="Conversation" value={selectedRun} onValueChange={(v) => nav(`/w/${w}/artifacts/${v}`)} className="h-8 w-full max-w-96 text-xs"
+          options={(runs.data ?? []).map((r) => ({ value: r.id, label: `${r.goal.slice(0, 56)}`, hint: `${r.status} · ${timeAgo(r.created_at)}` }))} placeholder="Choose a conversation" />
         <div className="ml-auto flex items-center gap-1.5">
-          <Button size="sm" variant="ghost" onClick={() => void zip()} disabled={source === "run" && !selectedRun}><Download />Download ZIP</Button>
+          <Button size="sm" variant="ghost" onClick={() => void zip()} disabled={!selectedRun}><Download />Download changes</Button>
         </div>
       </div>
 
       <div className="artifacts-body flex min-h-0 flex-1">
         <aside className="artifact-sidebar flex w-60 shrink-0 flex-col border-r border-border bg-surface/40">
-          {source === "project" && project.data && (
-            <div className="flex items-start gap-2 border-b border-border px-3 py-2" title={project.data.root}>
-              <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-semibold">{project.data.name}</div>
-                <div className="truncate font-mono text-[10px] text-muted-foreground">{project.data.root}</div>
-              </div>
-              <span className="shrink-0 text-[10px] text-muted-foreground">{projectFiles.length}{project.data.truncated ? "+" : ""} files</span>
-            </div>
-          )}
           <div className="p-2"><div className="relative"><Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter files" className="h-7 pl-7 text-xs" aria-label="Filter files" /></div></div>
           <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2 text-[13px]" role="tree">
-            {(arts.isLoading || project.isLoading) && <div className="space-y-1.5 p-2">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-5" />)}</div>}
-            {!projectFiles.length && !arts.isLoading && !project.isLoading && <p className="p-4 text-center text-xs text-muted-foreground">{source === "run" ? "This run didn't write any files." : "This folder has no files yet (.git and dependency folders are hidden)."}</p>}
+            {arts.isLoading && <div className="space-y-1.5 p-2">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-5" />)}</div>}
+            {!projectFiles.length && !arts.isLoading && <p className="p-4 text-center text-xs text-muted-foreground">{!runs.data?.length ? "Changes appear here after your first conversation." : workFiles.length ? "No project files changed. The agents only wrote working docs, listed below." : "This conversation didn't change any files."}</p>}
             <TreeView node={tree} depth={0} selected={selected} onSelect={pick} />
             {workTree && (
               <div className="mt-3 border-t border-border pt-2" role="group" aria-label="Agents' working documents">
@@ -179,13 +160,13 @@ export default function ArtifactsPage() {
                 <span className="truncate font-mono text-xs">{selected}</span>
                 <Button size="sm" variant="ghost" disabled={latest?.deleted} onClick={() => nav(`/w/${w}/workspace?file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
                 {deleted && <Badge variant="outline">Deleted</Badge>}
-                {source === "run" && shownVersion !== null && <Badge variant="outline">v{shownVersion}{latest && shownVersion !== latest.version ? ` of ${latest.version}` : ""}</Badge>}
+                {shownVersion !== null && <Badge variant="outline">v{shownVersion}{latest && shownVersion !== latest.version ? ` of ${latest.version}` : ""}</Badge>}
                 <div className="ml-auto flex items-center gap-1">
                   <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
                     <TabsList>
                       <TabsTrigger value="view"><Code2 />Code</TabsTrigger>
-                      <TabsTrigger value="diff" disabled={source !== "run" || shownVersion === null}><GitCompare />Diff</TabsTrigger>
-                      <TabsTrigger value="preview" disabled={!!deleted || !kind || (source === "run" && !selectedRun)}><Eye />Preview</TabsTrigger>
+                      <TabsTrigger value="diff" disabled={shownVersion === null}><GitCompare />Diff</TabsTrigger>
+                      <TabsTrigger value="preview" disabled={!!deleted || !kind || !selectedRun}><Eye />Preview</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
@@ -227,7 +208,7 @@ export default function ArtifactsPage() {
           )}
         </section>
 
-        {source === "run" && selected && versions.length > 0 && (
+        {selected && versions.length > 0 && (
           <aside className="w-72 shrink-0 overflow-y-auto border-l border-border bg-surface" aria-label="Version history">
             <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-xs font-semibold"><History className="h-3.5 w-3.5" />Version history</div>
             <ol className="relative space-y-1 p-2">
@@ -253,13 +234,13 @@ export default function ArtifactsPage() {
             <div className="space-y-1.5 border-t border-border p-3">
               <div className="text-[11px] font-medium text-muted-foreground">Restore in project</div>
               {shownVersion !== null && shownVersion !== latest?.version && <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(shownVersion)}><RotateCcw />Restore v{shownVersion}</Button>}
-              <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(0)}><RotateCcw />Revert to before this run</Button>
+              <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(0)}><RotateCcw />Revert to before this conversation</Button>
             </div>
           </aside>
         )}
       </div>
       <ConfirmDialog open={revertTo !== null} onOpenChange={(o) => !o && setRevertTo(null)} title={revertTo === 0 ? `Revert ${selected}?` : `Restore v${revertTo}?`} destructive confirmLabel="Restore"
-        description={revertTo === 0 ? "The file is restored to its content before the run (or deleted if the run created it)." : "The project file is overwritten with this version."}
+        description={revertTo === 0 ? "The file is restored to its content before the conversation (or deleted if the conversation created it)." : "The project file is overwritten with this version."}
         onConfirm={() => revertTo !== null && revert.mutate(revertTo)} />
     </div>
   );

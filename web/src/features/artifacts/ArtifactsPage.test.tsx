@@ -23,7 +23,6 @@ vi.mock("@/hooks/queries", () => ({
   useCompanyId: () => ({ companyId: "company" }),
   useRuns: () => ({ data: [{ id: "run", goal: "Remove old file", status: "completed", created_at: "2026-01-01" }] }),
   useRun: () => ({ data: { snapshot: { agents: [] } } }),
-  useProjectTree: () => ({ data: { files: [] } }),
   useArtifacts: () => ({ data: [
     { id: "v1", path: "old.md", version: 1, size: 14, created_at: "2026-01-01", deleted: false },
     { id: "v2", path: "old.md", version: 2, size: 0, created_at: "2026-01-02", deleted: true },

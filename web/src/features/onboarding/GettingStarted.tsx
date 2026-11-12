@@ -32,6 +32,7 @@ export function GettingStarted({ onRun }: { onRun?: () => void }) {
   ];
   const done = steps.filter((s) => s.done).length;
   const next = steps.findIndex((s) => !s.done && !s.optional);
+  if (done === steps.length) return null; // everything is set up: the checklist has nothing left to say
   const expanded = open ?? !companies.data?.length; // start collapsed once a team exists, so the canvas stays clear
 
   return (
@@ -70,7 +71,6 @@ export function GettingStarted({ onRun }: { onRun?: () => void }) {
           </ol>
           <div className="flex items-center justify-between border-t border-border px-3.5 py-2 text-xs">
             <Link to={`/w/${w}/guide`} className="flex items-center gap-1 text-muted-foreground hover:text-foreground"><BookOpen className="h-3.5 w-3.5" />Read the guide</Link>
-            {done === steps.length && <button onClick={() => setOnboarded(true)} className="font-medium text-primary hover:underline">All set, hide</button>}
           </div>
         </>
       )}

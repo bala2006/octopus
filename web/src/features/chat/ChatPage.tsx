@@ -4,14 +4,13 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Building2, Check, ChevronDown, Copy, Download, FileJson, Hash, MessageSquare, MoreHorizontal, Paperclip, Pencil, RefreshCw, Square, Trash2, Wrench,
-  Play, Radio, ArrowUp,
+  Check, ChevronDown, Copy, Download, FileJson, MessageSquare, MessagesSquare, MoreHorizontal, Paperclip, Pencil, RefreshCw, Square, Trash2, Wrench,
+  ArrowUp,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
 import { clockTime, cn, download, formatTokens, timeAgo } from "@/lib/utils";
 import { useMoney } from "@/lib/money";
-import { qk, useCanvas as useCanvasQuery, useCompanyId, useRuns, useSessionMessages, useSessions, useWorkspaceId } from "@/hooks/queries";
-import { useApp } from "@/stores/app";
+import { qk, useCanvas as useCanvasQuery, useCompanyId, useSessionMessages, useSessions, useWorkspaceId } from "@/hooks/queries";
 import type { AgentOut, MessageOut, SessionOut } from "@/types";
 import { AgentAvatar, ConnectionDot, EmptyState, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
@@ -20,14 +19,8 @@ import { PromptComposer } from "@/components/ui/surfaces";
 import { Badge, Input, Textarea } from "@/components/ui/primitives";
 import {
   ConfirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
-  Select, Tip,
+  Tip,
 } from "@/components/ui/overlays";
-import { RunFeed, type FeedFilter } from "@/features/runs/RunFeed";
-import { RunDialog } from "@/features/runs/RunDialog";
-import { QuestionCard } from "@/features/runs/QuestionCard";
-import { ApprovalCard } from "@/features/runs/ApprovalCard";
-import { useRunStream } from "@/features/runs/useRunStream";
-import { TERMINAL } from "@/features/runs/runState";
 import { AttachmentChips, useAttachments } from "./attachments";
 import { useDirectChat, type StreamingMsg } from "./useDirectChat";
 
@@ -43,8 +36,8 @@ export default function ChatPage() {
   const agents = React.useMemo(() => Object.fromEntries((canvas.data?.agents ?? []).map((a) => [a.id, a])), [canvas.data]);
 
   const createSession = useMutation({
-    mutationFn: (body: { mode: "direct" | "company"; agent_id?: string; title?: string }) =>
-      unwrap(api.POST("/api/v1/w/{workspace_id}/sessions", { params: { path: { workspace_id: w } }, body: { company_id: companyId, title: body.title ?? "New chat", mode: body.mode, agent_id: body.agent_id } })),
+    mutationFn: (body: { agent_id: string; title: string }) =>
+      unwrap(api.POST("/api/v1/w/{workspace_id}/sessions", { params: { path: { workspace_id: w } }, body: { company_id: companyId, title: body.title, mode: "direct", agent_id: body.agent_id } })),
     onSuccess: (s) => { qc.invalidateQueries({ queryKey: qk.sessions(w, companyId) }); nav(`/w/${w}/chat/${s.id}`); },
     onError: (e: Error) => toast.error("Could not open chat", { description: e.message.includes("agent") ? "Save the canvas first (agents autosave within a second)." : e.message }),
   });
@@ -52,7 +45,7 @@ export default function ChatPage() {
   const openAgent = React.useCallback((agentId: string) => {
     const existing = sessions.data?.find((s) => s.mode === "direct" && s.agent_id === agentId);
     if (existing) nav(`/w/${w}/chat/${existing.id}`);
-    else createSession.mutate({ mode: "direct", agent_id: agentId, title: `Chat with ${agents[agentId]?.name ?? "agent"}` });
+    else createSession.mutate({ agent_id: agentId, title: `Chat with ${agents[agentId]?.name ?? "agent"}` });
   }, [sessions.data, agents, nav, w]); // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
@@ -60,24 +53,23 @@ export default function ChatPage() {
     if (a && sessions.data && agents[a]) { setParams({}, { replace: true }); openAgent(a); }
   }, [params, sessions.data, agents, openAgent, setParams]);
 
-  const session = sessions.data?.find((s) => s.id === sessionId);
-  if (!companyId) return <EmptyState icon={MessageSquare} title="Create a company first" description="Chats belong to a company of agents." />;
+  // Team conversations live in the Conversation space; this space is for one-on-one chats only.
+  const direct = (sessions.data ?? []).filter((s) => s.mode === "direct");
+  const session = direct.find((s) => s.id === sessionId);
+  if (!companyId) return <EmptyState icon={MessageSquare} title="Create a team first" description="Direct chats are with the agents on your team." />;
 
   return (
     <div className="chat-layout flex h-full min-h-0">
-      <ChatSidebar agents={canvas.data?.agents ?? []} sessions={sessions.data ?? []} activeId={sessionId} onAgent={openAgent}
-        onCompany={() => { const s = sessions.data?.find((x) => x.mode === "company"); if (s) nav(`/w/${w}/chat/${s.id}`); else createSession.mutate({ mode: "company", title: "Company channel" }); }} />
+      <ChatSidebar agents={canvas.data?.agents ?? []} sessions={direct} activeId={sessionId} onAgent={openAgent} />
       <div className="chat-main min-h-0 min-w-0 flex-1">
         {!sessionId ? (
-          <EmptyState icon={MessageSquare} title="Talk to your company"
-            description="Pick an agent for a direct conversation, or open the Company Channel to give the whole team a goal."
-            action={<Button onClick={() => createSession.mutate({ mode: "company", title: "Company channel" })}><Building2 />Open Company Channel</Button>} />
+          <EmptyState icon={MessagesSquare} title="Chat with one agent"
+            description="Pick an agent on the left to ask a quick question or try its prompt. It answers alone, with its own tools and memory. To give the whole team work, use Conversation." />
         ) : !session ? (
-          <div className="space-y-2 p-6">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-14" />)}</div>
-        ) : session.mode === "direct" ? (
-          <DirectChat key={session.id} session={session} agent={session.agent_id ? agents[session.agent_id] : undefined} />
+          sessions.isLoading ? <div className="space-y-2 p-6">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-14" />)}</div>
+            : <EmptyState icon={MessagesSquare} title="This chat is not here" description="Team conversations open in Conversation. Pick an agent on the left to chat one-on-one." />
         ) : (
-          <CompanyChat key={session.id} session={session} agents={agents} companyId={companyId} />
+          <DirectChat key={session.id} session={session} agent={session.agent_id ? agents[session.agent_id] : undefined} />
         )}
       </div>
     </div>
@@ -89,8 +81,8 @@ function SidebarHeading({ id, children }: { id: string; children: React.ReactNod
   return <div id={id} className="shrink-0 px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</div>;
 }
 
-function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
-  agents: AgentOut[]; sessions: SessionOut[]; activeId?: string; onAgent: (id: string) => void; onCompany: () => void;
+function ChatSidebar({ agents, sessions, activeId, onAgent }: {
+  agents: AgentOut[]; sessions: SessionOut[]; activeId?: string; onAgent: (id: string) => void;
 }) {
   const w = useWorkspaceId();
   const nav = useNavigate();
@@ -115,13 +107,7 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
   return (
     // Bounded flex column: Agents takes its natural height up to 45% and scrolls beyond that; History gets the rest and
     // scrolls too. (Agents used to be unbounded, so with ~8+ agents History collapsed to zero height and never scrolled.)
-    <aside className="chat-sidebar flex h-full min-h-0 w-56 shrink-0 flex-col border-r border-border bg-surface/40" aria-label="Chats">
-      <div className="chat-company-link shrink-0 p-2">
-        <button onClick={onCompany} className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium transition hover:bg-accent", active?.mode === "company" && "bg-accent")}>
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
-          Company Channel
-        </button>
-      </div>
+    <aside className="chat-sidebar flex h-full min-h-0 w-56 shrink-0 flex-col border-r border-border bg-surface/40" aria-label="Direct chats">
       <SidebarHeading id="chat-agents-heading">Agents</SidebarHeading>
       <div className="chat-agents max-h-[45%] min-h-0 shrink-0 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-agents-heading" data-testid="chat-agents-list">
         {agents.map((a) => (
@@ -132,13 +118,13 @@ function ChatSidebar({ agents, sessions, activeId, onAgent, onCompany }: {
           </button>
         ))}
       </div>
-      <SidebarHeading id="chat-history-heading">History</SidebarHeading>
+      <SidebarHeading id="chat-history-heading">Earlier chats</SidebarHeading>
       <div className="chat-history min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-history-heading" data-testid="chat-history-list">
         {!sessions.length && <p className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet.</p>}
         {sessions.map((s) => (
           <div key={s.id} role="listitem" className={cn("group flex items-center gap-1 rounded-lg pr-1 transition hover:bg-accent/60", s.id === activeId && "bg-accent")}>
             <button onClick={() => nav(`/w/${w}/chat/${s.id}`)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center">{s.mode === "company" ? <Hash className="h-3.5 w-3.5 text-muted-foreground" /> : <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}</span>
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center"><MessageSquare className="h-3.5 w-3.5 text-muted-foreground" /></span>
               <span className="min-w-0 flex-1"><span className="block truncate text-xs">{s.title}</span><span className="text-[10px] text-muted-foreground">{timeAgo(s.created_at)}</span></span>
             </button>
             <DropdownMenu>
@@ -318,72 +304,3 @@ function Composer({ placeholder, busy, onSend, onStop, disabled, extra, images =
     </PromptComposer>
   );
 }
-// ---------------------------------------------------------------- company chat
-function CompanyChat({ session, agents, companyId }: { session: SessionOut; agents: Record<string, AgentOut>; companyId: string }) {
-  const w = useWorkspaceId();
-  const runs = useRuns(w, companyId, true);
-  const sessionRuns = (runs.data ?? []).filter((r) => r.session_id === session.id);
-  const liveRun = sessionRuns.find((r) => !TERMINAL.has(r.status));
-  const shownRun = liveRun ?? sessionRuns[0];
-  const names = React.useMemo(() => Object.fromEntries(Object.values(agents).map((a) => [a.id, a.name])), [agents]);
-  const stream = useRunStream(w, shownRun?.id, names);
-  const filter = useApp((s) => s.chatFilter);
-  const setFilter = useApp((s) => s.setChatFilter);
-  const [goal, setGoal] = React.useState<string | null>(null);
-  const [goalFiles, setGoalFiles] = React.useState<import("@/types").ParsedFileOut[]>([]);
-  const [target, setTarget] = React.useState("all");
-  const nav = useNavigate();
-  const live = !!liveRun && !TERMINAL.has(stream.state.status);
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="view-toolbar">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-steel to-steel text-white"><Hash className="h-4 w-4" /></span>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">Team conversation</div>
-          <div className="truncate text-xs text-muted-foreground">{shownRun ? `${live ? "Your team is working" : "Ready for your next message"}: ${shownRun.goal}` : "Message the team; the orchestrator will bring in the right agents"}</div>
-        </div>
-        <Select ariaLabel="Feed filter" value={filter} onValueChange={(v) => setFilter(v as FeedFilter)} className="h-7 w-[150px] text-xs"
-          options={[{ value: "all", label: "All messages" }, { value: "user", label: "User-facing only" }, { value: "internal", label: "Internal only" }]} />
-        {shownRun && !live && <Tip content="Start a fresh team conversation"><Button size="sm" variant="ghost" onClick={() => setGoal("")}><Play />New conversation</Button></Tip>}
-        {shownRun && <Button size="sm" variant="secondary" onClick={() => nav(`/w/${w}/runs/${shownRun.id}`)}><Radio className={cn(live && "animate-pulse text-primary")} />Team activity</Button>}
-      </div>
-      <div className="min-h-0 flex-1">
-        {shownRun ? <RunFeed state={stream.state} agents={agents} filter={filter} /> : (
-          <EmptyState icon={Building2} title="Start a team conversation" description='Send a message, such as "Help me build a todo app with auth." The orchestrator will coordinate the team.' />
-        )}
-      </div>
-      {live && stream.state.awaiting && (
-        <div className="mx-auto w-full max-w-3xl px-3 pb-2">
-          <QuestionCard key={stream.state.awaiting.question} awaiting={stream.state.awaiting} agent={agents[stream.state.awaiting.agent_id]}
-            onAnswer={(answer) => stream.send({ type: "interject", content: answer, to_agent_id: stream.state.awaiting!.agent_id })} />
-        </div>
-      )}
-      {live && stream.state.pendingApproval && (
-        <div className="mx-auto w-full max-w-3xl px-3 pb-2">
-          <ApprovalCard key={stream.state.pendingApproval.id} approval={stream.state.pendingApproval} agent={agents[stream.state.pendingApproval.agent_id]}
-            onDecide={(ok, scope, reason) => stream.send({ type: ok ? "approve" : "reject", approval_id: stream.state.pendingApproval!.id, scope, reason })} />
-        </div>
-      )}
-      <Composer
-        placeholder={live ? "Message your team while they work…" : shownRun ? "Continue the conversation with your team…" : "Message Octopus to build, fix, or explore…"}
-        images={!shownRun}
-        onSend={(t, files) => {
-          // A follow-up continues the same team conversation and keeps its history and files.
-          if (shownRun) stream.send({ type: "interject", content: t, to_agent_id: target === "all" ? undefined : target });
-          else { setGoalFiles(files); setGoal(t); }
-        }}
-        extra={shownRun ? (
-          <Select ariaLabel="Send to" value={target} onValueChange={setTarget} variant="ghost" className="w-auto max-w-40"
-            options={[{ value: "all", label: live ? "Octopus (team lead)" : "Team lead" }, ...Object.values(agents).map((a) => ({ value: a.id, label: a.name }))]} />
-        ) : (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Play className="h-3 w-3" />starts a team conversation</span>
-        )}
-      />
-      <RunDialog open={goal !== null} onOpenChange={(o) => !o && setGoal(null)} companyId={companyId} sessionId={session.id} initialGoal={goal ?? ""}
-        initialAttachments={goalFiles} onStarted={() => { setGoal(null); setGoalFiles([]); void runs.refetch(); }} />
-    </div>
-  );
-}
-
-
