@@ -117,6 +117,7 @@ export const DropdownMenuItem = React.forwardRef<React.ElementRef<typeof Dropdow
 );
 DropdownMenuItem.displayName = "DropdownMenuItem";
 export const DropdownMenuLabel = ({ className, ...p }: React.ComponentPropsWithoutRef<typeof DropdownPrimitive.Label>) => <DropdownPrimitive.Label className={cn("px-3 pb-2 pt-2.5 text-[11px] font-medium text-muted-foreground", className)} {...p} />;
+export const DropdownMenuShortcut = ({ className, ...p }: React.HTMLAttributes<HTMLSpanElement>) => <span className={cn("ml-auto pl-4 text-[11px] tracking-wide text-muted-foreground", className)} {...p} />;
 export const DropdownMenuSeparator = ({ className, ...p }: React.ComponentPropsWithoutRef<typeof DropdownPrimitive.Separator>) => <DropdownPrimitive.Separator className={cn("-mx-1 my-1 h-px bg-border", className)} {...p} />;
 
 // ---------------- Context menu

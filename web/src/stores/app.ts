@@ -12,6 +12,9 @@ interface AppState {
   onboarded: boolean;
   /** display currency for costs (ISO code); costs are stored in USD and converted with live rates */
   currency: string;
+  /** the name shown on your avatar and Activity page (stays on this device) */
+  profileName: string;
+  setProfileName: (name: string) => void;
   setCurrency: (c: string) => void;
   setOnboarded: (v: boolean) => void;
   setTheme: (t: Theme) => void;
@@ -33,6 +36,8 @@ export const useApp = create<AppState>()(
       chatFilter: "all",
       onboarded: false,
       currency: "USD",
+      profileName: "",
+      setProfileName: (name) => set({ profileName: name.trim().slice(0, 60) }),
       setCurrency: (c) => set({ currency: c.toUpperCase() }),
       setOnboarded: (v) => set({ onboarded: v }),
       setTheme: (t) => { applyTheme(t); set({ theme: t }); },

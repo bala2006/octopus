@@ -446,8 +446,11 @@ export class Conversation {
     return agent;
   }
 
-  /** Who reviews a piece of work: the author's department lead, else a reviewer on the team, else a new tech lead. */
+  /** Who reviews a piece of work: a review channel to the author, their department lead, a reviewer on the team, or a new tech lead. */
   private reviewerFor(author: AgentOut): AgentOut {
+    const byChannel = this.edges.find((e) => e.type === "review" && e.target_agent_id === author.id && e.source_agent_id !== author.id);
+    const assigned = byChannel && this.team.find((a) => a.id === byChannel.source_agent_id);
+    if (assigned) return assigned;
     const lead = this.team.find((a) => a.id === author.reports_to && a.is_manager && a.id !== this.lead.id && a.tools.file_read !== false);
     if (lead && lead.id !== author.id) return lead;
     const reviewer = this.team.find((a) => a.id !== author.id && ["techlead", "architect", "security"].includes(a.behavior.template_key ?? ""));

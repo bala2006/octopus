@@ -170,10 +170,10 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Receives the goal">
-            <label className="flex h-8 items-center gap-2 rounded-md border border-border px-2 text-xs">
-              <Switch checked={!!data.is_entry} onCheckedChange={(v) => update(id, { is_entry: v }, { history: true })} aria-label="Entry agent" />
-              <Flag className="h-3 w-3 shrink-0 text-primary" /><span className="truncate">Entry</span>
+          <Field label="Leads the team">
+            <label className="flex h-8 items-center gap-2 rounded-md border border-border px-2 text-xs" title="The lead plans every request, hires and reports back to you">
+              <Switch checked={!!data.is_entry} onCheckedChange={(v) => update(id, { is_entry: v }, { history: true })} aria-label="Team lead" />
+              <Flag className="h-3 w-3 shrink-0 text-primary" /><span className="truncate">Team lead</span>
             </label>
           </Field>
         </div>

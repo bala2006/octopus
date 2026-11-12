@@ -64,11 +64,11 @@ function activity(reg: Registry, tz: string | undefined): ActivityOut {
   const totalRuns = [...effort.values()].reduce((a, b) => a + b, 0);
   const [topEffort, topCount] = [...effort.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
   return {
-    email: "you@this-computer", days: sorted.map(([date, tokens]) => ({ date, tokens })), lifetime_tokens: sorted.reduce((n, [, t]) => n + t, 0),
+    days: sorted.map(([date, tokens]) => ({ date, tokens })), lifetime_tokens: sorted.reduce((n, [, t]) => n + t, 0),
     peak_tokens: Math.max(0, ...sorted.map(([, t]) => t)), active_days: active.size, current_streak: streak(new Date()), longest_streak: longestStreak,
     longest_task_seconds: Math.round(longest), most_used_reasoning: topEffort, reasoning_percent: totalRuns ? Math.round((topCount / totalRuns) * 100) : 0,
     projects: projects.sort((a, b) => b.tokens - a.tokens), tools: [...tools.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 12),
-    skills_explored: 0, total_skills_used: 0, unavailable_projects: unavailable,
+    unavailable_projects: unavailable,
   };
 }
 

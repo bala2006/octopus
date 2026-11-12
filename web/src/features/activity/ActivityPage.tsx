@@ -1,7 +1,10 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, Check, Folder, LockKeyhole, Pencil, Wrench } from "lucide-react";
+import { ArrowUpRight, Check, Folder, LockKeyhole, Pencil, User, Wrench } from "lucide-react";
+import { useApp } from "@/stores/app";
+import { initials } from "@/lib/utils";
+import { useOpenFolder } from "@/features/projects/useOpenFolder";
 import { api, unwrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
@@ -25,18 +28,16 @@ export default function ActivityPage() {
   const query = useQuery({ queryKey: ["personal-activity", tz], queryFn: () => unwrap(api.GET("/api/v1/activity", { params: { query: { tz } } })), refetchInterval: 30_000 });
   const [view, setView] = React.useState<View>("Daily");
   const [editing, setEditing] = React.useState(false);
-  const [savedName, setSavedName] = React.useState("");
+  const savedName = useApp((st) => st.profileName);
+  const setProfileName = useApp((st) => st.setProfileName);
   const [draft, setDraft] = React.useState("");
+  const folder = useOpenFolder();
   const data = query.data;
-  React.useEffect(() => {
-    if (!data) return;
-    setSavedName(localStorage.getItem(`octopus-profile-name:${data.email}`) ?? "");
-  }, [data?.email]);
   if (query.isPending) return <div className="personal-activity" aria-busy="true"><div className="activity-loading">Loading your activity…</div></div>;
   if (query.isError) return <div className="personal-activity activity-loading" role="alert"><p>Your activity could not be loaded.</p><Button onClick={() => void query.refetch()}>Try again</Button></div>;
   if (!data) return null;
-  const name = savedName || "Your activity";
-  const initials = savedName ? savedName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase() : "YO";
+  const name = savedName ? `${savedName}'s activity` : "Your activity";
+  const avatar = savedName ? initials(savedName) : <User size={34} />;
   const days = calendarDays(data.days, localDate(new Date()));
   const stats = [
     [compact.format(data.lifetime_tokens), "Lifetime tokens", "Recorded tokens across your registered projects"],
@@ -48,23 +49,22 @@ export default function ActivityPage() {
   const saveName = (event: React.FormEvent) => {
     event.preventDefault();
     const value = draft.trim();
-    localStorage.setItem(`octopus-profile-name:${data.email}`, value);
-    setSavedName(value);
+    setProfileName(value);
     setEditing(false);
   };
   return (
     <div className="personal-activity">
       <div className="activity-page-inner">
-        <div className="activity-profile-actions"><span><LockKeyhole size={14} />Private on this device</span><Button variant="ghost" size="sm" onClick={() => { setDraft(savedName); setEditing(!editing); }}><Pencil />Edit profile</Button></div>
+        <div className="activity-profile-actions"><span><LockKeyhole size={14} />Private on this device</span><Button variant="ghost" size="sm" onClick={() => { setDraft(savedName); setEditing(!editing); }}><Pencil />{savedName ? "Edit name" : "Add your name"}</Button></div>
         <header className="activity-profile">
-          <div className="activity-avatar" aria-hidden="true">{initials}</div>
+          <div className="activity-avatar" aria-hidden="true">{avatar}</div>
           {editing ? <form className="activity-name-form" onSubmit={saveName}><label htmlFor="activity-name">Display name</label><div><Input id="activity-name" value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={60} autoFocus placeholder="Your name" /><Button type="submit" size="sm"><Check />Save</Button><Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button></div></form> : <h1>{name}</h1>}
           <p>Your work with Octopus, over time.</p>
         </header>
         <dl className="activity-stats">{stats.map(([value, label, hint]) => <div key={label} title={hint}><dd>{value}</dd><dt>{label}</dt></div>)}</dl>
         {data.unavailable_projects > 0 && <p className="activity-notice" role="status">Totals exclude {data.unavailable_projects} unavailable project{data.unavailable_projects === 1 ? "" : "s"}. Reconnect those folders to include their history.</p>}
-        <section className="activity-section" aria-labelledby="activity-projects"><div className="activity-section-heading"><h2 id="activity-projects">Your projects</h2><Link to="/">Open a project <ArrowUpRight size={14} /></Link></div>
-          {data.projects.length ? <div className="activity-projects">{data.projects.slice(0, 3).map((project) => <Link key={project.id} to={`/w/${project.id}/agent`}><Folder size={22} /><strong>{project.name}</strong><span>{compact.format(project.tokens)} tokens</span><ArrowUpRight className="activity-project-arrow" size={16} /></Link>)}</div> : <div className="activity-project-empty"><Folder size={30} /><h3>A place for your work</h3><p>Your projects and their usage will appear here.</p><Button asChild variant="outline"><Link to="/">Open a project</Link></Button></div>}
+        <section className="activity-section" aria-labelledby="activity-projects"><div className="activity-section-heading"><h2 id="activity-projects">Your projects</h2><button type="button" onClick={folder.openPicker}>Open a project <ArrowUpRight size={14} /></button></div>
+          {data.projects.length ? <div className="activity-projects">{data.projects.slice(0, 6).map((project) => <Link key={project.id} to={`/w/${project.id}/agent`}><Folder size={22} /><strong>{project.name}</strong><span>{compact.format(project.tokens)} tokens</span><ArrowUpRight className="activity-project-arrow" size={16} /></Link>)}</div> : <div className="activity-project-empty"><Folder size={30} /><h3>A place for your work</h3><p>Your projects and their usage will appear here.</p><Button variant="outline" onClick={folder.openPicker}>Open a project</Button></div>}
         </section>
         <section className="activity-section" aria-labelledby="token-activity"><div className="activity-section-heading"><h2 id="token-activity">Token activity</h2><div className="activity-tabs" role="group" aria-label="Token activity view">{(["Daily", "Weekly", "Cumulative"] satisfies View[]).map((tab) => <button key={tab} aria-pressed={view === tab} onClick={() => setView(tab)}>{tab}</button>)}</div></div>
           <TokenChart days={days} view={view} />
@@ -72,7 +72,8 @@ export default function ActivityPage() {
           {!data.lifetime_tokens && <p className="activity-chart-empty">Your first activity starts with a conversation in a project.</p>}
         </section>
         <section className="activity-section" aria-labelledby="top-tools"><h2 id="top-tools">Most used tools</h2>{data.tools.length ? <div className="activity-tools">{data.tools.map((tool) => <div key={tool.name} title={`${tool.name}: ${full.format(tool.count)} calls`}><div className="activity-tool-icon"><Wrench size={23} /></div><strong>{tool.name.replaceAll("_", " ")}</strong><span>{full.format(tool.count)} calls</span></div>)}</div> : <p className="activity-muted">Tools you use with Octopus will appear here.</p>}</section>
-        <section className="activity-section" aria-labelledby="activity-insights"><h2 id="activity-insights">Insights</h2><dl className="activity-insights"><div><dt>Most used reasoning</dt><dd>{data.most_used_reasoning ? `${data.most_used_reasoning} · ${data.reasoning_percent}%` : "No recorded preference"}</dd></div><div><dt>Skills explored</dt><dd>{data.skills_explored}</dd></div><div><dt>Total skills used</dt><dd>{data.total_skills_used}</dd></div><div><dt>Projects connected</dt><dd>{data.projects.length}</dd></div></dl></section>
+        <section className="activity-section" aria-labelledby="activity-insights"><h2 id="activity-insights">Insights</h2><dl className="activity-insights"><div><dt>Most used reasoning</dt><dd>{data.most_used_reasoning ? `${data.most_used_reasoning} · ${data.reasoning_percent}%` : "No recorded preference"}</dd></div><div><dt>Tool calls</dt><dd>{full.format(data.tools.reduce((n, t) => n + t.count, 0))}</dd></div><div><dt>Active days</dt><dd>{data.active_days}</dd></div><div><dt>Projects connected</dt><dd>{data.projects.length}</dd></div></dl></section>
+        {folder.element}
         <p className="activity-footnote">Based on usage history saved in your projects. Deleted history is excluded. Dates use {tz}. Updates every 30 seconds.</p>
       </div>
     </div>

@@ -54,7 +54,7 @@ export function WelcomePage() {
         String(a.last_opened_at ?? ""),
       ),
     );
-  const project = selected === "__no_project__" ? undefined : available.find((p) => p.id === selected) ?? available[0];
+  const project = available.find((p) => p.id === selected) ?? available[0];
   React.useEffect(() => setGitSelection({ newWorktree: false, branch: "" }), [project?.id]);
   const filteredProjects = available.filter((item) => item.name.toLowerCase().includes(projectSearch.trim().toLowerCase()));
   const preferenceKey = project?.id ?? "home";
@@ -65,7 +65,9 @@ export function WelcomePage() {
   const settings = useSettings();
   const caption = APPROVAL_MODES[approvalModeOf(settings.data?.approval_mode)].caption;
   const continuePrompt = async () => {
-    if (!project || !store.homeDraft.trim() || attachments.uploading || creatingWorktree) return;
+    if (!store.homeDraft.trim() || attachments.uploading || creatingWorktree) return;
+    // No project yet: choose a folder; the draft and attachments move into the new project when it opens.
+    if (!project) { folder.openPicker(); return; }
     let targetWorkspaceId = project.id;
     if (gitSelection.newWorktree) {
       if (!gitSelection.branch) {
@@ -145,11 +147,10 @@ export function WelcomePage() {
                 </div>
                 <div className="home-project-menu-footer">
                   <button type="button" onClick={() => { setProjectPickerOpen(false); folder.openPicker(); }}><Plus />New project</button>
-                  <button type="button" onClick={() => { setSelected("__no_project__"); setProjectPickerOpen(false); }}><span>×</span>Don’t work in a project</button>
                 </div>
               </PopoverContent>
             </Popover>
-            <span className="home-computer-context"><Laptop />This computer</span>
+            <span className="home-computer-context" title="Agents work in the folder on this computer"><Laptop />Runs on this computer</span>
             {project && <LocalEnvironmentPicker key={project.id} workspaceId={project.id} value={gitSelection} onChange={setGitSelection} />}
           </div>
           <PromptComposer
@@ -159,7 +160,7 @@ export function WelcomePage() {
                 <span>
                   {project
                   ? caption
-                    : "Choose a project folder to continue. Your draft is saved."}
+                    : "Octopus works inside a project folder. Send to choose one; your message goes with it."}
                 </span>
                 <span className="ml-auto hidden shrink-0 sm:inline">
                   Enter to continue
@@ -188,9 +189,9 @@ export function WelcomePage() {
                   type="submit"
                   size="icon"
                   className="composer-send ml-auto sm:ml-0"
-                  aria-label="Continue in selected project"
-                  title="Continue in selected project"
-                  disabled={!project || !store.homeDraft.trim() || attachments.uploading || creatingWorktree}
+                  aria-label={project ? "Continue in selected project" : "Choose a project folder and continue"}
+                  title={project ? "Continue in selected project" : "Choose a project folder and continue"}
+                  disabled={!store.homeDraft.trim() || attachments.uploading || creatingWorktree}
                   loading={creatingWorktree}
                 >
                   <ArrowUp />

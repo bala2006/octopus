@@ -2,8 +2,6 @@ import * as React from "react";
 import "./navigation.css";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft,
-  ArrowRight,
   Bell,
   BookOpen,
   ChevronDown,
@@ -15,7 +13,6 @@ import {
   MessageSquare,
   Moon,
   PanelLeftClose,
-  PanelLeft,
   PanelLeftOpen,
   CircleHelp,
   Plus,
@@ -23,15 +20,26 @@ import {
   SquarePen,
   Sun,
   X,
+  User,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import {
+  qk,
   useCompanyId,
   useRuns,
   useWorkspaceId,
   useWorkspaces,
 } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
-import { cn } from "@/lib/utils";
+import { cn, initials } from "@/lib/utils";
+import { toast } from "sonner";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, unwrap } from "@/lib/api";
+import { ConfirmDialog, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/overlays";
+import { Input } from "@/components/ui/primitives";
+import type { WorkspaceOut } from "@/types";
+import { AppMenuBar } from "./AppMenuBar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/overlays";
 import { useOpenFolder } from "@/features/projects/useOpenFolder";
@@ -112,6 +120,17 @@ export function DesktopLayout({
     return () => window.removeEventListener("keydown", keydown);
   }, [mobile, sidebar, closeSidebar]);
 
+  const folder = useOpenFolder();
+  const navigate = useNavigate();
+  const { companyId } = useCompanyId();
+  const selectThread = useWorkbenchStore((st) => st.selectThread);
+  const profileName = useApp((st) => st.profileName);
+  const toggleProjects = () => { if (sidebarView && sidebar) closeSidebar(); else { setShowChats(true); setSidebar(true); } };
+  const newConversation = () => {
+    if (!w) { navigate("/"); return; }
+    selectThread(threadKey(w, companyId), null);
+    navigate(`/w/${w}/agent`);
+  };
   const project = projects?.find((item) => item.id === w);
   // The project sidebar owns a column on desktop. Elsewhere (mobile drawer,
   // collapsed sidebar, non-chat views) the identity and actions share the bar.
@@ -131,30 +150,25 @@ export function DesktopLayout({
 
   return (
     <div className="desktop-layout">
-      <div className="app-top-rail" role="toolbar" aria-label="Application menu">
-        <div className="app-top-navigation">
-          <button type="button" disabled aria-label="Back"><ArrowLeft /></button>
-          <button type="button" disabled aria-label="Forward"><ArrowRight /></button>
-          <button type="button" disabled aria-label="Toggle sidebar"><PanelLeft /></button>
-        </div>
-        {["File", "Edit", "View", "Help"].map((label) => <button key={label} type="button" disabled className="app-top-menu">{label}</button>)}
-      </div>
+      <AppMenuBar onToggleSidebar={toggleProjects} onNewConversation={newConversation} onOpenFolder={folder.openPicker} />
+      {folder.element}
       <nav className="activity-rail" aria-label="Main navigation">
         {chatsView && !sidebar && <Button variant="ghost" size="icon" className="rail-item rail-toggle" aria-label="Expand navigation bar" aria-expanded={false} onClick={() => setSidebar(true)}><img src="/octopus.svg" alt="" /></Button>}
         <Link to="/" aria-label="All projects" className={cn("rail-item", location.pathname === "/" && "is-active")}><Home /></Link>
         {VIEWS.map(({ to, label, icon: Icon }) => to === "agent" ? (
-          <button key={to} className={cn("rail-item", sidebarView && sidebar && "is-active")} aria-label={label} aria-expanded={sidebarView && sidebar} onClick={() => { if (sidebarView && sidebar) closeSidebar(); else { setShowChats(true); setSidebar(true); } }}><Icon /></button>
+          <button key={to} className={cn("rail-item", sidebarView && sidebar && "is-active")} aria-label="Projects and conversations" title="Projects and conversations" aria-expanded={sidebarView && sidebar} onClick={toggleProjects}><Icon /></button>
         ) : (
-          <Link key={to} to="/activity" aria-label={label} className={cn("rail-item", location.pathname === "/activity" && "is-active")}><Icon /></Link>
+          <Link key={to} to="/activity" aria-label={label} title={label} className={cn("rail-item", location.pathname === "/activity" && "is-active")}><Icon /></Link>
         ))}
         <div className="flex-1" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="rail-profile" aria-label="Open profile menu"><span>AA</span></button>
+            <button className="rail-profile" aria-label="Open profile menu" title={profileName || "Your profile"}>{profileName ? <span>{initials(profileName)}</span> : <User className="h-4 w-4" />}</button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="right" className="w-64">
-            <DropdownMenuLabel className="flex flex-col gap-1"><span className="text-foreground">Octopus</span><span className="font-normal">Local workspace</span></DropdownMenuLabel>
+            <DropdownMenuLabel className="flex flex-col gap-1"><span className="text-foreground">{profileName || "You"}</span><span className="font-normal">Everything stays on this computer</span></DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild><Link to="/activity"><History />Activity and profile</Link></DropdownMenuItem>
             <DropdownMenuItem onSelect={toggleTheme}>{theme === "dark" ? <Sun /> : <Moon />}{theme === "dark" ? "Light mode" : "Dark mode"}</DropdownMenuItem>
             <DropdownMenuItem asChild><Link to={w ? `/w/${w}/settings` : "/settings"}><Settings />Settings</Link></DropdownMenuItem>
             <DropdownMenuItem asChild><Link to={w ? `/w/${w}/guide` : "/guide"}><CircleHelp />Help</Link></DropdownMenuItem>
@@ -335,12 +349,15 @@ function ProjectSidebar({
               </p>
             )}
             {filtered.map((project) => (
-              <div key={project.id}>
+              <ProjectItem key={project.id} project={project} selected={w === project.id}>
                 <Link
                   to={project.exists ? `/w/${project.id}/agent` : "/"}
                   aria-disabled={!project.exists}
                   onClick={(e) => {
-                    if (!project.exists) e.preventDefault();
+                    if (!project.exists) {
+                      e.preventDefault();
+                      toast.error(`${project.name}: folder not found`, { description: `${project.path} was moved or deleted. Right-click the project to remove it from Octopus.` });
+                    }
                   }}
                   className={cn(
                     "sidebar-project",
@@ -355,7 +372,7 @@ function ProjectSidebar({
                     <ChevronDown className="!h-3 !w-3 opacity-50" />
                   )}
                 </Link>
-              </div>
+              </ProjectItem>
             ))}
             {!projects.isLoading && !projects.isError && !filtered.length && (
               <p className="px-5 py-3 text-xs text-muted-foreground">
@@ -365,7 +382,7 @@ function ProjectSidebar({
           </div>
         )}
         <div className="sidebar-section-heading sidebar-recents-heading">
-          <span>Recents</span>
+          <span>{w || !target ? "Recents" : `Recents in ${projects.data?.find((p) => p.id === target)?.name ?? "your last project"}`}</span>
         </div>
         <div className="sidebar-conversations">
           {w && selected === null && location.pathname.endsWith("/agent") && (
@@ -386,6 +403,47 @@ function ProjectSidebar({
       </div>
       {folder.element}
     </aside>
+  );
+}
+
+/** A project in the sidebar: right-click to rename it or remove it from Octopus (the folder is not touched). */
+function ProjectItem({ project, selected, children }: { project: WorkspaceOut; selected: boolean; children: React.ReactNode }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [renaming, setRenaming] = React.useState(false);
+  const [name, setName] = React.useState(project.name);
+  const [removing, setRemoving] = React.useState(false);
+  const rename = useMutation({
+    mutationFn: () => unwrap(api.PATCH("/api/v1/workspaces/{workspace_id}", { params: { path: { workspace_id: project.id } }, body: { name: name.trim() } })),
+    onSuccess: () => { setRenaming(false); void qc.invalidateQueries({ queryKey: qk.workspaces }); toast.success("Project renamed"); },
+    onError: (e: Error) => toast.error("Could not rename the project", { description: e.message }),
+  });
+  const remove = useMutation({
+    mutationFn: () => unwrap(api.DELETE("/api/v1/workspaces/{workspace_id}", { params: { path: { workspace_id: project.id } } })),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.workspaces }); toast.success(`Removed ${project.name} from Octopus`, { description: "The folder and its .octopus history are untouched; open it again to bring everything back." }); if (selected) navigate("/"); },
+    onError: (e: Error) => toast.error("Could not remove the project", { description: e.message }),
+  });
+  if (renaming) {
+    return (
+      <form className="px-2 py-1" onSubmit={(e) => { e.preventDefault(); if (name.trim()) rename.mutate(); }}>
+        <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={() => !rename.isPending && setRenaming(false)} onKeyDown={(e) => e.key === "Escape" && setRenaming(false)} aria-label="Project name" className="h-8" maxLength={120} />
+      </form>
+    );
+  }
+  return (
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild><div>{children}</div></ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem disabled={!project.exists} onSelect={() => { setName(project.name); setRenaming(true); }}><Pencil />Rename</ContextMenuItem>
+          <ContextMenuItem disabled={!project.exists} onSelect={() => navigate(`/w/${project.id}/settings#project`)}><Settings />Project settings</ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem destructive onSelect={() => setRemoving(true)}><Trash2 />Remove from Octopus</ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      <ConfirmDialog open={removing} onOpenChange={setRemoving} title={`Remove ${project.name}?`} destructive confirmLabel="Remove"
+        description={`Octopus forgets this project. Nothing in ${project.path} is deleted, including its .octopus history.`} onConfirm={() => remove.mutate()} />
+    </>
   );
 }
 

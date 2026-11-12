@@ -26,7 +26,7 @@ export function UsageMeter({ usage }: { usage: RunLive["usage"] }) {
   const money = useMoney();
   return (
     <div className="flex items-center gap-4">
-      <Meter icon={Gauge} label="Turns" value={usage.turns} max={usage.max_turns} fmt={String} />
+      <Meter icon={Gauge} label="Model calls" value={usage.turns} max={usage.max_turns} fmt={String} />
       <UsageBreakdown usage={usage}>
         <button className="flex items-center gap-4 rounded-md px-1 py-0.5 transition hover:bg-accent" aria-label="Token and cost details">
           <Meter icon={Cpu} label="Tokens" value={usage.tokens} max={usage.max_tokens} fmt={formatTokens} />
@@ -89,7 +89,7 @@ const COLS = [["todo", "To do"], ["in_progress", "In progress"], ["review", "In 
 const KIND: Record<string, string> = { build: "Build", fix: "Revision", review: "Review", docs: "Document", research: "Research", verify: "Checks", answer: "Answer" };
 
 export function TaskBoard({ tasks, agents, compact = false }: { tasks: TaskOut[]; agents: Record<string, AgentOut>; compact?: boolean }) {
-  if (!tasks.length) return <p className="py-10 text-center text-sm text-muted-foreground">No tasks on the board yet. Managers create them when delegating.</p>;
+  if (!tasks.length) return <p className="py-10 text-center text-sm text-muted-foreground">No tasks yet. Octopus creates them when a request needs work.</p>;
   return (
     <div className={cn("grid gap-2 p-3", compact ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-3")}>
       {COLS.map(([k, label]) => {

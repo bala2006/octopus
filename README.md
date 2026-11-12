@@ -94,9 +94,9 @@ The code is TypeScript end to end: `shared/` holds the contract, `server/` the e
 
 | | |
 |---|---|
-| ![Welcome](docs/screenshots/01-welcome.png) | ![Canvas and quick config](docs/screenshots/03-canvas-quick-config.png) |
-| ![Live run](docs/screenshots/05-live-run.png) | ![Approval](docs/screenshots/09-approval.png) |
-| ![Artifacts diff](docs/screenshots/07-artifacts-diff.png) | ![Team view](docs/screenshots/14-team-view.png) |
+| ![Home](web/public/guide/welcome-dark.jpg) | ![Live conversation](web/public/guide/run-dark.jpg) |
+| ![Team canvas](web/public/guide/canvas-dark.jpg) | ![Agent quick config](web/public/guide/quick-config-dark.jpg) |
+| ![Artifacts and diffs](web/public/guide/artifacts-dark.jpg) | ![Settings](web/public/guide/settings-dark.jpg) |
 
 ## Community
 

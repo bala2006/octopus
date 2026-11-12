@@ -341,11 +341,8 @@ export interface SessionOut { id: string; company_id: string; agent_id: string |
 export const ProviderOptionsSchema = z.object({
   auth: z.enum(["key", "entra"]).optional(),
   deployments: z.array(z.string()).optional(),
-  reasoning_models: z.array(z.string()).optional(),
   deployment_type: z.enum(["global", "data_zone", "regional"]).optional(),
   pricing: z.record(z.string(), z.number()).optional(),
-  api_style: z.string().optional(),
-  api_version: z.string().optional(),
 });
 export type ProviderOptions = z.infer<typeof ProviderOptionsSchema>;
 export const ProviderKeyInSchema = z.object({
@@ -385,8 +382,8 @@ export interface McpServerOut {
 // ── Activity ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ActivityOut {
-  email: string; days: { date: string; tokens: number }[]; lifetime_tokens: number; peak_tokens: number;
+  days: { date: string; tokens: number }[]; lifetime_tokens: number; peak_tokens: number;
   active_days: number; current_streak: number; longest_streak: number; longest_task_seconds: number;
   most_used_reasoning: string | null; reasoning_percent: number; projects: { id: string; name: string; tokens: number }[];
-  tools: { name: string; count: number }[]; skills_explored: number; total_skills_used: number; unavailable_projects: number;
+  tools: { name: string; count: number }[]; unavailable_projects: number;
 }

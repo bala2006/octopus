@@ -226,7 +226,7 @@ function InterjectBox({ agents, awaiting, onSend, finished }: { agents: AgentOut
         </div>
       )}
       <PromptComposer caption={<><span>{finished ? "Continue with the same team and project" : "Send direction to your team"}</span><span className="ml-auto hidden sm:inline">Enter to send</span></>}
-        controls={<><Select ariaLabel="Send to" value={to} onValueChange={setTo} variant="ghost" className="w-auto max-w-48" options={[{ value: "all", label: finished ? "Entry agent" : "Everyone" }, ...agents.map((agent) => ({ value: agent.id, label: agent.name }))]} /><Button onClick={submit} disabled={!text.trim()} size="icon" className="composer-send ml-auto" aria-label="Send"><ArrowUp /></Button></>}>
+        controls={<><Select ariaLabel="Send to" value={to} onValueChange={setTo} variant="ghost" className="w-auto max-w-48" options={[{ value: "all", label: finished ? "Team lead" : "Octopus (team lead)" }, ...agents.map((agent) => ({ value: agent.id, label: agent.name }))]} /><Button onClick={submit} disabled={!text.trim()} size="icon" className="composer-send ml-auto" aria-label="Send"><ArrowUp /></Button></>}>
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={1}
           placeholder={awaiting ? "Or message the team…" : finished ? "Continue the conversation with your team…" : "Message your team while they work…"}
           className="max-h-32"

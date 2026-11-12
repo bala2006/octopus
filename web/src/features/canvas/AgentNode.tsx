@@ -75,7 +75,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
               <span className="truncate text-sm font-semibold">{data.name}</span>
               {data.is_manager && !dcolor && <Tip content="Manager"><Crown className="h-3 w-3 shrink-0 text-terracotta" /></Tip>}
               {data.is_entry && (
-                <Tip content="Entry agent: receives the company goal"><span className="inline-flex items-center gap-0.5 rounded bg-primary/15 px-1 py-px text-[9.5px] font-semibold uppercase tracking-wide text-primary"><Flag className="h-2.5 w-2.5" />Entry</span></Tip>
+                <Tip content="Team lead: plans every request and reports back"><span className="inline-flex items-center gap-0.5 rounded bg-primary/15 px-1 py-px text-[9.5px] font-semibold uppercase tracking-wide text-primary"><Flag className="h-2.5 w-2.5" />Lead</span></Tip>
               )}
             </div>
             <div className="truncate text-xs text-muted-foreground">{data.role || "No role"}</div>

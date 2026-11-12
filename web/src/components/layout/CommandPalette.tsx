@@ -32,6 +32,9 @@ const destinations = [
   { name: "Guide", hint: "Learn Octopus", to: "guide" },
 ];
 
+/** Window event that opens quick open (used by the Edit menu). */
+export const QUICK_OPEN_EVENT = "octopus:quick-open";
+
 export function CommandPalette() {
   const w = useWorkspaceId();
   const nav = useNavigate();
@@ -84,8 +87,10 @@ export function CommandPalette() {
         setOpen((v) => !v);
       }
     };
+    const show = () => setOpen(true);
     window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
+    window.addEventListener(QUICK_OPEN_EVENT, show);
+    return () => { window.removeEventListener("keydown", key); window.removeEventListener(QUICK_OPEN_EVENT, show); };
   }, []);
   React.useEffect(() => {
     if (open) {

@@ -15,7 +15,7 @@ export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode
   const t = agent.tools;
   const warnings: string[] = [];
   if (mode === "report") return { tools: [], warnings };
-  const tools: Tool[] = fileTools.filter((f) => READ.includes(f.name) || (mode === "worker" && t.file_write !== false));
+  const tools: Tool[] = fileTools.filter((f) => (READ.includes(f.name) && (t.file_read !== false || mode === "orchestrator")) || (mode === "worker" && t.file_write !== false && !READ.includes(f.name)));
   if (t.web_search || mode === "orchestrator") tools.push(...webTools);
   if (t.terminal && (mode === "worker" || mode === "reviewer")) tools.push(...commandTools);
   if (t.browser && (mode === "worker" || mode === "reviewer")) {
@@ -23,7 +23,8 @@ export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode
   }
   if (t.mcp_servers?.length && mode !== "consult") tools.push(...await serverTools(reg, t.mcp_servers));
   if (mode !== "consult") tools.push(...memoryTools);
-  if (mode === "worker" || mode === "reviewer") tools.push(consultTool, askUser);
+  if ((mode === "worker" || mode === "reviewer") && t.send_message !== false) tools.push(consultTool);
+  if ((mode === "worker" || mode === "reviewer") && t.ask_user !== false) tools.push(askUser);
   if (mode === "worker") tools.push(...workerTools);
   if (mode === "reviewer") tools.push(reviewTool, workerTools.find((w) => w.name === "block_task")!);
   if (mode === "orchestrator") tools.push(...plannerTools, askUser);

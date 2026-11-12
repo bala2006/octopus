@@ -15,7 +15,7 @@ export interface ChannelData extends Record<string, unknown> {
 }
 export type ChannelEdge = Edge<ChannelData, "channel">;
 
-const EDGE_ORDER: EdgeType[] = ["delegate", "review", "debate", "report", "consult"];
+const EDGE_ORDER: EdgeType[] = ["delegate", "review", "report", "consult"];
 const DEFAULT_CONFIG: EdgeConfig = { max_turns: 20, handoff_instructions: "", condition: "", max_rounds: 4, max_revisions: 3 };
 const HISTORY_LIMIT = 100;
 

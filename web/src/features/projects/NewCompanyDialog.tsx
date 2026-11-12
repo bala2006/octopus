@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BookmarkPlus, Building2, Check, Crown, LayoutTemplate, RefreshCw, Sparkles, Swords, Users, Wand2, FlaskConical, Rocket, Network, User, Bug, Gamepad2, Globe, UserCheck } from "lucide-react";
+import { BookmarkPlus, Building2, Check, Crown, LayoutTemplate, RefreshCw, Sparkles, Users, Wand2, FlaskConical, Rocket, Network, User, Bug, Globe, Smartphone } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { tone } from "@/lib/palette";
@@ -17,7 +17,8 @@ type Generated = GenerateCompanyOut;
 type DeptSummary = DepartmentSummary;
 
 const ICONS: Record<string, typeof Building2> = {
-  software_startup: Rocket, full_company: Building2, bug_squad: Bug, game_studio: Gamepad2, web_app_studio: Globe, solo_engineer: User, engineer_reviewer: UserCheck, self_organizing: Sparkles, research_lab: FlaskConical, small_dev_team: Users, debate_panel: Swords, blank: LayoutTemplate,
+  adaptive: Sparkles, solo_engineer: User, small_dev_team: Users, software_startup: Rocket, web_app_studio: Globe, mobile_app_team: Smartphone,
+  saas_launch: Rocket, data_science_team: FlaskConical, security_audit: Bug, content_studio: LayoutTemplate, research_lab: FlaskConical, full_company: Building2,
 };
 const EXAMPLES = [
   "Build and launch a habit-tracking mobile app, including a marketing campaign",
@@ -112,9 +113,7 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
           {t.source === "user" && <Badge variant="secondary">Mine</Badge>}</div>
         <div className="line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">{t.description || "Custom template"}</div>
         <div className="mt-2"><DepartmentChips departments={t.departments ?? []} max={6} /></div>
-        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">{t.agent_count} agents · {t.edge_count} channels
-          {t.workflow && <span title="Runs the defined workflow: intake → spec → design → build → test → review → accept, each phase with its owner"
-            className="ml-auto rounded-full border border-success/40 px-1.5 py-px text-[10px] font-medium text-success">Workflow</span>}</div>
+        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">{t.agent_count} {t.agent_count === 1 ? "agent" : "agents"} · {t.edge_count} {t.edge_count === 1 ? "channel" : "channels"}</div>
       </button>
     );
   };
@@ -124,7 +123,7 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>New company</DialogTitle>
-          <DialogDescription>Companies are built from departments. Each has a manager and a small team. Everything stays editable, and managers can hire more agents at runtime.</DialogDescription>
+          <DialogDescription>Pick a starting team. Octopus, the team lead, plans each request and hires more specialists when it needs them. Everything stays editable on the canvas.</DialogDescription>
         </DialogHeader>
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
           <TabsList><TabsTrigger value="templates"><LayoutTemplate />Templates</TabsTrigger><TabsTrigger value="generate" data-testid="tab-generate"><Wand2 />Generate with AI</TabsTrigger></TabsList>

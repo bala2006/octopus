@@ -275,8 +275,8 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
             {noEntry && (
-              <Tip content="The goal is delivered to entry agents. Without one, the first root agent is used.">
-                <span className="flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] font-medium text-warning"><Flag className="h-3 w-3" />No entry agent</span>
+              <Tip content="Mark one agent as the team lead (flag): it plans every request. Without one, the top of the org chart leads.">
+                <span className="flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] font-medium text-warning"><Flag className="h-3 w-3" />No team lead</span>
               </Tip>
             )}
             <span className="rounded-md border border-border bg-elevated/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm">{s.nodes.length} agents · {s.edges.length} channels</span>
