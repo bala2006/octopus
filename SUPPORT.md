@@ -10,6 +10,6 @@ Octopus is an open-source project maintained on a best-effort basis.
 - **Security vulnerabilities:** Follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
 - **Community conduct:** See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-For reproducibility, include the Octopus commit/version, Python and Node versions, and whether you used a real model endpoint. Remove all secrets and personal information from screenshots and logs before posting.
+For reproducibility, include the Octopus commit/version, Node version, and whether you used a real model endpoint. Remove all secrets and personal information from screenshots and logs before posting.
 
 The maintainer cannot guarantee response times, individual troubleshooting, or acceptance of suggested changes.

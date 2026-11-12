@@ -1,0 +1,230 @@
+import type { AwaitingQuestion } from "./QuestionCard";
+/** Pure reducer turning run events (live or replayed) into view state. Used for live runs and timeline scrubbing. */
+import type { AgentOut, EdgeOut, MessageOut, PendingApproval, RunEvent, TaskOut } from "@/types";
+import type { LiveOverlay } from "@/features/canvas/live";
+import { appendStream } from "./streamView";
+
+export interface ToolCall { call_id: string; agent_id: string; tool: string; args: Record<string, unknown>; ok?: boolean; output?: string; turn_no?: number; seq?: number }
+export type LiveTask = TaskOut;
+export interface LiveArtifact { id: string; path: string; version: number; author_agent_id?: string | null; change_note?: string; created?: boolean; deleted?: boolean; size?: number; lines?: number; previous_lines?: number; created_at?: string }
+export interface TimelineItem { seq: number; type: string; ts?: string; agent_id?: string | null; label: string; tone: "msg" | "protocol" | "file" | "tool" | "status" | "error" | "approval" | "org" }
+export interface OrgEvent { seq: number; kind: "created" | "updated"; by: string; agent_id: string; name: string; role?: string; department?: string; summary?: string; reason?: string; self?: boolean; persisted?: boolean; ts?: string }
+export type FeedMessage = MessageOut & { _seq?: number };
+export interface Usage {
+  tokens: number; cost_usd: number; turns: number; max_turns?: number; max_tokens?: number; max_cost_usd?: number; per_agent?: Record<string, number>;
+  active_seconds?: number; timeout_s?: number;
+  /** exact provider usage: input includes cached + cache-write tokens, output includes reasoning tokens */
+  input_tokens?: number; cached_tokens?: number; cache_write_tokens?: number; output_tokens?: number; reasoning_tokens?: number; llm_calls?: number; estimated_calls?: number;
+  cost_breakdown?: { input?: number; cached_input?: number; cache_write?: number; output?: number };
+  per_agent_cost?: Record<string, number>;
+  /** last turn that changed a file or moved the task board, and how many turns ago that was */
+  progress_turn?: number; turns_since_progress?: number;
+}
+/** One thing an agent did in its browser tab, and (when the page changed) a screenshot of what the tab showed afterwards. */
+export interface BrowserAction {
+  seq: number; ts?: string; agent_id: string; call_id?: string; tool: string; args: Record<string, unknown>; ok: boolean;
+  url: string; title: string; frame?: string | null; note?: string;
+}
+/** The company workflow of the run (phases with owners), from `workflow_updated` events. */
+export interface WorkflowPhase { key: string; title: string; owner: string | null; status: "pending" | "active" | "done" | "skipped" | "failed"; loops?: number; summary?: string }
+export interface WorkflowState { track: string | null; index: number; ended: boolean; reason?: string; phases: WorkflowPhase[] }
+export interface ProtocolState { kind: "debate" | "review"; result: string; edge_id: string; state: Record<string, any>; seq?: number } // eslint-disable-line @typescript-eslint/no-explicit-any
+
+export interface RunLive {
+  status: string;
+  reason: string;
+  summary: string;
+  agentStatus: Record<string, string>;
+  activity: Record<string, string>;
+  streaming: Record<string, string>;
+  thoughts: Record<string, string>;
+  /** reasoning summary streaming in right now (cleared when the finished thought arrives) */
+  thinking: Record<string, string>;
+  /** when each agent's current turn started (ms), for the "working for 42s" counter */
+  turnStart: Record<string, number>;
+  messages: FeedMessage[];
+  extraAgents: AgentOut[];
+  extraEdges: EdgeOut[];
+  agentPatches: Record<string, Partial<AgentOut>>;
+  orgEvents: OrgEvent[];
+  fresh: Record<string, number>;
+  departments: Record<string, { color: string }>;
+  rejected: Array<Record<string, any>>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  toolCalls: Record<string, ToolCall>;
+  /** browser actions in order, all agents (each agent has its own tab) */
+  browser: BrowserAction[];
+  workflow: WorkflowState | null;
+  tasks: Record<string, LiveTask>;
+  artifacts: Record<string, LiveArtifact>;
+  usage: Usage;
+  activeEdges: Record<string, { at: number; from: string; type: string; seq?: number }>;
+  lastMessage: Record<string, { text: string; type: string; to?: string }>;
+  protocols: Record<string, ProtocolState>;
+  pendingApproval: PendingApproval | null;
+  awaiting: AwaitingQuestion | null;
+  errors: Array<{ message: string; kind?: string; agent_id?: string; seq?: number; ts?: string }>;
+  timeline: TimelineItem[];
+  approvals: Array<{ id: string | null; approved: boolean; reason?: string; agent_id?: string; kind?: string; summary?: string; auto?: boolean; seq?: number }>;
+  lastSeq: number;
+  live: boolean;
+  replayDone: boolean;
+}
+
+export const initialRun = (): RunLive => ({
+  status: "queued", reason: "", summary: "", agentStatus: {}, activity: {}, streaming: {}, thoughts: {}, thinking: {}, turnStart: {}, messages: [], rejected: [],
+  extraAgents: [], extraEdges: [], agentPatches: {}, orgEvents: [], fresh: {}, departments: {},
+  toolCalls: {}, browser: [], workflow: null, tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
+  pendingApproval: null, awaiting: null, errors: [], timeline: [], approvals: [], lastSeq: 0, live: false, replayDone: false,
+});
+
+/** "browser_navigate" → "opened", for labels like "Ann opened Snake". */
+export function browserVerb(tool: string): string {
+  const t = tool.replace(/^browser_/, "");
+  const verbs: Record<string, string> = {
+    navigate: "opened", navigate_back: "went back", click: "clicked", type: "typed", fill_form: "filled a form", press_key: "pressed a key",
+    select_option: "picked an option", hover: "hovered", snapshot: "read the page", take_screenshot: "took a screenshot",
+    wait_for: "waited", evaluate: "ran a script", console_messages: "read the console", network_requests: "checked network requests",
+    resize: "resized the window", tabs: "managed tabs", handle_dialog: "answered a dialog", file_upload: "uploaded a file", drag: "dragged",
+  };
+  return verbs[t] ?? `used ${t.replace(/_/g, " ")}`;
+}
+
+const clip = (s: string, n = 90) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string> = {}): RunLive {
+  const d = e.data ?? {};
+  const seq = e.seq ?? 0;
+  const now = e.replay ? Date.parse(e.ts ?? "") || Date.now() : Date.now();
+  const n = (id?: string | null) => (id ? names[id] ?? s.extraAgents.find((x) => x.id === id)?.name ?? "Agent" : "User");
+  const push = (item: Omit<TimelineItem, "seq" | "ts">) => (seq ? [...s.timeline, { ...item, seq, ts: e.ts }] : s.timeline);
+  const next: RunLive = { ...s, lastSeq: Math.max(s.lastSeq, seq) };
+  switch (e.type) {
+    case "snapshot":
+      return { ...next, status: d.status ?? s.status, live: !!d.live, agentStatus: { ...s.agentStatus, ...(d.agent_status ?? {}) },
+        activity: { ...s.activity, ...(d.activity ?? {}) }, pendingApproval: d.pending_approval ?? null, awaiting: d.awaiting ?? null,
+        usage: { ...s.usage, ...(d.usage ?? {}) } };
+    case "replay_done":
+      return { ...next, replayDone: true };
+    case "run_status":
+      return { ...next, status: d.status, reason: d.reason ?? s.reason, summary: d.summary ?? s.summary,
+        awaiting: d.status === "awaiting_user" ? d.awaiting ?? s.awaiting : d.status === "running" ? null : s.awaiting,
+        pendingApproval: d.pending_approval !== undefined ? d.pending_approval : s.pendingApproval,
+        timeline: d.status === "running" && s.status === "running" ? s.timeline : push({ type: e.type, label: `Run ${d.status}${d.reason ? `: ${clip(d.reason, 60)}` : ""}`, tone: "status" }) };
+    case "agent_status":
+      return { ...next, agentStatus: { ...s.agentStatus, [d.agent_id]: d.status }, activity: { ...s.activity, [d.agent_id]: d.activity ?? "" },
+        streaming: ["idle", "done", "waiting", "error"].includes(d.status) ? { ...s.streaming, [d.agent_id]: "" } : s.streaming };
+    case "turn_started":
+      return { ...next, streaming: { ...s.streaming, [d.agent_id]: "" }, thoughts: { ...s.thoughts, [d.agent_id]: "" }, thinking: { ...s.thinking, [d.agent_id]: "" },
+        turnStart: { ...s.turnStart, [d.agent_id]: now } };
+    case "token_stream":
+      return { ...next, streaming: { ...s.streaming, [d.agent_id]: appendStream(s.streaming[d.agent_id] ?? "", d.delta) } };
+    case "thinking_stream":
+      return { ...next, thinking: { ...s.thinking, [d.agent_id]: ((s.thinking[d.agent_id] ?? "") + d.delta).slice(-8000) } };
+    case "thought":
+      return { ...next, thoughts: { ...s.thoughts, [d.agent_id]: d.text }, thinking: { ...s.thinking, [d.agent_id]: "" } };
+    case "message_created": {
+      const m = d.message as MessageOut;
+      if (s.messages.some((x) => x.id === m.id)) return next;
+      const lm = m.from_agent_id && m.type !== "artifact_created"
+        ? { ...s.lastMessage, [m.from_agent_id]: { text: clip(m.content, 160), type: m.type, to: m.to_agent_id ? n(m.to_agent_id) : undefined } } : s.lastMessage;
+      return { ...next, messages: [...s.messages, { ...m, _seq: seq || undefined }], lastMessage: lm,
+        awaiting: m.meta?.awaiting_input ? { agent_id: m.from_agent_id!, question: m.content, options: (m.meta.options as AwaitingQuestion["options"]) ?? [], allow_other: true } : s.awaiting,
+        timeline: m.type === "artifact_created" ? s.timeline : push({ type: e.type, agent_id: m.from_agent_id, tone: "msg",
+          label: `${n(m.from_agent_id)} › ${m.to_agent_id ? n(m.to_agent_id) : m.sender === "user" ? "everyone" : "you"} · ${m.type.replace("_", " ")}` }) };
+    }
+    case "edge_activity":
+      return { ...next, activeEdges: { ...s.activeEdges, [d.edge_id]: { at: now, from: d.from_agent_id, type: d.type, seq } } };
+    case "tool_call":
+      return { ...next, toolCalls: { ...s.toolCalls, [d.call_id]: { ...d, seq } as ToolCall } };
+    case "tool_result": {
+      const prev = s.toolCalls[d.call_id] ?? { call_id: d.call_id, agent_id: d.agent_id, tool: d.tool, args: {} };
+      // browser calls get their own, more descriptive timeline entry from browser_action
+      const important = d.tool === "run_code" || (d.tool === "mcp_call" && prev.args?.server !== "browser");
+      return { ...next, toolCalls: { ...s.toolCalls, [d.call_id]: { ...prev, ok: d.ok, output: d.output } },
+        timeline: important ? push({ type: e.type, agent_id: d.agent_id, tone: d.ok ? "tool" : "error", label: `${n(d.agent_id)} ${d.tool === "run_code" ? "ran a command" : "called MCP"}: ${d.ok ? "ok" : "failed"}` }) : s.timeline };
+    }
+    case "browser_action": {
+      const a = { ...(d as BrowserAction), seq, ts: e.ts };
+      const where = a.title || a.url;
+      return { ...next, browser: [...s.browser, a].slice(-300),
+        timeline: push({ type: e.type, agent_id: a.agent_id, tone: a.ok ? "tool" : "error",
+          label: `${n(a.agent_id)} ${browserVerb(a.tool)}${where && a.tool === "browser_navigate" ? ` ${clip(where, 50)}` : ""}${a.ok ? "" : " (failed)"}` }) };
+    }
+    case "workflow_updated": {
+      const wf = d.workflow as WorkflowState;
+      const prev = s.workflow?.phases.find((p) => p.status === "active")?.key;
+      const cur = wf.phases.find((p) => p.status === "active");
+      return { ...next, workflow: wf, timeline: cur && cur.key !== prev
+        ? push({ type: e.type, agent_id: cur.owner, tone: "protocol", label: `${cur.title}${cur.owner ? ` → ${n(cur.owner)}` : ""}${cur.loops ? ` (fix round ${cur.loops})` : ""}` })
+        : s.timeline };
+    }
+    case "task_updated": {
+      const t = d.task as LiveTask;
+      return { ...next, tasks: { ...s.tasks, [t.key]: t } };
+    }
+    case "artifact_updated": {
+      const a = d.artifact as LiveArtifact;
+      return { ...next, artifacts: { ...s.artifacts, [a.path]: a },
+        timeline: push({ type: e.type, agent_id: a.author_agent_id, tone: "file", label: `${n(a.author_agent_id)} ${a.version === 1 && a.created ? "created" : "updated"} ${a.path} v${a.version}` }) };
+    }
+    case "run_continued":
+      return { ...next, status: "running", summary: "", timeline: push({ type: e.type, tone: "status", label: `Continued: ${clip(d.content, 60)}` }) };
+    case "usage_update":
+      return { ...next, usage: { ...s.usage, ...d } };
+    case "approval_requested":
+      return { ...next, pendingApproval: d as PendingApproval, timeline: push({ type: e.type, agent_id: d.agent_id, tone: "approval", label: `Approval needed: ${clip(d.summary, 60)}` }) };
+    case "approval_resolved":
+      return { ...next, pendingApproval: s.pendingApproval?.id === d.id ? null : s.pendingApproval, approvals: [...s.approvals, { ...(d as RunLive["approvals"][number]), seq }] };
+    case "error":
+      return { ...next, errors: [...s.errors, { ...d, seq, ts: e.ts } as RunLive["errors"][number]],
+        timeline: d.kind === "warning" ? s.timeline : push({ type: e.type, agent_id: d.agent_id, tone: "error", label: clip(d.message, 70) }) };
+    case "agent_created": {
+      const a = d.agent as AgentOut;
+      if (s.extraAgents.some((x) => x.id === a.id)) return next;
+      const dep = d.department as { name: string; color: string } | undefined;
+      const nm = (id?: string | null) => (id && (names[id] ?? s.extraAgents.find((x) => x.id === id)?.name)) || "Agent";
+      return { ...next, extraAgents: [...s.extraAgents, a], extraEdges: [...s.extraEdges, ...(d.edges as EdgeOut[])],
+        fresh: { ...s.fresh, [a.id]: now }, departments: dep ? { ...s.departments, [dep.name]: { color: dep.color } } : s.departments,
+        agentStatus: { ...s.agentStatus, [a.id]: "idle" },
+        orgEvents: [...s.orgEvents, { seq, kind: "created", by: d.created_by, agent_id: a.id, name: a.name, role: a.role, department: a.department, persisted: d.persisted, ts: e.ts }],
+        timeline: push({ type: e.type, agent_id: d.created_by, tone: "org", label: `${nm(d.created_by)} hired ${a.name} (${a.role})` }) };
+    }
+    case "agent_updated": {
+      const ch = (d.changes ?? {}) as Partial<AgentOut>;
+      const nm = (id?: string | null) => (id && (names[id] ?? s.extraAgents.find((x) => x.id === id)?.name)) || "Agent";
+      return { ...next, agentPatches: { ...s.agentPatches, [d.agent_id]: { ...(s.agentPatches[d.agent_id] ?? {}), ...ch } },
+        orgEvents: [...s.orgEvents, { seq, kind: "updated", by: d.by, agent_id: d.agent_id, name: ch.name ?? d.old_name, summary: d.summary, reason: d.reason, self: d.self, persisted: d.persisted, ts: e.ts }],
+        timeline: push({ type: e.type, agent_id: d.by, tone: "org", label: d.self ? `${nm(d.by)} edited own config` : `${nm(d.by)} reconfigured ${d.old_name}` }) };
+    }
+    case "agent_finished":
+      return next;
+    default:
+      return next;
+  }
+}
+
+/** Rebuild state from persisted events up to (and including) `cursor` for timeline scrubbing. */
+export function replayTo(events: RunEvent[], cursor: number, names: Record<string, string>): RunLive {
+  let s = initialRun();
+  for (const e of events) {
+    if ((e.seq ?? 0) > cursor) break;
+    s = reduceRun(s, { ...e, replay: true }, names);
+  }
+  // highlight the last few channel activities at the cursor position
+  const recent = Object.entries(s.activeEdges).sort((a, b) => (b[1].seq ?? 0) - (a[1].seq ?? 0)).slice(0, 2);
+  s.activeEdges = Object.fromEntries(recent.map(([k, v]) => [k, { ...v, at: Date.now() }]));
+  s.streaming = {};
+  return s;
+}
+
+export const TERMINAL = new Set(["completed", "incomplete", "failed", "cancelled"]);
+
+/** What the canvas shows of a live run: statuses, last messages, active channels, fresh hires. */
+export function liveOverlay(s: RunLive, agents: AgentOut[], departments: Record<string, { color: string }>): LiveOverlay {
+  return {
+    status: s.agentStatus, activity: s.activity, lastMessage: s.lastMessage, streaming: s.streaming, thinking: s.thinking,
+    activeEdges: s.activeEdges, tokens: s.usage.per_agent ?? {}, pendingApprovalAgent: s.pendingApproval?.agent_id ?? null,
+    departments, names: Object.fromEntries(agents.map((a) => [a.id, a.name])),
+    fresh: Object.fromEntries(Object.entries(s.fresh).filter(([, t]) => Date.now() - t < 3000).map(([k]) => [k, true])),
+  };
+}

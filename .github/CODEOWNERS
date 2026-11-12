@@ -1,40 +1,16 @@
-# Code owners for paths that need a human review before merge (plan.md, P8 tier 2).
-# GitHub applies the last matching line. This file only takes effect when branch protection
-# "Require review from Code owners" is enabled on the target branch.
+# Code owners for paths that need a human review before merge. GitHub applies the last matching line.
+# Takes effect when branch protection "Require review from Code owners" is enabled.
 
-# Default: the maintainer reviews everything not listed below.
 *                                   @bala2006
 
-# Kernel, SDK contracts, storage and the file boundary.
-/backend/app/kernel/                @bala2006
-/backend/app/sdk/                   @bala2006
-/backend/app/storage/               @bala2006
-/backend/migrations/                @bala2006
-/backend/app/bootstrap.py           @bala2006
+# The contract, the engine and the safety boundary
+/shared/                            @bala2006
+/server/src/engine/                 @bala2006
+/server/src/safety/                 @bala2006
+/server/src/llm/                    @bala2006
+/server/src/db/                     @bala2006
 
-# Agent execution, outside-world access, and secrets.
-/backend/app/plugins/sandbox/       @bala2006
-/backend/app/plugins/browser/       @bala2006
-/backend/app/plugins/mcp/           @bala2006
-/backend/app/plugins/providers/     @bala2006
-/backend/app/foundation/            @bala2006
-
-# Gates: changing a check, its thresholds or its expected output.
+# Build, CI and dependencies
 /.github/                           @bala2006
-/backend/tests/golden/              @bala2006
-/backend/pytest.ini                 @bala2006
-/backend/.importlinter              @bala2006
-/scripts/visual/                      @bala2006
-/frontend/vite.config.ts            @bala2006
-/frontend/tsconfig.json             @bala2006
-
-# Dependencies and launch scripts.
-/backend/requirements.txt           @bala2006
-/backend/requirements.lock          @bala2006
-/backend/requirements-dev.txt       @bala2006
-/frontend/package.json              @bala2006
-/frontend/package-lock.json         @bala2006
-/Makefile                           @bala2006
-/octopus.ps1                        @bala2006
-/start.sh                           @bala2006
-/start.bat                          @bala2006
+/package.json                       @bala2006
+/package-lock.json                  @bala2006
