@@ -31,3 +31,17 @@ test("paths stay inside the project and out of Git and Octopus internals", () =>
   symlinkSync("/", path.join(root, "escape"));
   expect(() => fs.abs("escape/etc/passwd")).toThrow(/outside/);
 });
+
+test("a database from Octopus 1.x is kept aside instead of breaking the project", async () => {
+  const { DatabaseSync } = (await import("node:module")).createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+  const { readdirSync } = await import("node:fs");
+  const { openProject } = await import("../src/db/project");
+  const dir = path.join(process.env.TEST_BASE_DIR!, "legacy");
+  mkdirSync(path.join(dir, ".octopus"), { recursive: true });
+  const old = new DatabaseSync(path.join(dir, ".octopus", "octopus.db"));
+  old.exec("CREATE TABLE alembic_version (v TEXT); CREATE TABLE companies (id TEXT)");
+  old.close();
+  const p = openProject(dir);
+  expect(p.companies.find()).toEqual([]);
+  expect(readdirSync(path.join(dir, ".octopus")).some((f) => f.startsWith("octopus.v1-"))).toBe(true);
+});

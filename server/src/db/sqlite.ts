@@ -2,7 +2,7 @@
  * A thin layer over Node's built-in SQLite: schema migrations by `user_version`, and a typed table helper that maps
  * JSON and boolean columns, so the rest of the server works with plain objects.
  */
-import { mkdirSync } from "node:fs";
+import { mkdirSync, renameSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { DatabaseSync as SqliteDb, SQLInputValue } from "node:sqlite";
 import path from "node:path";
@@ -19,6 +19,12 @@ export class Db {
   constructor(file: string, migrations: string[]) {
     if (file !== ":memory:") mkdirSync(path.dirname(file), { recursive: true });
     this.raw = new DatabaseSync(file);
+    // Databases from Octopus 1.x (Python, Alembic) have a different schema: keep them aside and start fresh.
+    if (this.get("SELECT name FROM sqlite_master WHERE name = 'alembic_version'")) {
+      this.raw.close();
+      renameSync(file, file.replace(/\.db$/, `.v1-${Date.now()}.db`));
+      this.raw = new DatabaseSync(file);
+    }
     this.raw.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
     const version = Number((this.get<{ user_version: number }>("PRAGMA user_version"))?.user_version ?? 0);
     migrations.slice(version).forEach((sql, i) => this.tx(() => {
