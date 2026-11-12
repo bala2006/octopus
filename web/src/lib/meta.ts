@@ -1,7 +1,7 @@
 import {
   Bot, Brain, Bug, ClipboardList, Code, Container, Crown, DraftingCompass, Eye, Gavel, GitPullRequest, Layout, Lightbulb,
   Palette, PenLine, Server, ShieldAlert, Sparkles, Terminal, Wrench, MessageSquareText, Hourglass, ShieldQuestion, CircleCheck,
-  CircleAlert, Moon, FileSearch, FolderTree, FilePen, Calculator, Globe, UserRoundSearch, Send, Plug, UsersRound, Search, Crown as CrownIcon,
+  CircleAlert, Moon, FileSearch, FilePen, Calculator, Globe, UserRoundSearch, Send, Plug, UsersRound, Search, Crown as CrownIcon,
   type LucideIcon,
 } from "lucide-react";
 import type { AgentStatus, ApprovalMode, EdgeType } from "@/types";
@@ -33,12 +33,14 @@ export const statusMeta = (s?: string): StatusMeta => STATUS[(s as AgentStatus) 
 
 export interface EdgeMeta { label: string; color: string; dash?: string; description: string }
 export const EDGE_TYPES: Record<EdgeType, EdgeMeta> = {
-  delegate: { label: "Delegate", color: "#D97756", description: "Task handoff: the source assigns work to the target." },
-  review: { label: "Review", color: "#7E9B6A", dash: "6 4", description: "Feedback loop: review_request → approve / request_changes." },
-  debate: { label: "Debate", color: "#B8645A", dash: "2 5", description: "Adversarial discussion ending in explicit agreement or a decision." },
-  report: { label: "Report", color: "#6B98B2", dash: "10 4", description: "Status reported upward." },
-  consult: { label: "Consult", color: "#C9A04A", dash: "1 4", description: "Ask-only: questions and answers." },
+  delegate: { label: "Delegate", color: "#D97756", description: "Who hands work to whom. Lights up when a task is assigned along it." },
+  review: { label: "Review", color: "#7E9B6A", dash: "6 4", description: "The source reviews the target's changes. Without one, the target's department lead or a tech lead reviews." },
+  debate: { label: "Debate", color: "#B8645A", dash: "2 5", description: "From an older version of Octopus; works like Consult." },
+  report: { label: "Report", color: "#6B98B2", dash: "10 4", description: "Status flows back up. Lights up when the target receives a finished task." },
+  consult: { label: "Consult", color: "#C9A04A", dash: "1 4", description: "Teammates who ask each other questions. Lights up when they do; anyone can ask anyone." },
 };
+/** Channel types you can create (debate is kept only so older teams still display). */
+export const CHANNEL_CHOICES: EdgeType[] = ["delegate", "review", "report", "consult"];
 
 export interface ApprovalModeMeta { label: string; description: string; caption: string }
 export const APPROVAL_MODES: Record<ApprovalMode, ApprovalModeMeta> = {
@@ -58,16 +60,13 @@ export const approvalModeOf = (value?: string | null): ApprovalMode => (value ==
 
 export interface ToolMeta { key: "file_read" | "file_write" | "list_files" | "terminal" | "web_search" | "calculator" | "ask_user" | "send_message" | "manage_team" | "browser"; label: string; icon: LucideIcon; hint: string; danger?: boolean }
 export const TOOLS: ToolMeta[] = [
-  { key: "file_read", label: "Read files", icon: FileSearch, hint: "read_file inside the project" },
-  { key: "list_files", label: "List files", icon: FolderTree, hint: "Browse the project tree" },
-  { key: "file_write", label: "Write files", icon: FilePen, hint: "Create / modify files (follows the approval mode)", danger: true },
-  { key: "terminal", label: "Terminal", icon: Terminal, hint: "Run sandboxed commands (python, node, npm test, pytest…)", danger: true },
-  { key: "web_search", label: "Web search", icon: Search, hint: "Keyless web search" },
-  { key: "browser", label: "Browser", icon: Globe, hint: "A real browser tab (Playwright, run by Octopus): open the project preview, click, type, read console errors" },
-  { key: "calculator", label: "Calculator", icon: Calculator, hint: "Exact arithmetic" },
-  { key: "ask_user", label: "Ask user", icon: UserRoundSearch, hint: "Pause the run to ask you a question" },
-  { key: "send_message", label: "Messaging", icon: Send, hint: "Talk to connected teammates" },
-  { key: "manage_team", label: "Manage team", icon: UsersRound, hint: "Hire agents at runtime and reconfigure / deactivate the agents it manages", danger: true },
+  { key: "file_read", label: "Read files", icon: FileSearch, hint: "List, read and search the project's files" },
+  { key: "file_write", label: "Write files", icon: FilePen, hint: "Create, edit, move and delete files (versioned; deletes go to the trash)", danger: true },
+  { key: "terminal", label: "Commands", icon: Terminal, hint: "Run builds, tests and tools in the project; destructive commands are always refused", danger: true },
+  { key: "web_search", label: "Web", icon: Search, hint: "Search the web and read pages" },
+  { key: "browser", label: "Browser", icon: Globe, hint: "A real browser tab: open the project preview, click through it, read console errors" },
+  { key: "ask_user", label: "Ask you", icon: UserRoundSearch, hint: "Ask you a question with suggested answers when a decision is yours" },
+  { key: "send_message", label: "Ask teammates", icon: Send, hint: "Ask a teammate a question and wait for the answer" },
 ];
 export const MANAGER_ICON = CrownIcon;
 export const SEARCH_ICON = Search;

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, Brain, Cpu, Flag, Plug, Save, SlidersHorizontal, Trash2, User, Wrench, X, FileText } from "lucide-react";
+import { Activity, Brain, Cpu, Flag, Plug, Save, Trash2, User, Wrench, X, FileText } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
 import { AGENT_COLORS, AVATARS, AVATAR_KEYS, MESSAGE_TYPE_LABEL, TOOLS } from "@/lib/meta";
 import { cn, timeAgo } from "@/lib/utils";
@@ -13,8 +13,8 @@ import { useCanvas } from "@/stores/canvas";
 import type { AgentBehavior, AgentTools } from "@/types";
 import { AgentAvatar, EmptyState } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Slider, Switch, Textarea } from "@/components/ui/primitives";
-import { ScrollArea, Select, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/overlays";
+import { Field, Input, Switch, Textarea } from "@/components/ui/primitives";
+import { ScrollArea, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/overlays";
 import { ModelPicker } from "./ModelPicker";
 import { EffortPicker, type Effort } from "./EffortPicker";
 
@@ -45,8 +45,8 @@ export function Inspector() {
       </div>
       <Tabs defaultValue="profile" className="flex min-h-0 flex-1 flex-col">
         <div className="border-b border-border px-3 py-2">
-          <TabsList className="grid w-full grid-cols-7">
-            {[["profile", User], ["prompt", FileText], ["model", Cpu], ["tools", Wrench], ["behavior", SlidersHorizontal], ["memory", Brain], ["activity", Activity]].map(([v, I]) => {
+          <TabsList className="grid w-full grid-cols-6">
+            {[["profile", User], ["prompt", FileText], ["model", Cpu], ["tools", Wrench], ["memory", Brain], ["activity", Activity]].map(([v, I]) => {
               const Icon = I as typeof User;
               return <TabsTrigger key={v as string} value={v as string} title={v as string} aria-label={v as string}><Icon /></TabsTrigger>;
             })}
@@ -83,7 +83,7 @@ export function Inspector() {
                 </div>
               </Field>
               <label className="flex items-center justify-between rounded-lg border border-border p-3">
-                <span><span className="flex items-center gap-1.5 text-sm font-medium"><Flag className="h-3.5 w-3.5 text-primary" />Entry agent</span><span className="text-xs text-muted-foreground">Receives the goal when the company runs</span></span>
+                <span><span className="flex items-center gap-1.5 text-sm font-medium"><Flag className="h-3.5 w-3.5 text-primary" />Team lead</span><span className="text-xs text-muted-foreground">Leads the team: plans every request, hires, and reports back to you</span></span>
                 <Switch checked={!!d.is_entry} onCheckedChange={(v) => update(id, { is_entry: v }, { history: true })} />
               </label>
             </TabsContent>
@@ -101,7 +101,7 @@ export function Inspector() {
                 </>
               ) : (
                 <>
-                  <p className="text-xs text-muted-foreground">This agent has a prompt of its own. Variables: <code>{"{{agent_name}}"}</code> <code>{"{{role}}"}</code> <code>{"{{company_name}}"}</code> <code>{"{{goal}}"}</code> <code>{"{{department}}"}</code> <code>{"{{manager}}"}</code> <code>{"{{reports}}"}</code> <code>{"{{team}}"}</code>. The runtime adds the team roster, channels, blackboard and tools.</p>
+                  <p className="text-xs text-muted-foreground">This agent has a prompt of its own. Variables: <code>{"{{agent_name}}"}</code> <code>{"{{role}}"}</code> <code>{"{{company_name}}"}</code> <code>{"{{goal}}"}</code>. Octopus adds the team, the project overview, the shared engineering standards, matching skills and the agent's notes.</p>
                   <Textarea value={d.system_prompt ?? ""} onChange={(e) => set({ system_prompt: e.target.value, behavior: { ...behavior, prompt_linked: false } })} className="min-h-[340px] font-mono text-[11.5px] leading-relaxed" spellCheck={false} aria-label="System prompt" />
                   <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                     {role ? <button className="text-primary hover:underline" onClick={() => update(id, applyRole(d, role), { history: true })}>Use the {role.role} role prompt</button> : <span />}
@@ -120,12 +120,6 @@ export function Inspector() {
               <Field label="Reasoning effort" hint="How long the model thinks before answering. Higher = better on hard work, more tokens and time.">
                 <EffortPicker value={(behavior.reasoning_effort ?? "default") as Effort} onChange={(v) => set({ behavior: { ...behavior, reasoning_effort: v } })} />
               </Field>
-              <Field label={`Temperature: ${(d.temperature ?? 0.4).toFixed(2)}`}>
-                <Slider min={0} max={2} step={0.05} value={[d.temperature ?? 0.4]} onValueChange={([v]) => set({ temperature: v })} aria-label="Temperature" />
-              </Field>
-              <Field label="Max output tokens" hint="Per reply, reasoning included. 128,000 is gpt-6-luna's maximum on Azure; you only pay for tokens actually generated.">
-                <Input type="number" min={64} max={128000} value={d.max_tokens ?? 128000} onChange={(e) => set({ max_tokens: Math.min(128000, Math.max(64, +e.target.value || 64)) })} />
-              </Field>
             </TabsContent>
 
             <TabsContent value="tools" className="space-y-4">
@@ -140,22 +134,6 @@ export function Inspector() {
                 ))}
               </div>
               <McpGrants tools={tools} onChange={(ids) => set({ tools: { ...tools, mcp_servers: ids } })} />
-            </TabsContent>
-
-            <TabsContent value="behavior" className="space-y-5">
-              <Heading>Behavior</Heading>
-              {(["assertiveness", "creativity", "strictness"] as const).map((k) => (
-                <Field key={k} label={`${k[0].toUpperCase()}${k.slice(1)}: ${Math.round((behavior[k] ?? 0.5) * 100)}%`}>
-                  <Slider min={0} max={1} step={0.05} value={[behavior[k] ?? 0.5]} onValueChange={([v]) => set({ behavior: { ...behavior, [k]: v } })} aria-label={k} />
-                </Field>
-              ))}
-              <Field label="Debate style">
-                <Select value={behavior.debate_style ?? "balanced"} onValueChange={(v) => set({ behavior: { ...behavior, debate_style: v as AgentBehavior["debate_style"] } })}
-                  options={[{ value: "agreeable", label: "Agreeable", hint: "Seeks common ground quickly" }, { value: "balanced", label: "Balanced", hint: "Judges on merit" }, { value: "devils_advocate", label: "Devil's advocate", hint: "Stress-tests every idea" }]} />
-              </Field>
-              <Field label="Max autonomous turns" hint="Hard cap on how many turns this agent may take in one run.">
-                <Input type="number" min={1} max={200} value={behavior.max_autonomous_turns ?? 12} onChange={(e) => set({ behavior: { ...behavior, max_autonomous_turns: Math.min(200, Math.max(1, +e.target.value || 1)) } })} />
-              </Field>
             </TabsContent>
 
             <TabsContent value="memory"><MemoryTab agentId={id} /></TabsContent>
@@ -206,7 +184,7 @@ function MemoryTab({ agentId }: { agentId: string }) {
   return (
     <div className="space-y-4">
       <Heading>Long-term memory</Heading>
-      <p className="text-xs text-muted-foreground">Persistent notes injected into every prompt. Agents add to it with the <code>remember</code> action. Short-term memory is the conversation itself (with rolling summaries).</p>
+      <p className="text-xs text-muted-foreground">Notes this agent sees on every task. Agents add their own with the <code>remember</code> tool; you can add or delete notes here.</p>
       {q.isError ? <p className="text-xs text-muted-foreground">Save the canvas first to use memory.</p> : (
         <ul className="space-y-1.5">
           {q.data?.map((m) => (

@@ -91,10 +91,9 @@ function Providers() {
 function useProviderSave(provider: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { api_key: string; base_url: string; options: { api_version?: string; api_style?: "auto" | "responses" | "chat" | "legacy"; auth?: "key" | "entra"; deployments?: string[]; reasoning_models?: string[]; deployment_type?: DeploymentType; pricing?: Record<string, number> } }) =>
+    mutationFn: (body: { api_key: string; base_url: string; options: { auth?: "key" | "entra"; deployments?: string[]; deployment_type?: DeploymentType; pricing?: Record<string, number> } }) =>
       unwrap(api.PUT("/api/v1/settings/providers", { body: { provider: provider as "azure", api_key: body.api_key, base_url: body.base_url,
-        options: { api_version: body.options.api_version ?? "", api_style: body.options.api_style ?? "auto", auth: body.options.auth ?? "key", deployments: body.options.deployments ?? [], reasoning_models: body.options.reasoning_models ?? [],
-          deployment_type: body.options.deployment_type ?? "global", pricing: body.options.pricing ?? {} } } })),
+        options: { auth: body.options.auth ?? "key", deployments: body.options.deployments ?? [], deployment_type: body.options.deployment_type ?? "global", pricing: body.options.pricing ?? {} } } })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.settings }); toast.success("Saved"); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -120,29 +119,20 @@ function TestButton({ provider, model, disabled }: { provider: string; model: st
   );
 }
 
-type AzureStyle = "auto" | "responses" | "chat" | "legacy";
 type DeploymentType = "global" | "data_zone" | "regional";
-/** gpt-6-luna Standard rates, USD per 1M tokens (backend: app/llm/pricing.py). */
-const DEFAULT_RATES = { input: 0.1, cached_input: 0.01, cache_write: 0.125, output: 0.5 };
-const RATE_FIELDS = [["input", "Input"], ["cached_input", "Cached input"], ["cache_write", "Cache writes"], ["output", "Output"]] as const;
+/** gpt-6-luna Standard rates, USD per 1M tokens (server: server/src/llm/pricing.ts). */
+const DEFAULT_RATES = { input: 0.1, cached_input: 0.01, output: 0.5 };
+const RATE_FIELDS = [["input", "Input"], ["cached_input", "Cached input"], ["output", "Output"]] as const;
 const DEFAULT_DEPLOYMENT = "gpt-6-luna";
 
-/** Mirrors backend app/llm/azure_v1.py:azure_v1_target so users see exactly which URL Octopus will call. */
-export function describeAzureEndpoint(url: string, style: AzureStyle): { ok: boolean; text: string } {
-  const u0 = url.trim().split(/[?#]/)[0].replace(/\/+$/, "");
-  if (!u0) return { ok: false, text: "" };
-  if (!/^https?:\/\//.test(u0)) return { ok: false, text: "The endpoint must start with https://" };
-  if (style === "legacy" || u0.includes("/openai/deployments/")) {
-    return { ok: true, text: `Legacy API: ${u0.split("/openai")[0]}/openai/deployments/<deployment>/chat/completions?api-version=…` };
-  }
-  let u = u0, kind: "responses" | "chat" = "responses";
-  if (u.endsWith("/responses")) u = u.slice(0, -"/responses".length);
-  else if (u.endsWith("/chat/completions")) { u = u.slice(0, -"/chat/completions".length); kind = "chat"; }
-  if (u.endsWith("/openai/v1")) { /* already v1 */ } else if (u.endsWith("/openai")) u += "/v1";
-  else if (u.endsWith("/models")) u = `${u.slice(0, -"/models".length)}/openai/v1`;
-  else u += "/openai/v1";
-  if (style === "responses" || style === "chat") kind = style;
-  return { ok: true, text: `${kind === "responses" ? "Responses API" : "Chat Completions API"} (v1): ${u}/${kind === "responses" ? "responses" : "chat/completions"}` };
+/** Mirrors normalizeEndpoint in server/src/llm/azure.ts, so you see exactly which URL Octopus will call. */
+export function describeAzureEndpoint(url: string): { ok: boolean; text: string } {
+  const u = url.trim().split(/[?#]/)[0].replace(/\/+$/, "");
+  if (!u) return { ok: false, text: "" };
+  if (!/^https?:\/\//.test(u)) return { ok: false, text: "The endpoint must start with https://" };
+  const origin = /^(https?:\/\/[^/]+)/.exec(u)?.[1] ?? u;
+  const deployment = /\/openai\/deployments\/([^/]+)/.exec(u)?.[1];
+  return { ok: true, text: `Responses API: ${origin}/openai/v1/responses${deployment ? ` (deployment ${deployment} is added to your list)` : ""}` };
 }
 
 function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
@@ -152,32 +142,28 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
   const [endpoint, setEndpoint] = React.useState(saved?.base_url ?? "");
   const [key, setKey] = React.useState("");
   const [auth, setAuth] = React.useState<"key" | "entra">((saved?.options.auth as "key" | "entra") ?? "key");
-  const [style, setStyle] = React.useState<AzureStyle>((saved?.options.api_style as AzureStyle) ?? "auto");
-  const [version, setVersion] = React.useState(saved?.options.api_version || "2024-10-21");
   const [deps, setDeps] = React.useState((saved?.options.deployments ?? []).join("\n") || DEFAULT_DEPLOYMENT);
-  const [reasoning, setReasoning] = React.useState((saved?.options.reasoning_models ?? []).join(", "));
   const [advanced, setAdvanced] = React.useState(false);
   const [depType, setDepType] = React.useState<DeploymentType>((saved?.options.deployment_type as DeploymentType) ?? "global");
   const [rates, setRates] = React.useState<Record<string, string>>(Object.fromEntries(Object.entries(saved?.options.pricing ?? {}).map(([k, v]) => [k, String(v)])));
   React.useEffect(() => {
     if (!saved) return;
-    setEndpoint(saved.base_url); setAuth((saved.options.auth as "key" | "entra") ?? "key"); setVersion(saved.options.api_version || "2024-10-21");
-    setStyle((saved.options.api_style as AzureStyle) ?? "auto");
+    setEndpoint(saved.base_url); setAuth((saved.options.auth as "key" | "entra") ?? "key");
     setDepType((saved.options.deployment_type as DeploymentType) ?? "global");
     setRates(Object.fromEntries(Object.entries(saved.options.pricing ?? {}).map(([k, v]) => [k, String(v)])));
-    setDeps((saved.options.deployments ?? []).join("\n") || DEFAULT_DEPLOYMENT); setReasoning((saved.options.reasoning_models ?? []).join(", "));
+    setDeps((saved.options.deployments ?? []).join("\n") || DEFAULT_DEPLOYMENT);
   }, [saved]);
   const save = useProviderSave(provider);
   const depList = deps.split(/[\n,]/).map((d) => d.trim()).filter(Boolean);
   const [testModel, setTestModel] = React.useState(depList[0] ?? "");
   React.useEffect(() => { if (!depList.includes(testModel)) setTestModel(depList[0] ?? ""); }, [depList, testModel]);
   const qc = useQueryClient();
+  const [confirmRemove, setConfirmRemove] = React.useState(false);
   const remove = useMutation({
     mutationFn: () => unwrap(api.DELETE("/api/v1/settings/providers/{provider}", { params: { path: { provider } } })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.settings }); setKey(""); setEndpoint(""); toast.success("Removed"); },
   });
-  const detected = isOpenAI ? describeAzureEndpoint(endpoint, style) : null;
-  const legacy = isOpenAI && (style === "legacy" || endpoint.includes("/openai/deployments/"));
+  const detected = isOpenAI ? describeAzureEndpoint(endpoint) : null;
   const needsKey = auth === "key" && !saved?.masked_key && !key;
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -187,7 +173,7 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
         {info?.configured ? <Badge variant="success"><CheckCircle2 className="h-3 w-3" />Connected</Badge> : <Badge variant="outline">Not connected</Badge>}
       </div>
       <div className="space-y-4 p-4">
-        <Step n={1} title="Endpoint" hint={isOpenAI ? "Paste it exactly as the Azure or Foundry portal shows it. Any of these work: resource URL, …/openai/v1, …/openai/v1/responses." : endpointHint}>
+        <Step n={1} title="Endpoint" hint={isOpenAI ? "Paste it exactly as the Azure or Foundry portal shows it: the resource URL, …/openai/v1, …/openai/v1/responses or an older …/openai/deployments/… URL all work." : endpointHint}>
           <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder={endpointHint} className="font-mono text-xs" aria-label={`${title} endpoint`} />
           {detected?.text && (
             <p className={cn("mt-1.5 flex items-start gap-1 break-all text-[11px]", detected.ok ? "text-success" : "text-destructive")}>
@@ -220,26 +206,13 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
                   { value: "key", label: "API key", hint: "Keys and Endpoint page of the resource" },
                   { value: "entra", label: "Microsoft Entra ID", hint: "Uses az login / managed identity / env credentials" }]} />
               </Field>
-              {isOpenAI && (
-                <Field label="API">
-                  <Select value={style} onValueChange={(v) => setStyle(v as AzureStyle)} options={[
-                    { value: "auto", label: "Automatic (recommended)", hint: "Detected from the endpoint; Responses API by default" },
-                    { value: "responses", label: "v1 Responses API", hint: "/openai/v1/responses" },
-                    { value: "chat", label: "v1 Chat Completions", hint: "/openai/v1/chat/completions" },
-                    { value: "legacy", label: "Legacy (api-version)", hint: "/openai/deployments/<name>/…?api-version=" }]} />
-                </Field>
-              )}
-              {legacy && <Field label="API version" hint="Legacy API only"><Input value={version} onChange={(e) => setVersion(e.target.value)} className="font-mono text-xs" /></Field>}
-              <Field label="Reasoning deployments" hint="Optional. Octopus drops parameters a deployment rejects (like temperature) automatically. List them here to skip that first retry.">
-                <Input value={reasoning} onChange={(e) => setReasoning(e.target.value)} placeholder="gpt-6-luna, o4-mini" className="font-mono text-xs" />
-              </Field>
               <Field label="Deployment type" hint="Data Zone and regional deployments cost 10% more.">
                 <Select value={depType} onValueChange={(v) => setDepType(v as DeploymentType)} ariaLabel="Deployment type" options={[
                   { value: "global", label: "Global Standard" }, { value: "data_zone", label: "Data Zone Standard (+10%)" }, { value: "regional", label: "Regional (+10%)" }]} />
               </Field>
               <div className="sm:col-span-2">
                 <div className="mb-1 text-xs font-medium">Pricing <span className="font-normal text-muted-foreground">(USD per 1M tokens, empty = gpt-6-luna list price)</span></div>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {RATE_FIELDS.map(([k, label]) => (
                     <label key={k} className="space-y-1 text-[11px] text-muted-foreground">{label}
                       <Input type="number" step="0.001" min="0" value={rates[k] ?? ""} placeholder={String(DEFAULT_RATES[k])} aria-label={`${label} price`}
@@ -247,7 +220,7 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
                     </label>
                   ))}
                 </div>
-                <p className="mt-1 text-[10.5px] text-muted-foreground">Costs use the exact token counts Azure returns: uncached input, cached input, cache writes and output (reasoning included). Prompts over 272K tokens bill 2× input and 1.5× output.</p>
+                <p className="mt-1 text-[10.5px] text-muted-foreground">Costs use the exact token counts Azure returns: uncached input, cached input and output (reasoning included). Prompts over 272K tokens bill 2× input and 1.5× output.</p>
               </div>
             </div>
           )}
@@ -255,11 +228,12 @@ function AzureCard({ provider, title, subtitle, info, saved, endpointHint }: {
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-border bg-background/40 px-4 py-2.5">
         <Button size="sm" loading={save.isPending} disabled={!endpoint || needsKey || (detected ? !detected.ok : false)} title={needsKey ? "Add an API key" : undefined}
-          onClick={() => save.mutate({ api_key: key, base_url: endpoint, options: { api_version: legacy ? version : "", api_style: style, auth, deployments: depList, reasoning_models: reasoning.split(",").map((x) => x.trim()).filter(Boolean),
-            deployment_type: depType, pricing: Object.fromEntries(Object.entries(rates).filter(([, v]) => v !== "" && !Number.isNaN(Number(v))).map(([k, v]) => [k, Number(v)])) } })}>Save</Button>
+          onClick={() => save.mutate({ api_key: key, base_url: endpoint, options: { auth, deployments: depList, deployment_type: depType, pricing: Object.fromEntries(Object.entries(rates).filter(([, v]) => v !== "" && !Number.isNaN(Number(v))).map(([k, v]) => [k, Number(v)])) } })}>Save</Button>
         {depList.length > 1 && <Select value={testModel} onValueChange={setTestModel} options={depList.map((d) => ({ value: d, label: d }))} className="h-8 w-40 text-xs" ariaLabel="Deployment to test" />}
         <TestButton provider={provider} model={testModel || depList[0] || ""} disabled={!info?.configured} />
-        {saved && <Button size="sm" variant="ghost" className="ml-auto text-destructive hover:text-destructive" onClick={() => remove.mutate()}><Trash2 />Remove</Button>}
+        {saved && <Button size="sm" variant="ghost" className="ml-auto text-destructive hover:text-destructive" onClick={() => setConfirmRemove(true)}><Trash2 />Remove</Button>}
+        <ConfirmDialog open={confirmRemove} onOpenChange={setConfirmRemove} title="Disconnect Azure OpenAI?" destructive confirmLabel="Disconnect"
+          description="Octopus deletes the saved endpoint and key from this computer. Agents cannot work until you connect again." onConfirm={() => remove.mutate()} />
       </div>
     </div>
   );
@@ -334,11 +308,8 @@ type BadgeVariant = "success" | "destructive" | "outline" | "warning";
 export function browserBadge(status?: string): { label: string; variant: BadgeVariant } {
   switch (status) {
     case "ready": return { label: "Browser working", variant: "success" };
-    case "server_ready": return { label: "Not verified yet", variant: "warning" };
-    case "starting": return { label: "Starting…", variant: "outline" };
-    case "installing": return { label: "Installing browser…", variant: "outline" };
+    case "unverified": case undefined: return { label: "Not tested yet", variant: "outline" };
     case "error": return { label: "Can't launch", variant: "destructive" };
-    case "stopped": case undefined: return { label: "Starts on first use", variant: "outline" };
     default: return { label: status, variant: "outline" };
   }
 }
@@ -376,8 +347,8 @@ function BrowserCard() {
         {test.isPending && <span className="text-xs text-muted-foreground">The first run downloads the browser, which can take a minute.</span>}
         {res && <span className={cn("flex items-center gap-1 text-xs", res.ok ? "text-success" : "text-destructive")}>{res.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}{res.detail}{res.latency_ms ? <span className="text-muted-foreground">· {res.latency_ms}ms</span> : null}</span>}
         {st && (
-          <Tip content="The tool count comes from the MCP server; it says nothing about whether a browser can launch (that's the badge).">
-            <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{st.package} · {st.browser} · MCP server {["server_ready", "ready"].includes(st.status) ? "up" : "not running"} · {st.tools?.length ?? 0} tools</span>
+          <Tip content="Starts the first time an agent needs a browser. Test browser opens a page to check it works.">
+            <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{st.package} · {st.browser}{st.verified ? ` · ${st.tools.length} tools` : ""}</span>
           </Tip>
         )}
       </div>
@@ -447,16 +418,31 @@ function ProjectSettings() {
   const patch = useMutation({
     mutationFn: (body: { name?: string }) => unwrap(api.PATCH("/api/v1/workspaces/{workspace_id}", { params: { path: { workspace_id: w } }, body })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.workspace(w) }); qc.invalidateQueries({ queryKey: qk.workspaces }); toast.success("Project updated"); },
+    onError: (e: Error) => toast.error("Could not rename the project", { description: e.message }),
+  });
+  const navigate = useNavigate();
+  const [removing, setRemoving] = React.useState(false);
+  const remove = useMutation({
+    mutationFn: () => unwrap(api.DELETE("/api/v1/workspaces/{workspace_id}", { params: { path: { workspace_id: w } } })),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.workspaces }); toast.success("Project removed from Octopus"); navigate("/"); },
+    onError: (e: Error) => toast.error("Could not remove the project", { description: e.message }),
   });
   if (!data) return <div className="skeleton h-40" />;
   return (
-    <Section title="Project" description="Agents are sandboxed to this directory. All Octopus data for it lives in its .octopus folder.">
+    <Section title="Project" description="Agents can only work inside this folder. Octopus keeps this project's data in its .octopus folder.">
       <div className="space-y-4 rounded-xl border border-border bg-surface p-4">
         <Field label="Name"><div className="flex gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} /><Button variant="secondary" onClick={() => patch.mutate({ name })} disabled={name === data.name}>Rename</Button></div></Field>
         <Field label="Directory"><code className="block rounded-md bg-muted px-2.5 py-2 font-mono text-xs">{data.path}</code></Field>
-        <Field label="Data folder" hint="Contains octopus.db (companies, agents, conversations, activity and artifact history), plans/ and exports/. Git-ignored by default.">
+        <Field label="Data folder" hint="octopus.db (teams, conversations, tasks, file history, agent notes), work/ (the team's working notes) and trash/ (deleted files you can restore). Ignored by Git.">
           <code className="block rounded-md bg-muted px-2.5 py-2 font-mono text-xs">{data.path}/.octopus/</code>
         </Field>
+      </div>
+      <div className="mt-4 rounded-xl border border-destructive/30 p-4">
+        <h3 className="text-sm font-medium">Remove from Octopus</h3>
+        <p className="mt-1 text-xs text-muted-foreground">Octopus forgets this project. Your files and the .octopus history stay in the folder; open it again to bring everything back.</p>
+        <Button className="mt-3" size="sm" variant="outline" onClick={() => setRemoving(true)}><Trash2 />Remove project</Button>
+        <ConfirmDialog open={removing} onOpenChange={setRemoving} title="Remove this project from Octopus?" destructive confirmLabel="Remove"
+          description={`Nothing in ${data.path} is deleted.`} onConfirm={() => remove.mutate()} />
       </div>
     </Section>
   );
@@ -577,7 +563,7 @@ function TemplatesSection() {
             <LayoutTemplate className="h-4 w-4 text-primary" />
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium">{t.name}</div>
-              <div className="truncate text-xs text-muted-foreground">{t.description || `${t.agent_count} agents · ${t.edge_count} channels`}</div>
+              <div className="truncate text-xs text-muted-foreground">{t.description || `${t.agent_count} ${t.agent_count === 1 ? "agent" : "agents"} · ${t.edge_count} ${t.edge_count === 1 ? "channel" : "channels"}`}</div>
               <div className="mt-1"><DepartmentChips departments={t.departments ?? []} /></div>
             </div>
             <Button size="icon-sm" variant="ghost" aria-label="Rename" onClick={() => setRenaming({ key: t.key, name: t.name, description: t.description })}><Pencil /></Button>

@@ -58,7 +58,7 @@ export default function RunsPage() {
 
   return (
     <div className="content-page flex h-full min-h-0 flex-col">
-      <PageHeader title="Team activity" description="Follow your team's work, revisit conversations, or continue where you left off." actions={<Button onClick={() => setOpen(true)} disabled={!companyId}><Play />New conversation</Button>} />
+      <PageHeader title="Conversation history" description="Every conversation with your team: open one to continue it, watch its live view, download its report or delete it." actions={<Button onClick={() => setOpen(true)} disabled={!companyId}><Play />New conversation</Button>} />
       {!!data?.length && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div role="radiogroup" aria-label="Filter team activity" className="flex items-center gap-1">
@@ -133,14 +133,14 @@ function RunRow({ r, w, onDelete, onStop, onRerun, onReport }: { r: RunOut; w: s
           </div>
         )}
         {live && maxTurns > 0 && (
-          <div className="mt-1 flex items-center gap-2 text-[10.5px] text-muted-foreground" aria-label={`Turn ${r.turns} of ${maxTurns}`}>
+          <div className="mt-1 flex items-center gap-2 text-[10.5px] text-muted-foreground" aria-label={`Model call ${r.turns} of ${maxTurns}`}>
             <div className="h-1 w-32 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(100, (r.turns / maxTurns) * 100)}%` }} /></div>
-            turn {r.turns}/{maxTurns}
+            {r.turns}/{maxTurns} model calls
           </div>
         )}
       </Link>
       <ApprovalModeBadge mode={r.permission_level} />
-      <div className="shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} turns · {formatTokens(r.tokens_used)} tok · {money(r.cost_usd)}</div>
+      <div className="shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} model calls · {formatTokens(r.tokens_used)} tok · {money(r.cost_usd)}</div>
       {/* always reachable (keyboard and touch); dimmed until the row is hovered or focused */}
       <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" aria-label="Conversation actions">
         {live ? (

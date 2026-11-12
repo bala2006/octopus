@@ -12,9 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Badge, Field, Input, Textarea } from "@/components/ui/primitives";
 import { ConfirmDialog, Select } from "@/components/ui/overlays";
 
-export const ROLE_CATEGORIES = ["Leadership", "Product", "Design", "Engineering", "Quality", "Operations", "Security", "Research", "Data",
-  "Content", "Growth", "Support", "Debate", "General"] as const;
-export const PROMPT_VARS = ["{{agent_name}}", "{{role}}", "{{company_name}}", "{{goal}}", "{{department}}", "{{manager}}", "{{reports}}", "{{team}}"];
+export const ROLE_CATEGORIES = ["Leadership", "Product & Design", "Engineering", "Quality & Ops", "Research", "Growth", "Custom"] as const;
+export const PROMPT_VARS = ["{{agent_name}}", "{{role}}", "{{company_name}}", "{{goal}}"];
 
 type Draft = { role: string; category: string; description: string; system_prompt: string };
 const draftOf = (r: RoleTemplateOut): Draft => ({ role: r.role, category: r.category, description: r.description, system_prompt: r.system_prompt });

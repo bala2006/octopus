@@ -38,13 +38,13 @@ const MODES = [
     v: "autonomous",
     label: "Autonomous",
     icon: Zap,
-    d: "Your team works until the task is done or a limit is reached",
+    d: "The team works until the request is done or a limit is reached",
   },
   {
     v: "step",
     label: "Step",
     icon: Footprints,
-    d: "You guide the team one step at a time",
+    d: "The team pauses after every model call until you press Next step",
   },
 ] as const;
 
@@ -125,7 +125,7 @@ export function RunDialog({
             Start a team conversation
           </DialogTitle>
           <DialogDescription>
-            Your message goes to the team orchestrator, which coordinates the agents through their communication channels.
+            Octopus plans the work, assigns it to the team, has every change reviewed and checked, and reports back. Set limits for this conversation below.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">

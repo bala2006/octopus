@@ -375,7 +375,7 @@ function CompanyChat({ session, agents, companyId }: { session: SessionOut; agen
         }}
         extra={shownRun ? (
           <Select ariaLabel="Send to" value={target} onValueChange={setTarget} variant="ghost" className="w-auto max-w-40"
-            options={[{ value: "all", label: live ? "Everyone" : "Entry agent" }, ...Object.values(agents).map((a) => ({ value: a.id, label: a.name }))]} />
+            options={[{ value: "all", label: live ? "Octopus (team lead)" : "Team lead" }, ...Object.values(agents).map((a) => ({ value: a.id, label: a.name }))]} />
         ) : (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Play className="h-3 w-3" />starts a team conversation</span>
         )}

@@ -1,13 +1,12 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { ArrowLeftRight, ArrowRight, Trash2, X } from "lucide-react";
-import { EDGE_TYPES } from "@/lib/meta";
+import { CHANNEL_CHOICES, EDGE_TYPES } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useCanvas } from "@/stores/canvas";
-import type { EdgeType } from "@/types";
 import { AgentAvatar } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Textarea } from "@/components/ui/primitives";
+import { Field, Input } from "@/components/ui/primitives";
 
 /** Floating panel to configure a communication channel (type, direction, label, limits, handoff, condition). */
 export function EdgeEditor() {
@@ -53,8 +52,8 @@ export function EdgeEditor() {
         </div>
         {!d.bidirectional && <button onClick={swap} className="text-[11px] text-primary hover:underline">Reverse direction</button>}
 
-        <div className="grid grid-cols-5 gap-1" role="radiogroup" aria-label="Channel type">
-          {(Object.keys(EDGE_TYPES) as EdgeType[]).map((t) => {
+        <div className="grid grid-cols-4 gap-1" role="radiogroup" aria-label="Channel type">
+          {CHANNEL_CHOICES.map((t) => {
             const m = EDGE_TYPES[t];
             const on = d.type === t;
             return (
@@ -66,17 +65,6 @@ export function EdgeEditor() {
         </div>
         <p className="text-[11px] text-muted-foreground">{EDGE_TYPES[d.type].description}</p>
         <Field label="Label"><Input className="h-8" value={d.label} onChange={(e) => patch({ label: e.target.value })} placeholder={EDGE_TYPES[d.type].label} /></Field>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Max turns"><Input className="h-8" type="number" min={1} max={500} value={d.config.max_turns} onChange={(e) => patch({ config: { ...d.config, max_turns: Math.max(1, +e.target.value || 1) } })} /></Field>
-          {d.type === "debate" && <Field label="Max rounds"><Input className="h-8" type="number" min={1} max={50} value={d.config.max_rounds} onChange={(e) => patch({ config: { ...d.config, max_rounds: Math.max(1, +e.target.value || 1) } })} /></Field>}
-          {d.type === "review" && <Field label="Max revisions"><Input className="h-8" type="number" min={1} max={50} value={d.config.max_revisions} onChange={(e) => patch({ config: { ...d.config, max_revisions: Math.max(1, +e.target.value || 1) } })} /></Field>}
-        </div>
-        <Field label="Handoff instructions" hint="Injected into the sender's prompt for this channel.">
-          <Textarea className="min-h-[56px] text-xs" value={d.config.handoff_instructions} onChange={(e) => patch({ config: { ...d.config, handoff_instructions: e.target.value } })} placeholder="Include acceptance criteria and file paths" />
-        </Field>
-        <Field label="Condition (optional)" hint='Natural language, checked by a gatekeeper model before delivery, e.g. "only if tests pass".'>
-          <Input className="h-8 text-xs" value={d.config.condition} onChange={(e) => patch({ config: { ...d.config, condition: e.target.value } })} placeholder="only if code is ready" />
-        </Field>
       </div>
       <div className="flex shrink-0 justify-end border-t border-border bg-surface px-2 py-1.5">
         <Button variant="ghost" size="xs" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => deleteEdge(id)}><Trash2 />Delete channel</Button>

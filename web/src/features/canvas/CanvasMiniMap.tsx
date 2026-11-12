@@ -68,7 +68,7 @@ function MiniNode({ id, x, y, width, height, selected, onClick }: MiniMapNodePro
       {d.is_entry && <circle cx={x + width - height * 0.16} cy={y + height * 0.16} r={height * 0.1} fill="hsl(var(--primary))" stroke="white" strokeWidth={3} />}
       <text x={x + width / 2} y={y + height / 2} textAnchor="middle" dominantBaseline="central" fontSize={height * 0.42} fontWeight={700}
         fill={status ? "white" : "hsl(var(--foreground))"} pointerEvents="none" style={{ userSelect: "none" }}>{initials(d.name)}</text>
-      <title>{`${d.name}${d.role ? ` · ${d.role}` : ""}${d.department ? ` · ${d.department}` : ""}${d.is_entry ? " · entry agent" : ""}${status ? ` · ${meta.label}` : ""}${inactive ? " · inactive" : ""}`}</title>
+      <title>{`${d.name}${d.role ? ` · ${d.role}` : ""}${d.department ? ` · ${d.department}` : ""}${d.is_entry ? " · team lead" : ""}${status ? ` · ${meta.label}` : ""}${inactive ? " · inactive" : ""}`}</title>
     </g>
   );
 }

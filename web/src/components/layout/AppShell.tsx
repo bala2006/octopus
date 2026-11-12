@@ -195,8 +195,9 @@ function CompanySwitcher() {
       qc.invalidateQueries({ queryKey: qk.companies(w) });
       qc.invalidateQueries({ queryKey: qk.canvas(w, companyId) });
       setRenaming(false);
-      toast.success("Renamed");
+      toast.success("Team renamed");
     },
+    onError: (e: Error) => toast.error("Could not rename the team", { description: e.message }),
   });
   const del = useMutation({
     mutationFn: () =>
@@ -206,6 +207,8 @@ function CompanySwitcher() {
         }),
       ),
     onSuccess: () => {
+      const next = companies?.find((c) => c.id !== companyId);
+      if (next) setCompanyId(next.id);
       qc.invalidateQueries({ queryKey: qk.companies(w) });
       toast.success(`Deleted ${current?.name}`);
     },

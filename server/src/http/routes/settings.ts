@@ -63,9 +63,13 @@ export function settingsRoutes(route: RouteFn, reg: Registry) {
   });
   route("GET", "/api/v1/settings/fx", ({ query }) => usdRate(query.currency));
 
+  // The last browser check, so the status says what was actually observed rather than assuming success.
+  let browserCheck: { ok: boolean; error?: string; tools: string[] } | null = null;
   route("GET", "/api/v1/settings/browser", () => ({
-    enabled: config.browserEnabled, status: config.browserEnabled ? "ready" : "disabled", browser: "Chrome (or Chrome for Testing)", package: BROWSER_PACKAGE,
-    node: true, verified: false, tools: [],
+    enabled: config.browserEnabled,
+    status: !config.browserEnabled ? "disabled" : !browserCheck ? "unverified" : browserCheck.ok ? "ready" : "error",
+    browser: "Chrome (or Chrome for Testing)", package: BROWSER_PACKAGE, node: true,
+    verified: !!browserCheck?.ok, error: browserCheck?.error, tools: browserCheck?.tools ?? [],
   }));
   route("POST", "/api/v1/settings/browser/test", async () => {
     const started = Date.now();
@@ -73,8 +77,12 @@ export function settingsRoutes(route: RouteFn, reg: Registry) {
       const dir = path.join(config.home, "browser-test");
       mkdirSync(path.join(dir, ".octopus"), { recursive: true });
       const conn = await browserConnection(dir);
-      return { ok: true, detail: `Browser ready with ${conn.tools.length} tools`, latency_ms: Date.now() - started };
+      const page = await conn.client.callTool({ name: "browser_navigate", arguments: { url: "about:blank" } });
+      if (page.isError) throw new Error("The browser started but could not open a page");
+      browserCheck = { ok: true, tools: conn.tools.map((t) => t.name) };
+      return { ok: true, detail: `Browser works (${conn.tools.length} tools)`, latency_ms: Date.now() - started };
     } catch (e) {
+      browserCheck = { ok: false, error: (e as Error).message, tools: [] };
       return { ok: false, detail: (e as Error).message, latency_ms: Date.now() - started };
     }
   });

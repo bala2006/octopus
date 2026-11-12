@@ -25,9 +25,9 @@ export function GettingStarted({ onRun }: { onRun?: () => void }) {
     { title: "Create a team", hint: "Start from a template, then tweak agents.", done: !!companies.data?.length },
     { title: "Connect a model", hint: "Agents need Azure OpenAI to run.", done: modelReady, optional: false,
       action: <Link to={`/w/${w}/settings#providers`} className="text-primary hover:underline">Connect</Link> },
-    { title: "Run a goal", hint: "Tell the team what to build.", done: hasRun,
-      action: onRun && <button onClick={onRun} className="text-primary hover:underline">Run</button> },
-    { title: "Review the results", hint: "Files, diffs and the final report.", done: finished,
+    { title: "Send your first request", hint: "Tell the team lead what you need.", done: hasRun,
+      action: onRun && <button onClick={onRun} className="text-primary hover:underline">Start</button> },
+    { title: "Review the results", hint: "Changed files, diffs and the final report.", done: finished,
       action: <Link to={`/w/${w}/artifacts`} className="text-primary hover:underline">Open</Link> },
   ];
   const done = steps.filter((s) => s.done).length;

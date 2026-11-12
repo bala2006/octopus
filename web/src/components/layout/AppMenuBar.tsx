@@ -1,0 +1,104 @@
+/**
+ * The window bar: history navigation, the sidebar toggle and the File / Edit / View / Help menus. Every entry does
+ * something; entries that need an open project are disabled with a hint until one is open.
+ */
+import * as React from "react";
+import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import {
+  ArrowLeft, ArrowRight, BookOpen, Download, FileSearch, FolderOpen, GitCompare, History, Keyboard, LayoutGrid, MessageSquare,
+  MessagesSquare, Moon, Network, PanelLeft, Settings, SquarePen, Sun, Bug, Info, Code2,
+} from "lucide-react";
+import { toast } from "sonner";
+import { useApp } from "@/stores/app";
+import { useWorkspaceId } from "@/hooks/queries";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger,
+} from "@/components/ui/overlays";
+import { download } from "@/lib/utils";
+import { fetchRaw } from "@/lib/api";
+import { QUICK_OPEN_EVENT } from "./CommandPalette";
+
+export const PROJECT_VIEWS = [
+  { to: "agent", label: "Conversation", icon: MessageSquare, shortcut: "Alt+0" },
+  { to: "canvas", label: "Team canvas", icon: Network, shortcut: "Alt+1" },
+  { to: "chat", label: "Agent chats", icon: MessagesSquare, shortcut: "Alt+2" },
+  { to: "runs", label: "Conversation history", icon: History, shortcut: "Alt+3" },
+  { to: "artifacts", label: "Changes", icon: GitCompare, shortcut: "Alt+4" },
+  { to: "workspace", label: "Code workspace", icon: Code2, shortcut: "Alt+7" },
+] as const;
+
+let furthest = 0;
+
+export function AppMenuBar({ onToggleSidebar, onNewConversation, onOpenFolder }: {
+  onToggleSidebar: () => void;
+  onNewConversation: () => void;
+  onOpenFolder: () => void;
+}) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const navType = useNavigationType();
+  const w = useWorkspaceId();
+  const { theme, toggleTheme } = useApp();
+  const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+  React.useEffect(() => { if (navType === "PUSH" || idx > furthest) furthest = idx; }, [location.key, navType, idx]);
+  const inProject = (to: string) => (w ? () => navigate(`/w/${w}/${to}`) : undefined);
+  const needsProject = !w;
+  const projectHint = needsProject ? "Open a project first" : undefined;
+  const downloadFiles = async () => {
+    const t = toast.loading("Preparing ZIP…");
+    try {
+      const res = await fetchRaw(`/api/v1/w/${w}/files.zip`);
+      download("project.zip", await res.blob(), "application/zip");
+      toast.success("Downloaded the project files", { id: t });
+    } catch (e) {
+      toast.error("Download failed", { id: t, description: (e as Error).message });
+    }
+  };
+  const item = (label: string, icon: React.ReactNode, onSelect?: () => void, shortcut?: string, hint?: string) => (
+    <DropdownMenuItem disabled={!onSelect} onSelect={onSelect} title={!onSelect ? hint : undefined}>
+      {icon}{label}{shortcut && <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut>}
+    </DropdownMenuItem>
+  );
+  const menu = (label: string, children: React.ReactNode) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild><button type="button" className="app-top-menu">{label}</button></DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">{children}</DropdownMenuContent>
+    </DropdownMenu>
+  );
+  return (
+    <div className="app-top-rail" role="toolbar" aria-label="Application menu">
+      <div className="app-top-navigation">
+        <button type="button" aria-label="Back" title="Back" disabled={idx <= 0} onClick={() => navigate(-1)}><ArrowLeft /></button>
+        <button type="button" aria-label="Forward" title="Forward" disabled={idx >= furthest} onClick={() => navigate(1)}><ArrowRight /></button>
+        <button type="button" aria-label="Toggle sidebar" title="Show or hide projects and conversations" onClick={onToggleSidebar}><PanelLeft /></button>
+      </div>
+      {menu("File", <>
+        {item("New conversation", <SquarePen />, onNewConversation)}
+        {item("Open project folder…", <FolderOpen />, onOpenFolder)}
+        <DropdownMenuSeparator />
+        {item("Download project files", <Download />, w ? () => void downloadFiles() : undefined, undefined, projectHint)}
+        {item("All projects", <LayoutGrid />, () => navigate("/"))}
+      </>)}
+      {menu("Edit", <>
+        {item("Find file or page…", <FileSearch />, w ? () => window.dispatchEvent(new Event(QUICK_OPEN_EVENT)) : undefined, "Ctrl K", projectHint)}
+        <DropdownMenuSeparator />
+        {item("Settings", <Settings />, () => navigate(w ? `/w/${w}/settings` : "/settings"))}
+      </>)}
+      {menu("View", <>
+        <DropdownMenuLabel>{needsProject ? "Open a project to see its views" : "Project"}</DropdownMenuLabel>
+        {PROJECT_VIEWS.map((v) => <React.Fragment key={v.to}>{item(v.label, <v.icon />, inProject(v.to), v.shortcut, projectHint)}</React.Fragment>)}
+        <DropdownMenuSeparator />
+        {item("Activity", <History />, () => navigate("/activity"))}
+        {item("Toggle sidebar", <PanelLeft />, onToggleSidebar)}
+        {item(theme === "dark" ? "Light mode" : "Dark mode", theme === "dark" ? <Sun /> : <Moon />, toggleTheme)}
+      </>)}
+      {menu("Help", <>
+        {item("Guide", <BookOpen />, () => navigate(w ? `/w/${w}/guide` : "/guide"))}
+        {item("Keyboard shortcuts", <Keyboard />, () => navigate(`${w ? `/w/${w}/guide` : "/guide"}#shortcuts`))}
+        <DropdownMenuSeparator />
+        {item("Report an issue", <Bug />, () => window.open("https://github.com/bala2006/octopus/issues/new/choose", "_blank", "noopener"))}
+        {item("About Octopus", <Info />, () => window.open("https://github.com/bala2006/octopus#readme", "_blank", "noopener"))}
+      </>)}
+    </div>
+  );
+}
