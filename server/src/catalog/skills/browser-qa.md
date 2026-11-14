@@ -6,10 +6,13 @@ roles: qa, qa_engineer, qa_lead, e2e_tester, playtester, designer, ux_designer, 
 # Browser QA
 
 ## Steps
-1. `browser_navigate` to the preview URL of the page. Then `browser_console_messages`: any error is a bug (copy it).
+1. `start_dev_server` for the URL, `browser_navigate` to it, then `browser_console_messages`: any error is a bug (copy it).
 2. `browser_snapshot` to see the page structure and get element refs.
 3. Walk every flow from the spec: click (`browser_click`), type (`browser_type`), press keys (`browser_press_key`),
    wait for results (`browser_wait_for`). After each step check the visible result in a new snapshot.
+   Games and pointer-lock apps: drive them through their test hook (`browser_evaluate` on `window.__game` or
+   `window.__app`), not with clicks that the lock swallows. No hook means the flow cannot be checked: report that once
+   and move on instead of retrying.
 4. Edge cases: empty submit, very long text, double click, rapid key presses, reload mid-flow, back button.
 5. Sizes: `browser_resize` to 375×800 and 1280×800; look for overflow, cut-off text, overlapping elements.
 6. Keyboard only: Tab through controls, Enter/Space activate, Esc closes dialogs; focus is visible.
