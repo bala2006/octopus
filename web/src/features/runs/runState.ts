@@ -3,6 +3,7 @@ import type { AwaitingQuestion } from "./QuestionCard";
 import type { AgentOut, EdgeOut, MessageOut, PendingApproval, RunEvent, TaskOut } from "@/types";
 import type { LiveOverlay } from "@/features/canvas/live";
 import { appendStream } from "./streamView";
+import { callStep, finishStep, thoughtStep, type Step } from "./steps";
 
 export interface ToolCall { call_id: string; agent_id: string; tool: string; args: Record<string, unknown>; ok?: boolean; output?: string; turn_no?: number; seq?: number }
 export type LiveTask = TaskOut;
@@ -11,8 +12,8 @@ export interface TimelineItem { seq: number; type: string; ts?: string; agent_id
 export interface OrgEvent { seq: number; kind: "created" | "updated"; by: string; agent_id: string; name: string; role?: string; department?: string; summary?: string; reason?: string; self?: boolean; persisted?: boolean; ts?: string }
 export type FeedMessage = MessageOut & { _seq?: number };
 export interface Usage {
-  tokens: number; cost_usd: number; turns: number; max_turns?: number; max_tokens?: number; max_cost_usd?: number; per_agent?: Record<string, number>;
-  active_seconds?: number; timeout_s?: number;
+  tokens: number; cost_usd: number; turns: number; per_agent?: Record<string, number>;
+  active_seconds?: number;
   /** exact provider usage: input includes cached + cache-write tokens, output includes reasoning tokens */
   input_tokens?: number; cached_tokens?: number; cache_write_tokens?: number; output_tokens?: number; reasoning_tokens?: number; llm_calls?: number; estimated_calls?: number;
   cost_breakdown?: { input?: number; cached_input?: number; cache_write?: number; output?: number };
@@ -51,6 +52,8 @@ export interface RunLive {
   departments: Record<string, { color: string }>;
   rejected: Array<Record<string, any>>; // eslint-disable-line @typescript-eslint/no-explicit-any
   toolCalls: Record<string, ToolCall>;
+  /** Every thought and tool call in order, for the chat's step tags (messages are kept in `messages`). */
+  steps: Step[];
   /** browser actions in order, all agents (each agent has its own tab) */
   browser: BrowserAction[];
   workflow: WorkflowState | null;
@@ -73,7 +76,7 @@ export interface RunLive {
 export const initialRun = (): RunLive => ({
   status: "queued", reason: "", summary: "", agentStatus: {}, activity: {}, streaming: {}, thoughts: {}, thinking: {}, turnStart: {}, messages: [], rejected: [],
   extraAgents: [], extraEdges: [], agentPatches: {}, orgEvents: [], fresh: {}, departments: {},
-  toolCalls: {}, browser: [], workflow: null, tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
+  toolCalls: {}, steps: [], browser: [], workflow: null, tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
   pendingApproval: null, awaiting: null, errors: [], timeline: [], approvals: [], lastSeq: 0, live: false, replayDone: false,
 });
 
@@ -91,6 +94,17 @@ export function browserVerb(tool: string): string {
 
 const clip = (s: string, n = 90) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
+/** A run that has ended cannot finish the calls, steps and workflow phase it left open, so they close here. */
+function closeOpenWork(s: RunLive): Pick<RunLive, "steps" | "toolCalls" | "workflow"> {
+  const note = "Stopped before it finished.";
+  const wf = s.workflow;
+  return {
+    steps: s.steps.map((x) => (x.status === "running" ? { ...x, status: "failed" as const, detail: note } : x)),
+    toolCalls: Object.fromEntries(Object.entries(s.toolCalls).map(([id, c]) => [id, c.ok === undefined ? { ...c, ok: false, output: note } : c])),
+    workflow: wf && !wf.ended ? { ...wf, ended: true, phases: wf.phases.map((p) => (p.status === "active" ? { ...p, status: "failed" as const } : p)) } : wf,
+  };
+}
+
 export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string> = {}): RunLive {
   const d = e.data ?? {};
   const seq = e.seq ?? 0;
@@ -105,11 +119,13 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
         usage: { ...s.usage, ...(d.usage ?? {}) } };
     case "replay_done":
       return { ...next, replayDone: true };
-    case "run_status":
-      return { ...next, status: d.status, reason: d.reason ?? s.reason, summary: d.summary ?? s.summary,
+    case "run_status": {
+      const closed = TERMINAL.has(d.status) ? closeOpenWork(s) : {};
+      return { ...next, ...closed, status: d.status, reason: d.reason ?? s.reason, summary: d.summary ?? s.summary,
         awaiting: d.status === "awaiting_user" ? d.awaiting ?? s.awaiting : d.status === "running" ? null : s.awaiting,
         pendingApproval: d.pending_approval !== undefined ? d.pending_approval : s.pendingApproval,
         timeline: d.status === "running" && s.status === "running" ? s.timeline : push({ type: e.type, label: `Run ${d.status}${d.reason ? `: ${clip(d.reason, 60)}` : ""}`, tone: "status" }) };
+    }
     case "agent_status":
       return { ...next, agentStatus: { ...s.agentStatus, [d.agent_id]: d.status }, activity: { ...s.activity, [d.agent_id]: d.activity ?? "" },
         streaming: ["idle", "done", "waiting", "error"].includes(d.status) ? { ...s.streaming, [d.agent_id]: "" } : s.streaming };
@@ -121,7 +137,8 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
     case "thinking_stream":
       return { ...next, thinking: { ...s.thinking, [d.agent_id]: ((s.thinking[d.agent_id] ?? "") + d.delta).slice(-8000) } };
     case "thought":
-      return { ...next, thoughts: { ...s.thoughts, [d.agent_id]: d.text }, thinking: { ...s.thinking, [d.agent_id]: "" } };
+      return { ...next, thoughts: { ...s.thoughts, [d.agent_id]: d.text }, thinking: { ...s.thinking, [d.agent_id]: "" },
+        steps: seq ? [...s.steps, thoughtStep(seq, d.agent_id, d.text)] : s.steps };
     case "message_created": {
       const m = d.message as MessageOut;
       if (s.messages.some((x) => x.id === m.id)) return next;
@@ -134,13 +151,16 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
     }
     case "edge_activity":
       return { ...next, activeEdges: { ...s.activeEdges, [d.edge_id]: { at: now, from: d.from_agent_id, type: d.type, seq } } };
-    case "tool_call":
-      return { ...next, toolCalls: { ...s.toolCalls, [d.call_id]: { ...d, seq } as ToolCall } };
+    case "tool_call": {
+      const step = callStep(seq, { call_id: d.call_id, agent_id: d.agent_id, tool: d.tool, args: d.args ?? {} });
+      return { ...next, toolCalls: { ...s.toolCalls, [d.call_id]: { ...d, seq } as ToolCall }, steps: step ? [...s.steps, step] : s.steps };
+    }
     case "tool_result": {
       const prev = s.toolCalls[d.call_id] ?? { call_id: d.call_id, agent_id: d.agent_id, tool: d.tool, args: {} };
       // browser calls get their own, more descriptive timeline entry from browser_action
       const important = d.tool === "run_code" || (d.tool === "mcp_call" && prev.args?.server !== "browser");
       return { ...next, toolCalls: { ...s.toolCalls, [d.call_id]: { ...prev, ok: d.ok, output: d.output } },
+        steps: s.steps.map((x) => (x.id === d.call_id ? finishStep(x, d.ok, d.output) : x)),
         timeline: important ? push({ type: e.type, agent_id: d.agent_id, tone: d.ok ? "tool" : "error", label: `${n(d.agent_id)} ${d.tool === "run_code" ? "ran a command" : "called MCP"}: ${d.ok ? "ok" : "failed"}` }) : s.timeline };
     }
     case "browser_action": {

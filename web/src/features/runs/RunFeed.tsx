@@ -1,6 +1,6 @@
 import * as React from "react";
 import { tone } from "@/lib/palette";
-import { ArrowRight, Ban, ChevronDown, CircleCheck, CircleX, FileCode2, Gavel, Settings2, Sparkles, Terminal, User } from "lucide-react";
+import { ArrowRight, Ban, ChevronDown, ChevronRight, CircleCheck, CircleX, FileCode2, Gavel, Loader2, Settings2, Sparkles, Terminal, User } from "lucide-react";
 import { MESSAGE_TYPE_LABEL, statusMeta } from "@/lib/meta";
 import { clockTime, cn } from "@/lib/utils";
 import { fetchRaw } from "@/lib/api";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/primitives";
 import type { OrgEvent, RunLive } from "./runState";
 import { LiveWriting, ThinkingView } from "./LiveWriting";
 import { humanizeStream } from "./streamView";
+import { countLine, type Step } from "./steps";
 
 export type FeedFilter = "all" | "user" | "internal";
 
@@ -27,7 +28,7 @@ export function isUserFacing(m: MessageOut): boolean {
   return m.sender === "user" || !m.to_agent_id || m.type === "final_report";
 }
 
-type Item = ({ kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any> } | { kind: "org"; ev: OrgEvent }) & { seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Item = ({ kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any> } | { kind: "org"; ev: OrgEvent } | { kind: "step"; step: Step } | { kind: "steps"; steps: Step[] }) & { seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export function RunFeed({ state, agents, filter, showThoughts = true }: { state: RunLive; agents: Record<string, AgentOut>; filter: FeedFilter; showThoughts?: boolean }) {
   const bottom = React.useRef<HTMLDivElement>(null);
@@ -42,15 +43,18 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
     });
     if (filter !== "user") for (const r of state.rejected) raw.push({ kind: "rejected", r, seq: r.seq ?? 0 });
     for (const ev of state.orgEvents) raw.push({ kind: "org", ev, seq: ev.seq });
+    for (const step of state.steps) if (showThoughts || step.kind !== "thought") raw.push({ kind: "step", step, seq: step.seq });
     raw.sort((a, b) => a.seq - b.seq);
     const out: Item[] = [];
-    for (const it of raw) { // group consecutive file writes by the same agent
+    for (const it of raw) { // group consecutive file writes by the same agent, and consecutive steps by the same agent
       const last = out[out.length - 1];
       if (it.kind === "files" && last?.kind === "files" && last.ms[0].from_agent_id === it.ms[0].from_agent_id) last.ms.push(...it.ms);
+      else if (it.kind === "step" && last?.kind === "steps" && last.steps[0].agent_id === it.step.agent_id) last.steps.push(it.step);
+      else if (it.kind === "step") out.push({ kind: "steps", steps: [it.step], seq: it.seq });
       else out.push(it.kind === "files" ? { ...it, ms: [...it.ms] } : it);
     }
     return out;
-  }, [state.messages, state.rejected, state.orgEvents, filter]);
+  }, [state.messages, state.rejected, state.orgEvents, state.steps, filter, showThoughts]);
   const active = Object.entries(state.agentStatus).filter(([, st]) => statusMeta(st).live);
 
   React.useEffect(() => { if (stick) bottom.current?.scrollIntoView({ block: "end" }); }, [items.length, stick, state.streaming]);
@@ -66,7 +70,9 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
         {items.map((it) => it.kind === "msg" ? <FeedMessage key={it.m.id} m={it.m} agents={agents} />
           : it.kind === "files" ? <FileGroup key={it.ms[0].id} ms={it.ms} agents={agents} />
           : it.kind === "org" ? <OrgItem key={`o${it.seq}`} ev={it.ev} agents={agents} />
-          : <Rejected key={`r${it.seq}`} r={it.r} agents={agents} />)}
+          : it.kind === "steps" ? <StepRun key={`s${it.seq}`} steps={it.steps} agents={agents} />
+          : it.kind === "rejected" ? <Rejected key={`r${it.seq}`} r={it.r} agents={agents} />
+          : null)}
         {active.map(([aid, st]) => {
           const a = agents[aid];
           if (!a) return null;
@@ -76,8 +82,7 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{a.name}</span><StatusPill status={st} activity={state.activity[aid]} />
                   {state.live && state.turnStart[aid] ? <Elapsed since={state.turnStart[aid]} /> : null}</div>
-                {showThoughts && (state.thinking[aid] ? <ThinkingView text={state.thinking[aid]} live />
-                  : state.thoughts[aid] ? <ThinkingView text={state.thoughts[aid]} /> : null)}
+                {showThoughts && state.thinking[aid] && <ThinkingView text={state.thinking[aid]} live />}
                 {state.streaming[aid] && humanizeStream(state.streaming[aid]).length ? <LiveWriting raw={state.streaming[aid]} />
                   : !state.thinking[aid] && <TypingDots color={statusMeta(st).color} />}
               </div>
@@ -115,14 +120,15 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
   const expandable = delegated ? content.trim().length > 0 : content.length >= 700 && m.type !== "final_report";
   const isUser = m.sender === "user";
   const verdict = meta.verdict as string | undefined;
+  // The server stores attached images as file names; only strings are image names.
+  const names = React.useMemo(() => (Array.isArray(meta.images) ? meta.images.filter((n: unknown): n is string => typeof n === "string") : []), [m.meta]);
   return (
-    <article data-sender={isUser ? "user" : "agent"} className={cn("feed-message group rounded-lg px-2 py-2 transition-colors animate-fade-up hover:bg-accent/30", m.type === "final_report" && "border border-primary/30 bg-primary/5",
-      isUser && "bg-primary/[0.04]")} aria-label={`${from?.name ?? "You"} to ${to?.name ?? "you"}`}>
-      <div className="flex gap-2.5">
+    <article data-sender={isUser ? "user" : "agent"} className={cn("feed-message group rounded-lg px-2 py-2 animate-fade-up", !isUser && "transition-colors hover:bg-accent/30", m.type === "final_report" && "border border-primary/30 bg-primary/5")} aria-label={`${from?.name ?? "You"} to ${to?.name ?? "you"}`}>
+      <div className={cn("flex gap-2.5", isUser && "flex-row-reverse")}>
         {from ? <AgentAvatar name={from.name} color={from.color} avatar={from.avatar} size={28} /> :
-          <div className="feed-user-avatar flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary"><User className="h-3.5 w-3.5" /></div>}
-        <div className="min-w-0 flex-1">
-          <div className="feed-message-meta flex flex-wrap items-center gap-1.5 text-xs">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary"><User className="h-3.5 w-3.5" /></div>}
+        <div className={cn("min-w-0", isUser ? "flex max-w-[80%] flex-col items-end" : "flex-1")}>
+          <div className={cn("feed-message-meta flex flex-wrap items-center gap-1.5 text-xs", isUser && "hidden")}>
             <span className="font-semibold" style={from ? { color: from.color } : undefined}>{from?.name ?? "You"}</span>
             <ArrowRight className="h-3 w-3 text-muted-foreground" />
             <span className="font-medium text-muted-foreground">{to?.name ?? (m.type === "final_report" || m.type === "question" ? "You" : "Everyone")}{!to && meta.recipients ? ` (${meta.recipients} agents)` : ""}</span>
@@ -140,11 +146,11 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
               {meta.delegation_result ? "Result: " : ""}{firstLine(content) || "(empty)"}
             </button>
           ) : (
-            <div className={cn("relative mt-1 text-[13px]", !open && "max-h-28 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}>
+            <div className={cn("relative mt-1 text-[13px]", !open && "max-h-28 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]", isUser && "rounded-2xl rounded-tr-sm bg-primary/25 px-3.5 py-2.5")}>
               <Markdown>{content}</Markdown>
             </div>
           )}
-          {Array.isArray(meta.images) && meta.images.length > 0 && <GoalImages runId={m.run_id ?? ""} images={meta.images} />}
+          {names.length > 0 && <GoalImages runId={m.run_id ?? ""} names={names} />}
           {Array.isArray(meta.files) && <div className="mt-2 flex flex-wrap gap-1.5">{meta.files.filter((file: unknown): file is string => typeof file === "string").map((file: string) => <span key={file} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px]"><FileCode2 className="h-3 w-3" />{file}</span>)}</div>}
           {Array.isArray(meta.options) && meta.options.length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Offered answers">
@@ -164,38 +170,39 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
   );
 }
 
-/** Thumbnails of the images attached to the goal (click to open full size). */
-function GoalImages({ runId, images }: { runId: string; images: { name: string; filename?: string }[] }) {
+/** Thumbnails of the images attached to a message (click to open full size). `names` are the saved file names. */
+function GoalImages({ runId, names }: { runId: string; names: string[] }) {
   const w = useWorkspaceId();
   const [srcs, setSrcs] = React.useState<Record<string, string>>({});
   React.useEffect(() => {
     if (!runId || !w) return;
     let alive = true;
     const made: string[] = [];
-    for (const im of images) {
-      fetchRaw(`/api/v1/w/${w}/runs/${runId}/attachments/${encodeURIComponent(im.name)}`).then((r) => r.blob()).then((b) => {
+    for (const name of names) {
+      fetchRaw(`/api/v1/w/${w}/runs/${runId}/attachments/${encodeURIComponent(name)}`).then((r) => r.blob()).then((b) => {
         const u = URL.createObjectURL(b);
         made.push(u);
-        if (alive) setSrcs((s) => ({ ...s, [im.name]: u }));
+        if (alive) setSrcs((s) => ({ ...s, [name]: u }));
       }).catch(() => undefined);
     }
     return () => { alive = false; made.forEach((u) => URL.revokeObjectURL(u)); };
-  }, [w, runId, images]);
+  }, [w, runId, names]);
   return (
     <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="goal-images">
-      {images.map((im) => srcs[im.name] ? (
-        <a key={im.name} href={srcs[im.name]} target="_blank" rel="noreferrer" title={im.filename ?? im.name}>
-          <img src={srcs[im.name]} alt={im.filename ?? "attached image"} className="h-20 max-w-[10rem] rounded border border-border object-cover" />
+      {names.map((name) => srcs[name] ? (
+        <a key={name} href={srcs[name]} target="_blank" rel="noreferrer" title="Open full size">
+          <img src={srcs[name]} alt="Attached image" className="h-20 max-w-[10rem] rounded border border-border object-cover" />
         </a>
-      ) : <span key={im.name} className="flex h-20 w-28 items-center justify-center rounded border border-border text-[10px] text-muted-foreground">{im.filename ?? "image"}</span>)}
+      ) : <span key={name} className="flex h-20 w-28 items-center justify-center rounded border border-border text-[10px] text-muted-foreground">Image</span>)}
     </div>
   );
 }
-
 function FileGroup({ ms, agents }: { ms: MessageOut[]; agents: Record<string, AgentOut> }) {
   const a = ms[0].from_agent_id ? agents[ms[0].from_agent_id] : null;
   return (
-    <div className="ml-9 flex flex-wrap items-center gap-1.5 rounded-md py-1 text-[11px] text-muted-foreground animate-fade-up">
+    <div className="flex gap-2.5 px-2 animate-fade-up">
+      <div className="flex w-7 shrink-0 justify-center">{a && <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} size={22} />}</div>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-1 text-[11px] text-muted-foreground">
       <FileCode2 className="h-3.5 w-3.5 text-olive" />
       <span style={a ? { color: tone(a.color) } : undefined} className="font-medium">{a?.name}</span>
       {ms.map((m) => (
@@ -203,6 +210,7 @@ function FileGroup({ ms, agents }: { ms: MessageOut[]; agents: Record<string, Ag
           {String(m.meta?.path ?? "")}<span className="text-muted-foreground/70"> v{String(m.meta?.version ?? "")}</span>
         </span>
       ))}
+      </div>
     </div>
   );
 }
@@ -212,7 +220,7 @@ function OrgItem({ ev, agents }: { ev: OrgEvent; agents: Record<string, AgentOut
   const who = agents[ev.agent_id];
   if (ev.kind === "created") {
     return (
-      <div className="ml-9 flex items-center gap-2 rounded-lg border border-steel/30 bg-steel/5 px-2.5 py-2 text-xs animate-in fade-in-0 slide-in-from-left-2">
+      <div className="ml-[46px] flex items-center gap-2 rounded-lg border border-steel/30 bg-steel/5 px-2.5 py-2 text-xs animate-in fade-in-0 slide-in-from-left-2">
         <Sparkles className="h-3.5 w-3.5 shrink-0 text-steel" />
         {who && <AgentAvatar name={who.name} color={who.color} avatar={who.avatar} size={20} />}
         <span><span className="font-semibold" style={by ? { color: tone(by.color) } : undefined}>{by?.name ?? "An agent"}</span> hired{" "}
@@ -222,7 +230,7 @@ function OrgItem({ ev, agents }: { ev: OrgEvent; agents: Record<string, AgentOut
     );
   }
   return (
-    <div className="ml-9 flex items-start gap-2 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground animate-fade-up">
+    <div className="ml-[46px] flex items-start gap-2 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground animate-fade-up">
       <Settings2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-steel" />
       <span><span className="font-medium text-foreground">{by?.name ?? "Agent"}</span> {ev.self ? "refined its own configuration" : <>reconfigured <span className="font-medium text-foreground">{who?.name ?? ev.name}</span></>}: {ev.summary}
         {ev.reason ? <span className="italic"> · “{ev.reason}”</span> : null}</span>
@@ -233,10 +241,67 @@ function OrgItem({ ev, agents }: { ev: OrgEvent; agents: Record<string, AgentOut
 function Rejected({ r, agents }: { r: Record<string, any>; agents: Record<string, AgentOut> }) { // eslint-disable-line @typescript-eslint/no-explicit-any
   const a = agents[r.from_agent_id];
   return (
-    <div className="ml-9 flex items-start gap-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1.5 text-[11px] animate-fade-up">
+    <div className="ml-[46px] flex items-start gap-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1.5 text-[11px] animate-fade-up">
       <Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
       <span><span className="font-medium">{a?.name}</span> → {r.to}: blocked. <span className="text-muted-foreground">{r.reason}</span></span>
     </div>
+  );
+}
+
+/**
+ * One agent's consecutive steps. The count line opens to each step; the line under it says what the agent is doing now,
+ * which is its latest thought.
+ */
+function StepRun({ steps, agents }: { steps: Step[]; agents: Record<string, AgentOut> }) {
+  const a = agents[steps[0].agent_id];
+  const thoughts = steps.filter((s) => s.kind === "thought");
+  const now = thoughts[thoughts.length - 1];
+  const running = steps.some((s) => s.status === "running");
+  const failed = steps.some((s) => s.status === "failed");
+  return (
+    <div className="flex gap-2.5 px-2 animate-fade-up text-[12px]" data-testid="step-run">
+      <div className="flex w-7 shrink-0 justify-center">
+        {a && <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} size={22} />}
+      </div>
+      <div className="min-w-0 flex-1">
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground hover:text-foreground">
+          {a && <span className="font-medium" style={{ color: tone(a.color) }}>{a.name}</span>}
+          <span className="font-medium text-foreground/90">{countLine(steps)}</span>
+          {running && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-warning" aria-label="a step is running" />}
+          {failed && <CircleX className="h-3.5 w-3.5 shrink-0 text-destructive" aria-label="a step failed" />}
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 transition group-open:rotate-180" />
+        </summary>
+        <ul className="mt-1 space-y-1 border-l border-border/60 pl-3">
+          {steps.map((s) => <StepLine key={s.id} step={s} />)}
+        </ul>
+      </details>
+      {now && <p className="truncate text-foreground/80" data-testid="step-narration">{now.title}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** One step in plain words. A thought or a tool's output opens to its full text. */
+function StepLine({ step }: { step: Step }) {
+  const status = step.status === "running" ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-warning" />
+    : step.status === "failed" ? <CircleX className="h-3 w-3 shrink-0 text-destructive" />
+    : step.kind === "thought" ? null : <CircleCheck className="h-3 w-3 shrink-0 text-success" />;
+  const body = step.detail.trim();
+  if (!body) return <li className="flex items-center gap-2 text-foreground/90">{status}<span className="min-w-0 truncate">{step.title}</span></li>;
+  return (
+    <li>
+      <details className="group/step">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-foreground/90 hover:text-foreground">
+          {status}
+          <span className="min-w-0 flex-1 truncate">{step.title}</span>
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground transition group-open/step:rotate-90" />
+        </summary>
+        {step.kind === "thought"
+          ? <div className="mt-1 pl-5 text-[12px] text-muted-foreground"><Markdown>{body}</Markdown></div>
+          : <pre className="ml-5 mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-2 font-mono text-[11px]">{body}</pre>}
+      </details>
+    </li>
   );
 }
 

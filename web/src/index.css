@@ -267,10 +267,6 @@ select option { background: hsl(var(--surface)); color: hsl(var(--foreground)); 
 .context-card-link { display: flex; align-items: center; gap: 10px; margin-top: 16px; font-size: 11px; }
 .context-card-link:hover { color: hsl(var(--primary)); }
 .context-card-link svg { height: 14px; width: 14px; }
-.conversation-workbench .feed-message { margin: 14px 0; border: 0; padding: 14px 0; background: transparent; }
-.conversation-workbench .feed-message[data-sender="user"] { width: fit-content; max-width: 85%; margin: 12px 0 25px auto; border-radius: 19px; padding: 12px 18px; background: hsl(var(--primary) / .16); }
-.dark .conversation-workbench .feed-message[data-sender="user"] { background: #1b3d6c; }
-.conversation-workbench .feed-message[data-sender="user"] .feed-user-avatar, .conversation-workbench .feed-message[data-sender="user"] .feed-message-meta { display: none; }
 .conversation-workbench .feed-message .prose { font-size: 14px; line-height: 1.85; }
 .conversation-workbench .feed-message[data-sender="user"] .prose { font-size: 13px; }
 
@@ -325,7 +321,6 @@ select option { background: hsl(var(--surface)); color: hsl(var(--foreground)); 
 .prompt-composer-controls .composer-send { background: hsl(var(--foreground)); color: hsl(var(--background)); }
 .welcome-ideas { margin: 18px auto 0; }
 .welcome-ideas button { border-radius: 999px; padding: 9px 14px; font-size: 12px; }
-.conversation-workbench .feed-message[data-sender="user"], .dark .conversation-workbench .feed-message[data-sender="user"] { background: hsl(var(--surface-2)); }
 @media (max-width: 767px) {
   .welcome-stage { justify-content: safe center; gap: 0; padding: 24px 16px; }
   .welcome-intro h1 { font-size: 27px; }

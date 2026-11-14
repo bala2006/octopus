@@ -7,6 +7,18 @@ const msg = (id: string, from: string | null, to: string | null, type = "task", 
 });
 
 describe("reduceRun", () => {
+  it("keeps every thought and tool call as a step, in order, and finishes each call with its result", () => {
+    const ev = (seq: number, type: string, data: Record<string, unknown>) => ({ type, seq, data }) as unknown as RunEvent;
+    let s = reduceRun(initialRun(), ev(1, "thought", { agent_id: "a", text: "Check the spec first." }), {});
+    s = reduceRun(s, ev(2, "tool_call", { call_id: "c1", agent_id: "a", tool: "read_file", args: { path: "spec.md" } }), {});
+    s = reduceRun(s, ev(3, "tool_result", { call_id: "c1", agent_id: "a", tool: "read_file", ok: true, output: "# Spec" }), {});
+    s = reduceRun(s, ev(4, "tool_call", { call_id: "c2", agent_id: "a", tool: "reply_to_user", args: { message: "Hi" } }), {});
+    expect(s.steps).toEqual([
+      expect.objectContaining({ seq: 1, kind: "thought", title: "Check the spec first.", detail: "Check the spec first.", status: "ok" }),
+      expect.objectContaining({ id: "c1", kind: "read", title: "Read spec.md", detail: "# Spec", status: "ok" }),
+    ]);
+  });
+
   it("tracks the workflow and puts each phase handoff on the timeline", () => {
     const wf = (active: string, loops = 0) => ({ track: "quick", index: 1, ended: false, phases: ["intake", "build", "test", "accept"].map((k) => ({
       key: k, title: k[0].toUpperCase() + k.slice(1), owner: k === "build" ? "b" : k === "test" ? "q" : "h",
@@ -25,6 +37,22 @@ describe("reduceRun", () => {
   it("treats incomplete as a terminal status", () => {
     expect(TERMINAL.has("incomplete")).toBe(true);
     expect(TERMINAL.has("paused")).toBe(false);
+  });
+
+  it("closes the steps, tool calls and workflow phase that a stopped run left open", () => {
+    const ev = (seq: number, type: string, data: Record<string, unknown>) => ({ type, seq, data }) as unknown as RunEvent;
+    const workflow = { track: "quick", index: 1, ended: false, phases: [
+      { key: "build", title: "Build", owner: "r", status: "active" }, { key: "review", title: "Review", owner: "q", status: "pending" },
+    ] };
+    let s = reduceRun(initialRun(), ev(1, "workflow_updated", { workflow }), {});
+    s = reduceRun(s, ev(2, "tool_call", { call_id: "c1", agent_id: "a", tool: "run_command", args: { command: "npm test" } }), {});
+    s = reduceRun(s, ev(3, "run_status", { status: "running" }), {});
+    expect(s.steps[0]).toMatchObject({ status: "running" });
+    s = reduceRun(s, ev(4, "run_status", { status: "incomplete", reason: "Reached the token limit" }), {});
+    expect(s.steps[0]).toMatchObject({ id: "c1", status: "failed" });
+    expect(s.toolCalls.c1.ok).toBe(false);
+    expect(s.workflow).toMatchObject({ ended: true });
+    expect(s.workflow?.phases.map((p) => p.status)).toEqual(["failed", "pending"]);
   });
 
   it("tracks statuses, streaming and last message", () => {
