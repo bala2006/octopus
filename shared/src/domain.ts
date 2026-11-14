@@ -302,6 +302,8 @@ export interface TaskOut {
   files: string[];
   /** Playbooks (skill names) the assignee follows for this task. */
   skills: string[];
+  /** Agent ids of the specialists who critique this part each time its owner finishes a round. */
+  specialists: string[];
 }
 
 /** One thing the user asked for, in their words. A run is accepted against these. */

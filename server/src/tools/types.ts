@@ -41,7 +41,7 @@ export const MAX_TOOL_OUTPUT = 40_000;
 export type Shown = Map<string, { hash: string; ranges: [number, number][] }>
 
 export interface HireSpec { role_key?: string; title: string; name?: string; department: string; reports_to?: string; manager?: boolean; instructions?: string; reason: string }
-export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[]; requirements: string[]; files: string[]; skills: string[] }
+export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[]; requirements: string[]; files: string[]; skills: string[]; specialists: string[] }
 
 /** What the orchestrator's tools can do to the conversation (only present for the orchestrator). */
 export interface Planner {

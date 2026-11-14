@@ -45,6 +45,7 @@ const MIGRATIONS = [
   `ALTER TABLE tasks ADD COLUMN requirements TEXT NOT NULL DEFAULT '[]';
    ALTER TABLE tasks ADD COLUMN files TEXT NOT NULL DEFAULT '[]';
    ALTER TABLE tasks ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';`,
+  `ALTER TABLE tasks ADD COLUMN specialists TEXT NOT NULL DEFAULT '[]';`,
 ];
 
 export type CompanyRow = {
@@ -72,7 +73,7 @@ export function openProject(root: string) {
     sessions: db.table<SessionOut>("sessions"),
     runs: db.table<RunRow>("runs", { json: ["budget", "outcome", "snapshot", "state"] }),
     messages: db.table<MessageOut>("messages", { json: ["meta"] }),
-    tasks: db.table<TaskOut>("tasks", { json: ["depends_on", "requirements", "files", "skills"] }),
+    tasks: db.table<TaskOut>("tasks", { json: ["depends_on", "requirements", "files", "skills", "specialists"] }),
     events: db.table<EventRow>("run_events", { key: "seq", json: ["data"] }),
     artifacts: db.table<ArtifactRow>("artifacts", { bool: ["deleted", "created"] }),
     memory: db.table<MemoryOut>("memory"),

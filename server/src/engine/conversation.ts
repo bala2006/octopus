@@ -38,7 +38,7 @@ import { publish } from "./bus";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
 import { canRunBeside, owns, writes } from "./ownership";
 import { Collab, formatPin, type Pin, type Session } from "./collab";
-import { acceptanceBrief, instructions, libraryList, outcomeSection, reAcceptanceBrief, reReviewBrief, reviewBrief, revisionNote, skillList, taskBrief } from "./prompts";
+import { acceptanceBrief, instructions, lensOf, LENS, libraryList, outcomeSection, type Verdict, reAcceptanceBrief, reReviewBrief, reviewBrief, revisionNote, skillList, taskBrief } from "./prompts";
 
 interface Pending { question: Question; task_id: string | null }
 interface RunState {
@@ -61,6 +61,10 @@ interface RunState {
   requirements: Requirement[];
   /** Pinned posts in the team chat: interfaces and decisions; the latest version of each key is current. */
   pins: Pin[];
+  /** The review tasks of each part's current round, by work task id: the round closes when all have finished. */
+  rounds: Record<string, string[]>;
+  /** Each critic's verdict, by review task id. */
+  verdicts: Record<string, Verdict>;
   always: string[];
   verify_rounds: number;
   acceptance_rounds: number;
@@ -106,7 +110,7 @@ function emptyUsage(): Usage {
 
 function initialState(): RunState {
   return { agent_status: {}, activity: {}, usage: emptyUsage(), history: [], questions: [], answers: {}, feedback: {}, revisions: {}, files_by_task: {}, diffs_by_task: {},
-    resume: {}, continues: {}, requirements: [], pins: [],
+    resume: {}, continues: {}, requirements: [], pins: [], rounds: {}, verdicts: {},
     always: [], verify_rounds: 0, acceptance_rounds: 0, open_comments: {}, cycle_from: 0, req_from: 0, unchecked: false, unaccepted: false, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
 }
 
@@ -342,9 +346,9 @@ export class Conversation {
     this.emit("task_updated", { task: t });
   }
 
-  private newTask(spec: Omit<TaskOut, "id" | "run_id" | "key" | "status" | "result" | "attempts" | "updated_at" | "requirements" | "files" | "skills">
-    & Partial<Pick<TaskOut, "requirements" | "files" | "skills">>): TaskOut {
-    const t: TaskOut = { requirements: [], files: [], skills: [], ...spec, id: newId(), run_id: this.row.id, key: `T${this.tasks.length + 1}`, status: "todo", result: "", attempts: 0, updated_at: now() };
+  private newTask(spec: Omit<TaskOut, "id" | "run_id" | "key" | "status" | "result" | "attempts" | "updated_at" | "requirements" | "files" | "skills" | "specialists">
+    & Partial<Pick<TaskOut, "requirements" | "files" | "skills" | "specialists">>): TaskOut {
+    const t: TaskOut = { requirements: [], files: [], skills: [], specialists: [], ...spec, id: newId(), run_id: this.row.id, key: `T${this.tasks.length + 1}`, status: "todo", result: "", attempts: 0, updated_at: now() };
     this.saveTask(t);
     return t;
   }
@@ -816,8 +820,14 @@ export class Conversation {
         const unknown = spec.skills.filter((s) => !known.has(s));
         if (unknown.length) throw new UserError(`Unknown skills: ${unknown.join(", ")}. Pick from the skill list.`);
         const files = spec.files.map((f) => this.p.fs.rel(f) || f);
+        const specialists = spec.specialists.map((name) => {
+          const a = this.findAgent(name);
+          if (!a) throw new UserError(`Nobody called ${name} to review this. Hire them first or pick someone on the team.`);
+          if (a.id === assignee.id) throw new UserError(`${a.name} owns this part, so cannot also critique it.`);
+          return a.id;
+        });
         const t = this.newTask({ title: spec.title, description: spec.description, acceptance_criteria: spec.acceptance_criteria, assignee_agent_id: assignee.id,
-          kind: spec.kind, depends_on: deps, created_by: lead.id, requirements, files, skills: spec.skills });
+          kind: spec.kind, depends_on: deps, created_by: lead.id, requirements, files, skills: spec.skills, specialists });
         this.post({ from: lead.id, to: assignee.id, type: "task", content: `**${t.title}**\n\n${t.description}`, meta: { task_id: t.key } });
         return t;
       },
@@ -933,9 +943,11 @@ export class Conversation {
           files: [...new Set(built.flatMap((t) => this.state.files_by_task[t.id] ?? []))],
           scripts: projectTasks(this.p.fs).slice(0, 12).map((t) => `- ${t.name}: \`${t.command}\`${t.kind === "server" ? " (dev server: use start_dev_server)" : ""}`).join("\n") });
     } else if (task.kind === "review" && work) {
-      // A reviewer who already reviewed this work continues: it checks its own comments against the change since then.
+      // A critic who already reviewed this work continues: it checks its own comments against the change since then.
       session = `${agent.id}:review:${this.state.continues[work.id] ?? work.id}`;
-      const small = this.smallChange(work);
+      const lens = lensOf(agent);
+      // Only a code review can be judged from a diff alone; looking at or playing the product needs the full toolset.
+      const small = lens === "code" ? this.smallChange(work) : null;
       const prior = this.liveSession(session);
       if (prior && prior.mode !== "reviewer" && !small) this.sessions.delete(session);
       const cont = this.liveSession(session);
@@ -946,9 +958,9 @@ export class Conversation {
       brief = cont && resume
         ? revisionNote(task, resume, "Then give your verdict with submit_review.")
         : cont
-        ? reReviewBrief(work, { author: author(work), summary: work.result, files: diff?.files ?? [], round, diff: diff?.text ?? "" })
+        ? reReviewBrief(work, { author: author(work), summary: work.result, files: diff?.files ?? [], round, diff: diff?.text ?? "", lens })
         : reviewBrief(work, { goal: this.row.goal, author: author(work), summary: work.result, files: this.state.files_by_task[work.id] ?? [], round, diff: small?.text,
-          previous: round > 1 ? this.state.feedback[work.id] : undefined, requirements: this.state.requirements });
+          previous: round > 1 ? this.state.feedback[work.id] : undefined, requirements: this.state.requirements, lens, pins: this.pinsFor(work.files) });
     } else {
       mode = "worker";
       session = `${agent.id}:${this.state.continues[task.id] ?? task.id}`;
@@ -1003,9 +1015,12 @@ export class Conversation {
     if (stop?.kind === "block" || (!stop && (exhausted || !text || task.kind === "review"))) {
       const reason = stop?.kind === "block" ? stop.reason : task.kind === "review" ? "The reviewer did not give a verdict." : exhausted ? "Ran out of steps before finishing." : "Stopped without finishing.";
       this.saveTask({ ...task, status: "blocked", result: reason });
-      const work = task.kind === "review" ? this.tasks.find((x) => x.key === task.depends_on[0]) : undefined;
-      if (work?.status === "review") this.saveTask({ ...work, status: "blocked", result: `${work.result}\n\nNot reviewed: ${reason}` });
       this.post({ from: agent.id, to: lead.id, type: "status_update", content: `Blocked on ${task.key}: ${reason}`, meta: { task_id: task.key } });
+      const work = task.kind === "review" ? this.tasks.find((x) => x.key === task.depends_on[0]) : undefined;
+      if (work) {
+        this.state.verdicts[task.id] = { critic: agent.name, lens: lensOf(agent), verdict: "none", comments: reason };
+        this.closeRound(work);
+      }
       return;
     }
     if (task.kind === "review") {
@@ -1014,20 +1029,10 @@ export class Conversation {
       const { verdict, comments } = stop;
       this.saveTask({ ...task, status: "done", result: `${verdict === "approve" ? "Approved" : "Changes requested"}: ${comments}` });
       if (!work) return;
-      delete this.state.diffs_by_task[work.id]; // the next review looks only at what changes after this one
-      const rounds = this.state.revisions[work.id] ?? 0;
+      this.state.verdicts[task.id] = { critic: agent.name, lens: lensOf(agent), verdict, comments };
       this.post({ from: agent.id, to: work.assignee_agent_id, type: "review_result", content: comments,
-        meta: { verdict, task_id: work.key, review: { revisions: rounds, max_revisions: this.budget.max_revisions } } });
-      if (verdict === "approve" || rounds >= this.budget.max_revisions) {
-        if (verdict !== "approve") this.state.open_comments[work.id] = comments;
-        this.saveTask({ ...work, status: "done", result: verdict === "approve" ? work.result : `${work.result}\n\nOpen review comments (revision limit reached): ${comments}` });
-        this.phase("review", "done", agent.id);
-        return;
-      }
-      this.state.revisions[work.id] = rounds + 1;
-      this.state.feedback[work.id] = comments;
-      this.state.resume[work.id] = { from: `${agent.name}'s review`, text: comments };
-      this.saveTask({ ...work, status: "todo", kind: "fix" as const, title: work.title.startsWith("Revise: ") ? work.title : `Revise: ${work.title}` });
+        meta: { verdict, task_id: work.key, review: { revisions: this.state.revisions[work.id] ?? 0, max_revisions: this.budget.max_revisions } } });
+      this.closeRound(work);
       return;
     }
     const summary = stop?.kind === "complete" ? `${stop.summary}${stop.verification ? `\n\nVerified: ${stop.verification}` : ""}` : text;
@@ -1035,13 +1040,61 @@ export class Conversation {
     this.post({ from: agent.id, to: agent.reports_to ?? lead.id, type: "status_update", content: summary, meta: { task_id: task.key } });
     if (this.budget.review && (task.kind === "build" || task.kind === "fix") && changed) {
       this.saveTask({ ...task, status: "review", result: summary });
-      const reviewer = this.reviewerFor(agent);
-      this.newTask({ title: `Review ${task.key}: ${task.title.replace(/^Revise: /, "")}`, description: `Review ${agent.name}'s work on ${task.key}.`, acceptance_criteria: "",
-        assignee_agent_id: reviewer.id, kind: "review", depends_on: [task.key], created_by: lead.id });
-      this.post({ from: agent.id, to: reviewer.id, type: "review_request", content: `Please review ${task.key}: ${task.title}`, meta: { task_id: task.key } });
+      // Every specialist on this part critiques the same round in parallel; the owner gets their feedback together.
+      const ids: string[] = [];
+      for (const critic of this.criticsFor(task, agent)) {
+        const lens = lensOf(critic);
+        const t = this.newTask({ title: `${LENS[lens].title} ${task.key}: ${task.title.replace(/^Revise: /, "")}`, description: `${LENS[lens].title} of ${agent.name}'s work on ${task.key}.`,
+          acceptance_criteria: "", assignee_agent_id: critic.id, kind: "review", depends_on: [task.key], created_by: lead.id });
+        ids.push(t.id);
+        this.post({ from: agent.id, to: critic.id, type: "review_request", content: `Please review ${task.key}: ${task.title} (${LENS[lens].name})`, meta: { task_id: task.key } });
+      }
+      this.state.rounds[task.id] = ids;
       return;
     }
     this.saveTask({ ...task, status: "done", result: summary });
+  }
+
+  /**
+   * Who sharpens a part: the specialists the lead attached to it, plus a code reviewer unless one of them already
+   * reviews code. Nobody reviews their own work.
+   */
+  private criticsFor(work: TaskOut, author: AgentOut): AgentOut[] {
+    const named = work.specialists.map((id) => this.team.find((a) => a.id === id))
+      .filter((a): a is AgentOut => !!a && a.id !== author.id && a.tools.file_read !== false);
+    const code = named.some((a) => lensOf(a) === "code") ? [] : [this.reviewerFor(author)];
+    return [...new Map([...code, ...named].map((a) => [a.id, a])).values()];
+  }
+
+  /**
+   * When every critic of the current round has finished, decide: approved, or one revision for the owner with all the
+   * requested changes together. A round where nobody could give a verdict blocks the work.
+   */
+  private closeRound(work: TaskOut) {
+    const ids = this.state.rounds[work.id] ?? [];
+    if (ids.some((id) => !["done", "blocked", "cancelled"].includes(this.tasks.find((t) => t.id === id)?.status ?? "done"))) return;
+    const current = this.latest(work);
+    if (current.status !== "review") return;
+    const verdicts = ids.map((id) => this.state.verdicts[id]).filter((v): v is Verdict => !!v);
+    const given = verdicts.filter((v) => v.verdict !== "none");
+    if (!given.length) {
+      this.saveTask({ ...current, status: "blocked", result: `${current.result}\n\nNot reviewed: ${verdicts.map((v) => v.comments).join("; ") || "no verdict"}` });
+      return;
+    }
+    delete this.state.diffs_by_task[work.id]; // the next round looks only at what changes after this one
+    const changes = given.filter((v) => v.verdict === "request_changes");
+    const merged = changes.map((v) => `### ${v.critic} (${LENS[v.lens].name})\n${v.comments}`).join("\n\n");
+    const rounds = this.state.revisions[work.id] ?? 0;
+    if (!changes.length || rounds >= this.budget.max_revisions) {
+      if (changes.length) this.state.open_comments[work.id] = merged;
+      this.saveTask({ ...current, status: "done", result: changes.length ? `${current.result}\n\nOpen review comments (revision limit reached):\n${merged}` : current.result });
+      this.phase("review", "done");
+      return;
+    }
+    this.state.revisions[work.id] = rounds + 1;
+    this.state.feedback[work.id] = merged;
+    this.state.resume[work.id] = { from: `review by ${changes.map((v) => v.critic).join(" and ")}`, text: merged };
+    this.saveTask({ ...current, status: "todo", kind: "fix" as const, title: current.title.startsWith("Revise: ") ? current.title : `Revise: ${current.title}` });
   }
 
   /**
@@ -1180,7 +1233,7 @@ export class Conversation {
       requirements: this.cycleRequirements(),
       open: [
         ...cycle.filter((t) => t.status === "blocked").map((t) => `${t.key} ${t.title} (${who(t.assignee_agent_id)}) is blocked: ${firstLine(t.result, 300)}`),
-        ...cycle.filter((t) => this.state.open_comments[t.id]).map((t) => `${t.key} ${t.title.replace(/^Revise: /, "")}: review comments still open after ${this.budget.max_revisions} revisions: ${clip(this.state.open_comments[t.id]!, 400)}`),
+        ...cycle.filter((t) => this.state.open_comments[t.id]).map((t) => `${t.key} ${t.title.replace(/^Revise: /, "")}: review comments still open after ${this.budget.max_revisions} revisions: ${clip(this.state.open_comments[t.id]!.replace(/^### (.+)\n/gm, "$1: ").replace(/\s*\n+\s*/g, " "), 400)}`),
         ...this.state.verification.filter((v) => !v.ok).map((v) => `\`${v.command}\` fails.`),
       ],
     });

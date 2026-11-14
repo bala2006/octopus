@@ -168,9 +168,10 @@ export const plannerTools = [
       requirements: z.array(z.string()).optional().describe("Ids of the requirements this task delivers, e.g. R1, R4"),
       files: z.array(z.string()).optional().describe("Files and folders this task owns, e.g. src/world/, index.html. Tasks that own different paths run in parallel; a task with none runs alone"),
       skills: z.array(z.string()).optional().describe("Playbooks the assignee should follow, by name from the skill list"),
+      specialists: z.array(z.string()).optional().describe("Teammates who sharpen this part each round: an art director for anything visual, a QA engineer to play or use it, a security engineer for sensitive code. A code reviewer is added automatically"),
     }),
     async run(ctx, a) {
-      const t = ctx.planner!.addTask({ ...a, depends_on: a.depends_on ?? [], requirements: a.requirements ?? [], files: a.files ?? [], skills: a.skills ?? [] });
+      const t = ctx.planner!.addTask({ ...a, depends_on: a.depends_on ?? [], requirements: a.requirements ?? [], files: a.files ?? [], skills: a.skills ?? [], specialists: a.specialists ?? [] });
       return { text: `Created ${t.key}: ${t.title} → ${ctx.team().find((m) => m.id === t.assignee_agent_id)?.name}` };
     },
   }),

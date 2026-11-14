@@ -423,7 +423,7 @@ test("review comments still open at the revision limit are listed in the report,
   const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
   await until(run.id, ["completed", "incomplete"]);
   const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
-  expect(messages.at(-1)!.content).toMatch(/### Still open\n- T1 Build the landing page: review comments still open after 2 revisions: 1\. index\.html: the footer is missing\./);
+  expect(messages.at(-1)!.content).toMatch(/### Still open\n- T1 Build the landing page: review comments still open after 2 revisions: Kai \(code review\): 1\. index\.html: the footer is missing\./);
 });
 
 test("a message sent while a task runs is planned at once, and amend_task reaches the running builder and its reviewer", async () => {
@@ -589,6 +589,52 @@ test("a teammate's edit reaches the agent that read the file, and its re-read re
   await until(run.id, ["completed", "incomplete"]);
   expect(notice).toContain("shared.txt was changed by Diego");
   expect(reread).toContain("version two");
+}, 30_000);
+
+test("specialists sharpen a part in parallel, and the owner gets all their feedback in one revision", async () => {
+  const reviews: { who: string; first: string; tools: string[] }[] = [];
+  const revisions: string[] = [];
+  const round: Record<string, number> = {};
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const first = JSON.stringify(b.input[0]);
+    const last = JSON.stringify(b.input.findLast((i: { role?: string }) => i.role === "user"));
+    if (kind === "plan") return n === 0 ? { calls: [
+      { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Owns the page" } },
+      { name: "hire_agent", args: { role_key: "designer", title: "Art Director", department: "Product & Design", reason: "Sharpens the look" } },
+      { name: "hire_agent", args: { role_key: "qa", title: "QA Engineer", department: "Quality & Ops", reason: "Plays it" } },
+      { name: "create_task", args: { title: "Build the landing page", description: "Write index.html.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", files: ["index.html"], specialists: ["Iris", "Sam"] } },
+    ] } : { calls: [{ name: "start_work", args: { note: "Lena builds; Iris and Sam sharpen it." } }] };
+    if (kind === "review") {
+      const who = /\(by Lena|revision \d+ by Lena/.test(first + last) ? (b.instructions.match(/You are (\w+),/)?.[1] ?? "?") : "?";
+      if (n === 0) reviews.push({ who, first, tools: (b.tools ?? []).map((t: { name: string }) => t.name) });
+      const r = (round[who] = (round[who] ?? 0) + (n === 0 ? 1 : 0));
+      const ask = r === 1 && who !== "Kai" ? { verdict: "request_changes", comments: who === "Iris" ? "1. The hero should be red." : "1. The button does nothing." } : { verdict: "approve", comments: "Good." };
+      return { calls: [{ name: "submit_review", args: ask }] };
+    }
+    if (kind === "work" && last.includes("again:")) {
+      if (n === 0) { revisions.push(last); return { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1 style=\"color:red\">Acme</h1><button onclick=\"go()\">Go</button>" } }] }; }
+      return { calls: [{ name: "complete_task", args: { summary: "Made the hero red and wired the button.", verification: "Opened it" } }] };
+    }
+    if (kind === "acceptance") return { calls: [{ name: "submit_acceptance", args: { results: [] } }] };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  expect((await until(run.id, ["completed", "incomplete"])).status).toBe("completed");
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks.filter((t) => t.kind === "review").map((t) => t.title.split(" T1")[0]).sort())
+    .toEqual(["Play review", "Play review", "Review", "Review", "Visual review", "Visual review"]);
+  expect(revisions).toHaveLength(1);
+  expect(revisions[0]).toContain("### Iris (art direction)");
+  expect(revisions[0]).toContain("The hero should be red");
+  expect(revisions[0]).toContain("### Sam (play testing)");
+  expect(revisions[0]).not.toContain("### Kai");
+  const iris = reviews.find((r) => r.who === "Iris")!;
+  expect(iris.first).toContain("Your lens: art direction");
+  expect(iris.tools).toContain("read_file"); // a visual review is never a diff-only quick review
+  expect(tasks.find((t) => t.kind === "fix")?.status).toBe("done");
 }, 30_000);
 
 test("resuming a finished conversation leaves it finished", async () => {
