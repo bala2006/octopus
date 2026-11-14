@@ -50,12 +50,25 @@ function command(m: string, start: string): string[] {
   }
 }
 
+/**
+ * The folder a dialog returned, or null when it was cancelled. The Windows script marks its answer, because its helper
+ * can print other lines, and a failed run is an error. The other tools print only the path, and exit non-zero when
+ * the user cancels.
+ */
+export function pickedFolder(m: string, code: number | null, output: string): string | null {
+  if (m === "powershell") {
+    if (code !== 0) throw new Error(`The folder dialog failed (exit ${code}): ${output.trim()}`);
+    const picked = /^OCTOPUS_PICK:(.+)$/m.exec(output)?.[1]?.trim();
+    return picked ? picked.replace(/\/$/, "") || "/" : null;
+  }
+  const out = output.trim().split("\n").pop()?.trim() ?? "";
+  return code === 0 && out ? out.replace(/\/$/, "") || "/" : null;
+}
+
 /** Show the dialog and return the chosen folder, or null when cancelled. */
 export async function pickDirectory(start = homedir()): Promise<string | null> {
   const a = availability();
   if (!a.available || !a.method) throw new Error(a.reason ?? "No folder dialog available");
   const res = await run(command(a.method, start), { cwd: homedir(), env: process.env, timeoutMs: 10 * 60_000 });
-  if (res.code !== 0) throw new Error(`The folder dialog failed (exit ${res.code}): ${res.output.trim()}`);
-  const picked = /^OCTOPUS_PICK:(.+)$/m.exec(res.output)?.[1]?.trim();
-  return picked ? picked.replace(/\/$/, "") || "/" : null;
+  return pickedFolder(a.method, res.code, res.output);
 }
