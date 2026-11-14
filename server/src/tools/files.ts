@@ -71,10 +71,10 @@ export const fileTools = [
       const content = read(ctx, rel);
       if (content === null) return { text: `${rel} does not exist.`, ok: false };
       const hash = sha1(content);
-      ctx.seen.set(rel, hash);
       const lines = content.split("\n");
       if (GENERATED.test(rel) && a.start_line === undefined && a.end_line === undefined)
         return { text: `${rel} is a generated file (${lines.length} lines). Use search_project to find what you need in it, or read a line range.` };
+      ctx.seen.set(rel, hash);
       const from = Math.min(a.start_line ?? 1, lines.length);
       const to = page(lines, from, Math.min(a.end_line ?? lines.length, lines.length));
       const prior = ctx.shown.get(rel);

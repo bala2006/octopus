@@ -426,6 +426,95 @@ test("review comments still open at the revision limit are listed in the report,
   expect(messages.at(-1)!.content).toMatch(/### Still open\n- T1 Build the landing page: review comments still open after 2 revisions: 1\. index\.html: the footer is missing\./);
 });
 
+test("a message sent while a task runs is planned at once, and amend_task reaches the running builder and its reviewer", async () => {
+  writeFileSync(path.join(dir, "wait.js"), "setTimeout(() => {}, 1500);\n");
+  let runId = "";
+  let builderSaw = "";
+  let reviewBrief = "";
+  let posted = false;
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const all = JSON.stringify(b.input);
+    if (kind === "plan" && all.includes("Use three.js")) return n === 0
+      ? { calls: [{ name: "amend_task", args: { task: "T1", note: "Use three.js for the hero." } }] }
+      : { calls: [{ name: "reply_to_user", args: { message: "Told Lena." } }] };
+    if (kind === "work") {
+      if (n === 0) {
+        if (!posted) { posted = true; setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Use three.js" }), 100); }
+        return { calls: [{ name: "run_command", args: { command: "node wait.js" } }] };
+      }
+      if (n === 1) { builderSaw = JSON.stringify(b.input); return { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] }; }
+      return { calls: [{ name: "complete_task", args: { summary: "Built the page with three.js.", verification: "Opened it" } }] };
+    }
+    if (kind === "review") reviewBrief = JSON.stringify(b.input[0]);
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  runId = run.id;
+  await new Promise((r) => setTimeout(r, 300));
+  await until(run.id, ["completed", "incomplete"]);
+  expect(builderSaw).toContain("Update from Octopus on T1");
+  expect(builderSaw).toContain("Use three.js for the hero.");
+  expect(reviewBrief).toContain("Use three.js for the hero.");
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks.filter((t) => t.kind === "build")).toHaveLength(1);
+});
+
+test("a follow-up is accepted against its own requirements, not the earlier request's", async () => {
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const last = JSON.stringify(b.input.findLast((i: { role?: string }) => i.role === "user"));
+    if (kind === "plan" && last.includes("Rename")) return n === 0
+      ? { calls: [{ name: "create_task", args: { title: "Rename the title", description: "Change the h1 in index.html.", acceptance_criteria: "- renamed", assignee: "Lena", kind: "build", files: ["index.html"] } }] }
+      : { calls: [{ name: "start_work", args: { note: "Lena renames it." } }] };
+    if (kind === "plan") return n === 0 ? { calls: [
+      { name: "set_requirements", args: { items: ["A pricing section"] } },
+      { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
+      { name: "create_task", args: { title: "Build the landing page", description: "Write index.html.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", requirements: ["R1"], files: ["index.html"] } },
+    ] } : { calls: [{ name: "start_work", args: { note: "Lena builds it." } }] };
+    if (kind === "work" && last.includes("Rename")) return outputs(b).length === 0
+      ? { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "Acme", new_string: "Acme Inc" } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Renamed the title.", verification: "Read it" } }] };
+    if (kind === "work" && last.includes("Make R1 work")) return { calls: [{ name: "complete_task", args: { summary: "Could not add pricing.", verification: "none" } }] };
+    if (kind === "acceptance") return { calls: [{ name: "submit_acceptance", args: { results: [{ id: "R1", met: false, evidence: "No pricing section." }] } }] };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "A landing page with pricing" });
+  expect((await until(run.id, ["completed", "incomplete"])).status).toBe("incomplete");
+  const before = (await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`)).length;
+  await call("POST", `${W()}/runs/${run.id}/continue`, { content: "Rename the title to Acme Inc" });
+  await new Promise((r) => setTimeout(r, 300));
+  const done = await until(run.id, ["completed", "incomplete"]);
+  const later = (await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`)).slice(before);
+  expect(later.map((t) => t.kind)).toEqual(["build", "review"]);
+  expect(done.status).toBe("completed");
+  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+  expect(messages.at(-1)!.content).not.toContain("### Requirements");
+});
+
+test("a blocked acceptance check is not queued again until something changes", async () => {
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    if (kind === "plan") return n === 0 ? { calls: [
+      { name: "set_requirements", args: { items: ["A pricing section"] } },
+      { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
+      { name: "create_task", args: { title: "Build the landing page", description: "Write index.html.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", requirements: ["R1"], files: ["index.html"] } },
+    ] } : { calls: [{ name: "start_work", args: { note: "Lena builds it." } }] };
+    if (kind === "acceptance") return { calls: [{ name: "block_task", args: { reason: "The page does not load in the browser here." } }] };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "A landing page with pricing" });
+  expect((await until(run.id, ["completed", "incomplete"])).status).toBe("incomplete");
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks.filter((t) => t.kind === "verify").map((t) => t.status)).toEqual(["blocked"]);
+});
+
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });

@@ -4,7 +4,17 @@
  */
 import type { TaskOut } from "@octopus/shared";
 
-const norm = (p: string) => p.trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/\*\*?$/, "").replace(/\/+$/, "").replace(/^\.$/, "");
+/**
+ * Ownership is decided by literal path prefixes. A glob keeps only the folder before its first wildcard (`src/**\/*.ts`
+ * owns all of `src`), so it never owns less than it says. On Windows paths compare without case.
+ */
+const norm = (p: string) => {
+  let o = p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  const glob = o.search(/[*?[{]/);
+  if (glob >= 0) o = o.slice(0, glob).replace(/[^/]*$/, "");
+  o = o.replace(/\/+$/, "").replace(/^\.$/, "");
+  return process.platform === "win32" ? o.toLowerCase() : o;
+};
 
 /** `src/game` owns `src/game/world.js` but not `src/gameplay.js`. */
 export function owns(paths: string[], rel: string): boolean {

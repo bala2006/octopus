@@ -181,12 +181,12 @@ export function reReviewBrief(work: TaskOut, o: { author: string; summary: strin
   ].filter(Boolean).join("\n\n");
 }
 
-/** The next turn of an author's session: why the work came back. */
-export function revisionNote(t: TaskOut, why: { from: string; text: string }): string {
+/** The next turn of a session: why the work came back, and how to finish. */
+export function revisionNote(t: TaskOut, why: { from: string; text: string }, finish: string): string {
   return [
     `# ${t.key} again: ${why.from}`,
     why.text,
-    "Address every point. The files you worked on are earlier in this conversation; re-read only what changed since. Verify the result, then call complete_task.",
+    `What you read and wrote is earlier in this conversation; re-read only what changed since. ${finish}`,
   ].join("\n\n");
 }
 

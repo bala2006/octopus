@@ -9,6 +9,14 @@ test("a folder owns what is inside it, not its namesakes", () => {
   expect(owns(["."], "anything.txt")).toBe(true);
 });
 
+test("a glob owns at least the folder before its wildcard", () => {
+  expect(owns(["src/**/*.ts"], "src/game/world.ts")).toBe(true);
+  expect(owns(["src/**/*.ts"], "src/game/world.css")).toBe(true);
+  expect(owns(["src/game/*.js"], "src/ui/hud.js")).toBe(false);
+  expect(owns(["*.html"], "index.html")).toBe(true);
+  expect(canRunBeside({ kind: "build", files: ["src/**/*.ts"] }, [{ kind: "build", files: ["src/ui/"] }])).toBe(false);
+});
+
 test("writers run side by side only when what they own does not overlap", () => {
   const build = (files: string[]) => ({ kind: "build" as const, files });
   expect(canRunBeside(build(["src/a/"]), [build(["src/b/"])])).toBe(true);

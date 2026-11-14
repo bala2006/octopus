@@ -65,6 +65,10 @@ interface RunState {
   open_comments: Record<string, string>;
   /** Index of the first task of the current request; earlier tasks belong to earlier requests. */
   cycle_from: number;
+  /** Index of the first requirement recorded for the current request. */
+  req_from: number;
+  /** Files changed since the last acceptance check was queued. */
+  unaccepted: boolean;
   /** Files changed since the project's checks last ran. */
   unchecked: boolean;
   workflow: WorkflowState;
@@ -99,7 +103,7 @@ function emptyUsage(): Usage {
 function initialState(): RunState {
   return { agent_status: {}, activity: {}, usage: emptyUsage(), history: [], questions: [], answers: {}, feedback: {}, revisions: {}, files_by_task: {}, diffs_by_task: {},
     resume: {}, continues: {}, requirements: [],
-    always: [], verify_rounds: 0, acceptance_rounds: 0, open_comments: {}, cycle_from: 0, unchecked: false, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
+    always: [], verify_rounds: 0, acceptance_rounds: 0, open_comments: {}, cycle_from: 0, req_from: 0, unchecked: false, unaccepted: false, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
 }
 
 export class Conversation {
@@ -120,11 +124,18 @@ export class Conversation {
   private requestImages: Item[] = [];
   private activeSince = 0;
   private sessions = new Map<string, Session>();
+  /** This conversation started the project's dev server; it stays up for you after a report and stops when you stop or delete the conversation. */
+  private startedServer = false;
+  /** Resolved when a user message arrives while tasks run. */
+  private wake: ReturnType<typeof deferred<void>> | null = null;
 
   private constructor(readonly p: Project, readonly reg: Registry, row: RunRow) {
     this.row = row;
     this.budget = { ...DEFAULT_BUDGET, ...row.budget } as Budget;
-    this.state = { ...initialState(), ...(row.state as Partial<RunState>) };
+    const saved = row.state as Partial<RunState>;
+    this.state = { ...initialState(), ...saved };
+    // Conversations saved before requests were tracked separately: count what is already there as earlier requests.
+    if (saved.cycle_from === undefined && TERMINAL_STATUSES.includes(row.status)) this.state.cycle_from = p.db.tasks.count("run_id = ?", [row.id]);
     this.tasks = p.db.tasks.find("run_id = ?", [row.id], "rowid");
     for (const t of this.tasks) if (t.status === "in_progress") t.status = "todo";
     this.loadTeam();
@@ -199,6 +210,7 @@ export class Conversation {
       meta: { display_content: content, images: images.map((i) => i.name), attachments: attachments.map((a) => a.filename) } });
     if (this.row.status !== "queued" && TERMINAL_STATUSES.includes(this.row.status)) this.emit("run_continued", { content: firstLine(content, 200) });
     this.queue.push({ content: content + files, display: content, to_agent_id: target, images: images.map((i) => ({ type: "input_image", image_url: i.url })) });
+    this.wake?.resolve();
     void this.drive();
     return msg.id;
   }
@@ -409,6 +421,7 @@ export class Conversation {
         if (task) this.state.files_by_task[task.id] = [...new Set([...(this.state.files_by_task[task.id] ?? []), rel])];
         if (task) this.recordDiff(task.id, rel, before, after);
         this.state.unchecked = true;
+        this.state.unaccepted = true;
         this.emit("artifact_updated", { artifact: { ...artifactOut(row), created: before === null, lines, previous_lines } });
       },
       consult: (to, question) => this.consult(agent, to, question),
@@ -424,13 +437,15 @@ export class Conversation {
   private async devServer(): Promise<{ command: string; url: string | null; output: string }> {
     const server = processes(this.p.id).server;
     if (server.status !== "running") {
+      // Only the conventional dev scripts: anything else named like a server (deploy, release) is not ours to start.
       const scripts = projectTasks(this.p.fs).filter((t) => t.kind === "server");
-      const pick = ["dev", "start", "serve", "preview"].map((n) => scripts.find((t) => t.id.endsWith(`:${n}`))).find(Boolean) ?? scripts[0];
-      if (!pick) throw new UserError("The project has no dev server script (dev, start or preview in package.json). Add one first.");
+      const pick = ["dev", "start", "serve", "preview"].map((n) => scripts.find((t) => t.id.endsWith(`:${n}`))).find(Boolean);
+      if (!pick) throw new UserError("The project has no dev server script (dev, start, serve or preview in package.json). Add one first.");
       server.start(this.p.fs, pick.command, pick.directory);
+      this.startedServer = true;
     }
     const url = () => LOCAL_URL.exec(server.view().output.replace(/\x1b\[[0-9;]*m/g, ""))?.[0].replace("0.0.0.0", "localhost") ?? null;
-    for (let i = 0; i < 120 && !url() && server.status === "running"; i++) await sleep(250);
+    for (let i = 0; i < 120 && !url() && server.status === "running" && !this.stopped; i++) await sleep(250);
     return { command: server.command, url: url(), output: server.view().output };
   }
 
@@ -451,17 +466,24 @@ export class Conversation {
   private async turn(agent: AgentOut, mode: Mode, task: TaskOut | null, input: Item[], opts: { planner?: ToolContext["planner"]; maxRounds: number; session?: string; preload?: { path: string; content: string }[] }) {
     let s = opts.session ? this.liveSession(opts.session) : undefined;
     if (!s) {
-      const { tools, warnings } = await toolbox(this.reg, this.p.root, agent, mode);
-      for (const w of warnings) this.emit("error", { message: w, kind: "warning", agent_id: agent.id });
-      const company = this.p.db.companies.get(this.row.company_id);
-      const system = instructions({
-        agent, company: company?.name ?? "the company", goal: this.row.goal, team: this.team, overview: projectOverview(this.p.fs), skills: skillsFor(this.reg, agent, task?.skills),
-        memory: { own: this.p.db.memory.find("agent_id = ?", [agent.id]), shared: this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]) },
-      }, mode);
-      s = { mode, instructions: system, tools, input: [], seen: new Map(), shown: new Map(), inbox: [] };
+      // Registered before anything is awaited, so an amend_task sent meanwhile lands in its inbox.
+      s = { mode, instructions: "", tools: [], input: [], seen: new Map(), shown: new Map(), inbox: [] };
+      if (opts.session) this.sessions.set(opts.session, s);
+      try {
+        const { tools, warnings } = await toolbox(this.reg, this.p.root, agent, mode);
+        for (const w of warnings) this.emit("error", { message: w, kind: "warning", agent_id: agent.id });
+        const company = this.p.db.companies.get(this.row.company_id);
+        s.tools = tools;
+        s.instructions = instructions({
+          agent, company: company?.name ?? "the company", goal: this.row.goal, team: this.team, overview: projectOverview(this.p.fs), skills: skillsFor(this.reg, agent, task?.skills),
+          memory: { own: this.p.db.memory.find("agent_id = ?", [agent.id]), shared: this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]) },
+        }, mode);
+      } catch (e) {
+        if (opts.session) this.sessions.delete(opts.session);
+        throw e;
+      }
       // Documents put in the brief count as read, so the agent is not sent them twice.
       for (const d of opts.preload ?? []) { const hash = sha1(d.content); s.seen.set(d.path, hash); s.shown.set(d.path, { hash, ranges: [[1, d.content.split("\n").length]] }); }
-      if (opts.session) this.sessions.set(opts.session, s);
     }
     s.input.push(...input);
     this.emit("turn_started", { agent_id: agent.id, task_key: task?.key });
@@ -629,6 +651,7 @@ export class Conversation {
   private halt(reason: string, status: RunStatus = "incomplete") {
     this.queue = [];
     this.abort.abort();
+    if (this.startedServer) processes(this.p.id).server.stop();
     for (const a of this.approvals.values()) a.done(false, "The conversation was stopped");
     this.gate?.resolve();
     this.gate = null;
@@ -674,6 +697,12 @@ export class Conversation {
     this.save();
   }
 
+  /** The requirements the current request is about: the ones it recorded, and earlier ones its tasks took on. */
+  private cycleRequirements(): Requirement[] {
+    const owned = new Set(this.tasks.slice(this.state.cycle_from).flatMap((t) => t.requirements));
+    return this.state.requirements.filter((r, i) => i >= this.state.req_from || owned.has(r.id));
+  }
+
   /** The orchestrator's planning turn. Returns what happened. */
   private async plan(msg: Inbound, midRun = false): Promise<"work" | "replied" | "asked"> {
     const note = midRun ? "The team is already working on the open tasks above. If the message changes or adds to work in progress, add requirements and use amend_task on the task that owns it; create a task only for new work. If it needs no change, answer with reply_to_user." : "";
@@ -688,7 +717,7 @@ export class Conversation {
     const planner: Planner = {
       hire: (spec: HireSpec) => this.hire(spec, lead),
       tasks: () => this.tasks,
-      requirements: () => this.state.requirements,
+      requirements: () => this.cycleRequirements(),
       addRequirements: (texts) => {
         const start = this.state.requirements.length;
         const added = texts.map((text, i): Requirement => ({ id: `R${start + i + 1}`, text: text.trim(), status: "open", note: "" }));
@@ -719,7 +748,8 @@ export class Conversation {
         const t = this.tasks.find((x) => x.key === key.trim().toUpperCase());
         if (!t || !["todo", "in_progress", "waiting"].includes(t.status)) throw new UserError(`${key} is not open. Create a task for new work instead.`);
         this.saveTask({ ...t, description: `${t.description}\n\n## Update from ${lead.name}\n${note}` });
-        if (t.status === "in_progress") this.sessions.get(`${t.assignee_agent_id}:${this.state.continues[t.id] ?? t.id}`)?.inbox.push(`## Update from ${lead.name}\n${note}`);
+        // A session that will take another turn gets the update before its next step; a fresh brief includes the description.
+        this.sessions.get(`${t.assignee_agent_id}:${this.state.continues[t.id] ?? t.id}`)?.inbox.push(`## Update from ${lead.name} on ${t.key}\n${note}`);
         this.post({ from: lead.id, to: t.assignee_agent_id, type: "task", content: `**Update to ${t.key}**\n\n${note}`, meta: { task_id: t.key } });
         return t;
       },
@@ -785,7 +815,9 @@ export class Conversation {
         if (worked && !this.state.questions.length && (await this.verify())) continue;
         break;
       }
-      await Promise.race(running.values());
+      // Wake for a finished task or for a message from the user, so a mid-run message is planned while the team works.
+      this.wake = deferred<void>();
+      await Promise.race([...running.values(), this.wake.promise]);
     }
     await Promise.allSettled(running.values());
     if (this.pendingHalt) throw new Halt(this.pendingHalt.reason);
@@ -813,10 +845,12 @@ export class Conversation {
       mode = "acceptance";
       session = `${agent.id}:acceptance`;
       fresh = !this.liveSession(session);
-      const reqs = this.state.requirements.filter((r) => task.requirements.includes(r.id));
-      const built = this.tasks.filter((t) => (t.kind === "build" || t.kind === "fix" || t.kind === "docs") && t.status === "done");
-      const fixes = built.filter((t) => t.kind === "fix").slice(-6).map((t) => ({ key: t.key, who: author(t), result: t.result }));
-      brief = !fresh && fixes.length
+      const reqs = this.state.requirements.filter((r) => task.requirements.includes(r.id) && r.status !== "cut");
+      const cycle = this.tasks.slice(this.state.cycle_from);
+      const built = cycle.filter((t) => (t.kind === "build" || t.kind === "fix" || t.kind === "docs") && t.status === "done");
+      const lastCheck = cycle.findLastIndex((t) => t.kind === "verify" && t.id !== task.id && t.status === "done");
+      const fixes = cycle.slice(lastCheck + 1).filter((t) => t.kind === "fix" && t.status === "done").map((t) => ({ key: t.key, who: author(t), result: t.result }));
+      brief = !fresh && lastCheck >= 0 && fixes.length
         ? reAcceptanceBrief({ requirements: reqs, fixes })
         : acceptanceBrief({ goal: this.row.goal, requirements: reqs, work: built.map((t) => ({ key: t.key, title: t.title, who: author(t), result: t.result })),
           files: [...new Set(built.flatMap((t) => this.state.files_by_task[t.id] ?? []))],
@@ -832,7 +866,9 @@ export class Conversation {
       fresh = !cont;
       const round = (this.state.revisions[work.id] ?? 0) + 1;
       const diff = this.state.diffs_by_task[work.id];
-      brief = cont
+      brief = cont && resume
+        ? revisionNote(task, resume, "Then give your verdict with submit_review.")
+        : cont
         ? reReviewBrief(work, { author: author(work), summary: work.result, files: diff?.files ?? [], round, diff: diff?.text ?? "" })
         : reviewBrief(work, { goal: this.row.goal, author: author(work), summary: work.result, files: this.state.files_by_task[work.id] ?? [], round, diff: small?.text,
           previous: round > 1 ? this.state.feedback[work.id] : undefined, requirements: this.state.requirements });
@@ -841,7 +877,7 @@ export class Conversation {
       session = `${agent.id}:${this.state.continues[task.id] ?? task.id}`;
       fresh = !this.liveSession(session);
       if (fresh) preload = this.depDocs(deps);
-      brief = !fresh && resume ? revisionNote(task, resume) : taskBrief(task, { goal: this.row.goal, deps, team: this.team, feedback: this.state.feedback[task.id],
+      brief = !fresh && resume ? revisionNote(task, resume, "Address every point and verify the result, then call complete_task.") : taskBrief(task, { goal: this.row.goal, deps, team: this.team, feedback: this.state.feedback[task.id],
         answer: this.state.answers[task.id], requirements: this.state.requirements, docs: preload });
     }
     let stop: Stop | null = null;
@@ -857,17 +893,20 @@ export class Conversation {
       if (e instanceof Halt || this.stopped) { this.pendingHalt ??= { reason: e instanceof Halt ? e.message : "Stopped", status: this.stopped && !(e instanceof Halt) ? "cancelled" : "incomplete" }; this.abort.abort(); return; }
       const message = (e as Error).message;
       this.emit("error", { message: `${agent.name}: ${message}`, kind: "error", agent_id: agent.id });
-      if (task.attempts < 2 && !(e instanceof UserError && /not connected|401|403|404/.test(message))) { this.saveTask({ ...task, status: "todo" }); return; }
-      this.saveTask({ ...task, status: "blocked", result: `Failed: ${message}` });
+      if (task.attempts < 2 && !(e instanceof UserError && /not connected|401|403|404/.test(message))) { this.saveTask({ ...this.latest(task), status: "todo" }); return; }
+      this.saveTask({ ...this.latest(task), status: "blocked", result: `Failed: ${message}` });
       return;
     }
     try {
-      await this.settle(task, agent, stop, text, exhausted);
+      // The lead may have amended the task during the turn: settle the stored version, not the copy taken at the start.
+      await this.settle(this.latest(task), agent, stop, text, exhausted);
     } catch (e) {
       this.emit("error", { message: `${agent.name}: ${(e as Error).message}`, kind: "error", agent_id: agent.id });
-      this.saveTask({ ...task, status: "blocked", result: `Could not be completed: ${(e as Error).message}` });
+      this.saveTask({ ...this.latest(task), status: "blocked", result: `Could not be completed: ${(e as Error).message}` });
     }
   }
+
+  private latest(t: TaskOut): TaskOut { return this.tasks.find((x) => x.id === t.id) ?? t; }
 
   /** Apply how a task ended: done, review, fix round, question or blocked. */
   private async settle(task: TaskOut, agent: AgentOut, stop: Stop | null, text: string, exhausted = false) {
@@ -879,6 +918,7 @@ export class Conversation {
       return;
     }
     if (task.kind === "review" && stop?.kind !== "review" && stop?.kind !== "block" && task.attempts < 2) {
+      this.state.resume[task.id] = { from: "No verdict yet", text: "You stopped without giving a verdict." };
       this.saveTask({ ...task, status: "todo" }); // the reviewer did not give a verdict: ask again
       return;
     }
@@ -933,7 +973,7 @@ export class Conversation {
    */
   private async verify(): Promise<boolean> {
     if (!this.budget.verify) return false;
-    const changedTasks = this.tasks.filter((t) => (t.kind === "build" || t.kind === "fix") && t.status === "done" && (this.state.files_by_task[t.id] ?? []).length);
+    const changedTasks = this.tasks.slice(this.state.cycle_from).filter((t) => (t.kind === "build" || t.kind === "fix") && t.status === "done" && (this.state.files_by_task[t.id] ?? []).length);
     if (!changedTasks.length) return false;
     if (this.state.unchecked) {
       this.state.unchecked = false;
@@ -976,22 +1016,27 @@ export class Conversation {
     return true;
   }
 
-  /** Who checks the result against the requirements: a QA engineer, else someone with a browser who did not build it, else a new QA engineer. */
-  private verifierFor(changedTasks: TaskOut[]): AgentOut {
+  /**
+   * Who checks the result against the requirements: a QA engineer, else someone with a browser who did not build it,
+   * else a new QA engineer; when the team is full, anyone else who can run things. Null when nobody can.
+   */
+  private verifierFor(changedTasks: TaskOut[]): AgentOut | null {
     const authors = new Set(changedTasks.map((t) => t.assignee_agent_id));
-    const pool = this.team.filter((a) => a.id !== this.lead.id && a.tools.file_read !== false);
+    const pool = this.team.filter((a) => a.id !== this.lead.id && a.tools.file_read !== false && (a.tools.terminal || a.tools.browser));
     const found = pool.find((a) => a.behavior.template_key === "qa") ?? pool.find((a) => a.tools.browser && !authors.has(a.id));
     if (found) return found;
     try {
       return this.hire({ role_key: "qa", title: "QA Engineer", department: "Quality & Ops", reason: "Checks the finished work against what you asked for", manager: false }, this.lead);
     } catch {
-      return pool.find((a) => !authors.has(a.id) && a.tools.terminal) ?? pool[0] ?? this.lead; // the team is full
+      return pool.find((a) => !authors.has(a.id)) ?? pool[0] ?? null; // the team is full
     }
   }
 
   /** Queue an acceptance check of the requirements not yet met. Returns true when one was queued. */
   private requestAcceptance(changedTasks: TaskOut[]): boolean {
-    const pending = this.state.requirements.filter((r) => r.status === "open" || r.status === "unmet");
+    // Nothing changed since the last check was queued (it blocked, or found nothing to fix): asking again would repeat it.
+    if (!this.state.unaccepted) return false;
+    const pending = this.cycleRequirements().filter((r) => r.status === "open" || r.status === "unmet");
     if (!pending.length || this.tasks.some((t) => t.kind === "verify" && ["todo", "in_progress"].includes(t.status))) return false;
     if (this.state.acceptance_rounds > this.budget.max_revisions) {
       this.phase("verify", "failed", this.lead.id, `${pending.map((r) => r.id).join(", ")} not met`);
@@ -999,6 +1044,8 @@ export class Conversation {
     }
     this.state.acceptance_rounds++;
     const verifier = this.verifierFor(changedTasks);
+    if (!verifier) { this.phase("verify", "skipped", null, "No one on the team can run the product to check it"); return false; }
+    this.state.unaccepted = false;
     const ids = pending.map((r) => r.id);
     const t = this.newTask({ title: `Acceptance check: ${ids.join(", ")}`, description: "Check the finished product against these requirements, in the user's words.", acceptance_criteria: "",
       assignee_agent_id: verifier.id, kind: "verify", depends_on: [], created_by: this.lead.id, requirements: ids });
@@ -1018,7 +1065,7 @@ export class Conversation {
     }
     const verdicts = new Map(stop.results.map((r) => [r.id, r]));
     this.setRequirements(this.state.requirements.map((r) => {
-      if (!task.requirements.includes(r.id)) return r;
+      if (!task.requirements.includes(r.id) || r.status === "cut") return r; // a requirement cut meanwhile stays cut
       const v = verdicts.get(r.id)!;
       return { ...r, status: v.met ? "met" : "unmet", note: v.evidence };
     }));
@@ -1053,7 +1100,7 @@ export class Conversation {
     const files = [...new Set(cycle.flatMap((t) => this.state.files_by_task[t.id] ?? []))];
     const checks = this.state.verification.map((v) => `- ${v.name}: ${v.ok ? "passed" : "failed"}`).join("\n");
     const outcome = outcomeSection({
-      requirements: this.state.requirements,
+      requirements: this.cycleRequirements(),
       open: [
         ...cycle.filter((t) => t.status === "blocked").map((t) => `${t.key} ${t.title} (${who(t.assignee_agent_id)}) is blocked: ${firstLine(t.result, 300)}`),
         ...cycle.filter((t) => this.state.open_comments[t.id]).map((t) => `${t.key} ${t.title.replace(/^Revise: /, "")}: review comments still open after ${this.budget.max_revisions} revisions: ${clip(this.state.open_comments[t.id]!, 400)}`),
@@ -1074,7 +1121,7 @@ export class Conversation {
       if (e instanceof Halt || this.stopped) throw e;
       text = `The work is done, but I could not write the summary (${(e as Error).message}).\n\n${tasks}`;
     }
-    const blocked = cycle.some((t) => t.status === "blocked") || this.state.verification.some((v) => !v.ok) || this.state.requirements.some((r) => r.status === "unmet");
+    const blocked = cycle.some((t) => t.status === "blocked") || this.state.verification.some((v) => !v.ok) || this.cycleRequirements().some((r) => r.status === "unmet");
     this.phase("report", "done", lead.id);
     this.finishCycle([text || "Done.", outcome].filter(Boolean).join("\n\n"), blocked ? "incomplete" : "completed", files);
   }
@@ -1091,12 +1138,13 @@ export class Conversation {
     this.state.verify_rounds = 0;
     this.state.acceptance_rounds = 0;
     this.state.cycle_from = this.tasks.length;
+    this.state.req_from = this.state.requirements.length;
     this.sessions.clear();
   }
 
   /** For deleting a conversation: stop it and forget it. */
   static discard(runId: string) {
     const c = live.get(runId);
-    if (c) { c.abort.abort(); live.delete(runId); }
+    if (c) { c.abort.abort(); if (c.startedServer) processes(c.p.id).server.stop(); live.delete(runId); }
   }
 }
