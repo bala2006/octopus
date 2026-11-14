@@ -4,13 +4,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowDownUp, GitCompare, History, Play, RotateCw, Search, Square, Trash2 } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
-import { cn, formatTokens, timeAgo, duration, parseUtc } from "@/lib/utils";
+import { cn, formatTokens, timeAgo, duration, goalTitle, parseUtc } from "@/lib/utils";
 import { useMoney } from "@/lib/money";
 import { qk, useCompanyId, useRuns, useWorkspaceId } from "@/hooks/queries";
 import type { RunOut } from "@/types";
 import { ApprovalModeBadge, EmptyState, LoadingRows } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/components/ui/surfaces";
+import { PageToolbar } from "@/components/ui/surfaces";
 import { Badge, Input } from "@/components/ui/primitives";
 import { ConfirmDialog, Tip } from "@/components/ui/overlays";
 import { useOpenConversation } from "@/features/conversation/useOpenConversation";
@@ -51,28 +51,30 @@ export default function RunsPage() {
   const counts = React.useMemo(() => Object.fromEntries(FILTERS.map(([f]) => [f, filterRuns(data ?? [], f, "", "newest").length])), [data]);
 
   return (
-    <div className="content-page flex h-full min-h-0 flex-col">
-      <PageHeader title="History" description="Every conversation in this project, with what it cost and how it ended. Open one to pick it up where you left off." />
+    <div className="flex h-full min-h-0 flex-col">
       {!!data?.length && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div role="radiogroup" aria-label="Filter conversations" className="flex items-center gap-1">
+        <PageToolbar
+          actions={
+            <>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search conversations" aria-label="Search conversations by message" className="h-8 w-56 pl-8 text-xs" />
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setSort(sort === "newest" ? "oldest" : "newest")} aria-label={`Sort: ${sort} first`}>
+                <ArrowDownUp />{sort === "newest" ? "Newest first" : "Oldest first"}
+              </Button>
+            </>
+          }
+        >
+          <div role="radiogroup" aria-label="Filter conversations" className="segmented">
             {FILTERS.map(([f, label]) => (
-              <button key={f} role="radio" aria-checked={filter === f} onClick={() => setFilter(f)}
-                className={cn("rounded-full border px-2.5 py-1 text-xs transition", filter === f ? "border-primary/50 bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-accent")}>
+              <button key={f} role="radio" aria-checked={filter === f} onClick={() => setFilter(f)}>
                 {label} <span className="tabular-nums opacity-70">{counts[f]}</span>
               </button>
             ))}
           </div>
-          <div className="relative ml-auto">
-            <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search conversations" aria-label="Search conversations by message" className="h-8 w-56 pl-7 text-xs" />
-          </div>
-          <Button size="sm" variant="ghost" onClick={() => setSort(sort === "newest" ? "oldest" : "newest")} aria-label={`Sort: ${sort} first`}>
-            <ArrowDownUp />{sort === "newest" ? "Newest first" : "Oldest first"}
-          </Button>
-        </div>
-      )}
-      <div className="ui-surface min-h-0 overflow-y-auto" data-testid="runs-list">
+        </PageToolbar>
+      )}      <div className="min-h-0 flex-1 overflow-y-auto" data-testid="runs-list">
         {isLoading ? <LoadingRows rows={5} /> : !data?.length ? (
           <EmptyState icon={History} title="No conversations yet" description="Send your first request in Conversation. The team lead plans the work and brings in the right agents." action={<Button onClick={() => openConversation(w, null, companyId)}><Play />Start a conversation</Button>} />
         ) : !shown.length ? (
@@ -80,7 +82,7 @@ export default function RunsPage() {
         ) : (
           groups.map((g) => (
             <section key={g.day} aria-label={g.day}>
-              <h2 className="sticky top-0 z-10 border-b border-border bg-surface/95 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">{g.day}</h2>
+              <h2 className="sticky top-0 z-10 border-b border-border bg-surface/95 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">{g.day}</h2>
               <ul className="divide-y divide-border">
                 {g.runs.map((r) => (
                   <RunRow key={r.id} r={r} w={w} onDelete={() => setDel(r.id)} onStop={() => stop.mutate(r.id)} onRerun={() => rerun.mutate(r)} />
@@ -105,14 +107,14 @@ function RunRow({ r, w, onDelete, onStop, onRerun }: { r: RunOut; w: string; onD
   const dur = r.started_at && r.ended_at ? duration(parseUtc(r.ended_at) - parseUtc(r.started_at)) : null;
   const created = new Date(parseUtc(r.created_at));
   return (
-    <li className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/30 focus-within:bg-accent/30" data-testid={`run-row-${r.id}`}>
+    <li className="group flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 transition-colors hover:bg-accent/30 focus-within:bg-accent/30" data-testid={`run-row-${r.id}`}>
       <Tip content={out.caveat ?? out.label}>
         <Badge variant={out.variant} className={cn("w-24 shrink-0 justify-center gap-1", r.status === "running" && "animate-pulse")}>
           {out.caveat && <AlertTriangle className="h-3 w-3" aria-hidden />}{out.label}
         </Badge>
       </Tip>
-      <Link to={`/w/${w}/runs/${r.id}`} className="min-w-0 flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <div className="truncate text-sm font-medium">{r.goal}</div>
+      <Link to={`/w/${w}/runs/${r.id}`} className="min-w-[10rem] flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <div className="truncate text-sm font-medium">{goalTitle(r.goal)}</div>
         <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
           <time dateTime={created.toISOString()} title={created.toLocaleString()} className="shrink-0">{timeAgo(r.created_at)}</time>
           <span>·</span><span className="shrink-0 capitalize">{r.mode}</span>{dur && <><span>·</span><span className="shrink-0">{dur}</span></>}
@@ -125,7 +127,7 @@ function RunRow({ r, w, onDelete, onStop, onRerun }: { r: RunOut; w: string; onD
           </div>
         )}
       </Link>
-      <ApprovalModeBadge mode={r.permission_level} />
+      <span className="shrink-0 whitespace-nowrap"><ApprovalModeBadge mode={r.permission_level} /></span>
       <div className="shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-muted-foreground">{r.turns} model calls · {formatTokens(r.tokens_used)} tok · {money(r.cost_usd)}</div>
       {/* always reachable (keyboard and touch); dimmed until the row is hovered or focused */}
       <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" aria-label="Conversation actions">

@@ -9,7 +9,7 @@ import {
   ExternalLink, Code2, Bot, NotebookPen,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
-import { cn, download, languageFor, timeAgo } from "@/lib/utils";
+import { cn, download, goalTitle, languageFor, timeAgo } from "@/lib/utils";
 import { qk, useArtifacts, useCompanyId, useRun, useRuns, useWorkspaceId } from "@/hooks/queries";
 import { Markdown } from "@/components/Markdown";
 import { splitWork } from "./files";
@@ -18,6 +18,7 @@ import type { AgentOut, ArtifactOut } from "@/types";
 import { AgentAvatar, EmptyState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Badge, Input } from "@/components/ui/primitives";
+import { PageToolbar, SidePanel } from "@/components/ui/surfaces";
 import { ConfirmDialog, Select, Tabs, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 
 interface TreeNode { name: string; path: string; children: Map<string, TreeNode>; file?: { path: string; badge?: "created" | "modified" | "deleted"; versions?: number; area?: "project" | "work"; generated?: boolean } }
@@ -122,20 +123,26 @@ export default function ArtifactsPage() {
 
   return (
     <div className="artifacts-layout flex h-full min-h-0 flex-col">
-      <div className="view-toolbar">
+      <PageToolbar
+        actions={
+          <Button size="sm" variant="outline" onClick={() => void zip()} disabled={!selectedRun}><Download />Download changes</Button>
+        }
+      >
         <History className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
         <Select ariaLabel="Conversation" value={selectedRun} onValueChange={(v) => nav(`/w/${w}/artifacts/${v}`)} className="h-8 w-full max-w-96 text-xs"
-          options={(runs.data ?? []).map((r) => ({ value: r.id, label: `${r.goal.slice(0, 56)}`, hint: `${r.status} · ${timeAgo(r.created_at)}` }))} placeholder="Choose a conversation" />
-        <div className="ml-auto flex items-center gap-1.5">
-          <Button size="sm" variant="ghost" onClick={() => void zip()} disabled={!selectedRun}><Download />Download changes</Button>
-        </div>
-      </div>
-
+          options={(runs.data ?? []).map((r) => ({ value: r.id, label: goalTitle(r.goal).slice(0, 56), hint: `${r.status} \u00b7 ${timeAgo(r.created_at)}` }))} placeholder="Choose a conversation" />
+      </PageToolbar>
       <div className="artifacts-body flex min-h-0 flex-1">
-        <aside className="artifact-sidebar flex w-60 shrink-0 flex-col border-r border-border bg-surface/40">
-          <div className="p-2"><div className="relative"><Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter files" className="h-7 pl-7 text-xs" aria-label="Filter files" /></div></div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2 text-[13px]" role="tree">
+        <SidePanel
+          label="Changed files"
+          className="artifact-sidebar"
+          header={
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter files" className="h-8 pl-8 text-xs" aria-label="Filter files" />
+            </div>
+          }
+        >          <div className="side-panel-body text-[13px]" role="tree">
             {arts.isLoading && <div className="space-y-1.5 p-2">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-5" />)}</div>}
             {!projectFiles.length && !arts.isLoading && <p className="p-4 text-center text-xs text-muted-foreground">{!runs.data?.length ? "Changes appear here after your first conversation." : workFiles.length ? "No project files changed. The agents only wrote working docs, listed below." : "This conversation didn't change any files."}</p>}
             <TreeView node={tree} depth={0} selected={selected} onSelect={pick} />
@@ -151,27 +158,29 @@ export default function ArtifactsPage() {
               </div>
             )}
           </div>
-        </aside>
+        </SidePanel>
 
         <section className="flex min-w-0 flex-1 flex-col">
           {!selected ? <EmptyState icon={FileCode2} title="No file selected" description="Pick a file from the tree." /> : (
             <>
-              <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
-                <span className="truncate font-mono text-xs">{selected}</span>
-                <Button size="sm" variant="ghost" disabled={latest?.deleted} onClick={() => nav(`/w/${w}/workspace?file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
+              <PageToolbar
+                actions={
+                  <>
+                    <Button size="sm" variant="outline" disabled={latest?.deleted} onClick={() => nav(`/w/${w}/workspace?file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
+                    <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
+                      <TabsList>
+                        <TabsTrigger value="view"><Code2 />Code</TabsTrigger>
+                        <TabsTrigger value="diff" disabled={shownVersion === null}><GitCompare />Diff</TabsTrigger>
+                        <TabsTrigger value="preview" disabled={!!deleted || !kind || !selectedRun}><Eye />Preview</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </>
+                }
+              >
+                <span className="min-w-0 truncate font-mono text-xs" title={selected}>{selected}</span>
                 {deleted && <Badge variant="outline">Deleted</Badge>}
                 {shownVersion !== null && <Badge variant="outline">v{shownVersion}{latest && shownVersion !== latest.version ? ` of ${latest.version}` : ""}</Badge>}
-                <div className="ml-auto flex items-center gap-1">
-                  <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
-                    <TabsList>
-                      <TabsTrigger value="view"><Code2 />Code</TabsTrigger>
-                      <TabsTrigger value="diff" disabled={shownVersion === null}><GitCompare />Diff</TabsTrigger>
-                      <TabsTrigger value="preview" disabled={!!deleted || !kind || !selectedRun}><Eye />Preview</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                </div>
-              </div>
-              <div className="relative min-h-0 flex-1">
+              </PageToolbar>              <div className="relative min-h-0 flex-1">
                 {content.isLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
                 {content.isError && <EmptyState icon={FileCode2} title="Cannot open file" description={(content.error as Error).message} />}
                 {mode === "view" && deleted && <EmptyState icon={FileCode2} title="File deleted" description="This version removes the file. Open Diff to review the removed content or choose an earlier version to restore it." />}
@@ -209,10 +218,13 @@ export default function ArtifactsPage() {
         </section>
 
         {selected && versions.length > 0 && (
-          <aside className="w-72 shrink-0 overflow-y-auto border-l border-border bg-surface" aria-label="Version history">
-            <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-xs font-semibold"><History className="h-3.5 w-3.5" />Version history</div>
-            <ol className="relative space-y-1 p-2">
-              {[...versions].reverse().map((v) => {
+          <SidePanel
+            side="right"
+            label="Version history"
+            header={<><History className="h-3.5 w-3.5" />Version history</>}
+          >
+            <div className="side-panel-body">
+            <ol className="relative space-y-1">              {[...versions].reverse().map((v) => {
                 const a = v.author_agent_id ? agents[v.author_agent_id] : undefined;
                 const on = v.version === shownVersion;
                 return (
@@ -231,12 +243,13 @@ export default function ArtifactsPage() {
                 );
               })}
             </ol>
+            </div>
             <div className="space-y-1.5 border-t border-border p-3">
               <div className="text-[11px] font-medium text-muted-foreground">Restore in project</div>
               {shownVersion !== null && shownVersion !== latest?.version && <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(shownVersion)}><RotateCcw />Restore v{shownVersion}</Button>}
               <Button size="xs" variant="outline" className="w-full" onClick={() => setRevertTo(0)}><RotateCcw />Revert to before this conversation</Button>
             </div>
-          </aside>
+          </SidePanel>
         )}
       </div>
       <ConfirmDialog open={revertTo !== null} onOpenChange={(o) => !o && setRevertTo(null)} title={revertTo === 0 ? `Revert ${selected}?` : `Restore v${revertTo}?`} destructive confirmLabel="Restore"
