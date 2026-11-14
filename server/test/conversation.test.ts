@@ -317,7 +317,7 @@ test("requirements must all be owned or cut, owned paths let builders run in par
   const lena = work.filter((w) => w.who === "Lena");
   const ava = work.filter((w) => w.who === "Alex");
   expect(lena[0]!.input).toContain("R1: A red home page");
-  expect(lena[0]!.input).toContain("Files you own");
+  expect(lena[0]!.input).toContain("Your part");
   expect(ava[0]!.instructions).toContain("# Web game");
   expect(work.indexOf(ava[0]!)).toBeLessThan(work.indexOf(lena.at(-1)!)); // both ran at once
   expect(existsSync(path.join(dir, "src/about/extra.html"))).toBe(false);
@@ -514,6 +514,82 @@ test("a blocked acceptance check is not queued again until something changes", a
   const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
   expect(tasks.filter((t) => t.kind === "verify").map((t) => t.status)).toEqual(["blocked"]);
 });
+
+test("an idle teammate answers from its own session, and pins reach the briefs of tasks on their paths", async () => {
+  const seen: { last: string; first: string; tools: string[] }[] = [];
+  let alexGot = "";
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const first = JSON.stringify(b.input[0]);
+    const last = JSON.stringify(b.input.findLast((i: { role?: string }) => i.role === "user"));
+    if (kind === "plan") return n === 0 ? { calls: [
+      { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the shell" } },
+      { name: "hire_agent", args: { role_key: "backend", title: "Backend Developer", department: "Engineering", reason: "Builds the API" } },
+      { name: "create_task", args: { title: "Build the API", description: "Write src/api/index.js.", acceptance_criteria: "- exists", assignee: "Diego", kind: "build", files: ["src/api"] } },
+      { name: "create_task", args: { title: "Build the client", description: "Write src/web/app.js against the API.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", files: ["src/web"], depends_on: ["T1"] } },
+    ] } : { calls: [{ name: "start_work", args: { note: "API, then client." } }] };
+    if (kind === "work" || kind === "consult") seen.push({ last, first, tools: (b.tools ?? []).map((t: { name: string }) => t.name) });
+    const answering = /Message (\w+) from Lena/.exec(last);
+    if (answering) return { calls: [{ name: "reply", args: { message_id: answering[1], text: "Blue, #2244ff." } }] };
+    if (kind === "work" && first.includes("# T1: Build the API")) return n === 0
+      ? { calls: [{ name: "write_file", args: { path: "src/api/index.js", content: "export const color = '#2244ff';\n" } }, { name: "pin", args: { key: "contract: api", text: "GET /color returns { color: string }", paths: ["src/api", "src/web"] } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Built the API.", verification: "Read it" } }] };
+    if (kind === "work" && first.includes("Build the client")) {
+      if (n === 0) return { calls: [{ name: "message", args: { to: "Diego", text: "Which brand colour does the API return?", wait: true } }] };
+      if (n === 1) { alexGot = String(outputs(b)[0]!.output); return { calls: [{ name: "write_file", args: { path: "src/web/app.js", content: "// blue\n" } }] }; }
+      return { calls: [{ name: "complete_task", args: { summary: "Built the client.", verification: "Read it" } }] };
+    }
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "An API and a client" });
+  expect((await until(run.id, ["completed", "incomplete"])).status).toBe("completed");
+
+  const clientBrief = seen.find((s) => s.first.includes("# T2: Build the client"))!;
+  expect(clientBrief.first).toContain("Pinned in the team chat");
+  expect(clientBrief.first).toContain("GET /color returns { color: string }");
+  expect(clientBrief.tools).toEqual(expect.arrayContaining(["message", "reply", "pin"]));
+  const answer = seen.find((s) => /Message \w+ from Lena/.test(s.last))!;
+  expect(answer.first).toContain("# T1: Build the API"); // Diego answered inside his own session
+  expect(alexGot).toBe("Diego replied: Blue, #2244ff.");
+  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+  expect(messages.filter((m) => ["question", "answer", "decision"].includes(m.type)).map((m) => m.type)).toEqual(expect.arrayContaining(["decision", "question", "answer"]));
+});
+
+test("a teammate's edit reaches the agent that read the file, and its re-read returns the new content", async () => {
+  writeFileSync(path.join(dir, "shared.txt"), "version one\n");
+  writeFileSync(path.join(dir, "wait.js"), "setTimeout(() => {}, Number(process.argv[2] ?? 1000));\n");
+  const steps: Record<string, number> = {};
+  let notice = "";
+  let reread = "";
+  script = (b) => {
+    const kind = turnKind(b);
+    if (kind === "plan") return outputs(b).length === 0 ? { calls: [
+      { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds part A" } },
+      { name: "hire_agent", args: { role_key: "backend", title: "Backend Developer", department: "Engineering", reason: "Builds part B" } },
+      { name: "create_task", args: { title: "Build part A", description: "Work in src/a.", acceptance_criteria: "- done", assignee: "Lena", kind: "build", files: ["src/a"] } },
+      { name: "create_task", args: { title: "Build part B", description: "Work in src/b.", acceptance_criteria: "- done", assignee: "Diego", kind: "build", files: ["src/b"] } },
+    ] } : { calls: [{ name: "start_work", args: { note: "Both at once." } }] };
+    if (kind !== "work") return buildScript(b);
+    const who = JSON.stringify(b.input[0]).includes("part A") ? "lena" : "diego";
+    const step = (steps[who] = (steps[who] ?? 0) + 1);
+    if (who === "diego") return step === 1 ? { calls: [{ name: "run_command", args: { command: "node wait.js 600" } }] }
+      : step === 2 ? { calls: [{ name: "read_file", args: { path: "shared.txt" } }] }
+      : step === 3 ? { calls: [{ name: "write_file", args: { path: "shared.txt", content: "version two\n" } }, { name: "write_file", args: { path: "src/b/x.txt", content: "b\n" } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Built part B.", verification: "Read it" } }] };
+    if (step === 1) return { calls: [{ name: "read_file", args: { path: "shared.txt" } }] };
+    if (step === 2) return { calls: [{ name: "run_command", args: { command: "node wait.js 2500" } }] };
+    if (step === 3) { notice = JSON.stringify(b.input.slice(-1)); return { calls: [{ name: "read_file", args: { path: "shared.txt" } }] }; }
+    if (step === 4) { reread = String(outputs(b).at(-1)?.output); return { calls: [{ name: "write_file", args: { path: "src/a/y.txt", content: "a\n" } }] }; }
+    return { calls: [{ name: "complete_task", args: { summary: "Built part A.", verification: "Read it" } }] };
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Two parts" });
+  await until(run.id, ["completed", "incomplete"]);
+  expect(notice).toContain("shared.txt was changed by Diego");
+  expect(reread).toContain("version two");
+}, 30_000);
 
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });

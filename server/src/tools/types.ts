@@ -28,7 +28,9 @@ export type Stop =
   | { kind: "block"; reason: string }
   | { kind: "plan_ready"; note: string }
   | { kind: "reply"; message: string }
-  | { kind: "acceptance"; results: { id: string; met: boolean; evidence: string }[] };
+  | { kind: "acceptance"; results: { id: string; met: boolean; evidence: string }[] }
+  /** The agent answered the message its turn was started for. */
+  | { kind: "answered"; text: string };
 
 export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop }
 
@@ -73,8 +75,17 @@ export interface ToolContext {
   seen: Map<string, string>;
   /** What this agent's transcript already holds, so an unchanged re-read costs a line instead of the file. */
   shown: Shown;
-  /** Ask a teammate a question and wait for the answer. */
-  consult(to: AgentOut, question: string): Promise<string>;
+  /**
+   * Message a teammate by name, or the team chat with "team". With `wait`, resolves with the reply; otherwise the
+   * reply reaches this agent before a later step.
+   */
+  message(to: string, text: string, wait: boolean): Promise<string>;
+  /** Reply to a message by its id. */
+  reply(messageId: string, text: string): string;
+  /** Pin an interface or decision to the team chat; teammates working on its paths hear about it. */
+  pin(key: string, text: string, paths: string[]): string;
+  /** The message this turn was started to answer, when it is an answer turn. */
+  answering: string | null;
   /** The running task (other than this one) that owns a path, as "T4 (Lena)", or null when nobody else does. */
   ownerOf(rel: string): string | null;
   /** Start the project's dev server in the background (or find the running one) and return where it listens. */

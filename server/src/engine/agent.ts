@@ -92,7 +92,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   for (let round = 1; round <= o.maxRounds; round++) {
     if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: WRAP_UP });
     await o.events.beforeCall();
-    while (o.inbox?.length) input.push({ role: "user", content: o.inbox.shift()! });
+    if (o.inbox?.length) input.push({ role: "user", content: o.inbox.splice(0).join("\n\n") });
     // A shortened read no longer holds the file, so the next read of it must return the content again.
     if (compact(input)) o.ctx.shown.clear();
     const res = await complete(o.reg, {

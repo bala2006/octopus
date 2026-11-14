@@ -138,7 +138,7 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
   return sections.filter((s) => s.trim()).join("\n\n");
 }
 
-export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: AgentOut[]; feedback?: string; answer?: string; requirements?: Requirement[]; docs?: { path: string; content: string }[] }): string {
+export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: AgentOut[]; feedback?: string; answer?: string; requirements?: Requirement[]; docs?: { path: string; content: string }[]; pins?: string[] }): string {
   const who = (id: string | null) => o.team.find((a) => a.id === id)?.name ?? "someone";
   const mine = (o.requirements ?? []).filter((r) => t.requirements.includes(r.id));
   return [
@@ -146,7 +146,8 @@ export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: 
     t.description,
     t.acceptance_criteria && `## Acceptance criteria\n${t.acceptance_criteria}`,
     mine.length && `## Requirements you deliver (the user's words; the finished product is checked against these)\n${mine.map((r) => `- ${r.id}: ${r.text}`).join("\n")}`,
-    t.files.length && `## Files you own\n${t.files.map((f) => `- ${f}`).join("\n")}\nOnly you write these while you work. Other paths may belong to teammates working at the same time.`,
+    t.files.length && `## Your part\n${t.files.map((f) => `- ${f}`).join("\n")}\nYou own these files. Teammates own the other parts: to change something in theirs, message them. Only a file a teammate is editing right now is closed to you.`,
+    o.pins?.length && `## Pinned in the team chat (build on these; pin a new version if you must change one)\n${o.pins.join("\n\n")}`,
     `## The user's request (for context)\n${o.goal}`,
     o.deps.length ? `## Work this builds on\n${o.deps.map((d) => `### ${d.key} ${d.title} (${who(d.assignee_agent_id)})\n${d.result || "Done."}`).join("\n\n")}` : "",
     o.docs?.length ? `## Documents from that work (already here: do not read them again)\n${o.docs.map((d) => `### ${d.path}\n\`\`\`\n${d.content}\n\`\`\``).join("\n\n")}` : "",

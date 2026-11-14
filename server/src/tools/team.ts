@@ -1,22 +1,17 @@
 /**
- * Collaboration tools. Specialists finish, block, ask the user, consult teammates, review and keep notes; the
- * orchestrator additionally hires and plans. Tools that end a turn return a `stop`.
+ * Collaboration tools. Builders finish or block, everyone messages teammates, replies and pins decisions to the team
+ * chat, reviewers give verdicts, and the orchestrator hires and plans. Tools that end a turn return a `stop`.
  */
 import { z } from "zod";
 import { newId, now } from "../lib/util";
 import { SHARED_MEMORY } from "../db/project";
-import { defineTool, type ToolContext } from "./types";
+import { defineTool } from "./types";
 
 const options = z.array(z.object({
   label: z.string().describe("Short answer the user can pick"),
   description: z.string().optional().describe("What choosing it means"),
   recommended: z.boolean().optional(),
 })).max(5);
-
-const findMate = (ctx: ToolContext, who: string) => {
-  const q = who.trim().toLowerCase();
-  return ctx.team().find((a) => a.id === who || a.name.toLowerCase() === q) ?? ctx.team().find((a) => a.role.toLowerCase() === q || a.name.toLowerCase().startsWith(q));
-};
 
 export const askUser = defineTool({
   name: "ask_user",
@@ -48,18 +43,40 @@ export const memoryTools = [
   }),
 ];
 
-export const consultTool = defineTool({
-  name: "ask_teammate",
-  description: "Ask a teammate a focused question (an API contract, a design decision, how something works) and wait for their answer. Use their name.",
-  args: z.object({ teammate: z.string(), question: z.string().min(5) }),
-  async run(ctx, a) {
-    const mate = findMate(ctx, a.teammate);
-    if (!mate) return { text: `No teammate called ${a.teammate}. Team: ${ctx.team().map((t) => `${t.name} (${t.role})`).join(", ")}`, ok: false };
-    if (mate.id === ctx.agent.id) return { text: "That is you.", ok: false };
-    ctx.setStatus("waiting", `Asking ${mate.name}`);
-    return { text: `${mate.name}: ${await ctx.consult(mate, a.question)}` };
-  },
-});
+export const collabTools = [
+  defineTool({
+    name: "message",
+    description: "Message a teammate while you both work: a question only they can answer, a heads-up about a change that affects their part, or a request to change something they own. Use their name, or \"team\" to post to the team chat (mention people with @Name). Messages reach them before their next step; an idle teammate answers from their own context. Set wait only when you cannot continue without the answer.",
+    args: z.object({
+      to: z.string().describe("Teammate name, or \"team\""),
+      text: z.string().min(3).max(2000).describe("Self-contained: say what you need and why; name files instead of pasting them"),
+      wait: z.boolean().optional().describe("Wait for the reply before continuing"),
+    }),
+    async run(ctx, a) {
+      ctx.setStatus("waiting", a.wait ? `Waiting for ${a.to}` : `Messaging ${a.to}`);
+      return { text: await ctx.message(a.to, a.text, a.wait ?? false) };
+    },
+  }),
+  defineTool({
+    name: "reply",
+    description: "Answer a teammate's message by its id. Be specific: facts, file paths, exact names. Say plainly when you do not know.",
+    args: z.object({ message_id: z.string().min(4), text: z.string().min(1).max(2000) }),
+    async run(ctx, a) {
+      const out = ctx.reply(a.message_id, a.text);
+      return ctx.answering === a.message_id ? { text: out, stop: { kind: "answered", text: a.text } } : { text: out };
+    },
+  }),
+  defineTool({
+    name: "pin",
+    description: "Pin an interface, contract or decision that teammates build on (types and signatures, an API shape, a file layout, a visual direction). Teammates working on the listed paths are told at their next step. Pin again with the same key to publish a new version.",
+    args: z.object({
+      key: z.string().min(2).max(80).describe("Stable topic, e.g. \"contract: GameWorldPort\""),
+      text: z.string().min(5).max(1500).describe("The interface or decision itself, exact enough to build against"),
+      paths: z.array(z.string()).optional().describe("Files or folders it is about; empty means the whole project"),
+    }),
+    async run(ctx, a) { return { text: ctx.pin(a.key, a.text, a.paths ?? []) }; },
+  }),
+];
 
 export const workerTools = [
   defineTool({
