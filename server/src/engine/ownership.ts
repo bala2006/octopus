@@ -14,8 +14,8 @@ export function owns(paths: string[], rel: string): boolean {
 
 const overlap = (a: string[], b: string[]) => a.some((p) => owns(b, p)) || b.some((p) => owns(a, p));
 
-/** Tasks that change files. Reviews only read. */
-export const writes = (t: Pick<TaskOut, "kind">) => t.kind !== "review";
+/** Tasks that change files. Reviews and acceptance checks only read and run. */
+export const writes = (t: Pick<TaskOut, "kind">) => t.kind !== "review" && t.kind !== "verify";
 
 /** Whether `next` can start while `running` runs: a task that owns nothing may write anywhere, so it runs alone. */
 export function canRunBeside(next: Pick<TaskOut, "kind" | "files">, running: Pick<TaskOut, "kind" | "files">[]): boolean {

@@ -10,6 +10,7 @@ import { publish } from "../src/engine/bus";
 import { Conversation } from "../src/engine/conversation";
 import { openProject } from "../src/db/project";
 import { project } from "../src/workspace/projects";
+import { stopAll } from "../src/workspace/processes";
 import { fakeModel, outputs, turnKind, type FakeModel, type Script } from "./fakeModel";
 
 let app: FastifyInstance;
@@ -63,6 +64,10 @@ const buildScript: Script = (b) => {
     ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n", note: "Landing page" } }] }
     : { calls: [{ name: "complete_task", args: { summary: "Built index.html with the hero.", verification: "Opened the file" } }] };
   if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks good." } }] };
+  if (kind === "acceptance") {
+    const ids = [...new Set(JSON.stringify(b.input).match(/- (R\d+):/g)?.map((m) => m.slice(2, -1)) ?? [])];
+    return { calls: [{ name: "submit_acceptance", args: { results: ids.map((id) => ({ id, met: true, evidence: "Saw it work." })) } }] };
+  }
   return { text: "The landing page is ready in index.html." };
 };
 
@@ -350,6 +355,56 @@ test("a small document a task depends on is handed over in its brief, so it is n
   expect(builderBrief).toContain("The page says hello.");
   expect(reread).toMatch(/have not changed since you read them/);
 });
+
+test("the result is checked against the requirements; what fails goes back to its builder until it passes", async () => {
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x", scripts: { dev: "node server.js" } }));
+  writeFileSync(path.join(dir, "server.js"), "console.log('  Local:   http://localhost:4321/');\nsetInterval(() => {}, 1000);\n");
+  const seen: { kind: string; last: string; input: unknown[]; outputs: string[] }[] = [];
+  let checks = 0;
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const last = JSON.stringify(b.input.findLast((i: { role?: string }) => i.role === "user"));
+    seen.push({ kind, last, input: b.input, outputs: outputs(b).map((o) => String(o.output)) });
+    if (kind === "plan") return n === 0 ? { calls: [
+      { name: "set_requirements", args: { items: ["A pricing section"] } },
+      { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
+      { name: "create_task", args: { title: "Build the landing page", description: "Write index.html.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", requirements: ["R1"], files: ["index.html"] } },
+    ] } : { calls: [{ name: "start_work", args: { note: "Lena builds it." } }] };
+    if (kind === "work" && last.includes("Make R1 work")) return n === 0
+      ? { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1>Acme</h1><section>Pricing</section>" } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Added the pricing section.", verification: "Opened it" } }] };
+    if (kind === "acceptance") {
+      if (checks === 0 && n === 0) return { calls: [{ name: "start_dev_server", args: {} }] };
+      const met = checks++ > 0;
+      return { calls: [{ name: "submit_acceptance", args: { results: [{ id: "R1", met, evidence: met ? "The pricing section shows." : "There is no pricing section on the page." }] } }] };
+    }
+    return buildScript(b);
+  };
+  try {
+    const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+    const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "A landing page with a pricing section" });
+    const done = await until(run.id, ["completed", "incomplete"]);
+    expect(done.status).toBe("completed");
+    const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+    expect(tasks.map((t) => [t.kind, t.status])).toEqual([
+      ["build", "done"], ["review", "done"], ["verify", "done"], ["fix", "done"], ["review", "done"], ["verify", "done"]]);
+    expect(tasks[2]!.result).toContain("R1 not met: There is no pricing section");
+    expect(readFileSync(path.join(dir, "index.html"), "utf8")).toContain("Pricing");
+
+    const firstCheck = seen.find((s) => s.kind === "acceptance" && s.outputs.length === 1)!;
+    expect(firstCheck.outputs[0]).toContain("is running at http://localhost:4321/");
+    const fix = seen.find((s) => s.kind === "work" && s.last.includes("Make R1 work"))!;
+    expect(JSON.stringify(fix.input[0])).toContain("# T1: Build the landing page"); // the builder's own session
+    expect(fix.last).toContain("There is no pricing section");
+    const recheck = seen.find((s) => s.kind === "acceptance" && s.last.includes("Acceptance check again"))!;
+    expect(recheck.last).toContain("R1: A pricing section");
+    const state = done.state as { requirements: { id: string; status: string }[] };
+    expect(state.requirements).toEqual([expect.objectContaining({ id: "R1", status: "met" })]);
+  } finally {
+    stopAll();
+  }
+}, 30_000);
 
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });

@@ -34,6 +34,20 @@ Read every changed file in full, then the code around it. Check, in order:
 Approve work that is correct and solid; do not block on taste. Request changes only for real problems, as a numbered list:
 file, problem, concrete fix.`.trim();
 
+const ACCEPTANCE_PROCEDURE = `
+## Acceptance check
+The team says the work is finished. You decide, for each requirement you are given, whether the user would agree. You
+did not build it and you do not change it: you run it, look at it and report.
+1. Run it the way the user would: start_dev_server and open the URL in the browser for anything with a UI; run the
+   program or its tests otherwise. Read the console.
+2. Check every requirement against the user's own words, not against the team's spec or summary. For anything visual,
+   take a screenshot and judge what you see: placeholder shapes, missing effects, broken layout or a flow that does not
+   work mean unmet.
+3. When the browser cannot drive something (pointer lock, real-time input), use a test hook the app exposes, or a test
+   that exercises it. If you could not observe it at all, it is unmet, and the evidence says what is needed to check it.
+4. Be specific in evidence: what you did, what you saw, and for unmet ones what is missing.
+Call submit_acceptance once with a result for every requirement. Do not keep exploring after you have an answer for each.`.trim();
+
 const ORCHESTRATOR_PROCEDURE = `
 ## How you work
 You are the head of a company of AI specialists working for one developer, in their project folder. Your job: understand
@@ -81,7 +95,7 @@ const roster = (team: AgentOut[], me: AgentOut) => team.filter((a) => a.active).
 }).join("\n");
 
 /** System instructions for any agent. `mode` adds the procedure for what the agent is doing right now. */
-export function instructions(p: PromptContext, mode: "orchestrator" | "worker" | "reviewer" | "quick_review" | "chat" | "consult" | "report"): string {
+export function instructions(p: PromptContext, mode: "orchestrator" | "worker" | "reviewer" | "quick_review" | "acceptance" | "chat" | "consult" | "report"): string {
   const a = p.agent;
   const vars = { agent_name: a.name, company_name: p.company, goal: p.goal, role: a.role };
   const identity = `You are ${a.name}, ${a.role} at ${p.company}${a.department ? ` (${a.department})` : ""}.`;
@@ -93,6 +107,7 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
     worker: "## Your task\nYou have been given one task. Do it completely. Check each acceptance criterion once, with the cheapest check that proves it. When every criterion passes, call complete_task straight away: do not keep testing, tuning or polishing after that. If you cannot do it as specified, call block_task with what you need. Ask a teammate (ask_teammate) for facts only they have; ask the user only for decisions only they can make.",
     quick_review: `## Your task\nYou are reviewing a teammate's work, a small change shown as a diff in the brief. You cannot open files: judge the change from the diff and the brief. Check that it does what was asked, is correct, and breaks nothing next to it. Call submit_review once with a verdict and specific comments. Call block_task only if the diff cannot be judged.`,
       reviewer: `## Your task\nYou are reviewing a teammate's work. You do not edit files: you report what must change. Once you have checked the work, give your verdict with submit_review and stop; do not keep re-reading files.\n\n${REVIEW_STANDARD}`,
+    acceptance: ACCEPTANCE_PROCEDURE,
     chat: "## Direct chat\nThe developer is talking to you one-on-one. Answer as yourself, concisely and specifically, using your tools to look at the project when it helps. You cannot change files in this chat; suggest they ask the company in the main conversation for changes.",
     consult: "## A teammate's question\nA teammate needs a quick, precise answer from you. Look at the project if needed. Answer in a few sentences or a short list.",
   }[mode];
@@ -157,6 +172,28 @@ export function revisionNote(t: TaskOut, why: { from: string; text: string }): s
     `# ${t.key} again: ${why.from}`,
     why.text,
     "Address every point. The files you worked on are earlier in this conversation; re-read only what changed since. Verify the result, then call complete_task.",
+  ].join("\n\n");
+}
+
+/** The first acceptance check of a cycle: the requirements, how to run the product, and what the team says it built. */
+export function acceptanceBrief(o: { goal: string; requirements: Requirement[]; work: { key: string; title: string; who: string; result: string }[]; files: string[]; scripts: string }): string {
+  return [
+    "# Acceptance check",
+    `## The user's request\n${o.goal}`,
+    `## Requirements to check\n${o.requirements.map((r) => `- ${r.id}: ${r.text}`).join("\n")}`,
+    o.scripts && `## How to run it\n${o.scripts}`,
+    `## What the team says it built\n${o.work.map((w) => `- ${w.key} ${w.title} (${w.who}): ${firstLine(w.result, 300)}`).join("\n")}`,
+    o.files.length && `## Files changed\n${o.files.map((f) => `- ${f}`).join("\n")}`,
+  ].filter(Boolean).join("\n\n");
+}
+
+/** A later acceptance check in the same session: only the requirements that failed, after the fixes. */
+export function reAcceptanceBrief(o: { requirements: Requirement[]; fixes: { key: string; who: string; result: string }[] }): string {
+  return [
+    "# Acceptance check again",
+    `The team worked on what you found:\n${o.fixes.map((f) => `- ${f.key} (${f.who}): ${firstLine(f.result, 300)}`).join("\n")}`,
+    `## Check these again\n${o.requirements.map((r) => `- ${r.id}: ${r.text}`).join("\n")}`,
+    "Reload the product (restart nothing that is still running) and check only these. Then call submit_acceptance.",
   ].join("\n\n");
 }
 

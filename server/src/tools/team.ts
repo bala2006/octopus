@@ -76,6 +76,24 @@ export const workerTools = [
   }),
 ];
 
+export const acceptanceTool = defineTool({
+  name: "submit_acceptance",
+  description: "Submit the acceptance check: for every requirement you were asked to check, whether it is met and what you observed. Met means you saw it work in the running product (or proved it with a test), not that the code mentions it.",
+  args: z.object({
+    results: z.array(z.object({
+      id: z.string().describe("Requirement id, e.g. R2"),
+      met: z.boolean(),
+      evidence: z.string().min(5).describe("What you did and saw; for unmet ones, what is missing or wrong"),
+    })).min(1),
+  }),
+  async run(ctx, a) {
+    const given = new Set(a.results.map((r) => r.id.trim().toUpperCase()));
+    const missing = (ctx.task?.requirements ?? []).filter((id) => !given.has(id));
+    if (missing.length) return { text: `Give a result for ${missing.join(", ")} too.`, ok: false };
+    return { text: "Acceptance submitted.", stop: { kind: "acceptance", results: a.results.map((r) => ({ ...r, id: r.id.trim().toUpperCase() })) } };
+  },
+});
+
 export const reviewTool = defineTool({
   name: "submit_review",
   description: "Submit your review. approve only if the work meets the acceptance criteria, is correct, secure and maintainable. Otherwise request_changes with numbered, actionable comments (file, problem, fix).",

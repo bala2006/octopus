@@ -27,7 +27,8 @@ export type Stop =
   | { kind: "ask"; question: string; options: { label: string; description?: string; recommended?: boolean }[] }
   | { kind: "block"; reason: string }
   | { kind: "plan_ready"; note: string }
-  | { kind: "reply"; message: string };
+  | { kind: "reply"; message: string }
+  | { kind: "acceptance"; results: { id: string; met: boolean; evidence: string }[] };
 
 export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop }
 
@@ -76,6 +77,8 @@ export interface ToolContext {
   consult(to: AgentOut, question: string): Promise<string>;
   /** The running task (other than this one) that owns a path, as "T4 (Lena)", or null when nobody else does. */
   ownerOf(rel: string): string | null;
+  /** Start the project's dev server in the background (or find the running one) and return where it listens. */
+  devServer(): Promise<{ command: string; url: string | null; output: string }>;
 }
 
 export interface Tool<A = any> { // eslint-disable-line @typescript-eslint/no-explicit-any

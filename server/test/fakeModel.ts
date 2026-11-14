@@ -47,11 +47,12 @@ export async function fakeModel(script: Script): Promise<FakeModel> {
 }
 
 /** Which kind of turn a request is, from the agent's instructions. */
-export function turnKind(body: { instructions: string }): "plan" | "work" | "review" | "report" | "consult" | "chat" {
+export function turnKind(body: { instructions: string }): "plan" | "work" | "review" | "acceptance" | "report" | "consult" | "chat" {
   const s = body.instructions;
   if (s.includes("## Direct chat")) return "chat";
   if (s.includes("A teammate's question")) return "consult";
   if (s.includes("You are reviewing a teammate's work")) return "review";
+  if (s.includes("## Acceptance check")) return "acceptance";
   if (s.includes("You have been given one task")) return "work";
   return body.instructions.includes("## How you work") && (body as { tools?: unknown[] }).tools?.length ? "plan" : "report";
 }

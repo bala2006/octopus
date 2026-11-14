@@ -64,6 +64,7 @@ export class ChatSession {
       guard: async () => { throw new Denied("not available in direct chat; ask the company in the main conversation"); },
       emit: () => {}, setStatus: (_st, activity) => this.send("status", { message_id: messageId, phase: "tool", detail: activity ?? "" }),
       recordFile: () => {}, consult: async () => "Teammates cannot be consulted from a direct chat.", ownerOf: () => null,
+      devServer: async () => { throw new Denied("not available in direct chat"); },
     };
     let text = "";
     try {

@@ -24,19 +24,20 @@ import type { Item } from "../llm/azure";
 import { costParts } from "../llm/pricing";
 import { connection } from "../llm/azure";
 import { run as runProcess, safeEnv } from "../lib/proc";
-import { clip, deferred, firstLine, newId, now, sha1, UserError } from "../lib/util";
+import { clip, deferred, firstLine, newId, now, sha1, sleep, UserError } from "../lib/util";
 import { changedLines } from "../lib/diff";
 import { parseCommand } from "../safety/commands";
 import { toolbox, type Mode } from "../tools";
 import { Denied, type GuardRequest, type HireSpec, type Planner, type Shown, type Stop, type TaskSpec, type Tool, type ToolContext } from "../tools/types";
 import { recordVersion, artifactOut } from "../workspace/artifacts";
-import { projectOverview, verificationChecks } from "../workspace/overview";
+import { projectOverview, projectTasks, verificationChecks } from "../workspace/overview";
+import { processes } from "../workspace/processes";
 import type { Project } from "../workspace/projects";
 import { agentLoop, type LoopEvents } from "./agent";
 import { publish } from "./bus";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
 import { canRunBeside, owns, writes } from "./ownership";
-import { instructions, libraryList, reReviewBrief, reviewBrief, revisionNote, skillList, taskBrief } from "./prompts";
+import { acceptanceBrief, instructions, libraryList, reAcceptanceBrief, reReviewBrief, reviewBrief, revisionNote, skillList, taskBrief } from "./prompts";
 
 interface Pending { question: Question; task_id: string | null }
 interface RunState {
@@ -59,6 +60,9 @@ interface RunState {
   requirements: Requirement[];
   always: string[];
   verify_rounds: number;
+  acceptance_rounds: number;
+  /** Files changed since the project's checks last ran. */
+  unchecked: boolean;
   workflow: WorkflowState;
   verification: { name: string; command: string; ok: boolean; output: string }[];
 }
@@ -73,6 +77,8 @@ interface Session { mode: Mode; instructions: string; tools: Tool[]; input: Item
 const SESSION_MAX_CHARS = 320_000;
 /** Documents from finished dependencies up to this size go inside the brief instead of being read with tools. */
 const DOCS_IN_BRIEF = 20_000;
+/** Where a dev server says it listens. */
+const LOCAL_URL = /https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?[^\s"'<>]*/;
 
 class Halt extends Error {}
 /** A change this small is reviewed from its diff in one step, instead of by reading files. */
@@ -89,7 +95,7 @@ function emptyUsage(): Usage {
 function initialState(): RunState {
   return { agent_status: {}, activity: {}, usage: emptyUsage(), history: [], questions: [], answers: {}, feedback: {}, revisions: {}, files_by_task: {}, diffs_by_task: {},
     resume: {}, continues: {}, requirements: [],
-    always: [], verify_rounds: 0, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
+    always: [], verify_rounds: 0, acceptance_rounds: 0, unchecked: false, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
 }
 
 export class Conversation {
@@ -398,6 +404,7 @@ export class Conversation {
         const { row, lines, previous_lines } = recordVersion(this.p.db, { runId: this.row.id, path: rel, before, after, author: agent.id, note });
         if (task) this.state.files_by_task[task.id] = [...new Set([...(this.state.files_by_task[task.id] ?? []), rel])];
         if (task) this.recordDiff(task.id, rel, before, after);
+        this.state.unchecked = true;
         this.emit("artifact_updated", { artifact: { ...artifactOut(row), created: before === null, lines, previous_lines } });
       },
       consult: (to, question) => this.consult(agent, to, question),
@@ -405,7 +412,22 @@ export class Conversation {
         const t = this.tasks.find((x) => x.status === "in_progress" && x.id !== task?.id && writes(x) && x.files.length && owns(x.files, rel));
         return t ? `${t.key} (${this.team.find((a) => a.id === t.assignee_agent_id)?.name ?? "a teammate"})` : null;
       },
+      devServer: () => this.devServer(),
     };
+  }
+
+  /** The project's dev server, started in the background when it is not running, and the URL it printed. */
+  private async devServer(): Promise<{ command: string; url: string | null; output: string }> {
+    const server = processes(this.p.id).server;
+    if (server.status !== "running") {
+      const scripts = projectTasks(this.p.fs).filter((t) => t.kind === "server");
+      const pick = ["dev", "start", "serve", "preview"].map((n) => scripts.find((t) => t.id.endsWith(`:${n}`))).find(Boolean) ?? scripts[0];
+      if (!pick) throw new UserError("The project has no dev server script (dev, start or preview in package.json). Add one first.");
+      server.start(this.p.fs, pick.command, pick.directory);
+    }
+    const url = () => LOCAL_URL.exec(server.view().output.replace(/\x1b\[[0-9;]*m/g, ""))?.[0].replace("0.0.0.0", "localhost") ?? null;
+    for (let i = 0; i < 120 && !url() && server.status === "running"; i++) await sleep(250);
+    return { command: server.command, url: url(), output: server.view().output };
   }
 
   private model(agent: AgentOut) { return this.budget.model || agent.model || config.defaultModel; }
@@ -771,7 +793,7 @@ export class Conversation {
     if (!agent) { this.saveTask({ ...t, status: "blocked", result: "Its owner is no longer on the team." }); return; }
     const task = { ...t, status: "in_progress" as const, attempts: t.attempts + 1 };
     this.saveTask(task);
-    this.phase(task.kind === "review" ? "review" : "build", "active");
+    this.phase(task.kind === "review" ? "review" : task.kind === "verify" ? "verify" : "build", "active");
     const deps = this.tasks.filter((d) => task.depends_on.includes(d.key));
     const work = task.kind === "review" ? this.tasks.find((x) => x.key === task.depends_on[0]) : undefined;
     const author = (w: TaskOut) => this.team.find((a) => a.id === w.assignee_agent_id)?.name ?? "a teammate";
@@ -782,9 +804,22 @@ export class Conversation {
     let brief: string;
     let fresh: boolean;
     let preload: { path: string; content: string }[] = [];
-    if (task.kind === "review" && work) {
+    if (task.kind === "verify") {
+      // The verifier keeps one session per cycle: a re-check after fixes looks only at what failed.
+      mode = "acceptance";
+      session = `${agent.id}:acceptance`;
+      fresh = !this.liveSession(session);
+      const reqs = this.state.requirements.filter((r) => task.requirements.includes(r.id));
+      const built = this.tasks.filter((t) => (t.kind === "build" || t.kind === "fix" || t.kind === "docs") && t.status === "done");
+      const fixes = built.filter((t) => t.kind === "fix").slice(-6).map((t) => ({ key: t.key, who: author(t), result: t.result }));
+      brief = !fresh && fixes.length
+        ? reAcceptanceBrief({ requirements: reqs, fixes })
+        : acceptanceBrief({ goal: this.row.goal, requirements: reqs, work: built.map((t) => ({ key: t.key, title: t.title, who: author(t), result: t.result })),
+          files: [...new Set(built.flatMap((t) => this.state.files_by_task[t.id] ?? []))],
+          scripts: projectTasks(this.p.fs).slice(0, 12).map((t) => `- ${t.name}: \`${t.command}\`${t.kind === "server" ? " (dev server: use start_dev_server)" : ""}`).join("\n") });
+    } else if (task.kind === "review" && work) {
       // A reviewer who already reviewed this work continues: it checks its own comments against the change since then.
-      session = `${agent.id}:review:${work.id}`;
+      session = `${agent.id}:review:${this.state.continues[work.id] ?? work.id}`;
       const small = this.smallChange(work);
       const prior = this.liveSession(session);
       if (prior && prior.mode !== "reviewer" && !small) this.sessions.delete(session);
@@ -810,7 +845,7 @@ export class Conversation {
     let exhausted = false;
     try {
       const content = fresh && this.requestImages.length ? [{ type: "input_text", text: brief }, ...this.requestImages] : brief;
-      const res = await this.turn(agent, mode, task, [{ role: "user", content }], { session, preload, maxRounds: mode === "worker" ? 60 : mode === "reviewer" ? 30 : 3 });
+      const res = await this.turn(agent, mode, task, [{ role: "user", content }], { session, preload, maxRounds: mode === "worker" ? 60 : mode === "reviewer" || mode === "acceptance" ? 40 : 3 });
       stop = res.stop;
       text = res.text;
       exhausted = !!res.exhausted;
@@ -843,6 +878,7 @@ export class Conversation {
       this.saveTask({ ...task, status: "todo" }); // the reviewer did not give a verdict: ask again
       return;
     }
+    if (task.kind === "verify") return this.settleAcceptance(task, agent, stop, exhausted);
     if (stop?.kind === "block" || (!stop && (exhausted || !text || task.kind === "review"))) {
       const reason = stop?.kind === "block" ? stop.reason : task.kind === "review" ? "The reviewer did not give a verdict." : exhausted ? "Ran out of steps before finishing." : "Stopped without finishing.";
       this.saveTask({ ...task, status: "blocked", result: reason });
@@ -886,11 +922,24 @@ export class Conversation {
     this.saveTask({ ...task, status: "done", result: summary });
   }
 
-  /** Run the project's own checks after changes. Returns true when fix tasks were created. */
+  /**
+   * After the team's changes: the project's own checks, then the acceptance check against the requirements.
+   * Returns true when it created work (a fix or an acceptance check), so the run keeps going.
+   */
   private async verify(): Promise<boolean> {
     if (!this.budget.verify) return false;
     const changedTasks = this.tasks.filter((t) => (t.kind === "build" || t.kind === "fix") && t.status === "done" && (this.state.files_by_task[t.id] ?? []).length);
     if (!changedTasks.length) return false;
+    if (this.state.unchecked) {
+      this.state.unchecked = false;
+      if (await this.runChecks(changedTasks)) return true;
+    }
+    if (this.state.verification.some((v) => !v.ok)) return false;
+    return this.requestAcceptance(changedTasks);
+  }
+
+  /** Run the project's own checks. Returns true when a fix task was created. */
+  private async runChecks(changedTasks: TaskOut[]): Promise<boolean> {
     const checks = verificationChecks(this.p.fs);
     if (!checks.length) { this.phase("verify", "skipped", null, "The project has no automated checks"); return false; }
     const lead = this.lead;
@@ -920,6 +969,74 @@ export class Conversation {
     this.state.continues[fix.id] = this.state.continues[last.id] ?? last.id;
     this.post({ from: lead.id, to: owner.id, type: "task", content: `Checks failed: ${failures.map((f) => f.name).join(", ")}. Please fix (${fix.key}).`, meta: { task_id: fix.key } });
     return true;
+  }
+
+  /** Who checks the result against the requirements: a QA engineer, else someone with a browser who did not build it, else a new QA engineer. */
+  private verifierFor(changedTasks: TaskOut[]): AgentOut {
+    const authors = new Set(changedTasks.map((t) => t.assignee_agent_id));
+    const pool = this.team.filter((a) => a.id !== this.lead.id && a.tools.file_read !== false);
+    const found = pool.find((a) => a.behavior.template_key === "qa") ?? pool.find((a) => a.tools.browser && !authors.has(a.id));
+    if (found) return found;
+    try {
+      return this.hire({ role_key: "qa", title: "QA Engineer", department: "Quality & Ops", reason: "Checks the finished work against what you asked for", manager: false }, this.lead);
+    } catch {
+      return pool.find((a) => !authors.has(a.id) && a.tools.terminal) ?? pool[0] ?? this.lead; // the team is full
+    }
+  }
+
+  /** Queue an acceptance check of the requirements not yet met. Returns true when one was queued. */
+  private requestAcceptance(changedTasks: TaskOut[]): boolean {
+    const pending = this.state.requirements.filter((r) => r.status === "open" || r.status === "unmet");
+    if (!pending.length || this.tasks.some((t) => t.kind === "verify" && ["todo", "in_progress"].includes(t.status))) return false;
+    if (this.state.acceptance_rounds > this.budget.max_revisions) {
+      this.phase("verify", "failed", this.lead.id, `${pending.map((r) => r.id).join(", ")} not met`);
+      return false;
+    }
+    this.state.acceptance_rounds++;
+    const verifier = this.verifierFor(changedTasks);
+    const ids = pending.map((r) => r.id);
+    const t = this.newTask({ title: `Acceptance check: ${ids.join(", ")}`, description: "Check the finished product against these requirements, in the user's words.", acceptance_criteria: "",
+      assignee_agent_id: verifier.id, kind: "verify", depends_on: [], created_by: this.lead.id, requirements: ids });
+    this.post({ from: this.lead.id, to: verifier.id, type: "task", content: `Please check the result against ${ids.join(", ")} (${t.key}).`, meta: { task_id: t.key } });
+    this.phase("verify", "active", verifier.id);
+    return true;
+  }
+
+  /** Record the verdict on each requirement; what is not met goes back to the task that owns it. */
+  private settleAcceptance(task: TaskOut, agent: AgentOut, stop: Stop | null, exhausted: boolean) {
+    if (stop?.kind !== "acceptance") {
+      const reason = stop?.kind === "block" ? stop.reason : exhausted ? "Ran out of steps before checking every requirement." : "Stopped without a verdict.";
+      this.saveTask({ ...task, status: "blocked", result: reason });
+      this.phase("verify", "failed", agent.id, "The acceptance check did not finish");
+      this.post({ from: agent.id, to: this.lead.id, type: "status_update", content: `Blocked on ${task.key}: ${reason}`, meta: { task_id: task.key } });
+      return;
+    }
+    const verdicts = new Map(stop.results.map((r) => [r.id, r]));
+    this.setRequirements(this.state.requirements.map((r) => {
+      if (!task.requirements.includes(r.id)) return r;
+      const v = verdicts.get(r.id)!;
+      return { ...r, status: v.met ? "met" : "unmet", note: v.evidence };
+    }));
+    const unmet = this.state.requirements.filter((r) => task.requirements.includes(r.id) && r.status === "unmet");
+    const summary = `${task.requirements.length - unmet.length} of ${task.requirements.length} met.${unmet.map((r) => `\n- ${r.id} not met: ${r.note}`).join("")}`;
+    this.saveTask({ ...task, status: "done", result: summary });
+    this.post({ from: agent.id, to: this.lead.id, type: "status_update", content: summary, meta: { task_id: task.key } });
+    if (!unmet.length) { this.phase("verify", "done", agent.id, "Every requirement met"); return; }
+    if (this.state.acceptance_rounds > this.budget.max_revisions) { this.phase("verify", "failed", agent.id, `${unmet.map((r) => r.id).join(", ")} not met`); return; }
+    const built = this.tasks.filter((t) => writes(t) && t.status === "done" && (this.state.files_by_task[t.id] ?? []).length);
+    const groups = new Map<TaskOut, Requirement[]>();
+    for (const r of unmet) {
+      const owner = built.findLast((t) => t.requirements.includes(r.id)) ?? built.at(-1);
+      if (owner) groups.set(owner, [...(groups.get(owner) ?? []), r]);
+    }
+    for (const [owner, reqs] of groups) {
+      const ids = reqs.map((r) => r.id);
+      const fix = this.newTask({ title: `Make ${ids.join(", ")} work`, kind: "fix", depends_on: [], created_by: this.lead.id, assignee_agent_id: owner.assignee_agent_id,
+        description: `${agent.name}'s acceptance check found these requirements not met in the running product:\n\n${reqs.map((r) => `- ${r.id}: ${r.text}\n  Observed: ${r.note}`).join("\n")}\n\nFix them, then check them yourself the same way.`,
+        acceptance_criteria: reqs.map((r) => `- ${r.id} works as the user asked: ${r.text}`).join("\n"), requirements: ids, files: owner.files, skills: owner.skills });
+      this.state.continues[fix.id] = this.state.continues[owner.id] ?? owner.id;
+      this.post({ from: this.lead.id, to: owner.assignee_agent_id, type: "task", content: `Not accepted yet: ${ids.join(", ")}. Please fix (${fix.key}).`, meta: { task_id: fix.key } });
+    }
   }
 
   private async report() {
@@ -957,6 +1074,7 @@ export class Conversation {
     this.setRunStatus(status, { summary: firstLine(text, 300), reason: status === "incomplete" ? "Some tasks could not be finished" : "" });
     this.state.workflow = initialState().workflow;
     this.state.verify_rounds = 0;
+    this.state.acceptance_rounds = 0;
     this.sessions.clear();
   }
 
