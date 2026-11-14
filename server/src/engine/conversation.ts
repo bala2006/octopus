@@ -37,7 +37,7 @@ import { agentLoop, type LoopEvents } from "./agent";
 import { publish } from "./bus";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
 import { canRunBeside, owns, writes } from "./ownership";
-import { acceptanceBrief, instructions, libraryList, reAcceptanceBrief, reReviewBrief, reviewBrief, revisionNote, skillList, taskBrief } from "./prompts";
+import { acceptanceBrief, instructions, libraryList, outcomeSection, reAcceptanceBrief, reReviewBrief, reviewBrief, revisionNote, skillList, taskBrief } from "./prompts";
 
 interface Pending { question: Question; task_id: string | null }
 interface RunState {
@@ -61,6 +61,10 @@ interface RunState {
   always: string[];
   verify_rounds: number;
   acceptance_rounds: number;
+  /** Review comments left open when a task hit the revision limit, by task id. */
+  open_comments: Record<string, string>;
+  /** Index of the first task of the current request; earlier tasks belong to earlier requests. */
+  cycle_from: number;
   /** Files changed since the project's checks last ran. */
   unchecked: boolean;
   workflow: WorkflowState;
@@ -95,7 +99,7 @@ function emptyUsage(): Usage {
 function initialState(): RunState {
   return { agent_status: {}, activity: {}, usage: emptyUsage(), history: [], questions: [], answers: {}, feedback: {}, revisions: {}, files_by_task: {}, diffs_by_task: {},
     resume: {}, continues: {}, requirements: [],
-    always: [], verify_rounds: 0, acceptance_rounds: 0, unchecked: false, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
+    always: [], verify_rounds: 0, acceptance_rounds: 0, open_comments: {}, cycle_from: 0, unchecked: false, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
 }
 
 export class Conversation {
@@ -898,6 +902,7 @@ export class Conversation {
       this.post({ from: agent.id, to: work.assignee_agent_id, type: "review_result", content: comments,
         meta: { verdict, task_id: work.key, review: { revisions: rounds, max_revisions: this.budget.max_revisions } } });
       if (verdict === "approve" || rounds >= this.budget.max_revisions) {
+        if (verdict !== "approve") this.state.open_comments[work.id] = comments;
         this.saveTask({ ...work, status: "done", result: verdict === "approve" ? work.result : `${work.result}\n\nOpen review comments (revision limit reached): ${comments}` });
         this.phase("review", "done", agent.id);
         return;
@@ -1043,12 +1048,22 @@ export class Conversation {
     const lead = this.lead;
     this.phase("report", "active", lead.id);
     const who = (id: string | null) => this.team.find((a) => a.id === id)?.name ?? "?";
-    const tasks = this.tasks.map((t) => `- ${t.key} [${t.status}] ${t.title} (${who(t.assignee_agent_id)}): ${clip(t.result, 800)}`).join("\n");
-    const files = [...new Set(Object.values(this.state.files_by_task).flat())];
+    const cycle = this.tasks.slice(this.state.cycle_from);
+    const tasks = cycle.map((t) => `- ${t.key} [${t.status}] ${t.title} (${who(t.assignee_agent_id)}): ${clip(t.result, 800)}`).join("\n");
+    const files = [...new Set(cycle.flatMap((t) => this.state.files_by_task[t.id] ?? []))];
     const checks = this.state.verification.map((v) => `- ${v.name}: ${v.ok ? "passed" : "failed"}`).join("\n");
+    const outcome = outcomeSection({
+      requirements: this.state.requirements,
+      open: [
+        ...cycle.filter((t) => t.status === "blocked").map((t) => `${t.key} ${t.title} (${who(t.assignee_agent_id)}) is blocked: ${firstLine(t.result, 300)}`),
+        ...cycle.filter((t) => this.state.open_comments[t.id]).map((t) => `${t.key} ${t.title.replace(/^Revise: /, "")}: review comments still open after ${this.budget.max_revisions} revisions: ${clip(this.state.open_comments[t.id]!, 400)}`),
+        ...this.state.verification.filter((v) => !v.ok).map((v) => `\`${v.command}\` fails.`),
+      ],
+    });
     const prompt = [
       `The team has finished working on the latest request. Write your reply to the user now, in Markdown, without calling tools.`,
-      `Lead with the outcome in one or two sentences. Then: what changed and where (files), how it was verified, how to run or try it, and anything open or worth deciding next. Be specific and honest; do not oversell. Keep it short.`,
+      `Lead with the outcome in one or two sentences. Then: what changed and where (files), how it was verified, and how to run or try it. Be specific and honest; do not oversell. Keep it short.`,
+      outcome && `The section below is added to your reply as it is. Do not repeat it, and do not claim anything it contradicts (a fix it lists as open, a requirement it lists as not met).\n\n${outcome}`,
       `## Tasks\n${tasks}`, files.length ? `## Files changed\n${files.map((f) => `- ${f}`).join("\n")}` : "", checks ? `## Automated checks\n${checks}` : "",
     ].filter(Boolean).join("\n\n");
     let text = "";
@@ -1059,9 +1074,9 @@ export class Conversation {
       if (e instanceof Halt || this.stopped) throw e;
       text = `The work is done, but I could not write the summary (${(e as Error).message}).\n\n${tasks}`;
     }
-    const blocked = this.tasks.some((t) => t.status === "blocked") || this.state.verification.some((v) => !v.ok);
+    const blocked = cycle.some((t) => t.status === "blocked") || this.state.verification.some((v) => !v.ok) || this.state.requirements.some((r) => r.status === "unmet");
     this.phase("report", "done", lead.id);
-    this.finishCycle(text || "Done.", blocked ? "incomplete" : "completed", files);
+    this.finishCycle([text || "Done.", outcome].filter(Boolean).join("\n\n"), blocked ? "incomplete" : "completed", files);
   }
 
   private finishCycle(text: string, status: RunStatus, files: string[] = []) {
@@ -1075,6 +1090,7 @@ export class Conversation {
     this.state.workflow = initialState().workflow;
     this.state.verify_rounds = 0;
     this.state.acceptance_rounds = 0;
+    this.state.cycle_from = this.tasks.length;
     this.sessions.clear();
   }
 

@@ -197,6 +197,16 @@ export function reAcceptanceBrief(o: { requirements: Requirement[]; fixes: { key
   ].join("\n\n");
 }
 
+/** The part of the report the engine writes: every requirement with its status, and everything left open. */
+export function outcomeSection(o: { requirements: Requirement[]; open: string[] }): string {
+  const status = { open: "Not checked", met: "Met", unmet: "Not met", cut: "Left out" } as const;
+  const cell = (s: string) => firstLine(s, 200).replace(/\|/g, "\\|");
+  return [
+    o.requirements.length && `### Requirements\n| | Requirement | Status | Notes |\n|---|---|---|---|\n${o.requirements.map((r) => `| ${r.id} | ${cell(r.text)} | ${status[r.status]} | ${cell(r.note)} |`).join("\n")}`,
+    o.open.length && `### Still open\n${o.open.map((x) => `- ${x}`).join("\n")}`,
+  ].filter(Boolean).join("\n\n");
+}
+
 export function libraryList(roles: RoleTemplateOut[]): string {
   return roles.filter((r) => r.key !== "orchestrator").map((r) => `- ${r.key}: ${r.role}. ${firstLine(r.description, 100)}`).join("\n");
 }

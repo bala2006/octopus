@@ -401,10 +401,30 @@ test("the result is checked against the requirements; what fails goes back to it
     expect(recheck.last).toContain("R1: A pricing section");
     const state = done.state as { requirements: { id: string; status: string }[] };
     expect(state.requirements).toEqual([expect.objectContaining({ id: "R1", status: "met" })]);
+    const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+    expect(messages.at(-1)!.content).toContain("| R1 | A pricing section | Met | The pricing section shows. |");
   } finally {
     stopAll();
   }
 }, 30_000);
+
+test("review comments still open at the revision limit are listed in the report, not hidden", async () => {
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "1. index.html: the footer is missing." } }] };
+    if (kind === "work") return n === 0
+      ? { calls: [{ name: "write_file", args: { path: "index.html", content: `<h1>Acme ${Math.random()}</h1>\n` } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Built and revised the page.", verification: "Opened it" } }] };
+    if (kind === "report") return { text: "The page is built and the footer was added." };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  await until(run.id, ["completed", "incomplete"]);
+  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+  expect(messages.at(-1)!.content).toMatch(/### Still open\n- T1 Build the landing page: review comments still open after 2 revisions: 1\. index\.html: the footer is missing\./);
+});
 
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
