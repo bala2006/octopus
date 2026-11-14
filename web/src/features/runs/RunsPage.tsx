@@ -115,7 +115,7 @@ function RunRow({ r, w, onDelete, onStop, onRerun }: { r: RunOut; w: string; onD
       </Tip>
       <Link to={`/w/${w}/runs/${r.id}`} className="min-w-[10rem] flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <div className="truncate text-sm font-medium">{goalTitle(r.goal)}</div>
-        <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
           <time dateTime={created.toISOString()} title={created.toLocaleString()} className="shrink-0">{timeAgo(r.created_at)}</time>
           <span>·</span><span className="shrink-0 capitalize">{r.mode}</span>{dur && <><span>·</span><span className="shrink-0">{dur}</span></>}
           {facts.length > 0 && <><span>·</span><span className="shrink-0" data-testid="run-facts">{facts.join(" · ")}</span></>}
