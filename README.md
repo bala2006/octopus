@@ -29,10 +29,11 @@ with feedback or the next request, and the same team carries on.
    and tests, using a browser, searching the web, your MCP servers. They consult each other and keep notes that
    carry over to the next request.
 4. **Quality is built in.** For a feature, your asks become a list of requirements in your words; anything left out is
-   shown with the reason. Every change gets an independent review, and requested changes go back to the author. Your
-   project's tests, type checks and lint run after changes, then a QA engineer runs the product and checks each
-   requirement; failures go back to whoever built that part. The shared engineering standards ask for complete code,
-   existing conventions, real copy and honest reporting.
+   shown with the reason. Each part has one owner who builds it, and specialists sharpen it every round: a code
+   reviewer always, an art director for anything you look at, a QA engineer for anything you use. Your project's
+   tests, type checks and lint run after changes, then a QA engineer runs the product and checks each requirement;
+   failures go back to whoever built that part. The shared engineering standards ask for complete code, existing
+   conventions, real copy and honest reporting.
 5. **You get a report** with what changed, where and how it was verified, followed by each requirement's status and
    everything still open. Your next message continues the conversation.
 

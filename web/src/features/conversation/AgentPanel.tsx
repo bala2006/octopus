@@ -73,7 +73,7 @@ import {
 } from "@/features/chat/attachments";
 import { RunDialog } from "@/features/runs/RunDialog";
 import { defaultRunBudget } from "@/features/runs/runDefaults";
-import { RunFeed, ToolLog } from "@/features/runs/RunFeed";
+import { AgentChatContext, RunFeed, ToolLog } from "@/features/runs/RunFeed";
 import { BrowserView } from "@/features/runs/BrowserView";
 import { isBrowsing } from "@/features/runs/browserSteps";
 import { RunStrip, conversationStatus } from "./RunStrip";
@@ -266,6 +266,13 @@ function CompanyAgentPanel({
     "chat" | "tasks" | "browser" | "tools" | "report"
   >("chat");
   React.useEffect(() => setConversationTab("chat"), [runId]);
+  /** The agent whose own chat the panel shows instead of the team chat; null for the team chat. */
+  const [agentChat, setAgentChat] = React.useState<string | null>(null);
+  React.useEffect(() => setAgentChat(null), [runId]);
+  const openAgentChat = React.useCallback((agentId: string) => {
+    setAgentChat(agentId);
+    setConversationTab("chat");
+  }, []);
   const [advanced, setAdvanced] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [internal, setInternal] = React.useState(false);
@@ -273,6 +280,19 @@ function CompanyAgentPanel({
   const input = React.useRef<HTMLTextAreaElement>(null);
   const floatingState = floatingWindow?.state;
   const changeFloatingState = floatingWindow?.onStateChange;
+  // The canvas asks the open conversation to show an agent's chat; handling it keeps the user in the conversation.
+  React.useEffect(() => {
+    if (!runId) return;
+    const onOpen = (e: Event) => {
+      const agentId = (e as CustomEvent<string>).detail;
+      if (!agents[agentId]) return; // not on this conversation's team: let the canvas open the one-on-one chat
+      e.preventDefault();
+      openAgentChat(agentId);
+      changeFloatingState?.("expanded");
+    };
+    window.addEventListener("octopus:agent-chat", onOpen);
+    return () => window.removeEventListener("octopus:agent-chat", onOpen);
+  }, [runId, openAgentChat, changeFloatingState, agents]);
   React.useLayoutEffect(() => {
     if (!floatingWindow || !input.current) return;
     input.current.style.height = "0px";
@@ -353,7 +373,7 @@ function CompanyAgentPanel({
       if (runId) {
         await unwrap(api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/continue", {
           params: { path: { workspace_id: w, run_id: runId } },
-          body: { content: goal, attachments: attachmentPayload(prompt.files), client_request_id: prompt.clientId },
+          body: { content: goal, attachments: attachmentPayload(prompt.files), client_request_id: prompt.clientId, ...(agentChat ? { to_agent_id: agentChat } : {}) },
         }));
         return { id: runId, company: undefined, queued: false };
       }
@@ -695,12 +715,22 @@ function CompanyAgentPanel({
           </div>
         ) : runId && run.data ? (
           <div className="flex h-full flex-col">
+            {agentChat && agents[agentChat] && (
+              <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs" data-testid="agent-chat-header">
+                <span className="font-semibold" style={{ color: agents[agentChat].color }}>{agents[agentChat].name}</span>
+                <span className="truncate text-muted-foreground">{agents[agentChat].role} · their own chat</span>
+                <button type="button" className="ml-auto text-primary hover:underline" onClick={() => setAgentChat(null)}>Team chat</button>
+              </div>
+            )}
             <div className="flex min-h-0 flex-1 flex-col">
-              <RunFeed
-                state={state}
-                agents={agents}
-                filter={internal ? "all" : "user"}
-              />
+              <AgentChatContext.Provider value={openAgentChat}>
+                <RunFeed
+                  state={state}
+                  agents={agents}
+                  filter={internal || agentChat ? "all" : "user"}
+                  agentId={agentChat ?? undefined}
+                />
+              </AgentChatContext.Provider>
             </div>
             {!conversation && !!Object.keys(state.artifacts).length && (
               <div className="max-h-28 shrink-0 overflow-auto border-t px-3 py-2">
@@ -1110,8 +1140,8 @@ function CompanyAgentPanel({
             )}
             <Textarea
               ref={input}
-              aria-label="Message the team lead"
-              placeholder={
+              aria-label={agentChat && agents[agentChat] ? `Message ${agents[agentChat].name}` : "Message the team lead"}
+              placeholder={agentChat && agents[agentChat] ? `Message ${agents[agentChat].name}…` :
                 floatingWindow
                   ? active
                     ? workingLabel

@@ -8,7 +8,7 @@ roles: gameplay_programmer, game_director, game_designer, fullstack_dev, fronten
 ## Structure
 - **Modules, one concern each**: `world/` (level, materials, lights), `actors/` (enemies, player), `weapon/` (view model,
   firing, effects), `game/` (state machine, waves, rules: pure and unit-tested), `ui/` (HUD, menus). No file over ~400
-  lines; the parts can then be built and reviewed by different people.
+  lines, so you can rework one area without rereading the rest and each specialist can review the area they care about.
 - **Game states**: title, playing, paused, game over, restart, plus any transition the brief asks for (for example
   travel between levels). Every state has a screen and a key or click path; pausing works in every state.
 - **Loop**: `requestAnimationFrame` with a fixed simulation step (60 Hz accumulator); clamp `dt` after tab switches;

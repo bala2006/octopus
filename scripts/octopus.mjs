@@ -9,6 +9,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Settings in the project's .env apply here too. A variable already set in the shell wins over the file.
+if (existsSync(path.join(root, ".env"))) process.loadEnvFile(path.join(root, ".env"));
 const port = Number(process.env.OCTOPUS_PORT ?? 8000);
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const [major, minor] = process.versions.node.split(".").map(Number);
