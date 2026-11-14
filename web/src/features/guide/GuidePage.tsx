@@ -340,9 +340,9 @@ const SECTIONS: Section[] = [
         <><b>Ask for permission / Approve for me</b> sets what needs your OK (see Safety).</>,
         <>The model button picks the Azure deployment and how long the team thinks: <b>Auto</b> uses each agent's own setting.</>,
         <>Start a message with <b>@Name</b> to give it straight to one teammate instead of Octopus.</>,
-        <>The conversation window floats over your team. Minimise it, dock it left or right, or open it full width from its window menu.</>,
+        <>The conversation window floats over your team. Minimise it, dock it left or right, or drag any edge to resize it.</>,
         <><b>New conversation</b> in the sidebar (or File menu) starts fresh with the same team. Past conversations are under <b>Recent conversations</b> in the sidebar, and all of them are in <b>History</b>.</>,
-        <><b>New conversation with limits…</b> in the message box options lets you set budgets and a step-by-step mode first.</>,
+        <><b>New conversation with limits…</b> in the message box options lets you set the team size, parallel tasks, fix rounds and a step-by-step mode first.</>,
       ]} />
     </>,
   },
@@ -356,7 +356,7 @@ const SECTIONS: Section[] = [
         <>The strip under the tabs shows the workflow phases, what the team is doing, and the calls, tokens and cost so far (click them for the exact breakdown). <b>Pause</b> or <b>Next step</b> is there too.</>,
         <>When an agent needs a decision, it asks with 2 to 5 answers and marks the one it recommends. Pick one or type your own; the rest of the team keeps working meanwhile.</>,
         <>Send a message at any time. While the team works, Octopus plans it in alongside the running tasks.</>,
-        <>To stop the team, press the square send button while the message box is empty. Each request has limits (model calls, tokens, cost, active time); when one is reached the team stops cleanly, and your next message continues with a fresh budget.</>,
+        <>To stop the team, press the square send button while the message box is empty. The team works until its tasks are finished, checked and reported. A task that keeps testing is told to wrap up before its step limit.</>,
         <>When the team needs you, the status pill at the top right turns amber and says <b>Needs you</b>, on every page. Click it to jump to that conversation.</>,
       ]} />
       <Shot name="run" alt="The team at work next to the conversation" />
