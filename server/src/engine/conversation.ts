@@ -783,10 +783,13 @@ export class Conversation {
     this.save();
   }
 
-  /** The requirements the current request is about: the ones it recorded, and earlier ones its tasks took on. */
+  /**
+   * The requirements the current request is about: the ones it recorded, earlier ones its tasks took on, and earlier
+   * ones that were never checked, which are still owed.
+   */
   private cycleRequirements(): Requirement[] {
     const owned = new Set(this.tasks.slice(this.state.cycle_from).flatMap((t) => t.requirements));
-    return this.state.requirements.filter((r, i) => i >= this.state.req_from || owned.has(r.id));
+    return this.state.requirements.filter((r, i) => i >= this.state.req_from || owned.has(r.id) || r.status === "open");
   }
 
   /** The orchestrator's planning turn. Returns what happened. */
@@ -805,8 +808,14 @@ export class Conversation {
       tasks: () => this.tasks,
       requirements: () => this.cycleRequirements(),
       addRequirements: (texts) => {
+        const items = texts.map((t) => t.trim().replace(/^["“”']+|["“”']+$/g, "").trim()).filter(Boolean);
+        // A fragment ("EXIT") cannot be checked on its own; it belongs inside the ask it came from.
+        const fragments = items.filter((t) => t.split(/\s+/).length < 3);
+        if (fragments.length) throw new UserError(`These are fragments, not whole asks: ${fragments.map((f) => `"${f}"`).join(", ")}. Keep each ask whole, including any quoted words in it, and call set_requirements again.`);
+        const known = new Set(this.state.requirements.map((r) => r.text.toLowerCase()));
+        const fresh = items.filter((t) => !known.has(t.toLowerCase()) && (known.add(t.toLowerCase()), true));
         const start = this.state.requirements.length;
-        const added = texts.map((text, i): Requirement => ({ id: `R${start + i + 1}`, text: text.trim(), status: "open", note: "" }));
+        const added = fresh.map((text, i): Requirement => ({ id: `R${start + i + 1}`, text, status: "open", note: "" }));
         this.setRequirements([...this.state.requirements, ...added]);
         return added;
       },

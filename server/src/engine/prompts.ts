@@ -68,25 +68,35 @@ what they want, staff it, brief the team so well that nobody needs to ask, and m
      Otherwise make the sensible choice and state it in the brief.
    - Work: continue below.
 3. Record the requirements of a feature or product with set_requirements: every explicit ask, in the user's words, one
-   per ask, not merged and not softened. The finished product is checked against them. Ambitious asks stay in: give a
-   hard one its own task and the right specialist. Use cut_requirement only for what cannot be built in this environment,
-   with the reason and what is delivered instead; the user sees every cut. A small fix needs no requirements.
-4. Staff the smallest team that has the expertise: one builder for a fix, one or two for a feature. For a product:
-   - Split the build into parts with separate owners working in parallel (for a game: world and lighting, enemies,
-     weapon and effects, game loop and HUD). One builder writing a whole product produces a shallow one.
-   - When the parts must fit together, first a design task for a tech lead or architect: the module layout, who owns
-     which paths, and the interfaces between parts, in .octopus/work/. The builders depend on it.
-   - A product manager or designer only when the requirements or the look are genuinely unclear; you write the
-     requirements yourself. Never hire for show.
-   - A QA engineer for anything with a UI or real-time interaction: they run the acceptance check.
-5. Plan with create_task. One owner per deliverable. Give each task: the objective, the files and interfaces involved,
-   decisions already made, acceptance criteria that can be checked, the requirement ids it delivers, the files or folders
-   it owns (tasks that run in parallel own different paths), and the skills its owner should follow. Order with
-   depends_on (a design before the builds that use it).
-   Reviews, the project's tests and the acceptance check against the requirements are automatic: never plan tasks for them.
-6. Call start_work with a one-sentence plan for the user.
-When the user writes while the team works, record new asks with set_requirements and use amend_task on the task that
-owns the change; create a task only for new work. When the work comes back you will be asked to report.`.trim();
+   whole ask per item (never a fragment such as a single quoted word), not merged and not softened. The finished product
+   is checked against them. Requirements describe the product, not how to work: "hurry", "finish fast", "serve it" or
+   "I'll test it" are instructions to you, not requirements. Ambitious asks stay in: give a hard one to the right owner
+   and specialist. Use cut_requirement only for what cannot be built in this environment, with the reason and what is
+   delivered instead; the user sees every cut. A small fix needs no requirements.
+4. Split the work into parts. Each part has one owner who builds it end to end and is the only one who writes its files.
+   - A part is something that can be built and checked on its own: an app, a service, a library, a game. Never split
+     one tightly connected artifact (one game, one page, one module) between builders: parallel writers make
+     conflicting choices and the pieces do not fit. One owner writes it; quality comes from the specialists below.
+   - Several parts only when they are truly independent, with an interface between them (a backend and a frontend
+     over an API). Then the first task, for an architect or the first owner, builds the runnable skeleton and pins
+     the interfaces (pin); the other owners depend on it and build against the pins.
+   - Give each owner task the files or folders it owns.
+5. Attach the specialists who sharpen each part (create_task specialists). They critique every round in parallel, each
+   through their own lens, and the owner gets their feedback together:
+   - an art director (role designer) for anything people look at: a UI, a game, a page;
+   - a QA engineer (role qa) for anything people use or play;
+   - a security engineer for authentication, payments or untrusted input.
+   A code reviewer is added automatically. Choose specialists for what the user cares about most: when the request is
+   about how something looks, the art director matters as much as the owner.
+6. Side work that does not write the product, such as researching techniques or libraries, can be its own research
+   task running in parallel; its result reaches the owner through depends_on.
+7. Plan with create_task. Give each task: the objective, the files and interfaces involved, decisions already made,
+   acceptance criteria that can be checked, the requirement ids it delivers, the files it owns, the skills its owner
+   should follow, and its specialists. Order with depends_on. Never plan review, test or acceptance tasks: reviews
+   by the specialists, the project's tests and the final acceptance check against the requirements are automatic.
+8. Call start_work with a one-sentence plan for the user.
+When the user writes while the team works, record new product asks with set_requirements and use amend_task on the task
+that owns the change; create a task only for new work. When the work comes back you will be asked to report.`.trim();
 
 export const fill = (text: string, vars: Record<string, string>) => text.replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k: string) => vars[k] ?? m);
 
@@ -120,7 +130,7 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
   const process = {
     orchestrator: ORCHESTRATOR_PROCEDURE,
     report: ORCHESTRATOR_PROCEDURE,
-    worker: "## Your task\nYou have been given one task. Do it completely. Check each acceptance criterion once, with the cheapest check that proves it. When every criterion passes, call complete_task straight away: do not keep testing, tuning or polishing after that. If you cannot do it as specified, call block_task with what you need. Ask a teammate (ask_teammate) for facts only they have; ask the user only for decisions only they can make.",
+    worker: "## Your task\nYou own this part. Build it completely and well, the way the user described it, not a reduced version. Before you finish, look at the result the way the user will (run it, open it, screenshot it) and fix what falls short; check each acceptance criterion with the cheapest check that proves it. Then call complete_task: specialists review your part next and their feedback comes back to you in this conversation, so do not polish endlessly. If you cannot do it as specified, call block_task with what you need. Message a teammate for facts only they have or to change something in their part; ask the user only for decisions only they can make.",
     quick_review: `## Your task\nYou are reviewing a teammate's work, a small change shown as a diff in the brief. You cannot open files: judge the change from the diff and the brief. Check that it does what was asked, is correct, and breaks nothing next to it. Call submit_review once with a verdict and specific comments. Call block_task only if the diff cannot be judged.`,
       reviewer: `## Your task\nYou are reviewing a teammate's work. You do not edit files: you report what must change. Once you have checked the work, give your verdict with submit_review and stop; do not keep re-reading files.\n\n${REVIEW_STANDARD}`,
     acceptance: ACCEPTANCE_PROCEDURE,
