@@ -1,18 +1,11 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  ArrowRight,
-  GripVertical,
-  Loader2,
-  Maximize2,
-  Minus,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, GripVertical, Loader2, Minus } from "lucide-react";
 import { useWorkspaceId } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
 import { AgentPanel, type FloatingChatState } from "./AgentPanel";
-import { PanelResize, usePanelSize } from "@/features/code/PanelResize";
+import { usePanelSize } from "@/features/code/PanelResize";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,15 +13,92 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/overlays";
 import { useChatFocus } from "./useOpenConversation";
+import {
+  FLOATING_GAP,
+  FLOATING_MIN_HEIGHT,
+  FLOATING_MIN_WIDTH,
+  resizeBox,
+  type FloatingBox,
+  type FloatingDock,
+  type FloatingEdge,
+} from "./floatingBox";
 import "./conversation-layout.css";
 
 const CanvasPage = React.lazy(() => import("@/features/canvas/CanvasPage"));
 type ConversationStyle = React.CSSProperties & {
   "--conversation-chat-width": string;
+  "--conversation-chat-height": string;
+  "--conversation-chat-top": string;
 };
 
 /** The last "open this conversation" request the chat window has shown. */
 let consumedFocus = 0;
+
+const KEY_STEP = 16;
+const ARROW_MOVES: Record<string, [dx: number, dy: number]> = {
+  ArrowLeft: [-KEY_STEP, 0],
+  ArrowRight: [KEY_STEP, 0],
+  ArrowUp: [0, -KEY_STEP],
+  ArrowDown: [0, KEY_STEP],
+};
+
+/** One resize edge of the floating chat. Dragging or arrow keys resize the window from that edge. */
+function EdgeHandle({
+  edge,
+  label,
+  box,
+  dock,
+  container,
+  onResize,
+}: {
+  edge: FloatingEdge;
+  label: string;
+  box: FloatingBox;
+  dock: FloatingDock;
+  container: React.RefObject<HTMLDivElement>;
+  onResize: (next: FloatingBox) => void;
+}) {
+  const drag = React.useRef<{ x: number; y: number; start: FloatingBox } | null>(null);
+  const bounds = () => ({
+    width: container.current?.clientWidth ?? 0,
+    height: container.current?.clientHeight ?? 0,
+  });
+  const end = () => {
+    drag.current = null;
+  };
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      aria-orientation={edge === "inner" ? "vertical" : "horizontal"}
+      tabIndex={0}
+      className="floating-chat-edge"
+      data-edge={edge}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { x: event.clientX, y: event.clientY, start: box };
+      }}
+      onPointerMove={(event) => {
+        const d = drag.current;
+        if (!d) return;
+        onResize(
+          resizeBox(edge, dock, d.start, event.clientX - d.x, event.clientY - d.y, bounds()),
+        );
+      }}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onLostPointerCapture={end}
+      onKeyDown={(event) => {
+        const move = ARROW_MOVES[event.key];
+        if (!move) return;
+        event.preventDefault();
+        onResize(resizeBox(edge, dock, box, move[0], move[1], bounds()));
+      }}
+    />
+  );
+}
 
 export default function AgentPage() {
   const w = useWorkspaceId();
@@ -46,22 +116,32 @@ export default function AgentPage() {
   const navigate = useNavigate();
   const split = React.useRef<HTMLDivElement>(null);
   const floatingChat = React.useRef<HTMLDivElement>(null);
-  const chat = usePanelSize("floating-conversation-chat", 380, 340, 520);
+  const width = usePanelSize("floating-conversation-chat", 380, FLOATING_MIN_WIDTH, 4000);
+  const height = usePanelSize("floating-conversation-height", 620, FLOATING_MIN_HEIGHT, 4000);
+  const top = usePanelSize("floating-conversation-top", FLOATING_GAP, FLOATING_GAP, 4000);
+  const box: FloatingBox = { top: top.size, width: width.size, height: height.size };
+  const resize = (next: FloatingBox) => {
+    width.setSize(next.width);
+    height.setSize(next.height);
+    top.setSize(next.top);
+  };
   const focus = useChatFocus((s) => s.token);
   const [windowState, setWindowState] =
     React.useState<FloatingChatState>(() => (focus > consumedFocus ? "expanded" : "minimized"));
   React.useEffect(() => {
     if (focus <= consumedFocus) return;
     consumedFocus = focus;
-    setWindowState((v) => (v === "full" ? v : "expanded"));
+    setWindowState("expanded");
   }, [focus]);
-  const [dock, setDock] = React.useState<"left" | "right">("right");
+  const [dock, setDock] = React.useState<FloatingDock>("right");
   const changeWindowState = React.useCallback((state: FloatingChatState) => {
     setWindowState(state);
   }, []);
   const [canvasInsets, setCanvasInsets] = React.useState({ left: 0, right: 0 });
   const style: ConversationStyle = {
-    "--conversation-chat-width": `${chat.size}px`,
+    "--conversation-chat-width": `${width.size}px`,
+    "--conversation-chat-height": `${height.size}px`,
+    "--conversation-chat-top": `${top.size}px`,
   };
   const windowMenu = (
     <DropdownMenu>
@@ -76,33 +156,11 @@ export default function AgentPage() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="end" className="w-56">
-        <DropdownMenuItem
-          onSelect={() =>
-            changeWindowState(windowState === "full" ? "expanded" : "full")
-          }
-        >
-          <Maximize2 />
-          {windowState === "full"
-            ? "Return to floating view"
-            : "Open in full view"}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={dock === "left" && windowState !== "full"}
-          onSelect={() => {
-            setDock("left");
-            if (windowState === "full") changeWindowState("expanded");
-          }}
-        >
+        <DropdownMenuItem disabled={dock === "left"} onSelect={() => setDock("left")}>
           <ArrowLeft />
           Move to left pane
         </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={dock === "right" && windowState !== "full"}
-          onSelect={() => {
-            setDock("right");
-            if (windowState === "full") changeWindowState("expanded");
-          }}
-        >
+        <DropdownMenuItem disabled={dock === "right"} onSelect={() => setDock("right")}>
           <ArrowRight />
           Move to right pane
         </DropdownMenuItem>
@@ -139,8 +197,6 @@ export default function AgentPage() {
           id="conversation-canvas"
           className="conversation-canvas-panel"
           aria-label="Team canvas"
-          onPointerDownCapture={() => changeWindowState("collapsed")}
-          onFocusCapture={() => changeWindowState("collapsed")}
         >
           <React.Suspense
             fallback={
@@ -166,12 +222,9 @@ export default function AgentPage() {
           data-dock={dock}
           ref={floatingChat}
         >
-          <PanelResize
-            label="Resize floating chat"
-            orientation="vertical"
-            panel={chat}
-            pixelsToUnits={(delta) => (dock === "right" ? -delta : delta)}
-          />
+          <EdgeHandle edge="inner" label="Resize chat width" box={box} dock={dock} container={split} onResize={resize} />
+          <EdgeHandle edge="top" label="Resize chat from the top" box={box} dock={dock} container={split} onResize={resize} />
+          <EdgeHandle edge="bottom" label="Resize chat height" box={box} dock={dock} container={split} onResize={resize} />
           <section
             id="conversation-chat"
             className="conversation-chat-panel"

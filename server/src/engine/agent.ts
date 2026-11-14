@@ -40,6 +40,9 @@ export interface LoopOptions {
 export interface LoopResult { stop: Stop | null; text: string; rounds: number; exhausted?: boolean }
 
 const MAX_CONTEXT_CHARS = 450_000;
+/** A turn that has not finished is told to wrap up this many steps before its step limit (the last one counts as 1). */
+const WRAP_UP_STEPS = 5;
+const WRAP_UP = "You are almost out of steps for this turn. Stop exploring, testing and polishing. Call the tool that ends the turn now (complete_task, submit_review, start_work or reply_to_user), and say what is done and what is not verified. If the work cannot be finished as specified, say so in that tool.";
 
 /** Older tool outputs are shortened when the transcript grows too long; the latest rounds stay intact. */
 function compact(input: Item[]) {
@@ -82,6 +85,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   let nudged = false;
   let lastText = "";
   for (let round = 1; round <= o.maxRounds; round++) {
+    if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: WRAP_UP });
     await o.events.beforeCall();
     compact(input);
     const res = await complete(o.reg, {

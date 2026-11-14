@@ -84,3 +84,29 @@ describe("departments", () => {
     expect(useCanvas.getState().nodes.every((n) => n.data.department === "Eng")).toBe(true);
   });
 });
+
+describe("arriving agents", () => {
+  beforeEach(() => useCanvas.getState().reset());
+  const agent = (id: string, x: number, y: number) => ({ id, name: id, role: "Engineer", department: "Engineering", position_x: x, position_y: y, is_entry: false }) as never;
+  const team = (agents: never[]) => ({ company: { id: "c1", name: "Team", departments: {} }, agents, edges: [], departments: {}, revision: 1 }) as never;
+
+  it("does not reorganise the team on its first load", () => {
+    useCanvas.getState().load(team([agent("a", 0, 0)]));
+    expect(useCanvas.getState().tidyPending).toBe(false);
+  });
+
+  it("organises the team when an agent is hired after the first load, so no two cards overlap", () => {
+    useCanvas.getState().load(team([agent("a", 0, 0)]));
+    useCanvas.getState().load(team([agent("a", 0, 0), agent("b", 0, 0)]));
+    expect(useCanvas.getState().tidyPending).toBe(true);
+    useCanvas.getState().autoLayout();
+    const [a, b] = useCanvas.getState().nodes;
+    expect(Math.abs(a.position.x - b.position.x) >= 250 || Math.abs(a.position.y - b.position.y) >= 130).toBe(true);
+  });
+
+  it("organises the team when a live hire appears", () => {
+    useCanvas.getState().load(team([agent("a", 0, 0)]));
+    useCanvas.getState().setLiveHires([{ id: "h", name: "Hana", role: "Designer", department: "Design" } as never]);
+    expect(useCanvas.getState().tidyPending).toBe(true);
+  });
+});

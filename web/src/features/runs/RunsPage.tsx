@@ -103,7 +103,6 @@ function RunRow({ r, w, onDelete, onStop, onRerun }: { r: RunOut; w: string; onD
   const facts = outcomeFacts(r);
   const live = LIVE_STATES.has(r.status);
   const dur = r.started_at && r.ended_at ? duration(parseUtc(r.ended_at) - parseUtc(r.started_at)) : null;
-  const maxTurns = Number((r.budget as { max_turns?: number })?.max_turns ?? 0);
   const created = new Date(parseUtc(r.created_at));
   return (
     <li className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/30 focus-within:bg-accent/30" data-testid={`run-row-${r.id}`}>
@@ -123,12 +122,6 @@ function RunRow({ r, w, onDelete, onStop, onRerun }: { r: RunOut; w: string; onD
         {(out.caveat || r.halt_reason) && (
           <div className={cn("truncate text-[11px]", out.verified ? "text-muted-foreground" : "text-warning")} title={r.halt_reason || out.caveat} data-testid="run-reason">
             {[out.caveat, r.halt_reason].filter(Boolean).join(" · ")}
-          </div>
-        )}
-        {live && maxTurns > 0 && (
-          <div className="mt-1 flex items-center gap-2 text-[10.5px] text-muted-foreground" aria-label={`Model call ${r.turns} of ${maxTurns}`}>
-            <div className="h-1 w-32 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(100, (r.turns / maxTurns) * 100)}%` }} /></div>
-            {r.turns}/{maxTurns} model calls
           </div>
         )}
       </Link>

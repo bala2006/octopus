@@ -25,6 +25,7 @@ import { costParts } from "../llm/pricing";
 import { connection } from "../llm/azure";
 import { run as runProcess, safeEnv } from "../lib/proc";
 import { clip, deferred, firstLine, newId, now, UserError } from "../lib/util";
+import { changedLines } from "../lib/diff";
 import { parseCommand } from "../safety/commands";
 import { toolbox, type Mode } from "../tools";
 import { Denied, type GuardRequest, type HireSpec, type Stop, type TaskSpec, type ToolContext } from "../tools/types";
@@ -47,6 +48,8 @@ interface RunState {
   feedback: Record<string, string>;
   revisions: Record<string, number>;
   files_by_task: Record<string, string[]>;
+  /** The changed lines of each task's files so far, for a reviewer of a small change. */
+  diffs_by_task: Record<string, { text: string; lines: number }>;
   always: string[];
   verify_rounds: number;
   workflow: WorkflowState;
@@ -56,17 +59,19 @@ interface Inbound { content: string; display: string; to_agent_id: string | null
 type Budget = typeof DEFAULT_BUDGET;
 
 class Halt extends Error {}
+/** A change this small is reviewed from its diff in one step, instead of by reading files. */
+const SMALL_CHANGE = { files: 2, lines: 80, chars: 12000 };
 const live = new Map<string, Conversation>();
 const PHASES = [["plan", "Plan"], ["build", "Build"], ["review", "Review"], ["verify", "Verify"], ["report", "Report"]] as const;
 
-function emptyUsage(b: Budget): Usage {
-  return { tokens: 0, cost_usd: 0, turns: 0, max_turns: b.max_turns, max_tokens: b.max_tokens, max_cost_usd: b.max_cost_usd, timeout_s: b.timeout_s,
+function emptyUsage(): Usage {
+  return { tokens: 0, cost_usd: 0, turns: 0,
     active_seconds: 0, input_tokens: 0, cached_tokens: 0, output_tokens: 0, reasoning_tokens: 0, llm_calls: 0, per_agent: {}, per_agent_cost: {},
     cost_breakdown: { input: 0, cached_input: 0, output: 0 } };
 }
 
-function initialState(b: Budget): RunState {
-  return { agent_status: {}, activity: {}, usage: emptyUsage(b), history: [], questions: [], answers: {}, feedback: {}, revisions: {}, files_by_task: {},
+function initialState(): RunState {
+  return { agent_status: {}, activity: {}, usage: emptyUsage(), history: [], questions: [], answers: {}, feedback: {}, revisions: {}, files_by_task: {}, diffs_by_task: {},
     always: [], verify_rounds: 0, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
 }
 
@@ -91,11 +96,10 @@ export class Conversation {
   private constructor(readonly p: Project, readonly reg: Registry, row: RunRow) {
     this.row = row;
     this.budget = { ...DEFAULT_BUDGET, ...row.budget } as Budget;
-    this.state = { ...initialState(this.budget), ...(row.state as Partial<RunState>) };
+    this.state = { ...initialState(), ...(row.state as Partial<RunState>) };
     this.tasks = p.db.tasks.find("run_id = ?", [row.id], "rowid");
     for (const t of this.tasks) if (t.status === "in_progress") t.status = "todo";
     this.loadTeam();
-    this.startRequest();
   }
 
   // ── lifecycle ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -106,6 +110,7 @@ export class Conversation {
     const row = p.db.runs.get(runId);
     if (!row) throw new UserError("Conversation not found", 404);
     const c = new Conversation(p, reg, row);
+    c.closeOrphanedApprovals();
     live.set(runId, c);
     return c;
   }
@@ -123,7 +128,7 @@ export class Conversation {
     const row: RunRow = {
       id: newId(), company_id: company.id, session_id: sessionId, goal: body.goal, status: "queued", mode: body.mode ?? "autonomous", budget,
       permission_level: reg.setting("approval_mode", "ask"), summary: "", halt_reason: "", report_md: "", tokens_used: 0, cost_usd: 0, turns: 0,
-      outcome: null, snapshot: { agents: [], edges: [], departments: company.departments }, state: initialState(budget) as never,
+      outcome: null, snapshot: { agents: [], edges: [], departments: company.departments }, state: initialState() as never,
       created_at: now(), started_at: null, ended_at: null,
     };
     p.db.runs.insert(row);
@@ -190,6 +195,21 @@ export class Conversation {
     if (!a) throw new UserError("That approval is no longer pending", 409);
     if (approved && scope === "always" && a.req.details.key) this.state.always.push(a.req.details.key);
     a.done(approved, reason);
+  }
+
+  /**
+   * Approvals wait in memory. A request stored by a process that has since stopped can never be answered, so the run
+   * view would keep offering it. Close each such request in the log. Called once, when the run loads into a process.
+   */
+  private closeOrphanedApprovals() {
+    const open = new Map<string, PendingApproval>();
+    for (const e of this.p.db.events.find("run_id = ? AND type IN ('approval_requested', 'approval_resolved')", [this.row.id], "seq")) {
+      const d = e.data as PendingApproval;
+      if (e.type === "approval_requested") open.set(d.id, d);
+      else open.delete(d.id);
+    }
+    for (const a of open.values())
+      this.emit("approval_resolved", { id: a.id, approved: false, reason: "The app restarted before this was answered.", agent_id: a.agent_id, kind: a.kind, summary: a.summary });
   }
 
   snapshot(): RunEventMap["snapshot"] {
@@ -307,23 +327,6 @@ export class Conversation {
 
   // ── running one agent ──────────────────────────────────────────────────────────────────────────────────────────────
 
-  /** Usage when the current request started: limits apply to each request, so a follow-up always has room to work. */
-  private requestStart = { turns: 0, tokens: 0, cost: 0, seconds: 0 };
-  private startRequest() {
-    const u = this.state.usage;
-    this.requestStart = { turns: u.turns, tokens: u.tokens, cost: u.cost_usd, seconds: u.active_seconds };
-  }
-
-  private checkBudget() {
-    const u = this.state.usage;
-    const b = this.budget;
-    const s = this.requestStart;
-    if (u.turns - s.turns >= b.max_turns) throw new Halt(`Reached the limit of ${b.max_turns} model calls for this request`);
-    if (u.tokens - s.tokens >= b.max_tokens) throw new Halt(`Reached the token limit (${b.max_tokens.toLocaleString()}) for this request`);
-    if (u.cost_usd - s.cost >= b.max_cost_usd) throw new Halt(`Reached the cost limit ($${b.max_cost_usd}) for this request`);
-    if (u.active_seconds - s.seconds >= b.timeout_s) throw new Halt(`Reached the time limit (${Math.round(b.timeout_s / 60)} min) for this request`);
-  }
-
   private loopEvents(agent: AgentOut): LoopEvents {
     const first = new Set<string>();
     return {
@@ -360,7 +363,6 @@ export class Conversation {
           this.setRunStatus("paused", { reason: "Step mode: press Next step to continue" });
           await this.gate.promise;
         }
-        this.checkBudget();
         this.setStatus(agent, "thinking", "Thinking");
       },
     };
@@ -376,6 +378,7 @@ export class Conversation {
       recordFile: (rel, before, after, note) => {
         const { row, lines, previous_lines } = recordVersion(this.p.db, { runId: this.row.id, path: rel, before, after, author: agent.id, note });
         if (task) this.state.files_by_task[task.id] = [...new Set([...(this.state.files_by_task[task.id] ?? []), rel])];
+        if (task) this.recordDiff(task.id, rel, before, after);
         this.emit("artifact_updated", { artifact: { ...artifactOut(row), created: before === null, lines, previous_lines } });
       },
       consult: (to, question) => this.consult(agent, to, question),
@@ -446,6 +449,21 @@ export class Conversation {
     return agent;
   }
 
+  /** Keeps the changed lines of a task's files, so a reviewer of a small change can read the diff. */
+  private recordDiff(taskId: string, rel: string, before: string | null, after: string | null) {
+    const hunk = changedLines(before, after);
+    const prev = this.state.diffs_by_task[taskId] ?? { text: "", lines: 0 };
+    this.state.diffs_by_task[taskId] = { text: clip(`${prev.text}\n\n## ${rel}\n${hunk.text}`.trim(), SMALL_CHANGE.chars), lines: prev.lines + hunk.lines };
+  }
+
+  /** The task's change, when it is small enough for a quick review from its diff. */
+  private smallChange(work: TaskOut) {
+    const diff = this.state.diffs_by_task[work.id];
+    const files = this.state.files_by_task[work.id] ?? [];
+    const fits = !!diff && diff.lines <= SMALL_CHANGE.lines && files.length <= SMALL_CHANGE.files && diff.text.length < SMALL_CHANGE.chars;
+    return fits ? diff : null;
+  }
+
   /** Who reviews a piece of work: a review channel to the author, their department lead, a reviewer on the team, or a new tech lead. */
   private reviewerFor(author: AgentOut): AgentOut {
     const byChannel = this.edges.find((e) => e.type === "review" && e.target_agent_id === author.id && e.source_agent_id !== author.id);
@@ -470,7 +488,6 @@ export class Conversation {
         const msg = this.queue.shift();
         const pending = this.state.questions[0];
         let worked = false;
-        if (msg) this.startRequest();
         if (msg && pending) {
           this.state.questions.shift();
           if (pending.task_id) {
@@ -651,18 +668,19 @@ export class Conversation {
     this.saveTask(task);
     this.phase(task.kind === "review" ? "review" : "build", "active");
     const deps = this.tasks.filter((d) => task.depends_on.includes(d.key));
-    const mode: Mode = task.kind === "review" ? "reviewer" : "worker";
     const work = task.kind === "review" ? this.tasks.find((x) => x.key === task.depends_on[0]) : undefined;
+    const small = work ? this.smallChange(work) : null;
+    const mode: Mode = task.kind === "review" ? (small ? "quick_review" : "reviewer") : "worker";
     const brief = task.kind === "review" && work
       ? reviewBrief(work, { goal: this.row.goal, author: this.team.find((a) => a.id === work.assignee_agent_id)?.name ?? "a teammate", summary: work.result,
-        files: this.state.files_by_task[work.id] ?? [], round: (this.state.revisions[work.id] ?? 0) + 1 })
+        files: this.state.files_by_task[work.id] ?? [], round: (this.state.revisions[work.id] ?? 0) + 1, diff: small?.text })
       : taskBrief(task, { goal: this.row.goal, deps, team: this.team, feedback: this.state.feedback[task.id], answer: this.state.answers[task.id] });
     let stop: Stop | null = null;
     let text = "";
     let exhausted = false;
     try {
       const content = this.requestImages.length ? [{ type: "input_text", text: brief }, ...this.requestImages] : brief;
-      const res = await this.turn(agent, mode, task, [{ role: "user", content }], { maxRounds: mode === "reviewer" ? 30 : 60 });
+      const res = await this.turn(agent, mode, task, [{ role: "user", content }], { maxRounds: mode === "worker" ? 60 : mode === "reviewer" ? 30 : 3 });
       stop = res.stop;
       text = res.text;
       exhausted = !!res.exhausted;
@@ -804,7 +822,7 @@ export class Conversation {
     for (const a of this.team) this.setStatus(a, a.id === lead.id ? "done" : "idle");
     this.state.workflow.ended = true;
     this.setRunStatus(status, { summary: firstLine(text, 300), reason: status === "incomplete" ? "Some tasks could not be finished" : "" });
-    this.state.workflow = initialState(this.budget).workflow;
+    this.state.workflow = initialState().workflow;
     this.state.verify_rounds = 0;
   }
 

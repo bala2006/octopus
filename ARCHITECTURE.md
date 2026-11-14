@@ -56,8 +56,7 @@ Every user message runs one cycle in `engine/conversation.ts`:
 5. **Report.** The orchestrator tells the user what changed, how it was verified and what is open.
 
 A follow-up continues the same conversation, team, tasks and files. A message sent while the team works is planned in
-alongside the running tasks; an answer goes to whoever asked. Budgets (model calls, tokens, cost, active time) stop a
-conversation cleanly, and any message continues it.
+alongside the running tasks; an answer goes to whoever asked. Each task has a step limit, and a task near it is told to wrap up. A conversation has no token, cost or time cap; any message continues it.
 
 ## 4. Events
 

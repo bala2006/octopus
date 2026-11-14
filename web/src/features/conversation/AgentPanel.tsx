@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Bot,
   ChevronDown,
+  ChevronUp,
   FileCode2,
   Folder,
   History,
@@ -101,8 +102,7 @@ type PromptSubmission = {
   clientId: string;
 };
 
-export type FloatingChatState =
-  "full" | "expanded" | "compose" | "minimized" | "collapsed";
+export type FloatingChatState = "expanded" | "compose" | "minimized" | "collapsed";
 type FloatingWindow = {
   state: FloatingChatState;
   onStateChange: (state: FloatingChatState) => void;
@@ -555,6 +555,17 @@ function CompanyAgentPanel({
               <span className="floating-chat-title" title={run.data?.goal}>
                 <span>{run.data?.goal.split("\n")[0] || "New conversation"}</span>
               </span>
+              {floatingState !== "expanded" && (
+                <button
+                  type="button"
+                  className="floating-chat-window-control"
+                  aria-label="Expand chat"
+                  title="Expand chat"
+                  onClick={() => floatingWindow.onStateChange("expanded")}
+                >
+                  <ChevronUp />
+                </button>
+              )}
               {floatingWindow.menu}
             </div>
           )}
@@ -689,7 +700,6 @@ function CompanyAgentPanel({
                 state={state}
                 agents={agents}
                 filter={internal ? "all" : "user"}
-                showThoughts={false}
               />
             </div>
             {!conversation && !!Object.keys(state.artifacts).length && (

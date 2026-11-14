@@ -80,10 +80,25 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   const [menuNode, setMenuNode] = React.useState<AgentNodeT | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const fitOptions = React.useMemo(() => ({
-    padding: embedded ? { top: "72px", right: `${rightInset + 24}px`, bottom: "56px", left: `${leftInset + 24}px` } : .2,
+    padding: embedded ? { top: "72px", right: "24px", bottom: "56px", left: "24px" } : .2,
     maxZoom: embedded ? 1 : 2,
-  } satisfies NonNullable<Parameters<typeof rf.fitView>[0]>), [embedded, rightInset, leftInset]);
-  const fitCanvas = React.useCallback((duration = 0) => rf.fitView({ ...fitOptions, duration }), [rf, fitOptions]);
+  } satisfies NonNullable<Parameters<typeof rf.fitView>[0]>), [embedded]);
+  // React Flow centers the agents on the whole canvas and uses padding only to avoid overflow, so the floating chat
+  // covered them. Embedded, the agents are centered between the insets: the canvas edge and the chat edge.
+  const fitCanvas = React.useCallback((duration = 0) => {
+    const box = wrapper.current;
+    const nodes = rf.getNodes();
+    if (!embedded || !box || !nodes.length) return rf.fitView({ ...fitOptions, duration });
+    const bounds = rf.getNodesBounds(nodes);
+    const left = leftInset + 24;
+    const right = box.clientWidth - rightInset - 24;
+    const top = 72;
+    const bottom = box.clientHeight - 56;
+    const zoom = Math.min(1, Math.max(0.2, Math.min((right - left) / bounds.width, (bottom - top) / bounds.height)));
+    const x = (left + right) / 2 - (bounds.x + bounds.width / 2) * zoom;
+    const y = (top + bottom) / 2 - (bounds.y + bounds.height / 2) * zoom;
+    return rf.setViewport({ x, y, zoom }, { duration });
+  }, [rf, embedded, fitOptions, leftInset, rightInset]);
   const canvasStyle: React.CSSProperties & { "--conversation-canvas-right-inset": string; "--conversation-canvas-left-inset": string } = { "--conversation-canvas-right-inset": `${rightInset}px`, "--conversation-canvas-left-inset": `${leftInset}px` };
 
   // layout effect: swap the store before paint so a stale company is never shown (or edited) for a frame
@@ -110,6 +125,34 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
     });
     observer.observe(wrapper.current);
     return () => { observer.disconnect(); clearTimeout(timer); };
+  }, [embedded, nodesInitialized, fitCanvas]);
+
+  // Each time the canvas opens, the agents are centered once they are measured. React Flow starts every mount at the
+  // origin, and saved agent positions can lie outside that view. Only the viewport moves; positions stay as saved.
+  const centeredOnOpen = React.useRef(false);
+  React.useEffect(() => {
+    if (centeredOnOpen.current || !nodesInitialized || !rf.getNodes().length) return;
+    centeredOnOpen.current = true;
+    void fitCanvas();
+  }, [nodesInitialized, fitCanvas, rf]);
+
+  // A hire that reaches the canvas is placed by the department layout, so no new card stays on top of another.
+  // The short delay lets the new cards be measured before the layout reads their sizes.
+  const tidyPending = useCanvas((x) => x.tidyPending);
+  React.useEffect(() => {
+    if (!tidyPending || !nodesInitialized) return;
+    const timer = setTimeout(() => {
+      useCanvas.setState({ tidyPending: false });
+      useCanvas.getState().autoLayout();
+      void fitCanvas(300);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [tidyPending, nodesInitialized, fitCanvas]);
+
+  // The floating chat's edges set the insets. Re-center whenever they move, since the chat overlays the canvas
+  // without resizing it.
+  React.useEffect(() => {
+    if (embedded && nodesInitialized) void fitCanvas();
   }, [embedded, nodesInitialized, fitCanvas]);
 
   const defaults = React.useMemo(() => ({ provider: settings.data?.default_provider ?? "azure", model: settings.data?.default_model ?? "gpt-6-luna" }), [settings.data]);
@@ -201,7 +244,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
                   const ids = s.nodes.filter((n) => n.data.department === d).map((n) => n.id);
                   useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: ids.includes(n.id) })) });
                 }} />
-                <Controls showInteractive={false} position="bottom-left" fitViewOptions={fitOptions} />
+                <Controls showInteractive={false} position="bottom-left" fitViewOptions={fitOptions} onFitView={() => fitCanvas(300)} />
                 <CanvasMiniMap departments={s.departments} position={embedded ? "top-right" : "bottom-right"} onPick={(id) => useCanvas.setState({ nodes: useCanvas.getState().nodes.map((n) => ({ ...n, selected: n.id === id })) })} />
               </ReactFlow>
               </EdgeAnchorsProvider>

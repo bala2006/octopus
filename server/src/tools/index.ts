@@ -8,13 +8,15 @@ import { askUser, consultTool, memoryTools, plannerTools, reviewTool, workerTool
 import type { Tool } from "./types";
 import { webTools } from "./web";
 
-export type Mode = "orchestrator" | "worker" | "reviewer" | "chat" | "consult" | "report";
+/** `quick_review`: a reviewer for a small change, shown as a diff, with only the verdict tools. */
+export type Mode = "orchestrator" | "worker" | "reviewer" | "quick_review" | "chat" | "consult" | "report";
 const READ = ["list_files", "read_file", "search_project"];
 
 export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode: Mode): Promise<{ tools: Tool[]; warnings: string[] }> {
   const t = agent.tools;
   const warnings: string[] = [];
   if (mode === "report") return { tools: [], warnings };
+  if (mode === "quick_review") return { tools: [reviewTool, workerTools.find((w) => w.name === "block_task")!], warnings };
   const tools: Tool[] = fileTools.filter((f) => (READ.includes(f.name) && (t.file_read !== false || mode === "orchestrator")) || (mode === "worker" && t.file_write !== false && !READ.includes(f.name)));
   if (t.web_search || mode === "orchestrator") tools.push(...webTools);
   if (t.terminal && (mode === "worker" || mode === "reviewer")) tools.push(...commandTools);

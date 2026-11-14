@@ -16,7 +16,7 @@ export interface ChannelData extends Record<string, unknown> {
 export type ChannelEdge = Edge<ChannelData, "channel">;
 
 const EDGE_ORDER: EdgeType[] = ["delegate", "review", "report", "consult"];
-const DEFAULT_CONFIG: EdgeConfig = { max_turns: 20, handoff_instructions: "", condition: "", max_rounds: 4, max_revisions: 3 };
+const DEFAULT_CONFIG: EdgeConfig = { handoff_instructions: "", condition: "", max_rounds: 4, max_revisions: 3 };
 const HISTORY_LIMIT = 100;
 
 interface Snapshot { nodes: AgentNode[]; edges: ChannelEdge[] }
@@ -44,6 +44,10 @@ interface CanvasState {
   departments: Record<string, DeptMeta>;
   revision: number;
   savedVersion: number;
+  /** Agent ids the last load had: an agent that shows up later was hired, so the team needs organising. */
+  knownAgentIds: string[];
+  /** Set when an agent arrives; the canvas then lays the team out by department. */
+  tidyPending: boolean;
   load: (c: CanvasOut) => void;
   setLiveHires: (hires: AgentOut[]) => void;
   markSaved: (version: number, revision: number) => void;
@@ -174,17 +178,25 @@ export const useCanvas = create<CanvasState>()((set, get) => {
   };
   return {
     companyId: null, nodes: [], edges: [], past: [], future: [], clipboard: null, version: 0, liveHires: [],
-    quickConfigId: null, inspectorId: null, edgeEditId: null, snapToGrid: true, departments: {}, revision: 0, savedVersion: 0,
+    quickConfigId: null, inspectorId: null, edgeEditId: null, snapToGrid: true, departments: {}, revision: 0, savedVersion: 0, knownAgentIds: [], tidyPending: false,
 
-    load: (c) => set({
-      companyId: c.company.id, nodes: placeLiveHires(c.agents.map(toNode), get().liveHires), edges: c.edges.map(toEdge), past: [], future: [], version: 0, savedVersion: 0,
-      quickConfigId: null, inspectorId: null, edgeEditId: null, departments: { ...(c.departments ?? {}) }, revision: c.revision ?? 0,
-    }),
+    load: (c) => {
+      const prev = get();
+      const ids = c.agents.map((a) => a.id);
+      const arrived = prev.companyId === c.company.id && prev.knownAgentIds.length > 0 && ids.some((id) => !prev.knownAgentIds.includes(id));
+      set({
+        companyId: c.company.id, nodes: placeLiveHires(c.agents.map(toNode), prev.liveHires), edges: c.edges.map(toEdge), past: [], future: [], version: 0, savedVersion: 0,
+        quickConfigId: null, inspectorId: null, edgeEditId: null, departments: { ...(c.departments ?? {}) }, revision: c.revision ?? 0,
+        knownAgentIds: ids, tidyPending: prev.tidyPending || arrived,
+      });
+    },
     markSaved: (version, revision) => set({ savedVersion: version, revision }),
   setLiveHires: (hires) => {
     const current = get().nodes;
     const keep = new Map(current.filter((n) => n.data.live_hire).map((n) => [n.id, n.position] as const));
-    set({ liveHires: hires, nodes: placeLiveHires(current.filter((n) => !n.data.live_hire), hires, keep) });
+    const seen = new Set(get().liveHires.map((h) => h.id));
+    const arrived = hires.some((h) => !seen.has(h.id));
+    set({ liveHires: hires, nodes: placeLiveHires(current.filter((n) => !n.data.live_hire), hires, keep), tidyPending: get().tidyPending || arrived });
   },
     addDepartment: (spec, defaults) => {
       const ids: string[] = [];
@@ -241,7 +253,7 @@ export const useCanvas = create<CanvasState>()((set, get) => {
       set({ departments: { ...rest, [name]: meta ?? { color: deptColor(name) } } });
       commit({ nodes: get().nodes.map((n) => (n.data.department === from ? { ...n, data: { ...n.data, department: name } } : n)) });
     },
-    reset: () => set({ companyId: null, nodes: [], edges: [], past: [], future: [], version: 0 }),
+    reset: () => set({ companyId: null, nodes: [], edges: [], past: [], future: [], version: 0, knownAgentIds: [], tidyPending: false }),
 
     onNodesChange: (changes) => {
       const persisted = changes.some((c) => c.type === "remove" || (c.type === "position" && c.dragging === false));

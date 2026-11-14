@@ -8,8 +8,8 @@ import type {
 
 export interface Question { agent_id: string; question: string; options: { label: string; description?: string; recommended?: boolean }[]; allow_other: boolean }
 export interface Usage {
-  tokens: number; cost_usd: number; turns: number; max_turns: number; max_tokens: number; max_cost_usd: number;
-  timeout_s: number; active_seconds: number; input_tokens: number; cached_tokens: number; output_tokens: number;
+  tokens: number; cost_usd: number; turns: number;
+  active_seconds: number; input_tokens: number; cached_tokens: number; output_tokens: number;
   reasoning_tokens: number; llm_calls: number; per_agent: Record<string, number>; per_agent_cost: Record<string, number>;
   cost_breakdown: { input: number; cached_input: number; output: number };
 }
