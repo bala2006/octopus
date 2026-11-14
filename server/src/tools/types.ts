@@ -31,6 +31,12 @@ export type Stop =
 
 export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop }
 
+/** The most of one tool result an agent sees. read_file pages within it, so a read is never cut by the loop. */
+export const MAX_TOOL_OUTPUT = 40_000;
+
+/** File contents already in an agent's transcript: the content hash and the line ranges shown. */
+export type Shown = Map<string, { hash: string; ranges: [number, number][] }>
+
 export interface HireSpec { role_key?: string; title: string; name?: string; department: string; reports_to?: string; manager?: boolean; instructions?: string; reason: string }
 export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[] }
 
@@ -59,6 +65,8 @@ export interface ToolContext {
   recordFile(path: string, before: string | null, after: string | null, note: string): void;
   /** Content hash of each file as this agent last read or wrote it, to catch edits made in between. */
   seen: Map<string, string>;
+  /** What this agent's transcript already holds, so an unchanged re-read costs a line instead of the file. */
+  shown: Shown;
   /** Ask a teammate a question and wait for the answer. */
   consult(to: AgentOut, question: string): Promise<string>;
 }

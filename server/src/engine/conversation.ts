@@ -371,7 +371,7 @@ export class Conversation {
   private context(agent: AgentOut, task: TaskOut | null, planner?: ToolContext["planner"]): ToolContext {
     return {
       agent, task, runId: this.row.id, fs: this.p.fs, db: this.p.db, reg: this.reg, signal: this.abort.signal, planner,
-      team: () => this.team, seen: new Map(),
+      team: () => this.team, seen: new Map(), shown: new Map(),
       guard: (req) => this.guard(agent, req),
       emit: (type, data) => this.emit(type, data),
       setStatus: (status, activity) => this.setStatus(agent, status, activity),

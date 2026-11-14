@@ -202,6 +202,32 @@ test("a worker that keeps testing is told to wrap up, then finishes instead of r
   expect(done.status).toBe("completed");
   expect(tasks.find((t) => t.kind === "build")?.status).toBe("done");
 }, 30_000);
+test("large files are read in pages, unchanged re-reads cost one line, lockfiles are not read whole", async () => {
+  writeFileSync(path.join(dir, "big.js"), Array.from({ length: 2000 }, (_, i) => `const line${i} = "${"x".repeat(30)}";`).join("\n"));
+  writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: {} }, null, 2));
+  const reads = [
+    { path: "big.js" }, { path: "big.js" }, { path: "big.js", start_line: 1500 }, { path: "package-lock.json" },
+  ];
+  let seen: { output?: string }[] = [];
+  script = (b) => {
+    if (turnKind(b) !== "work") return buildScript(b);
+    const n = outputs(b).length;
+    if (n === 0) return { calls: [{ name: "read_file", args: reads[0]! }] };
+    if (n < reads.length) return { calls: [{ name: "read_file", args: reads[n]! }] };
+    seen = outputs(b);
+    return { calls: [{ name: "complete_task", args: { summary: "Read the files it needed.", verification: "Read them" } }] };
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Look at big.js" });
+  await until(run.id, ["completed", "incomplete"]);
+  const [first, again, tail, lock] = seen.map((o) => String(o.output));
+  expect(first).toMatch(/^big\.js \(2000 lines, showing 1-\d+; continue with start_line \d+\)/);
+  expect(first!.length).toBeLessThan(41_000);
+  expect(again).toMatch(/have not changed since you read them/);
+  expect(tail).toMatch(/^big\.js \(2000 lines, showing 1500-2000\)/);
+  expect(lock).toMatch(/generated file/);
+});
+
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
