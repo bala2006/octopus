@@ -637,6 +637,44 @@ test("specialists sharpen a part in parallel, and the owner gets all their feedb
   expect(tasks.find((t) => t.kind === "fix")?.status).toBe("done");
 }, 30_000);
 
+test("a long turn summarizes its earlier work and keeps going, and repeating the same call gets a reminder", async () => {
+  const { contextLimits, CHECKPOINT_REQUEST } = await import("../src/engine/agent");
+  const saved = { ...contextLimits };
+  Object.assign(contextLimits, { summarizeAt: 30_000, keepTail: 8_000 });
+  writeFileSync(path.join(dir, "big.js"), Array.from({ length: 1000 }, (_, i) => `const v${i} = "${"y".repeat(40)}";`).join("\n"));
+  let step = 0;
+  let checkpointAsked = 0;
+  let afterSummary = "";
+  let reminder = "";
+  try {
+    script = (b) => {
+      if (turnKind(b) !== "work") return buildScript(b);
+      const last = JSON.stringify(b.input.at(-1));
+      if (last.includes(CHECKPOINT_REQUEST.slice(0, 40))) { checkpointAsked++; return { text: "## Done\nRead big.js in parts.\n## Next\nWrite index.html." }; }
+      step++;
+      if (JSON.stringify(b.input).includes("<checkpoint>") && !afterSummary) afterSummary = JSON.stringify(b.input);
+      if (step <= 3) {
+        if (step === 3) reminder = "";
+        return { calls: [{ name: "run_command", args: { command: "node --version" } }] };
+      }
+      if (step === 4) reminder = JSON.stringify(b.input.at(-1));
+      if (step < 12) return { calls: [{ name: "read_file", args: { path: "big.js", start_line: (step - 4) * 100 + 1, end_line: (step - 3) * 100 } }] };
+      if (step === 12) return { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] };
+      return { calls: [{ name: "complete_task", args: { summary: "Built the page after reading big.js.", verification: "Read it" } }] };
+    };
+    const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+    const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+    expect((await until(run.id, ["completed", "incomplete"])).status).toBe("completed");
+  } finally {
+    Object.assign(contextLimits, saved);
+  }
+  expect(reminder).toContain("same run_command call 3 times in a row");
+  expect(checkpointAsked).toBeGreaterThan(0);
+  expect(afterSummary).toContain("Write index.html.");
+  expect(afterSummary).toContain("# T1: Build the landing page"); // the brief stays
+  expect(afterSummary.length).toBeLessThan(30_000);
+}, 30_000);
+
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });

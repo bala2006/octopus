@@ -5,7 +5,7 @@
  */
 import type { Effort } from "@octopus/shared";
 import type { Registry } from "../db/registry";
-import { complete, type Item, type LlmResult, type ToolCall } from "../llm/azure";
+import { complete, type FunctionTool, type Item, type LlmResult, type ToolCall } from "../llm/azure";
 import { clip, UserError } from "../lib/util";
 import { Denied, MAX_TOOL_OUTPUT, toFunction, type Stop, type Tool, type ToolContext } from "../tools/types";
 
@@ -41,17 +41,31 @@ export interface LoopOptions {
 /** `exhausted`: the agent used every tool round without finishing. */
 export interface LoopResult { stop: Stop | null; text: string; rounds: number; exhausted?: boolean }
 
-const MAX_CONTEXT_CHARS = 450_000;
+/**
+ * How big a transcript may grow. Past `summarizeAt` characters the older part is replaced by a checkpoint the model
+ * writes itself, keeping the brief and the latest `keepTail` characters word for word; the work goes on without a cut.
+ * `truncateAt` is the last resort if summarizing fails. Mutable so tests can make them small.
+ */
+export const contextLimits = { summarizeAt: 300_000, keepTail: 60_000, truncateAt: 450_000 };
 /** A turn that has not finished is told to wrap up this many steps before its step limit (the last one counts as 1). */
 const WRAP_UP_STEPS = 5;
 const WRAP_UP = "You are almost out of steps for this turn. Stop exploring, testing and polishing. Call the tool that ends the turn now (complete_task, submit_review, start_work or reply_to_user), and say what is done and what is not verified. If the work cannot be finished as specified, say so in that tool.";
+/** Identical consecutive calls at these counts get a reminder that the agent is repeating itself. */
+const REPEAT_REMINDERS = [3, 5, 8];
+export const CHECKPOINT_REQUEST = `Write a checkpoint of your work so far. It replaces the earlier part of this conversation, so include everything you need to carry on without it:
+## Goal: the task and its acceptance criteria, in a few lines
+## Done: what you built or changed, file by file, with the decisions behind it
+## Facts: interfaces, names, commands, URLs and values you rely on
+## Problems: errors met and how they were resolved, or what is still failing
+## Next: the exact next steps
+Be specific and complete; do not call any tool.`;
 
 /** Older tool outputs are shortened when the transcript grows too long; the latest rounds stay intact. Returns whether anything was shortened. */
-function compact(input: Item[]): boolean {
+function truncate(input: Item[]): boolean {
   let size = JSON.stringify(input).length;
   let changed = false;
   for (const item of input) {
-    if (size <= MAX_CONTEXT_CHARS) break;
+    if (size <= contextLimits.truncateAt) break;
     if (item.type === "function_call_output" && typeof item.output === "string" && item.output.length > 1500) {
       size -= item.output.length - 1500;
       item.output = `${item.output.slice(0, 1200)}\n… [shortened to save context; run the tool again if you need it]`;
@@ -59,6 +73,30 @@ function compact(input: Item[]): boolean {
     }
   }
   return changed;
+}
+
+/**
+ * Replace the middle of a long transcript with a checkpoint the model writes. The request is the transcript plus one
+ * question, so the cached prefix is reused. Keeps the brief (item 0) and a recent tail that starts on a whole step.
+ * Returns whether it compacted.
+ */
+async function summarize(o: LoopOptions, functions: FunctionTool[]): Promise<boolean> {
+  const input = o.input;
+  let start = input.length;
+  for (let size = 0; start > 1 && size < contextLimits.keepTail; ) size += JSON.stringify(input[--start]).length;
+  while (start < input.length && input[start]!.type === "function_call_output") start++;
+  if (start <= 2) return false;
+  const res = await complete(o.reg, {
+    model: o.model, instructions: o.instructions, input: [...input, { role: "user", content: CHECKPOINT_REQUEST }], tools: functions, toolChoice: "none",
+    effort: o.effort, signal: o.ctx.signal, maxOutputTokens: 8_000,
+  });
+  o.events.usage(res);
+  const summary = res.text.trim();
+  if (!summary) return false;
+  const before = JSON.stringify(input).length;
+  input.splice(1, start - 1, { role: "user", content: `<checkpoint>\n${summary}\n</checkpoint>\nThis checkpoint replaces your earlier work in this conversation. Continue from it; files you read before must be read again if you need their content.` });
+  o.events.thought(`Summarized earlier work to keep the context focused (${Math.round(before / 1000)}k → ${Math.round(JSON.stringify(input).length / 1000)}k characters).`);
+  return true;
 }
 
 function parseArgs(call: ToolCall): Record<string, unknown> {
@@ -89,12 +127,19 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   const input = o.input;
   let nudged = false;
   let lastText = "";
+  let lastCall = "";
+  let repeats = 0;
   for (let round = 1; round <= o.maxRounds; round++) {
     if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: WRAP_UP });
     await o.events.beforeCall();
     if (o.inbox?.length) input.push({ role: "user", content: o.inbox.splice(0).join("\n\n") });
-    // A shortened read no longer holds the file, so the next read of it must return the content again.
-    if (compact(input)) o.ctx.shown.clear();
+    // A summarized or shortened read no longer holds the file, so the next read of it must return the content again.
+    if (JSON.stringify(input).length > contextLimits.summarizeAt) {
+      let done = false;
+      try { done = await summarize(o, functions); } catch (e) { if (o.ctx.signal.aborted) throw e; }
+      if (done) o.ctx.shown.clear();
+    }
+    if (truncate(input)) o.ctx.shown.clear();
     const res = await complete(o.reg, {
       model: o.model, instructions: o.instructions, input, tools: functions, effort: o.effort, signal: o.ctx.signal,
       maxOutputTokens: 48_000,
@@ -121,8 +166,14 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       input.push({ type: "function_call_output", call_id: call.call_id, output: clip(r.output, MAX_TOOL_OUTPUT) });
       if (r.image) images.push(r.image);
       if (r.stop) stop = r.stop;
+      const sig = `${call.name}:${call.arguments}`;
+      repeats = sig === lastCall ? repeats + 1 : 1;
+      lastCall = sig;
     }
     if (stop) return { stop, text: lastText, rounds: round };
+    if (REPEAT_REMINDERS.includes(repeats)) {
+      input.push({ role: "user", content: `You have made the same ${lastCall.split(":")[0]} call ${repeats} times in a row with identical arguments, and it keeps giving the same result. Change your approach: try something different, ask a teammate, or finish with what you have.` });
+    }
     if (images.length) input.push({ role: "user", content: [{ type: "input_text", text: "Screenshot from your last tool call:" }, ...images.slice(-2).map((url) => ({ type: "input_image", image_url: url }))] });
   }
   return { stop: null, text: lastText, rounds: o.maxRounds, exhausted: true };

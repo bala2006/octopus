@@ -83,8 +83,13 @@ interface RunState {
 }
 interface Inbound { content: string; display: string; to_agent_id: string | null; images: Item[] }
 type Budget = typeof DEFAULT_BUDGET;
-/** Past this size a session costs more to continue than a fresh brief and a few reads. */
-const SESSION_MAX_CHARS = 320_000;
+/** Past this size a session costs more to continue than a fresh brief and a few reads (long turns summarize well before it). */
+const SESSION_MAX_CHARS = 600_000;
+/**
+ * Steps per turn. Owners get room to build, look and fix in one go; context stays bounded by summarizing, not by
+ * cutting the work off. The limit is a backstop against a runaway turn.
+ */
+const STEPS: Partial<Record<Mode, number>> = { worker: 150, reviewer: 60, acceptance: 60, quick_review: 3 };
 /** Documents from finished dependencies up to this size go inside the brief instead of being read with tools. */
 const DOCS_IN_BRIEF = 20_000;
 /** Longest message between agents; longer material goes in a file and the message names it. */
@@ -974,7 +979,7 @@ export class Conversation {
     let exhausted = false;
     try {
       const content = fresh && this.requestImages.length ? [{ type: "input_text", text: brief }, ...this.requestImages] : brief;
-      const res = await this.turn(agent, mode, task, [{ role: "user", content }], { session, preload, maxRounds: mode === "worker" ? 60 : mode === "reviewer" || mode === "acceptance" ? 40 : 3 });
+      const res = await this.turn(agent, mode, task, [{ role: "user", content }], { session, preload, maxRounds: STEPS[mode] ?? 3 });
       stop = res.stop;
       text = res.text;
       exhausted = !!res.exhausted;
