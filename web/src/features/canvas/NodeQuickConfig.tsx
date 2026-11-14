@@ -242,7 +242,11 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
       </div>
 
       <div className="flex items-center gap-1 border-t border-border bg-surface px-2 py-1.5">
-        <Button variant="ghost" size="xs" onClick={() => nav(`/w/${w}/chat?agent=${id}`)}><MessageSquare />Chat</Button>
+        <Button variant="ghost" size="xs" onClick={() => {
+          // The open conversation shows this agent's own chat when it can; otherwise the one-on-one chat page.
+          const shown = !window.dispatchEvent(new CustomEvent("octopus:agent-chat", { detail: id, cancelable: true }));
+          if (!shown) nav(`/w/${w}/chat?agent=${id}`);
+        }}><MessageSquare />Chat</Button>
         <Button variant="ghost" size="xs" onClick={() => setInspector(id)}><Maximize2 />All settings</Button>
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" className="ml-auto" aria-label="Agent actions"><MoreHorizontal /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end"><DropdownMenuItem className="text-destructive" onSelect={() => deleteNodes([id])}><Trash2 />Delete agent</DropdownMenuItem></DropdownMenuContent>

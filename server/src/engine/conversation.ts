@@ -226,6 +226,16 @@ export class Conversation {
     const msg = this.post({ from: null, to: pending?.question.agent_id ?? target, sender: "user", type: pending ? "answer" : "task", content: content + files,
       meta: { display_content: content, images: images.map((i) => i.name), attachments: attachments.map((a) => a.filename) } });
     if (this.row.status !== "queued" && TERMINAL_STATUSES.includes(this.row.status)) this.emit("run_continued", { content: firstLine(content, 200) });
+    // A message to one teammate while the team works goes into that teammate's own chat, not into a new plan.
+    const mate = !pending && target && target !== this.lead.id && this.driving ? this.team.find((a) => a.id === target) : undefined;
+    if (mate && this.busy.has(mate.id)) {
+      this.collab.deliver(mate.id, `Message ${msg.id} from the user:\n${content}${files}\n\nTake it into account in your work, and answer with reply (message_id "${msg.id}") at a good point.`);
+      return msg.id;
+    }
+    if (mate && this.collab.latestSession(mate.id)) {
+      void this.answerTurn(mate, "the user", msg.id, content + files).catch((e) => this.emit("error", { message: `${mate.name}: ${(e as Error).message}`, kind: "error", agent_id: mate.id }));
+      return msg.id;
+    }
     this.queue.push({ content: content + files, display: content, to_agent_id: target, images: images.map((i) => ({ type: "input_image", image_url: i.url })) });
     this.wake?.resolve();
     void this.drive();
@@ -545,7 +555,7 @@ export class Conversation {
       this.collab.deliver(to.id, `Message ${msg.id} from ${from.name}:\n${body}\n\nAnswer with reply (message_id "${msg.id}")${blocking ? "; they are waiting for it" : " when you reach a good point"}.`);
     } else {
       // Idle: answer now, from the session that still holds what they know.
-      void this.answerTurn(to, from, msg.id, body).then((t) => this.collab.answer(msg.id, t || `(${to.name} gave no answer)`),
+      void this.answerTurn(to, `${from.name} (${from.role})`, msg.id, body).then((t) => this.collab.answer(msg.id, t || `(${to.name} gave no answer)`),
         (e) => this.collab.answer(msg.id, `(${to.name} could not answer: ${(e as Error).message})`));
     }
     if (blocking) return `${to.name} replied: ${await reply}`;
@@ -555,11 +565,11 @@ export class Conversation {
   }
 
   /** An idle agent answers a message, continuing its latest session so it answers with what it already knows. */
-  private async answerTurn(to: AgentOut, from: AgentOut, messageId: string, body: string): Promise<string> {
+  private async answerTurn(to: AgentOut, from: string, messageId: string, body: string): Promise<string> {
     this.busy.add(to.id);
     try {
       const live = this.collab.latestSession(to.id);
-      const prompt = `Message ${messageId} from ${from.name} (${from.role}):\n${body}\n\nAnswer from what you already know; read files only if you must, and change nothing. Answer with reply (message_id "${messageId}"), or in plain text.`;
+      const prompt = `Message ${messageId} from ${from}:\n${body}\n\nAnswer from what you already know; read files only if you must, and change nothing. Answer with reply (message_id "${messageId}"), or in plain text.`;
       const res = live
         ? await this.turn(to, live.session.mode, null, [{ role: "user", content: prompt }], { session: live.key, maxRounds: ANSWER_STEPS, answering: messageId })
         : await this.turn(to, "consult", null, [{ role: "user", content: prompt }], { maxRounds: ANSWER_STEPS, answering: messageId });

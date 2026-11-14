@@ -715,6 +715,43 @@ test("fragments are refused as requirements, and requirements never checked stay
   expect((final.state as { requirements: { id: string }[] }).requirements.map((r) => r.id)).toEqual(["R1"]);
 });
 
+test("a message to one agent while the team works lands in that agent's own chat, not in a new plan", async () => {
+  writeFileSync(path.join(dir, "wait.js"), "setTimeout(() => {}, 1500);\n");
+  let runId = "";
+  let lenaId = "";
+  let saw = "";
+  let posted = false;
+  script = (b) => {
+    const kind = turnKind(b);
+    const all = JSON.stringify(b.input);
+    if (kind === "work") {
+      const msg = /Message (\w+) from the user/.exec(all);
+      if (!posted) {
+        posted = true;
+        setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Make the heading say Hello", to_agent_id: lenaId }), 200);
+        return { calls: [{ name: "run_command", args: { command: "node wait.js" } }] };
+      }
+      if (msg && !saw) { saw = all; return { calls: [{ name: "reply", args: { message_id: msg[1], text: "Will do: the heading now says Hello." } }, { name: "write_file", args: { path: "index.html", content: "<h1>Hello</h1>\n" } }] }; }
+      return { calls: [{ name: "complete_task", args: { summary: "Built the page saying Hello.", verification: "Read it" } }] };
+    }
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  runId = run.id;
+  for (let i = 0; i < 100 && !lenaId; i++) {
+    lenaId = (await call<CanvasOut>("GET", `${W()}/companies/${team.company.id}`)).agents.find((a) => a.name === "Lena")?.id ?? "";
+    if (!lenaId) await new Promise((r) => setTimeout(r, 20));
+  }
+  await new Promise((r) => setTimeout(r, 400));
+  expect((await until(run.id, ["completed", "incomplete"])).status).toBe("completed");
+  expect(saw).toContain("Make the heading say Hello");
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks.filter((t) => t.kind === "build")).toHaveLength(1);
+  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+  expect(messages.find((m) => m.type === "answer" && m.content.includes("Will do"))).toMatchObject({ from_agent_id: lenaId, to_agent_id: null });
+}, 30_000);
+
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });

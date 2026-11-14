@@ -24,26 +24,43 @@ const TYPE_TONE: Record<string, string> = {
   user_interjection: "text-primary border-primary/40",
 };
 
+/** Opens one agent's own chat; provided by the panel that hosts the feed. */
+export const AgentChatContext = React.createContext<((agentId: string) => void) | null>(null);
+
+/** An agent's name that opens its chat when a host provides one. */
+function AgentName({ agent, className, style }: { agent: AgentOut; className?: string; style?: React.CSSProperties }) {
+  const open = React.useContext(AgentChatContext);
+  if (!open) return <span className={className} style={style}>{agent.name}</span>;
+  return <button type="button" onClick={() => open(agent.id)} className={cn(className, "hover:underline")} style={style} title={`Open ${agent.name}'s chat`}>{agent.name}</button>;
+}
+
+/** Whether a message belongs in one agent's chat: sent by it, to it, or about its work. */
+export function inAgentChat(m: MessageOut, agentId: string): boolean {
+  return m.from_agent_id === agentId || m.to_agent_id === agentId;
+}
+
 export function isUserFacing(m: MessageOut): boolean {
   return m.sender === "user" || !m.to_agent_id || m.type === "final_report";
 }
 
 type Item = ({ kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any> } | { kind: "org"; ev: OrgEvent } | { kind: "step"; step: Step } | { kind: "steps"; steps: Step[] }) & { seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export function RunFeed({ state, agents, filter, showThoughts = true }: { state: RunLive; agents: Record<string, AgentOut>; filter: FeedFilter; showThoughts?: boolean }) {
+/** The conversation feed. With `agentId` it is that agent's own chat: what it said and was told, and its steps. */
+export function RunFeed({ state, agents, filter, showThoughts = true, agentId }: { state: RunLive; agents: Record<string, AgentOut>; filter: FeedFilter; showThoughts?: boolean; agentId?: string }) {
   const bottom = React.useRef<HTMLDivElement>(null);
   const scroller = React.useRef<HTMLDivElement>(null);
   const [stick, setStick] = React.useState(true);
   const items = React.useMemo(() => {
     const raw: Item[] = [];
     state.messages.forEach((m, i) => {
-      if (filter === "user" && !isUserFacing(m)) return;
+      if (agentId) { if (!inAgentChat(m, agentId)) return; }
+      else if (filter === "user" && !isUserFacing(m)) return;
       if (filter === "internal" && (m.sender === "user" || !m.to_agent_id) && m.type !== "artifact_created") return;
       raw.push(m.type === "artifact_created" ? { kind: "files", ms: [m], seq: m._seq ?? i } : { kind: "msg", m, seq: m._seq ?? i });
     });
-    if (filter !== "user") for (const r of state.rejected) raw.push({ kind: "rejected", r, seq: r.seq ?? 0 });
-    for (const ev of state.orgEvents) raw.push({ kind: "org", ev, seq: ev.seq });
-    for (const step of state.steps) if (showThoughts || step.kind !== "thought") raw.push({ kind: "step", step, seq: step.seq });
+    if (filter !== "user" && !agentId) for (const r of state.rejected) raw.push({ kind: "rejected", r, seq: r.seq ?? 0 });
+    if (!agentId) for (const ev of state.orgEvents) raw.push({ kind: "org", ev, seq: ev.seq });
+    for (const step of state.steps) if ((showThoughts || step.kind !== "thought") && (!agentId || step.agent_id === agentId)) raw.push({ kind: "step", step, seq: step.seq });
     raw.sort((a, b) => a.seq - b.seq);
     const out: Item[] = [];
     for (const it of raw) { // group consecutive file writes by the same agent, and consecutive steps by the same agent
@@ -54,8 +71,8 @@ export function RunFeed({ state, agents, filter, showThoughts = true }: { state:
       else out.push(it.kind === "files" ? { ...it, ms: [...it.ms] } : it);
     }
     return out;
-  }, [state.messages, state.rejected, state.orgEvents, state.steps, filter, showThoughts]);
-  const active = Object.entries(state.agentStatus).filter(([, st]) => statusMeta(st).live);
+  }, [state.messages, state.rejected, state.orgEvents, state.steps, filter, showThoughts, agentId]);
+  const active = Object.entries(state.agentStatus).filter(([id, st]) => statusMeta(st).live && (!agentId || id === agentId));
 
   React.useEffect(() => { if (stick) bottom.current?.scrollIntoView({ block: "end" }); }, [items.length, stick, state.streaming]);
   const onScroll = () => {
@@ -129,9 +146,9 @@ function FeedMessage({ m, agents }: { m: MessageOut; agents: Record<string, Agen
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary"><User className="h-3.5 w-3.5" /></div>}
         <div className={cn("min-w-0", isUser ? "flex max-w-[80%] flex-col items-end" : "flex-1")}>
           <div className={cn("feed-message-meta flex flex-wrap items-center gap-1.5 text-xs", isUser && "hidden")}>
-            <span className="font-semibold" style={from ? { color: from.color } : undefined}>{from?.name ?? "You"}</span>
+            {from ? <AgentName agent={from} className="font-semibold" style={{ color: from.color }} /> : <span className="font-semibold">You</span>}
             <ArrowRight className="h-3 w-3 text-muted-foreground" />
-            <span className="font-medium text-muted-foreground">{to?.name ?? (m.type === "final_report" || m.type === "question" ? "You" : "Everyone")}{!to && meta.recipients ? ` (${meta.recipients} agents)` : ""}</span>
+            <span className="font-medium text-muted-foreground">{to ? <AgentName agent={to} /> : (m.type === "final_report" || m.type === "question" ? "You" : "Everyone")}{!to && meta.recipients ? ` (${meta.recipients} agents)` : ""}</span>
             <span className={cn("rounded border px-1.5 py-px text-[10px] font-medium", TYPE_TONE[m.type] ?? "text-muted-foreground border-border")}>{MESSAGE_TYPE_LABEL[m.type] ?? m.type}</span>
             {verdict && (verdict === "approve" ? <Badge variant="success"><CircleCheck className="h-3 w-3" />approved</Badge> : <Badge variant="warning"><CircleX className="h-3 w-3" />changes requested</Badge>)}
             {meta.debate && <Badge variant="outline"><Gavel className="h-3 w-3" />round {meta.debate.round}/{meta.debate.max_rounds}{meta.debate.status !== "open" ? ` · ${meta.debate.status}` : ""}</Badge>}
@@ -266,7 +283,7 @@ function StepRun({ steps, agents }: { steps: Step[]; agents: Record<string, Agen
       <div className="min-w-0 flex-1">
       <details className="group">
         <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground hover:text-foreground">
-          {a && <span className="font-medium" style={{ color: tone(a.color) }}>{a.name}</span>}
+          {a && <AgentName agent={a} className="font-medium" style={{ color: tone(a.color) }} />}
           <span className="font-medium text-foreground/90">{countLine(steps)}</span>
           {running && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-warning" aria-label="a step is running" />}
           {failed && <CircleX className="h-3.5 w-3.5 shrink-0 text-destructive" aria-label="a step failed" />}
