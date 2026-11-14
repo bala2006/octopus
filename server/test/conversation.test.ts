@@ -228,6 +228,44 @@ test("large files are read in pages, unchanged re-reads cost one line, lockfiles
   expect(lock).toMatch(/generated file/);
 });
 
+test("a revision continues the author's session, and the re-review sees only the change since the review", async () => {
+  const page = Array.from({ length: 200 }, (_, i) => `<p>Section ${i}</p>`).join("\n");
+  const requests: { kind: string; input: { role?: string; content?: unknown; type?: string; name?: string }[] }[] = [];
+  let reviews = 0;
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    if (kind === "work" || kind === "review") requests.push({ kind, input: b.input });
+    const last = JSON.stringify(b.input.findLast((i: { role?: string }) => i.role === "user"));
+    if (kind === "work") {
+      if (last.includes("again:")) return n === 0
+        ? { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<p>Section 7</p>", new_string: "<p>Pricing</p>" } }] }
+        : { calls: [{ name: "complete_task", args: { summary: "Replaced section 7 with pricing.", verification: "Re-read the change" } }] };
+      return n === 0 ? { calls: [{ name: "write_file", args: { path: "index.html", content: page } }] }
+        : { calls: [{ name: "complete_task", args: { summary: "Built the page.", verification: "Opened it" } }] };
+    }
+    if (kind === "review") {
+      if (reviews === 0 && n === 0) return { calls: [{ name: "read_file", args: { path: "index.html" } }] };
+      return { calls: [{ name: "submit_review", args: reviews++ === 0 ? { verdict: "request_changes", comments: "1. index.html: section 7 should be pricing." } : { verdict: "approve", comments: "Resolved." } }] };
+    }
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Landing page" });
+  expect((await until(run.id, ["completed", "incomplete"])).status).toBe("completed");
+  const lastUser = (r: (typeof requests)[number]) => JSON.stringify(r.input.findLast((i) => i.role === "user"));
+
+  const revision = requests.find((r) => r.kind === "work" && lastUser(r).includes("again:"))!;
+  expect(JSON.stringify(revision.input[0])).toContain("# T1: Build the landing page");
+  expect(revision.input.some((i) => i.type === "function_call" && i.name === "write_file")).toBe(true);
+  expect(lastUser(revision)).toContain("section 7 should be pricing");
+
+  const reReview = requests.find((r) => r.kind === "review" && lastUser(r).includes("Re-review"))!;
+  expect(reReview.input.some((i) => i.type === "function_call" && i.name === "submit_review")).toBe(true);
+  expect(lastUser(reReview)).toContain("Pricing");
+  expect(lastUser(reReview)).not.toContain("Section 150");
+});
+
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });

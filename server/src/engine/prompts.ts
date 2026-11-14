@@ -121,16 +121,37 @@ export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: 
   ].filter(Boolean).join("\n\n");
 }
 
-export function reviewBrief(work: TaskOut, o: { goal: string; author: string; summary: string; files: string[]; round: number; diff?: string }): string {
+export function reviewBrief(work: TaskOut, o: { goal: string; author: string; summary: string; files: string[]; round: number; diff?: string; previous?: string }): string {
   return [
     `# Review ${work.key}: ${work.title} (by ${o.author}${o.round > 1 ? `, revision ${o.round}` : ""})`,
     `## What was asked\n${work.description}`,
     work.acceptance_criteria && `## Acceptance criteria\n${work.acceptance_criteria}`,
     `## The user's request\n${o.goal}`,
     `## The author's summary\n${o.summary}`,
+    o.previous && `## The previous review's comments\nCheck that each is resolved. Request changes only for unresolved comments or real problems in the work; do not start over.\n\n${o.previous}`,
     `## Files changed\n${o.files.length ? o.files.map((f) => `- ${f}`).join("\n") : "(no files changed)"}`,
     o.diff && `## The change (small: judge it from this diff)\n${o.diff}`,
   ].filter(Boolean).join("\n\n");
+}
+
+/** The next turn of a reviewer who already reviewed this work: only what changed since. */
+export function reReviewBrief(work: TaskOut, o: { author: string; summary: string; files: string[]; round: number; diff: string }): string {
+  return [
+    `# Re-review ${work.key}: revision ${o.round} by ${o.author}`,
+    `${o.author} revised the work after your review. Their summary:\n${o.summary}`,
+    `## Changed since your review\n${o.files.length ? o.files.map((f) => `- ${f}`).join("\n") : "(no files changed)"}`,
+    o.diff && `## The change since your review\n${o.diff}`,
+    "Check that each of your comments is resolved and that this change is correct. You already know the rest of the work: read a file again only where the change needs it. Request changes only for unresolved comments or real problems in this change. Then call submit_review.",
+  ].filter(Boolean).join("\n\n");
+}
+
+/** The next turn of an author's session: why the work came back. */
+export function revisionNote(t: TaskOut, why: { from: string; text: string }): string {
+  return [
+    `# ${t.key} again: ${why.from}`,
+    why.text,
+    "Address every point. The files you worked on are earlier in this conversation; re-read only what changed since. Verify the result, then call complete_task.",
+  ].join("\n\n");
 }
 
 export function libraryList(roles: RoleTemplateOut[]): string {

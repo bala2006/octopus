@@ -28,14 +28,14 @@ import { clip, deferred, firstLine, newId, now, UserError } from "../lib/util";
 import { changedLines } from "../lib/diff";
 import { parseCommand } from "../safety/commands";
 import { toolbox, type Mode } from "../tools";
-import { Denied, type GuardRequest, type HireSpec, type Stop, type TaskSpec, type ToolContext } from "../tools/types";
+import { Denied, type GuardRequest, type HireSpec, type Shown, type Stop, type TaskSpec, type Tool, type ToolContext } from "../tools/types";
 import { recordVersion, artifactOut } from "../workspace/artifacts";
 import { projectOverview, verificationChecks } from "../workspace/overview";
 import type { Project } from "../workspace/projects";
 import { agentLoop, type LoopEvents } from "./agent";
 import { publish } from "./bus";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
-import { instructions, libraryList, reviewBrief, taskBrief } from "./prompts";
+import { instructions, libraryList, reReviewBrief, reviewBrief, revisionNote, taskBrief } from "./prompts";
 
 interface Pending { question: Question; task_id: string | null }
 interface RunState {
@@ -48,8 +48,12 @@ interface RunState {
   feedback: Record<string, string>;
   revisions: Record<string, number>;
   files_by_task: Record<string, string[]>;
-  /** The changed lines of each task's files so far, for a reviewer of a small change. */
-  diffs_by_task: Record<string, { text: string; lines: number }>;
+  /** The changed lines of each task's work since its last review, for a reviewer of a small change. */
+  diffs_by_task: Record<string, { text: string; lines: number; files?: string[] }>;
+  /** Why a task is running again, for the next turn of its session: review feedback, a user's answer, failed checks. Consumed when the turn starts. */
+  resume: Record<string, { from: string; text: string }>;
+  /** A task that carries on another task's session (a fix for failed checks continues its author's build). */
+  continues: Record<string, string>;
   always: string[];
   verify_rounds: number;
   workflow: WorkflowState;
@@ -57,6 +61,13 @@ interface RunState {
 }
 interface Inbound { content: string; display: string; to_agent_id: string | null; images: Item[] }
 type Budget = typeof DEFAULT_BUDGET;
+/**
+ * One agent's ongoing work on one deliverable: its frozen instructions and tools, its transcript, and what it has read.
+ * Kept in memory only; after a restart the next turn starts from a brief.
+ */
+interface Session { mode: Mode; instructions: string; tools: Tool[]; input: Item[]; seen: ToolContext["seen"]; shown: Shown }
+/** Past this size a session costs more to continue than a fresh brief and a few reads. */
+const SESSION_MAX_CHARS = 320_000;
 
 class Halt extends Error {}
 /** A change this small is reviewed from its diff in one step, instead of by reading files. */
@@ -72,6 +83,7 @@ function emptyUsage(): Usage {
 
 function initialState(): RunState {
   return { agent_status: {}, activity: {}, usage: emptyUsage(), history: [], questions: [], answers: {}, feedback: {}, revisions: {}, files_by_task: {}, diffs_by_task: {},
+    resume: {}, continues: {},
     always: [], verify_rounds: 0, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
 }
 
@@ -92,6 +104,7 @@ export class Conversation {
   /** Images attached to the request being worked on, shown to everyone who works on it. */
   private requestImages: Item[] = [];
   private activeSince = 0;
+  private sessions = new Map<string, Session>();
 
   private constructor(readonly p: Project, readonly reg: Registry, row: RunRow) {
     this.row = row;
@@ -368,10 +381,10 @@ export class Conversation {
     };
   }
 
-  private context(agent: AgentOut, task: TaskOut | null, planner?: ToolContext["planner"]): ToolContext {
+  private context(agent: AgentOut, task: TaskOut | null, planner?: ToolContext["planner"], memory: Pick<Session, "seen" | "shown"> = { seen: new Map(), shown: new Map() }): ToolContext {
     return {
       agent, task, runId: this.row.id, fs: this.p.fs, db: this.p.db, reg: this.reg, signal: this.abort.signal, planner,
-      team: () => this.team, seen: new Map(), shown: new Map(),
+      team: () => this.team, seen: memory.seen, shown: memory.shown,
       guard: (req) => this.guard(agent, req),
       emit: (type, data) => this.emit(type, data),
       setStatus: (status, activity) => this.setStatus(agent, status, activity),
@@ -388,18 +401,38 @@ export class Conversation {
   private model(agent: AgentOut) { return this.budget.model || agent.model || config.defaultModel; }
   private effort(agent: AgentOut) { return this.budget.reasoning_effort !== "default" ? this.budget.reasoning_effort : agent.behavior.reasoning_effort; }
 
-  private async turn(agent: AgentOut, mode: Mode, task: TaskOut | null, input: Item[], opts: { planner?: ToolContext["planner"]; maxRounds: number }) {
-    const { tools, warnings } = await toolbox(this.reg, this.p.root, agent, mode);
-    for (const w of warnings) this.emit("error", { message: w, kind: "warning", agent_id: agent.id });
-    const company = this.p.db.companies.get(this.row.company_id);
-    const system = instructions({
-      agent, company: company?.name ?? "the company", goal: this.row.goal, team: this.team, overview: projectOverview(this.p.fs), skills: skillsFor(this.reg, agent),
-      memory: { own: this.p.db.memory.find("agent_id = ?", [agent.id]), shared: this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]) },
-    }, mode);
+  /** A live session that can take another turn, or undefined. A session grown past its limit is dropped, so the next turn starts from a brief. */
+  private liveSession(key: string): Session | undefined {
+    const s = this.sessions.get(key);
+    if (s && JSON.stringify(s.input).length > SESSION_MAX_CHARS) { this.sessions.delete(key); return undefined; }
+    return s;
+  }
+
+  /**
+   * One agent turn. With `session`, the turn continues that session's transcript, instructions and tools, so the agent
+   * keeps what it already read and the model's cached prefix stays valid; without one it starts fresh.
+   */
+  private async turn(agent: AgentOut, mode: Mode, task: TaskOut | null, input: Item[], opts: { planner?: ToolContext["planner"]; maxRounds: number; session?: string }) {
+    let s = opts.session ? this.liveSession(opts.session) : undefined;
+    if (!s) {
+      const { tools, warnings } = await toolbox(this.reg, this.p.root, agent, mode);
+      for (const w of warnings) this.emit("error", { message: w, kind: "warning", agent_id: agent.id });
+      const company = this.p.db.companies.get(this.row.company_id);
+      const system = instructions({
+        agent, company: company?.name ?? "the company", goal: this.row.goal, team: this.team, overview: projectOverview(this.p.fs), skills: skillsFor(this.reg, agent),
+        memory: { own: this.p.db.memory.find("agent_id = ?", [agent.id]), shared: this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]) },
+      }, mode);
+      s = { mode, instructions: system, tools, input: [], seen: new Map(), shown: new Map() };
+      if (opts.session) this.sessions.set(opts.session, s);
+    }
+    s.input.push(...input);
     this.emit("turn_started", { agent_id: agent.id, task_key: task?.key });
     try {
-      return await agentLoop({ reg: this.reg, model: this.model(agent), effort: this.effort(agent), instructions: system, input, tools,
-        ctx: this.context(agent, task, opts.planner), events: this.loopEvents(agent), maxRounds: opts.maxRounds, requireStop: mode !== "consult" && mode !== "report" });
+      return await agentLoop({ reg: this.reg, model: this.model(agent), effort: this.effort(agent), instructions: s.instructions, input: s.input, tools: s.tools,
+        ctx: this.context(agent, task, opts.planner, s), events: this.loopEvents(agent), maxRounds: opts.maxRounds, requireStop: s.mode !== "consult" && s.mode !== "report" });
+    } catch (e) {
+      if (opts.session) this.sessions.delete(opts.session); // its transcript may end mid-round
+      throw e;
     } finally {
       this.setStatus(agent, "idle");
     }
@@ -449,18 +482,18 @@ export class Conversation {
     return agent;
   }
 
-  /** Keeps the changed lines of a task's files, so a reviewer of a small change can read the diff. */
+  /** Keeps the changed lines of a task's files since its last review, so a reviewer of a small change can read the diff. */
   private recordDiff(taskId: string, rel: string, before: string | null, after: string | null) {
     const hunk = changedLines(before, after);
-    const prev = this.state.diffs_by_task[taskId] ?? { text: "", lines: 0 };
-    this.state.diffs_by_task[taskId] = { text: clip(`${prev.text}\n\n## ${rel}\n${hunk.text}`.trim(), SMALL_CHANGE.chars), lines: prev.lines + hunk.lines };
+    const prev = this.state.diffs_by_task[taskId] ?? { text: "", lines: 0, files: [] };
+    this.state.diffs_by_task[taskId] = { text: clip(`${prev.text}\n\n## ${rel}\n${hunk.text}`.trim(), SMALL_CHANGE.chars), lines: prev.lines + hunk.lines,
+      files: [...new Set([...(prev.files ?? []), rel])] };
   }
 
-  /** The task's change, when it is small enough for a quick review from its diff. */
+  /** The task's change since its last review, when it is small enough for a quick review from its diff. */
   private smallChange(work: TaskOut) {
     const diff = this.state.diffs_by_task[work.id];
-    const files = this.state.files_by_task[work.id] ?? [];
-    const fits = !!diff && diff.lines <= SMALL_CHANGE.lines && files.length <= SMALL_CHANGE.files && diff.text.length < SMALL_CHANGE.chars;
+    const fits = !!diff && diff.lines <= SMALL_CHANGE.lines && (diff.files ?? []).length <= SMALL_CHANGE.files && diff.text.length < SMALL_CHANGE.chars;
     return fits ? diff : null;
   }
 
@@ -492,6 +525,7 @@ export class Conversation {
           this.state.questions.shift();
           if (pending.task_id) {
             this.state.answers[pending.task_id] = msg.content;
+            this.state.resume[pending.task_id] = { from: "The user's answer to your question", text: msg.content };
             const t = this.tasks.find((x) => x.id === pending.task_id);
             if (t) this.saveTask({ ...t, status: "todo" });
             this.askNext();
@@ -552,6 +586,7 @@ export class Conversation {
     const h = this.pendingHalt ?? { reason, status };
     this.pendingHalt = null;
     for (const t of this.tasks) if (t.status === "in_progress") this.saveTask({ ...t, status: "todo" });
+    this.sessions.clear(); // a stopped turn can leave a transcript mid-round
     for (const a of this.team) this.setStatus(a, "idle");
     this.setRunStatus(h.status, { reason: h.reason, summary: h.status === "cancelled" ? "Stopped. Send a message to continue." : `${h.reason}. Send a message to continue.` });
   }
@@ -669,18 +704,40 @@ export class Conversation {
     this.phase(task.kind === "review" ? "review" : "build", "active");
     const deps = this.tasks.filter((d) => task.depends_on.includes(d.key));
     const work = task.kind === "review" ? this.tasks.find((x) => x.key === task.depends_on[0]) : undefined;
-    const small = work ? this.smallChange(work) : null;
-    const mode: Mode = task.kind === "review" ? (small ? "quick_review" : "reviewer") : "worker";
-    const brief = task.kind === "review" && work
-      ? reviewBrief(work, { goal: this.row.goal, author: this.team.find((a) => a.id === work.assignee_agent_id)?.name ?? "a teammate", summary: work.result,
-        files: this.state.files_by_task[work.id] ?? [], round: (this.state.revisions[work.id] ?? 0) + 1, diff: small?.text })
-      : taskBrief(task, { goal: this.row.goal, deps, team: this.team, feedback: this.state.feedback[task.id], answer: this.state.answers[task.id] });
+    const author = (w: TaskOut) => this.team.find((a) => a.id === w.assignee_agent_id)?.name ?? "a teammate";
+    const resume = this.state.resume[task.id];
+    delete this.state.resume[task.id];
+    let mode: Mode;
+    let session: string;
+    let brief: string;
+    let fresh: boolean;
+    if (task.kind === "review" && work) {
+      // A reviewer who already reviewed this work continues: it checks its own comments against the change since then.
+      session = `${agent.id}:review:${work.id}`;
+      const small = this.smallChange(work);
+      const prior = this.liveSession(session);
+      if (prior && prior.mode !== "reviewer" && !small) this.sessions.delete(session);
+      const cont = this.liveSession(session);
+      mode = cont?.mode ?? (small ? "quick_review" : "reviewer");
+      fresh = !cont;
+      const round = (this.state.revisions[work.id] ?? 0) + 1;
+      const diff = this.state.diffs_by_task[work.id];
+      brief = cont
+        ? reReviewBrief(work, { author: author(work), summary: work.result, files: diff?.files ?? [], round, diff: diff?.text ?? "" })
+        : reviewBrief(work, { goal: this.row.goal, author: author(work), summary: work.result, files: this.state.files_by_task[work.id] ?? [], round, diff: small?.text,
+          previous: round > 1 ? this.state.feedback[work.id] : undefined });
+    } else {
+      mode = "worker";
+      session = `${agent.id}:${this.state.continues[task.id] ?? task.id}`;
+      fresh = !this.liveSession(session);
+      brief = !fresh && resume ? revisionNote(task, resume) : taskBrief(task, { goal: this.row.goal, deps, team: this.team, feedback: this.state.feedback[task.id], answer: this.state.answers[task.id] });
+    }
     let stop: Stop | null = null;
     let text = "";
     let exhausted = false;
     try {
-      const content = this.requestImages.length ? [{ type: "input_text", text: brief }, ...this.requestImages] : brief;
-      const res = await this.turn(agent, mode, task, [{ role: "user", content }], { maxRounds: mode === "worker" ? 60 : mode === "reviewer" ? 30 : 3 });
+      const content = fresh && this.requestImages.length ? [{ type: "input_text", text: brief }, ...this.requestImages] : brief;
+      const res = await this.turn(agent, mode, task, [{ role: "user", content }], { session, maxRounds: mode === "worker" ? 60 : mode === "reviewer" ? 30 : 3 });
       stop = res.stop;
       text = res.text;
       exhausted = !!res.exhausted;
@@ -727,6 +784,7 @@ export class Conversation {
       const { verdict, comments } = stop;
       this.saveTask({ ...task, status: "done", result: `${verdict === "approve" ? "Approved" : "Changes requested"}: ${comments}` });
       if (!work) return;
+      delete this.state.diffs_by_task[work.id]; // the next review looks only at what changes after this one
       const rounds = this.state.revisions[work.id] ?? 0;
       this.post({ from: agent.id, to: work.assignee_agent_id, type: "review_result", content: comments,
         meta: { verdict, task_id: work.key, review: { revisions: rounds, max_revisions: this.budget.max_revisions } } });
@@ -737,6 +795,7 @@ export class Conversation {
       }
       this.state.revisions[work.id] = rounds + 1;
       this.state.feedback[work.id] = comments;
+      this.state.resume[work.id] = { from: `${agent.name}'s review`, text: comments };
       this.saveTask({ ...work, status: "todo", kind: "fix" as const, title: work.title.startsWith("Revise: ") ? work.title : `Revise: ${work.title}` });
       return;
     }
@@ -785,6 +844,7 @@ export class Conversation {
     const report = failures.map((f) => `### ${f.name} (\`${f.command}\`) failed\n\`\`\`\n${f.output}\n\`\`\``).join("\n\n");
     const fix = this.newTask({ title: `Fix failing checks`, description: `The project's checks fail after the team's changes. Find the cause and fix it. If a failure was already there before this work and is unrelated, leave it and say so.\n\n${report}`,
       acceptance_criteria: failures.map((f) => `- \`${f.command}\` passes`).join("\n"), assignee_agent_id: owner.id, kind: "fix", depends_on: [], created_by: lead.id });
+    this.state.continues[fix.id] = this.state.continues[last.id] ?? last.id;
     this.post({ from: lead.id, to: owner.id, type: "task", content: `Checks failed: ${failures.map((f) => f.name).join(", ")}. Please fix (${fix.key}).`, meta: { task_id: fix.key } });
     return true;
   }
@@ -824,6 +884,7 @@ export class Conversation {
     this.setRunStatus(status, { summary: firstLine(text, 300), reason: status === "incomplete" ? "Some tasks could not be finished" : "" });
     this.state.workflow = initialState().workflow;
     this.state.verify_rounds = 0;
+    this.sessions.clear();
   }
 
   /** For deleting a conversation: stop it and forget it. */

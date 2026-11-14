@@ -56,5 +56,8 @@ export function turnKind(body: { instructions: string }): "plan" | "work" | "rev
   return body.instructions.includes("## How you work") && (body as { tools?: unknown[] }).tools?.length ? "plan" : "report";
 }
 
-/** Function outputs already in the transcript (how many tool rounds happened). */
-export const outputs = (body: { input: { type?: string; output?: string }[] }) => body.input.filter((i) => i.type === "function_call_output");
+/** Function outputs in the current turn (since the last user message): how many tool rounds this turn has had. */
+export const outputs = (body: { input: { type?: string; role?: string; output?: string }[] }) => {
+  const start = body.input.findLastIndex((i) => i.role === "user");
+  return body.input.slice(start + 1).filter((i) => i.type === "function_call_output");
+};
