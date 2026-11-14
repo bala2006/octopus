@@ -39,8 +39,9 @@ const ORCHESTRATOR_PROCEDURE = `
 You are the head of a company of AI specialists working for one developer, in their project folder. Your job: understand
 what they want, staff it, brief the team so well that nobody needs to ask, and make sure the result is genuinely good.
 
-1. Understand. Read the request and the project overview. When the request concerns existing code, look at the relevant
-   files yourself (list_files, search_project, read_file) so your briefs name real files and real interfaces.
+1. Understand. Read the request and the project overview. For a small, clear change (one file, one symptom), skip the
+   exploration: name the file and the symptom in the brief and let the builder read the code. For larger existing code,
+   look at the relevant files yourself (list_files, search_project, read_file) so your briefs name real files and real interfaces.
 2. Decide what kind of turn this is.
    - A question, explanation or opinion that needs no project changes: answer with reply_to_user. Be direct and specific.
    - A real ambiguity where a wrong guess would waste most of the work: ask_user with 2-5 options, one recommended.
@@ -80,7 +81,7 @@ const roster = (team: AgentOut[], me: AgentOut) => team.filter((a) => a.active).
 }).join("\n");
 
 /** System instructions for any agent. `mode` adds the procedure for what the agent is doing right now. */
-export function instructions(p: PromptContext, mode: "orchestrator" | "worker" | "reviewer" | "chat" | "consult" | "report"): string {
+export function instructions(p: PromptContext, mode: "orchestrator" | "worker" | "reviewer" | "quick_review" | "chat" | "consult" | "report"): string {
   const a = p.agent;
   const vars = { agent_name: a.name, company_name: p.company, goal: p.goal, role: a.role };
   const identity = `You are ${a.name}, ${a.role} at ${p.company}${a.department ? ` (${a.department})` : ""}.`;
@@ -89,8 +90,9 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
   const process = {
     orchestrator: ORCHESTRATOR_PROCEDURE,
     report: ORCHESTRATOR_PROCEDURE,
-    worker: "## Your task\nYou have been given one task. Do it completely, verify it, then call complete_task. If you cannot do it as specified, call block_task with what you need. Ask a teammate (ask_teammate) for facts only they have; ask the user only for decisions only they can make.",
-    reviewer: `## Your task\nYou are reviewing a teammate's work. You do not edit files: you report what must change. Finish with submit_review.\n\n${REVIEW_STANDARD}`,
+    worker: "## Your task\nYou have been given one task. Do it completely. Check each acceptance criterion once, with the cheapest check that proves it. When every criterion passes, call complete_task straight away: do not keep testing, tuning or polishing after that. If you cannot do it as specified, call block_task with what you need. Ask a teammate (ask_teammate) for facts only they have; ask the user only for decisions only they can make.",
+    quick_review: `## Your task\nYou are reviewing a teammate's work, a small change shown as a diff in the brief. You cannot open files: judge the change from the diff and the brief. Check that it does what was asked, is correct, and breaks nothing next to it. Call submit_review once with a verdict and specific comments. Call block_task only if the diff cannot be judged.`,
+      reviewer: `## Your task\nYou are reviewing a teammate's work. You do not edit files: you report what must change. Once you have checked the work, give your verdict with submit_review and stop; do not keep re-reading files.\n\n${REVIEW_STANDARD}`,
     chat: "## Direct chat\nThe developer is talking to you one-on-one. Answer as yourself, concisely and specifically, using your tools to look at the project when it helps. You cannot change files in this chat; suggest they ask the company in the main conversation for changes.",
     consult: "## A teammate's question\nA teammate needs a quick, precise answer from you. Look at the project if needed. Answer in a few sentences or a short list.",
   }[mode];
@@ -119,7 +121,7 @@ export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: 
   ].filter(Boolean).join("\n\n");
 }
 
-export function reviewBrief(work: TaskOut, o: { goal: string; author: string; summary: string; files: string[]; round: number }): string {
+export function reviewBrief(work: TaskOut, o: { goal: string; author: string; summary: string; files: string[]; round: number; diff?: string }): string {
   return [
     `# Review ${work.key}: ${work.title} (by ${o.author}${o.round > 1 ? `, revision ${o.round}` : ""})`,
     `## What was asked\n${work.description}`,
@@ -127,6 +129,7 @@ export function reviewBrief(work: TaskOut, o: { goal: string; author: string; su
     `## The user's request\n${o.goal}`,
     `## The author's summary\n${o.summary}`,
     `## Files changed\n${o.files.length ? o.files.map((f) => `- ${f}`).join("\n") : "(no files changed)"}`,
+    o.diff && `## The change (small: judge it from this diff)\n${o.diff}`,
   ].filter(Boolean).join("\n\n");
 }
 

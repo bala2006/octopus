@@ -239,47 +239,6 @@ export function RunDialog({
           <div>
             {adv && (
               <div className="mt-2 grid grid-cols-4 gap-2 animate-fade-up">
-                <Field label="Max model calls">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={2000}
-                    value={budget.max_turns}
-                    onChange={(e) => setBudget({ ...budget, max_turns: Math.min(2000, Math.max(1, +e.target.value || 1)) })}
-                    className="h-8"
-                  />
-                </Field>
-                <Field label="Token budget">
-                  <Input
-                    type="number"
-                    min={1000}
-                    max={50000000}
-                    value={budget.max_tokens}
-                    onChange={(e) => setBudget({ ...budget, max_tokens: Math.min(50000000, Math.max(1000, +e.target.value || 1000)) })}
-                    className="h-8"
-                  />
-                </Field>
-                <Field label="Cost cap ($)">
-                  <Input
-                    type="number"
-                    min={0}
-                    max={1000}
-                    step="0.5"
-                    value={budget.max_cost_usd}
-                    onChange={(e) => setBudget({ ...budget, max_cost_usd: Math.min(1000, Math.max(0, +e.target.value || 0)) })}
-                    className="h-8"
-                  />
-                </Field>
-                <Field label="Active time (s)" hint="Seconds of agent work; paused or waiting-for-you time does not count">
-                  <Input
-                    type="number"
-                    min={30}
-                    max={86400}
-                    value={budget.timeout_s}
-                    onChange={(e) => setBudget({ ...budget, timeout_s: Math.min(86400, Math.max(30, +e.target.value || 30)) })}
-                    className="h-8"
-                  />
-                </Field>
                 <Field label="Parallel tasks" hint="How many specialists work at the same time">
                   <Input
                     type="number"

@@ -6,6 +6,10 @@ import type { CanvasOut, MessageOut, PendingApproval, RunDetail, TaskOut, Worksp
 import { openRegistry, type Registry } from "../src/db/registry";
 import { buildServer } from "../src/http/server";
 import { encrypt } from "../src/lib/secrets";
+import { publish } from "../src/engine/bus";
+import { Conversation } from "../src/engine/conversation";
+import { openProject } from "../src/db/project";
+import { project } from "../src/workspace/projects";
 import { fakeModel, outputs, turnKind, type FakeModel, type Script } from "./fakeModel";
 
 let app: FastifyInstance;
@@ -185,21 +189,19 @@ test("a review without a verdict is retried, then blocks the work instead of app
   expect(tasks[1]!.attempts).toBe(2);
 });
 
-test("limits apply per request: after a halt, the next message gets a fresh budget", async () => {
-  script = buildScript;
+test("a worker that keeps testing is told to wrap up, then finishes instead of running out of steps", async () => {
+  script = (b) => {
+    if (turnKind(b) !== "work") return buildScript(b);
+    if (!JSON.stringify(b.input).includes("almost out of steps")) return { calls: [{ name: "read_file", args: { path: "index.html" } }] };
+    return { calls: [{ name: "complete_task", args: { summary: "Stopped testing and finished the page.", verification: "Read the file once more." } }] };
+  };
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
-  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page", budget: { max_turns: 4 } });
-  const halted = await until(run.id, ["incomplete", "completed"]);
-  expect(halted.halt_reason).toMatch(/limit of 4 model calls/);
-  script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Finishing the review now." } }] } : buildScript(b));
-  // the follow-up is answered, and the unfinished build resumes within the new request's budget
-  await call("POST", `${W()}/runs/${run.id}/continue`, { content: "Please finish." });
-  await new Promise((r) => setTimeout(r, 200));
-  const next = await until(run.id, ["completed", "incomplete"]);
-  expect(next.status).toBe("completed");
-  expect(readFileSync(path.join(dir, "index.html"), "utf8")).toContain("Acme");
-});
-
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  const done = await until(run.id, ["completed", "incomplete"]);
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(done.status).toBe("completed");
+  expect(tasks.find((t) => t.kind === "build")?.status).toBe("done");
+}, 30_000);
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
@@ -218,3 +220,40 @@ test("sandboxed pages cannot change anything", async () => {
   const get = await app.inject({ method: "GET", url: "/api/health", headers: { host: "127.0.0.1", origin: "null" } });
   expect(get.statusCode).toBe(200);
 });
+
+test("an approval left open by a restart is closed when the run loads again", async () => {
+  script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Hi" });
+  await until(run.id, ["completed"]);
+  // A request that was waiting for an answer when the previous process stopped.
+  const orphan: PendingApproval = { id: "orphan1", agent_id: team.agents[0]!.id, kind: "run_command", summary: "Run `npm test`",
+    preview: "", details: { key: "npm" }, risk: "medium", level: "ask" };
+  const current = project(reg, ws.id);
+  publish(current.db, run.id, "approval_requested", orphan);
+  // Loading the run in a new process: a fresh handle on the same database.
+  Conversation.get({ ...current, db: openProject(dir) }, reg, run.id);
+  const closed = () => current.db.events.find("run_id = ? AND type = 'approval_resolved'", [run.id], "seq");
+  expect(closed().map((e) => e.data)).toMatchObject([{ id: "orphan1", approved: false }]);
+  // Loading it again adds nothing.
+  Conversation.get({ ...current, db: openProject(dir) }, reg, run.id);
+  expect(closed()).toHaveLength(1);
+});
+
+test("a small change is reviewed from its diff in one step, with only the verdict tools", async () => {
+  const reviews: { tools: { name: string }[]; input: unknown }[] = [];
+  script = (b) => {
+    if (turnKind(b) === "review") {
+      reviews.push(b);
+      return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks right." } }] };
+    }
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  const done = await until(run.id, ["completed", "incomplete"]);
+  expect(done.status).toBe("completed");
+  expect(reviews).toHaveLength(1);
+  expect(reviews[0]!.tools.map((t) => t.name).sort()).toEqual(["block_task", "submit_review"]);
+  expect(JSON.stringify(reviews[0]!.input)).toMatch(/\+.*Acme/);
+}, 30_000);

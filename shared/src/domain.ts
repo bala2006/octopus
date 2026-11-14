@@ -100,7 +100,6 @@ export const EdgeConfigSchema = z.object({
   condition: z.string().optional(),
   max_revisions: z.number().int().optional(),
   max_rounds: z.number().int().optional(),
-  max_turns: z.number().int().optional(),
 });
 export type EdgeConfig = z.infer<typeof EdgeConfigSchema>;
 
@@ -222,10 +221,6 @@ export interface ParsedFileOut { filename: string; text: string; chars: number; 
 // ── Conversations (runs) ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export const RunBudgetSchema = z.object({
-  max_turns: z.number().int().min(1).max(2000).optional(),
-  max_tokens: z.number().int().min(1000).optional(),
-  max_cost_usd: z.number().min(0).optional(),
-  timeout_s: z.number().int().min(30).optional(),
   max_concurrency: z.number().int().min(1).max(8).optional(),
   max_agents: z.number().int().min(1).max(60).optional(),
   max_revisions: z.number().int().min(0).max(5).optional(),
@@ -239,7 +234,7 @@ export const RunBudgetSchema = z.object({
 });
 export type RunBudget = z.infer<typeof RunBudgetSchema>;
 export const DEFAULT_BUDGET: Required<Omit<RunBudget, "model">> & { model: string | null } = {
-  max_turns: 200, max_tokens: 3_000_000, max_cost_usd: 5, timeout_s: 3600, max_concurrency: 3, max_agents: 16,
+  max_concurrency: 3, max_agents: 16,
   max_revisions: 2, reasoning_effort: "default", model: null, review: true, verify: true,
 };
 

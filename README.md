@@ -79,7 +79,7 @@ Settings can also come from a `.env` file; see [`.env.example`](.env.example). U
 
 Octopus reads the exact usage Azure reports for each call and prices it at gpt-6-luna Standard rates (USD per 1M
 tokens: $0.10 input, $0.01 cached input, $0.50 output, with long-prompt and regional surcharges). You can override the
-rates, show costs in your currency, and cap every conversation by model calls, tokens, cost and active time.
+rates and show costs in your currency. Each task has a step limit, and a task that keeps testing is told to wrap up before it.
 
 ## Development
 
