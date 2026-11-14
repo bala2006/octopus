@@ -103,8 +103,26 @@ export const plannerTools = [
     },
   }),
   defineTool({
+    name: "set_requirements",
+    description: "Record what the user asked for, one requirement per explicit ask, in the user's own words (quote them; do not soften or merge them). Call it before create_task for any feature or product; small fixes and questions need none. Calling it again adds requirements. The team's work is accepted against this list.",
+    args: z.object({ items: z.array(z.string().min(3)).min(1).describe("Each requirement, in the user's words") }),
+    async run(ctx, a) {
+      const added = ctx.planner!.addRequirements(a.items);
+      return { text: `Recorded ${added.map((r) => `${r.id}: ${r.text}`).join("\n")}\nAssign each to a task with create_task requirements.` };
+    },
+  }),
+  defineTool({
+    name: "cut_requirement",
+    description: "Leave a requirement out because it cannot be built in this environment (for example native 8K output in a browser). Never cut something only because it is hard: give it its own task instead. The user sees every cut and its reason.",
+    args: z.object({ id: z.string().describe("Requirement id, e.g. R3"), reason: z.string().min(10).describe("Why it cannot be built here, and what is delivered instead") }),
+    async run(ctx, a) {
+      const r = ctx.planner!.cutRequirement(a.id, a.reason);
+      return { text: `${r.id} is cut: ${r.note}` };
+    },
+  }),
+  defineTool({
     name: "create_task",
-    description: "Assign a task. One owner, a clear outcome, acceptance criteria someone can check, and dependencies by task key. Builders get kind build; documents docs; investigations research. Reviews and test runs are added automatically.",
+    description: "Assign a task. One owner, a clear outcome, acceptance criteria someone can check, the requirements it delivers, the files or folders it owns, and dependencies by task key. Builders get kind build; documents docs; investigations research. Reviews, test runs and the final acceptance check are added automatically.",
     args: z.object({
       title: z.string().min(4),
       description: z.string().min(10).describe("What to do and the context the assignee needs: relevant files, interfaces, decisions"),
@@ -112,18 +130,34 @@ export const plannerTools = [
       assignee: z.string().describe("Teammate name"),
       kind: z.enum(["build", "docs", "research"]),
       depends_on: z.array(z.string()).optional().describe("Keys of tasks that must finish first, e.g. T1"),
+      requirements: z.array(z.string()).optional().describe("Ids of the requirements this task delivers, e.g. R1, R4"),
+      files: z.array(z.string()).optional().describe("Files and folders this task owns, e.g. src/world/, index.html. Tasks that own different paths run in parallel; a task with none runs alone"),
+      skills: z.array(z.string()).optional().describe("Playbooks the assignee should follow, by name from the skill list"),
     }),
     async run(ctx, a) {
-      const t = ctx.planner!.addTask({ ...a, depends_on: a.depends_on ?? [] });
+      const t = ctx.planner!.addTask({ ...a, depends_on: a.depends_on ?? [], requirements: a.requirements ?? [], files: a.files ?? [], skills: a.skills ?? [] });
       return { text: `Created ${t.key}: ${t.title} → ${ctx.team().find((m) => m.id === t.assignee_agent_id)?.name}` };
     },
   }),
   defineTool({
+    name: "amend_task",
+    description: "Change or add to an open task, for example when the user adds a constraint mid-run. The assignee gets the update before their next step. Prefer this to a new task when the work already covers it.",
+    args: z.object({ task: z.string().describe("Task key, e.g. T3"), note: z.string().min(5).describe("What changes, in full") }),
+    async run(ctx, a) {
+      const t = ctx.planner!.amendTask(a.task, a.note);
+      return { text: `Updated ${t.key}.` };
+    },
+  }),
+  defineTool({
     name: "start_work",
-    description: "Finish planning and let the team start. Call once the tasks cover the whole request.",
+    description: "Finish planning and let the team start. Call once the tasks cover the whole request: every requirement is assigned to a task or cut.",
     args: z.object({ note: z.string().describe("One or two sentences for the user: the plan and who does what") }),
     async run(ctx, a) {
-      if (!ctx.planner!.tasks().some((t) => t.status === "todo")) return { text: "There are no open tasks. Create tasks first, or use reply_to_user if no work is needed.", ok: false };
+      const p = ctx.planner!;
+      if (!p.tasks().some((t) => t.status === "todo")) return { text: "There are no open tasks. Create tasks first, or use reply_to_user if no work is needed.", ok: false };
+      const owned = new Set(p.tasks().flatMap((t) => t.requirements));
+      const loose = p.requirements().filter((r) => r.status === "open" && !owned.has(r.id));
+      if (loose.length) return { text: `No task delivers ${loose.map((r) => `${r.id} (${r.text})`).join(", ")}. Add them to a task's requirements, or cut_requirement with the reason.`, ok: false };
       return { text: "The team is starting.", stop: { kind: "plan_ready", note: a.note } };
     },
   }),

@@ -63,7 +63,7 @@ export class ChatSession {
       agent, task: null, runId: `chat-${s.id}`, fs: this.p.fs, db: this.p.db, reg: this.reg, signal: this.abort.signal, team: () => team, seen: new Map(), shown: new Map(),
       guard: async () => { throw new Denied("not available in direct chat; ask the company in the main conversation"); },
       emit: () => {}, setStatus: (_st, activity) => this.send("status", { message_id: messageId, phase: "tool", detail: activity ?? "" }),
-      recordFile: () => {}, consult: async () => "Teammates cannot be consulted from a direct chat.",
+      recordFile: () => {}, consult: async () => "Teammates cannot be consulted from a direct chat.", ownerOf: () => null,
     };
     let text = "";
     try {

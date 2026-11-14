@@ -266,6 +266,91 @@ test("a revision continues the author's session, and the re-review sees only the
   expect(lastUser(reReview)).not.toContain("Section 150");
 });
 
+test("requirements must all be owned or cut, owned paths let builders run in parallel, and a task's skills reach its builder", async () => {
+  const work: { who: string; input: string; instructions: string; n: number }[] = [];
+  let planOutputs: string[] = [];
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const brief = JSON.stringify(b.input[0]);
+    if (kind === "plan") {
+      if (n === 5) planOutputs = outputs(b).map((o) => String(o.output));
+      if (n === 0) return { calls: [
+        { name: "set_requirements", args: { items: ["A red home page", "A blue about page", "Native 8K output"] } },
+        { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Home page" } },
+        { name: "hire_agent", args: { title: "Three.js Game Developer", department: "Engineering", reason: "About page" } },
+        { name: "create_task", args: { title: "Build the home page", description: "Write src/home/index.html.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", requirements: ["R1"], files: ["src/home/"] } },
+        { name: "start_work", args: { note: "Go." } }] };
+      if (n === 5) return { calls: [
+        { name: "cut_requirement", args: { id: "R3", reason: "Browsers cannot render native 8K here; it adapts to the screen instead." } },
+        { name: "create_task", args: { title: "Build the about page", description: "Write src/about/index.html.", acceptance_criteria: "- exists", assignee: "Alex", kind: "build", requirements: ["R2"], files: ["src/about"], skills: ["web-game"] } },
+        { name: "start_work", args: { note: "Go." } }] };
+      return { text: "?" };
+    }
+    if (kind === "work") {
+      const who = brief.includes("# T1: Build the home page") ? "Lena" : "Alex";
+      work.push({ who, input: brief, instructions: b.instructions, n });
+      if (who === "Lena") return n === 0 ? { calls: [{ name: "write_file", args: { path: "src/home/index.html", content: "<h1>Home</h1>" } }] }
+        : n === 1 ? { calls: [{ name: "write_file", args: { path: "src/about/extra.html", content: "mine now" } }] }
+        : { calls: [{ name: "complete_task", args: { summary: "Built the home page.", verification: "Opened it" } }] };
+      return n === 0 ? { calls: [{ name: "write_file", args: { path: "src/about/index.html", content: "<h1>About</h1>" } }] }
+        : n < 4 ? { calls: [{ name: "read_file", args: { path: "src/about/index.html", start_line: n } }] }
+        : { calls: [{ name: "complete_task", args: { summary: "Built the about page.", verification: "Opened it" } }] };
+    }
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "A red home page, a blue about page, in native 8K" });
+  await until(run.id, ["completed", "incomplete"]);
+
+  expect(planOutputs[4]).toMatch(/No task delivers R2 \(A blue about page\), R3 \(Native 8K output\)/);
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks.filter((t) => t.kind === "build").map((t) => [t.key, t.requirements, t.files])).toEqual([["T1", ["R1"], ["src/home"]], ["T2", ["R2"], ["src/about"]]]);
+  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+  expect(messages.find((m) => m.type === "decision")?.content).toContain("R3 Native 8K output: Browsers cannot render native 8K");
+
+  const lena = work.filter((w) => w.who === "Lena");
+  const ava = work.filter((w) => w.who === "Alex");
+  expect(lena[0]!.input).toContain("R1: A red home page");
+  expect(lena[0]!.input).toContain("Files you own");
+  expect(ava[0]!.instructions).toContain("# Web game");
+  expect(work.indexOf(ava[0]!)).toBeLessThan(work.indexOf(lena.at(-1)!)); // both ran at once
+  expect(existsSync(path.join(dir, "src/about/extra.html"))).toBe(false);
+  const refused = model.requests.flatMap((r) => outputs(r)).find((o) => String(o.output).includes("belongs to T2"));
+  expect(refused?.output).toContain("src/about/extra.html belongs to T2 (Alex)");
+});
+
+test("a small document a task depends on is handed over in its brief, so it is not read again", async () => {
+  const spec = "# Spec\n\nThe page says hello.\n";
+  let builderBrief = "";
+  let reread = "";
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    if (kind === "plan") return n === 0 ? { calls: [
+      { name: "hire_agent", args: { role_key: "pm", title: "Product Manager", department: "Product", reason: "Writes the spec" } },
+      { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
+      { name: "create_task", args: { title: "Write the spec", description: "Write .octopus/work/spec.md.", acceptance_criteria: "- exists", assignee: "Priya", kind: "docs", files: [".octopus/work/spec.md"] } },
+      { name: "create_task", args: { title: "Build the page", description: "Build index.html from the spec.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", depends_on: ["T1"], files: ["index.html"] } },
+    ] } : { calls: [{ name: "start_work", args: { note: "Spec, then page." } }] };
+    if (kind === "work" && JSON.stringify(b.input[0]).includes("# T1: Write the spec")) return n === 0
+      ? { calls: [{ name: "write_file", args: { path: ".octopus/work/spec.md", content: spec } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Wrote the spec.", verification: "Re-read it" } }] };
+    if (kind === "work") {
+      builderBrief = JSON.stringify(b.input[0]);
+      if (n === 0) return { calls: [{ name: "read_file", args: { path: ".octopus/work/spec.md" } }] };
+      if (n === 1) { reread = String(outputs(b)[0]!.output); return { calls: [{ name: "write_file", args: { path: "index.html", content: "<p>hello</p>" } }] }; }
+      return { calls: [{ name: "complete_task", args: { summary: "Built the page.", verification: "Opened it" } }] };
+    }
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "A hello page" });
+  await until(run.id, ["completed", "incomplete"]);
+  expect(builderBrief).toContain("The page says hello.");
+  expect(reread).toMatch(/have not changed since you read them/);
+});
+
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });

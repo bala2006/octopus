@@ -9,7 +9,7 @@ import { z } from "zod";
 import { clip, sha1, UserError } from "../lib/util";
 import { isBinaryPath, isSecretPath, WORK_DIR } from "../safety/paths";
 import { trash } from "../workspace/trash";
-import { defineTool, MAX_TOOL_OUTPUT, type ToolContext } from "./types";
+import { Denied, defineTool, MAX_TOOL_OUTPUT, type ToolContext } from "./types";
 
 /** Lockfiles, minified bundles and source maps: large, generated, and almost never worth reading whole. */
 const GENERATED = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock|Cargo\.lock|poetry\.lock|composer\.lock)$|\.min\.(js|css)$|\.map$/;
@@ -27,8 +27,10 @@ const read = (ctx: ToolContext, rel: string): string | null => {
   return existsSync(abs) && statSync(abs).isFile() ? readFileSync(abs, "utf8") : null;
 };
 
-/** Low risk for new files, working notes and files the team created; medium for your files; high for secrets. */
+/** Refuses paths another running task owns, then: low risk for new files, working notes and files the team created; medium for your files; high for secrets. */
 async function guardWrite(ctx: ToolContext, rel: string, kind: string, before: string | null, after: string | null, summary: string) {
+  const owner = ctx.ownerOf(rel);
+  if (owner) throw new Denied(`${rel} belongs to ${owner}, which is working on it now. Change only your own files; use ask_teammate if you need something there.`);
   if (isSecretPath(rel)) {
     await ctx.guard({ kind, risk: "high", summary: `${summary} (looks like a secrets file)`, preview: after ?? "", details: { path: rel, old: before ?? "", new: after ?? "" }, key: `${kind}:${rel}` });
     return;
@@ -150,6 +152,8 @@ export const fileTools = [
       const to = ctx.fs.rel(a.to);
       if (!existsSync(ctx.fs.abs(from))) return { text: `${from} does not exist.`, ok: false };
       if (existsSync(ctx.fs.abs(to))) return { text: `${to} already exists; choose another name.`, ok: false };
+      const owner = ctx.ownerOf(to);
+      if (owner) throw new Denied(`${to} belongs to ${owner}, which is working on it now.`);
       await guardWrite(ctx, from, "move_file", read(ctx, from), null, `Move ${from} → ${to}`);
       mkdirSync(path.dirname(ctx.fs.abs(to)), { recursive: true });
       renameSync(ctx.fs.abs(from), ctx.fs.abs(to));

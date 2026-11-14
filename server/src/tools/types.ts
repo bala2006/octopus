@@ -3,7 +3,7 @@
  * before it runs) and gets a ToolContext: the one interface between tools and the engine.
  */
 import { z } from "zod";
-import type { AgentOut, AgentStatus, PendingApproval, RunEventMap, RunTopic, TaskOut } from "@octopus/shared";
+import type { AgentOut, AgentStatus, PendingApproval, Requirement, RunEventMap, RunTopic, TaskOut } from "@octopus/shared";
 import type { ProjectDb } from "../db/project";
 import type { Registry } from "../db/registry";
 import type { FunctionTool } from "../llm/azure";
@@ -38,13 +38,18 @@ export const MAX_TOOL_OUTPUT = 40_000;
 export type Shown = Map<string, { hash: string; ranges: [number, number][] }>
 
 export interface HireSpec { role_key?: string; title: string; name?: string; department: string; reports_to?: string; manager?: boolean; instructions?: string; reason: string }
-export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[] }
+export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[]; requirements: string[]; files: string[]; skills: string[] }
 
 /** What the orchestrator's tools can do to the conversation (only present for the orchestrator). */
 export interface Planner {
   hire(spec: HireSpec): AgentOut;
   addTask(spec: TaskSpec): TaskOut;
   tasks(): TaskOut[];
+  requirements(): Requirement[];
+  addRequirements(texts: string[]): Requirement[];
+  cutRequirement(id: string, reason: string): Requirement;
+  /** Add to an open task's brief; a running assignee gets it before its next step. */
+  amendTask(key: string, note: string): TaskOut;
 }
 
 export interface ToolContext {
@@ -69,6 +74,8 @@ export interface ToolContext {
   shown: Shown;
   /** Ask a teammate a question and wait for the answer. */
   consult(to: AgentOut, question: string): Promise<string>;
+  /** The running task (other than this one) that owns a path, as "T4 (Lena)", or null when nobody else does. */
+  ownerOf(rel: string): string | null;
 }
 
 export interface Tool<A = any> { // eslint-disable-line @typescript-eslint/no-explicit-any
