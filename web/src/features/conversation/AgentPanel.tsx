@@ -284,13 +284,15 @@ function CompanyAgentPanel({
   React.useEffect(() => {
     if (!runId) return;
     const onOpen = (e: Event) => {
+      const agentId = (e as CustomEvent<string>).detail;
+      if (!agents[agentId]) return; // not on this conversation's team: let the canvas open the one-on-one chat
       e.preventDefault();
-      openAgentChat((e as CustomEvent<string>).detail);
+      openAgentChat(agentId);
       changeFloatingState?.("expanded");
     };
     window.addEventListener("octopus:agent-chat", onOpen);
     return () => window.removeEventListener("octopus:agent-chat", onOpen);
-  }, [runId, openAgentChat, changeFloatingState]);
+  }, [runId, openAgentChat, changeFloatingState, agents]);
   React.useLayoutEffect(() => {
     if (!floatingWindow || !input.current) return;
     input.current.style.height = "0px";

@@ -26,6 +26,10 @@ export interface Session {
   files: string[];
   /** Notes for the agent from outside its turn, delivered as one message before its next step. */
   inbox: string[];
+  /** Leading transcript items summarizing must keep: the brief and what arrived with it. */
+  head: number;
+  /** When a turn last ran on this session (a counter); the agent's freshest knowledge is in its most recent session. */
+  used: number;
 }
 
 /** A pinned post in the team chat: an interface, decision or fact the team builds on. */
@@ -47,7 +51,7 @@ export class Collab {
   /** The agent's most recent live session, which holds what it knows right now. */
   latestSession(agentId: string): { key: string; session: Session } | undefined {
     let found: { key: string; session: Session } | undefined;
-    for (const [key, session] of this.host.sessions) if (session.agentId === agentId) found = { key, session };
+    for (const [key, session] of this.host.sessions) if (session.agentId === agentId && (!found || session.used >= found.session.used)) found = { key, session };
     return found;
   }
 
@@ -74,7 +78,8 @@ export class Collab {
    */
   fileChanged(by: string, rel: string, summary: string) {
     for (const s of this.host.sessions.values()) {
-      if (s.agentId === by || (!s.shown.has(rel) && !s.seen.has(rel))) continue;
+      // Only a session whose context holds the file hears about it; once told, it hears again only after re-reading.
+      if (s.agentId === by || !s.shown.has(rel)) continue;
       s.shown.delete(rel);
       const note = `${rel} was changed by ${this.host.name(by)}`;
       if (!s.inbox.some((m) => m.startsWith(note))) s.inbox.push(`${note} (${summary}). What you read of it before is out of date: read it again before relying on it.`);

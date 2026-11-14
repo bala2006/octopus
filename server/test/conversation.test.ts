@@ -752,6 +752,74 @@ test("a message to one agent while the team works lands in that agent's own chat
   expect(messages.find((m) => m.type === "answer" && m.content.includes("Will do"))).toMatchObject({ from_agent_id: lenaId, to_agent_id: null });
 }, 30_000);
 
+test("a message that reaches an agent as it finishes is still answered, and asking an idle agent for work makes it a task in that agent's session", async () => {
+  writeFileSync(path.join(dir, "wait.js"), "setTimeout(() => {}, Number(process.argv[2] ?? 1000));\n");
+  let runId = "";
+  const ids: Record<string, string> = {};
+  const lenaRequests: string[] = [];
+  let lenaStep = 0;
+  let sentLate = false;
+  let sentWork = false;
+  script = (b) => {
+    const kind = turnKind(b);
+    const first = JSON.stringify(b.input[0]);
+    const all = JSON.stringify(b.input);
+    if (kind === "plan") return outputs(b).length === 0 ? { calls: [
+      { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
+      { name: "hire_agent", args: { role_key: "backend", title: "Backend Developer", department: "Engineering", reason: "Builds the API" } },
+      { name: "create_task", args: { title: "Build the page", description: "Write index.html.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", files: ["index.html"] } },
+      { name: "create_task", args: { title: "Build the API", description: "Write api.js.", acceptance_criteria: "- exists", assignee: "Diego", kind: "build", files: ["api.js"] } },
+    ] } : { calls: [{ name: "start_work", args: { note: "Both at once." } }] };
+    if (kind === "work" && first.includes("Build the API")) {
+      const n = outputs(b).length;
+      if (n === 0) return { calls: [{ name: "run_command", args: { command: "node wait.js 4000" } }] };
+      if (n === 1) return { calls: [{ name: "write_file", args: { path: "api.js", content: "export {};\n" } }] };
+      return { calls: [{ name: "complete_task", args: { summary: "Built the API.", verification: "Read it" } }] };
+    }
+    if (b.instructions.includes("You are Lena,")) {
+      lenaRequests.push(all);
+      const late = /Message (\w+) from the user/.exec(JSON.stringify(b.input.at(-1)));
+      if (late) return { calls: [{ name: "reply", args: { message_id: late[1], text: "Yes, the heading is final." } }] };
+      if (all.includes("Add a footer") && JSON.stringify(b.input.findLast((i: { role?: string }) => i.role === "user")).includes("Add a footer")) {
+        return outputs(b).length === 0 ? { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "</h1>", new_string: "</h1><footer>f</footer>" } }] }
+          : { calls: [{ name: "complete_task", args: { summary: "Added the footer.", verification: "Read it" } }] };
+      }
+      if (kind === "work") {
+        lenaStep++;
+        if (lenaStep === 1) return { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] };
+        if (!sentLate) {
+          sentLate = true;
+          setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Is the heading final?", to_agent_id: ids.Lena }), 100);
+          // The message lands while this last step runs, after the inbox was read for it.
+          return { calls: [{ name: "run_command", args: { command: "node wait.js 600" } }, { name: "complete_task", args: { summary: "Built the page.", verification: "Read it" } }] };
+        }
+        return { calls: [{ name: "complete_task", args: { summary: "Built the page.", verification: "Read it" } }] };
+      }
+    }
+    if (kind === "review" && !sentWork && first.includes("Build the page")) {
+      sentWork = true;
+      setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Add a footer to the page", to_agent_id: ids.Lena }), 1200);
+    }
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "A page and an API" });
+  runId = run.id;
+  for (let i = 0; i < 100 && !ids.Lena; i++) {
+    for (const a of (await call<CanvasOut>("GET", `${W()}/companies/${team.company.id}`)).agents) ids[a.name] = a.id;
+    if (!ids.Lena) await new Promise((r) => setTimeout(r, 20));
+  }
+  await new Promise((r) => setTimeout(r, 2500));
+  await until(run.id, ["completed", "incomplete"]);
+  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+  expect(messages.find((m) => m.type === "answer" && m.content.includes("heading is final"))).toBeTruthy();
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  const footer = tasks.find((t) => t.title.startsWith("Add a footer"));
+  expect(footer).toMatchObject({ assignee_agent_id: ids.Lena, kind: expect.stringMatching(/build|fix/) });
+  const footerTurn = lenaRequests.find((r) => r.includes("Add a footer"))!;
+  expect(footerTurn).toContain("# T1: Build the page"); // continues her own session
+}, 30_000);
+
 test("resuming a finished conversation leaves it finished", async () => {
   script = (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "Hello." } }] } : { text: "?" });
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });

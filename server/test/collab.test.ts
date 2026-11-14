@@ -1,7 +1,7 @@
 import { Collab, type Pin, type Session } from "../src/engine/collab";
 
-const session = (agentId: string, files: string[] = []): Session =>
-  ({ agentId, mode: "worker", instructions: "", tools: [], input: [], seen: new Map(), shown: new Map(), files, inbox: [] });
+const session = (agentId: string, files: string[] = [], used = 0): Session =>
+  ({ agentId, mode: "worker", instructions: "", tools: [], input: [], seen: new Map(), shown: new Map(), files, inbox: [], head: 1, used });
 
 function setup() {
   const sessions = new Map<string, Session>();
@@ -45,6 +45,31 @@ test("notes for an agent with no live session wait for its next one", () => {
   sessions.set("sam:T3", session("sam"));
   collab.deliver("sam", "again");
   expect(sessions.get("sam:T3")!.inbox).toEqual(["again"]);
+});
+
+test("notes go to the session an agent used last, not the one it created last", () => {
+  const { sessions, collab } = setup();
+  const build = session("ben", [], 3);
+  const review = session("ben", [], 2);
+  sessions.set("ben:T3", build).set("ben:review:T5", review);
+  collab.deliver("ben", "hello");
+  expect(build.inbox).toEqual(["hello"]);
+  expect(review.inbox).toEqual([]);
+});
+
+test("an agent told about a change hears about the next one only after reading the file again", () => {
+  const { sessions, collab } = setup();
+  const a = session("lena");
+  a.shown.set("app.ts", { hash: "h1", ranges: [[1, 9]] });
+  a.seen.set("app.ts", "h1");
+  sessions.set("lena:T1", a);
+  collab.fileChanged("ava", "app.ts", "9 → 10 lines");
+  a.inbox.splice(0);
+  collab.fileChanged("ava", "app.ts", "10 → 11 lines");
+  expect(a.inbox).toEqual([]);
+  a.shown.set("app.ts", { hash: "h3", ranges: [[1, 11]] });
+  collab.fileChanged("ava", "app.ts", "11 → 12 lines");
+  expect(a.inbox).toHaveLength(1);
 });
 
 test("waiting that would close a cycle is detected; replies and idle agents release waiters", async () => {

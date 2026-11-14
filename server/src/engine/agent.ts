@@ -36,6 +36,8 @@ export interface LoopOptions {
   requireStop: boolean;
   /** Messages for the agent from outside its turn (the lead amending its task), delivered before its next step. */
   inbox?: string[];
+  /** Leading transcript items that summarizing must keep word for word: the brief and anything sent with it. */
+  keepHead?: number;
 }
 
 /** `exhausted`: the agent used every tool round without finishing. */
@@ -80,12 +82,24 @@ function truncate(input: Item[]): boolean {
  * question, so the cached prefix is reused. Keeps the brief (item 0) and a recent tail that starts on a whole step.
  * Returns whether it compacted.
  */
+/**
+ * Where the kept part of a transcript begins when summarizing: about `keepTail` characters from the end, moved forward
+ * to the start of a whole step (right after a finished one, never on a tool output), so no call loses its output or
+ * the reasoning that produced it. Null when nothing worth summarizing lies between the head and that point.
+ */
+export function keptFrom(input: Item[], head: number, keepTail: number): number | null {
+  let start = input.length;
+  for (let size = 0; start > head && size < keepTail; ) size += JSON.stringify(input[--start]).length;
+  const begins = (i: number) => input[i]!.type !== "function_call_output" && (input[i - 1]!.type === "function_call_output" || input[i - 1]!.role === "user" || input[i]!.role === "user");
+  while (start < input.length && !begins(start)) start++;
+  return start <= head + 1 || start >= input.length ? null : start;
+}
+
 async function summarize(o: LoopOptions, functions: FunctionTool[]): Promise<boolean> {
   const input = o.input;
-  let start = input.length;
-  for (let size = 0; start > 1 && size < contextLimits.keepTail; ) size += JSON.stringify(input[--start]).length;
-  while (start < input.length && input[start]!.type === "function_call_output") start++;
-  if (start <= 2) return false;
+  const head = Math.max(1, o.keepHead ?? 1);
+  const start = keptFrom(input, head, contextLimits.keepTail);
+  if (start === null) return false;
   const res = await complete(o.reg, {
     model: o.model, instructions: o.instructions, input: [...input, { role: "user", content: CHECKPOINT_REQUEST }], tools: functions, toolChoice: "none",
     effort: o.effort, signal: o.ctx.signal, maxOutputTokens: 8_000,
@@ -94,7 +108,7 @@ async function summarize(o: LoopOptions, functions: FunctionTool[]): Promise<boo
   const summary = res.text.trim();
   if (!summary) return false;
   const before = JSON.stringify(input).length;
-  input.splice(1, start - 1, { role: "user", content: `<checkpoint>\n${summary}\n</checkpoint>\nThis checkpoint replaces your earlier work in this conversation. Continue from it; files you read before must be read again if you need their content.` });
+  input.splice(head, start - head, { role: "user", content: `<checkpoint>\n${summary}\n</checkpoint>\nThis checkpoint replaces your earlier work in this conversation. Continue from it; files you read before must be read again if you need their content.` });
   o.events.thought(`Summarized earlier work to keep the context focused (${Math.round(before / 1000)}k → ${Math.round(JSON.stringify(input).length / 1000)}k characters).`);
   return true;
 }
