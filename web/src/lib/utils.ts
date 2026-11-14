@@ -51,6 +51,12 @@ export function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("") || "?";
 }
 
+/** A conversation's title: its first non-empty line, without leading markdown markers such as `#`, `>` or `-`. */
+export function goalTitle(goal: string | null | undefined, fallback = "New conversation"): string {
+  const line = (goal ?? "").split("\n").map((l) => l.replace(/^[#>*\-\s]+/, "").trim()).find(Boolean);
+  return line || fallback;
+}
+
 export function download(filename: string, content: BlobPart, type = "application/octet-stream"): void {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const a = document.createElement("a");

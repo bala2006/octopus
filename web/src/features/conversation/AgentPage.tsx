@@ -22,7 +22,6 @@ import {
   type FloatingDock,
   type FloatingEdge,
 } from "./floatingBox";
-import "./conversation-layout.css";
 
 const CanvasPage = React.lazy(() => import("@/features/canvas/CanvasPage"));
 type ConversationStyle = React.CSSProperties & {

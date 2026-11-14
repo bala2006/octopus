@@ -35,13 +35,16 @@ export default function SettingsPage() {
   const setSection = (value: string) => navigate({ hash: `#${value}` }, { replace: true });
   return (
     <div className="settings-layout flex h-full min-h-0">
-      <nav className="section-navigation" aria-label="Settings sections">
-        {SECTIONS.filter(([key]) => key !== "project" || workspaceId).map(([k, label, Icon]) => (
-          <button key={k} onClick={() => setSection(k)} title={label} aria-current={section === k ? "page" : undefined}
-            className={cn("sidebar-nav-item", section === k && "is-active")}>
-            <Icon className="h-4 w-4 shrink-0" /><span className="min-w-0 truncate">{label}</span>
-          </button>
-        ))}
+      <nav className="settings-nav" aria-label="Settings sections">
+        <div className="side-panel-header">Settings</div>
+        <div className="side-panel-body">
+          {SECTIONS.filter(([key]) => key !== "project" || workspaceId).map(([k, label, Icon]) => (
+            <button key={k} onClick={() => setSection(k)} title={label} aria-current={section === k ? "page" : undefined}
+              className={cn("sidebar-nav-item", section === k && "is-active")}>
+              <Icon className="h-4 w-4 shrink-0" /><span className="min-w-0 truncate">{label}</span>
+            </button>
+          ))}
+        </div>
       </nav>
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="settings-content animate-fade-up" key={section}>
