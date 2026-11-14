@@ -3,7 +3,7 @@
  * before it runs) and gets a ToolContext: the one interface between tools and the engine.
  */
 import { z } from "zod";
-import type { AgentOut, AgentStatus, PendingApproval, RunEventMap, RunTopic, TaskOut } from "@octopus/shared";
+import type { AgentOut, AgentStatus, PendingApproval, Requirement, RunEventMap, RunTopic, TaskOut } from "@octopus/shared";
 import type { ProjectDb } from "../db/project";
 import type { Registry } from "../db/registry";
 import type { FunctionTool } from "../llm/azure";
@@ -27,18 +27,30 @@ export type Stop =
   | { kind: "ask"; question: string; options: { label: string; description?: string; recommended?: boolean }[] }
   | { kind: "block"; reason: string }
   | { kind: "plan_ready"; note: string }
-  | { kind: "reply"; message: string };
+  | { kind: "reply"; message: string }
+  | { kind: "acceptance"; results: { id: string; met: boolean; evidence: string }[] };
 
 export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop }
 
+/** The most of one tool result an agent sees. read_file pages within it, so a read is never cut by the loop. */
+export const MAX_TOOL_OUTPUT = 40_000;
+
+/** File contents already in an agent's transcript: the content hash and the line ranges shown. */
+export type Shown = Map<string, { hash: string; ranges: [number, number][] }>
+
 export interface HireSpec { role_key?: string; title: string; name?: string; department: string; reports_to?: string; manager?: boolean; instructions?: string; reason: string }
-export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[] }
+export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[]; requirements: string[]; files: string[]; skills: string[] }
 
 /** What the orchestrator's tools can do to the conversation (only present for the orchestrator). */
 export interface Planner {
   hire(spec: HireSpec): AgentOut;
   addTask(spec: TaskSpec): TaskOut;
   tasks(): TaskOut[];
+  requirements(): Requirement[];
+  addRequirements(texts: string[]): Requirement[];
+  cutRequirement(id: string, reason: string): Requirement;
+  /** Add to an open task's brief; a running assignee gets it before its next step. */
+  amendTask(key: string, note: string): TaskOut;
 }
 
 export interface ToolContext {
@@ -59,8 +71,14 @@ export interface ToolContext {
   recordFile(path: string, before: string | null, after: string | null, note: string): void;
   /** Content hash of each file as this agent last read or wrote it, to catch edits made in between. */
   seen: Map<string, string>;
+  /** What this agent's transcript already holds, so an unchanged re-read costs a line instead of the file. */
+  shown: Shown;
   /** Ask a teammate a question and wait for the answer. */
   consult(to: AgentOut, question: string): Promise<string>;
+  /** The running task (other than this one) that owns a path, as "T4 (Lena)", or null when nobody else does. */
+  ownerOf(rel: string): string | null;
+  /** Start the project's dev server in the background (or find the running one) and return where it listens. */
+  devServer(): Promise<{ command: string; url: string | null; output: string }>;
 }
 
 export interface Tool<A = any> { // eslint-disable-line @typescript-eslint/no-explicit-any

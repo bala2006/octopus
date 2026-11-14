@@ -3,7 +3,7 @@
  * replayed from the event log. `seq` orders persisted events; streaming deltas are live-only and carry no seq.
  */
 import type {
-  AgentOut, AgentStatus, ArtifactOut, EdgeOut, MessageOut, PendingApproval, RunStatus, TaskOut,
+  AgentOut, AgentStatus, ArtifactOut, EdgeOut, MessageOut, PendingApproval, Requirement, RunStatus, TaskOut,
 } from "./domain.js";
 
 export interface Question { agent_id: string; question: string; options: { label: string; description?: string; recommended?: boolean }[]; allow_other: boolean }
@@ -33,6 +33,7 @@ export interface RunEventMap {
   tool_result: { call_id: string; agent_id: string; tool: string; ok: boolean; output: string };
   browser_action: { agent_id: string; call_id: string; tool: string; args: Record<string, unknown>; ok: boolean; url: string; title: string; frame: string | null; note?: string };
   task_updated: { task: TaskOut };
+  requirements_updated: { requirements: Requirement[] };
   artifact_updated: { artifact: ArtifactOut & { created: boolean; lines: number; previous_lines: number } };
   workflow_updated: { workflow: WorkflowState };
   usage_update: Usage;

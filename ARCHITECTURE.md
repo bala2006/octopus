@@ -44,19 +44,39 @@ run event (`RunEventMap`) and the socket messages. There is no code generation.
 Every user message runs one cycle in `engine/conversation.ts`:
 
 1. **Plan.** The orchestrator (the company's entry agent) reads the request, the project overview and, when needed, the
-   code. It answers directly (`reply_to_user`), asks a real question (`ask_user`), or staffs and plans: `hire_agent`
-   adds a specialist from the role library to the canvas, `create_task` assigns work with acceptance criteria and
-   dependencies, `start_work` hands over. A message addressed to one specialist (`@Name`) skips planning.
+   code. It answers directly (`reply_to_user`), asks a real question (`ask_user`), or staffs and plans. For a feature or
+   product it first records the user's asks as requirements (`set_requirements`, R1, R2...); `cut_requirement` leaves one
+   out only with a reason the user sees. `hire_agent` adds a specialist from the role library to the canvas, and
+   `create_task` assigns work with acceptance criteria, dependencies, the requirements it delivers, the paths it owns
+   and the skills to follow. `start_work` hands over, and refuses while a requirement has no task. A message addressed to
+   one specialist (`@Name`) skips planning.
 2. **Build.** Tasks start as soon as their dependencies are done, several at a time, each run by its owner through the
-   shared agent loop with their own tools, memory, skills and the shared engineering standards. Specialists can ask a
-   teammate (`ask_teammate`) or the user, and finish with `complete_task` or `block_task`.
+   shared agent loop with their own tools, memory, skills and the shared engineering standards. Tasks that write run side
+   by side only when the paths they own do not overlap; a write into a path another running task owns is refused.
+   Small documents from finished dependencies come inside the brief. Specialists can ask a teammate (`ask_teammate`) or
+   the user, and finish with `complete_task` or `block_task`.
 3. **Review.** Every task that changed files is reviewed by someone else: the author's department lead, a reviewer on
-   the team, or a tech lead the engine hires. Requested changes go back to the author for a bounded number of rounds.
-4. **Verify.** The project's own checks (tests, type checks, lint) run after changes. Failures become fix tasks.
-5. **Report.** The orchestrator tells the user what changed, how it was verified and what is open.
+   the team, or a tech lead the engine hires. A change of up to 80 lines is reviewed from its diff in one step. Requested
+   changes go back to the author for a bounded number of rounds.
+4. **Verify.** The project's own checks (tests, type checks, lint) run after changes; failures become fix tasks. Then
+   an acceptance check: a verifier (a QA engineer, else someone with a browser who did not build it, else a hired QA
+   engineer) runs the product and judges every open requirement with evidence (`submit_acceptance`). Unmet
+   requirements go back to the task that owns them, and only those are checked again, for a bounded number of rounds.
+5. **Report.** The orchestrator tells the user what changed, how it was verified and how to try it. The engine appends
+   the requirement table and everything still open (blocked tasks, review comments left at the revision limit, failing
+   checks), so the report cannot claim what did not happen.
+
+**Sessions.** An agent's work on one deliverable is one session: its transcript, instructions, tools and what it has
+read. A revision continues the author's session with the feedback; a re-review continues the reviewer's session with
+only the change since its review; a fix after failed checks or acceptance continues the build it fixes; a re-check
+continues the verifier's session. Continuing keeps the model's cached prompt prefix and avoids re-reading files.
+Sessions live in memory and end with the request; after a restart, an error or past a size limit, the next turn starts
+from a brief. `read_file` pages large files and answers an unchanged re-read with one line.
 
 A follow-up continues the same conversation, team, tasks and files. A message sent while the team works is planned in
-alongside the running tasks; an answer goes to whoever asked. Each task has a step limit, and a task near it is told to wrap up. A conversation has no token, cost or time cap; any message continues it.
+alongside the running tasks (`amend_task` delivers a change to a running task before its next step); an answer goes to
+whoever asked. Each task has a step limit, and a task near it is told to wrap up. A conversation has no token, cost or
+time cap; any message continues it.
 
 ## 4. Events
 

@@ -32,9 +32,14 @@ export function effectiveSkills(reg: Registry): SkillOut[] {
   return out;
 }
 
-/** The skills that apply to an agent: by role, plus any switched on for it. At most three, to keep prompts focused. */
-export function skillsFor(reg: Registry, agent: AgentOut): SkillOut[] {
+/**
+ * The skills that apply to an agent's turn, most specific first: the ones its task asks for, the ones switched on for
+ * the agent, then the ones its role lists. At most three, to keep prompts focused.
+ */
+export function skillsFor(reg: Registry, agent: AgentOut, wanted: string[] = []): SkillOut[] {
   const role = agent.behavior.template_key ?? "";
   const chosen = new Set(agent.behavior.skills ?? []);
-  return effectiveSkills(reg).filter((s) => chosen.has(s.name) || (role && s.roles.includes(role))).slice(0, 3);
+  const all = effectiveSkills(reg);
+  const rank = (s: SkillOut) => (wanted.includes(s.name) ? 0 : chosen.has(s.name) ? 1 : role && s.roles.includes(role) ? 2 : 3);
+  return all.filter((s) => rank(s) < 3).sort((a, b) => rank(a) - rank(b)).slice(0, 3);
 }
