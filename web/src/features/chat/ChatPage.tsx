@@ -15,7 +15,7 @@ import type { AgentOut, MessageOut, SessionOut } from "@/types";
 import { AgentAvatar, ConnectionDot, EmptyState, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/button";
-import { PromptComposer } from "@/components/ui/surfaces";
+import { PageToolbar, PromptComposer, SidePanel } from "@/components/ui/surfaces";
 import { Badge, Input, Textarea } from "@/components/ui/primitives";
 import {
   ConfirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -76,11 +76,6 @@ export default function ChatPage() {
   );
 }
 
-/** One section rhythm for both sidebar headings (they used to differ: pt-2 vs mt-3). */
-function SidebarHeading({ id, children }: { id: string; children: React.ReactNode }) {
-  return <div id={id} className="shrink-0 px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</div>;
-}
-
 function ChatSidebar({ agents, sessions, activeId, onAgent }: {
   agents: AgentOut[]; sessions: SessionOut[]; activeId?: string; onAgent: (id: string) => void;
 }) {
@@ -107,8 +102,8 @@ function ChatSidebar({ agents, sessions, activeId, onAgent }: {
   return (
     // Bounded flex column: Agents takes its natural height up to 45% and scrolls beyond that; History gets the rest and
     // scrolls too. (Agents used to be unbounded, so with ~8+ agents History collapsed to zero height and never scrolled.)
-    <aside className="chat-sidebar flex h-full min-h-0 w-56 shrink-0 flex-col border-r border-border bg-surface/40" aria-label="Direct chats">
-      <SidebarHeading id="chat-agents-heading">Agents</SidebarHeading>
+    <SidePanel label="Direct chats" className="chat-sidebar h-full">
+      <div id="chat-agents-heading" className="side-panel-header">Agents</div>
       <div className="chat-agents max-h-[45%] min-h-0 shrink-0 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-agents-heading" data-testid="chat-agents-list">
         {agents.map((a) => (
           <button key={a.id} onClick={() => onAgent(a.id)} data-testid={`chat-agent-${a.name}`} role="listitem"
@@ -118,7 +113,7 @@ function ChatSidebar({ agents, sessions, activeId, onAgent }: {
           </button>
         ))}
       </div>
-      <SidebarHeading id="chat-history-heading">Earlier chats</SidebarHeading>
+      <div id="chat-history-heading" className="panel-heading shrink-0 border-t border-border">Earlier chats</div>
       <div className="chat-history min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2" role="list" aria-labelledby="chat-history-heading" data-testid="chat-history-list">
         {!sessions.length && <p className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet.</p>}
         {sessions.map((s) => (
@@ -148,7 +143,7 @@ function ChatSidebar({ agents, sessions, activeId, onAgent }: {
       </Dialog>
       <ConfirmDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title={`Delete "${deleting?.title}"?`} destructive confirmLabel="Delete"
         description="This removes the conversation history." onConfirm={() => deleting && del.mutate(deleting.id)} />
-    </aside>
+    </SidePanel>
   );
 }
 
@@ -163,15 +158,13 @@ function DirectChat({ session, agent }: { session: SessionOut; agent?: AgentOut 
   const last = msgs.data?.[msgs.data.length - 1];
   return (
     <div className="flex h-full flex-col">
-      <div className="view-toolbar">
+      <PageToolbar actions={<ConnectionDot state={chat.conn} />}>
         <AgentAvatar name={agent.name} color={agent.color} avatar={agent.avatar} status={chat.streaming ? (chat.streaming.phase === "writing" ? "speaking" : chat.streaming.phase === "tool" ? "tool" : "thinking") : undefined} size={32} />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">{agent.name}</div>
-          <div className="text-xs text-muted-foreground">{agent.role} · <span className="font-mono">{agent.provider}/{agent.model}</span></div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold leading-tight">{agent.name}</div>
+          <div className="truncate text-xs leading-tight text-muted-foreground">{agent.role} &middot; <span className="font-mono">{agent.provider}/{agent.model}</span></div>
         </div>
-        <ConnectionDot state={chat.conn} />
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      </PageToolbar>      <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl space-y-5 px-4 py-6">
           {msgs.isLoading && [0, 1].map((i) => <div key={i} className="skeleton h-16" />)}
           {msgs.data?.length === 0 && !chat.streaming && (

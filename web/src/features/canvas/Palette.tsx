@@ -4,6 +4,7 @@ import { useRoleTemplates } from "@/hooks/queries";
 import { AgentAvatar } from "@/components/common";
 import { Input } from "@/components/ui/primitives";
 import { Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
+import { SidePanel } from "@/components/ui/surfaces";
 import { OrgPanel } from "./OrgPanel";
 
 export const DND_MIME = "application/x-octopus-role";
@@ -11,9 +12,9 @@ export const DND_MIME = "application/x-octopus-role";
 /** Left panel: role palette (drag onto the canvas) and the org chart (departments, active/inactive agents). */
 export function Palette({ onAdd }: { onAdd: (roleKey: string) => void }) {
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface" aria-label="Agents and org">
+    <SidePanel label="Agents and org">
       <Tabs defaultValue="org" className="flex min-h-0 flex-1 flex-col">
-        <div className="border-b border-border p-2">
+        <div className="side-panel-header">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="org"><Network />Org</TabsTrigger>
             <TabsTrigger value="roles"><UsersRound />Roles</TabsTrigger>
@@ -22,7 +23,7 @@ export function Palette({ onAdd }: { onAdd: (roleKey: string) => void }) {
         <TabsContent value="org" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><OrgPanel /></TabsContent>
         <TabsContent value="roles" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><RolePalette onAdd={onAdd} /></TabsContent>
       </Tabs>
-    </aside>
+    </SidePanel>
   );
 }
 

@@ -23,6 +23,7 @@ import {
   qk,
 } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
+import { goalTitle } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
 import {
@@ -68,12 +69,11 @@ export function AppShell() {
   }, [nav, w]);
   return (
     <DesktopLayout
-      hideHeader={segment === "settings"}
       header={
         <>
-          <div className="min-w-0 flex-1 truncate text-sm font-semibold">
+          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">
             {space?.to === "agent" ? <ConversationTitle /> : title}
-          </div>
+          </h1>
           <div className="hidden sm:block">
             <TeamSwitcher />
           </div>
@@ -106,7 +106,7 @@ function ConversationTitle() {
   const selected = useWorkbenchStore((store) => store.threads[threadKey(w, companyId)]);
   const id = companyId ? selected === undefined ? runs?.[0]?.id : selected : null;
   const { data: conversation } = useRun(w, id ?? "");
-  const title = conversation?.goal.split("\n")[0]?.trim() || "New chat";
+  const title = conversation ? goalTitle(conversation.goal, "New chat") : "New chat";
   return <span title={title}>{title}</span>;
 }
 /** Appears only when no model is connected, and links to the fix. A connected model needs no badge. */
@@ -115,7 +115,7 @@ function ModelStatus() {
   if (!data || data.providers.some((p) => p.configured)) return null;
   return (
     <Tip content="Agents can't work until you connect Azure OpenAI." side="bottom">
-      <Link to="settings#providers" className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/20">
+      <Link to="settings#providers" className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-medium text-primary transition hover:bg-primary/20">
         <Sparkles className="h-3 w-3" />Connect a model
       </Link>
     </Tip>
@@ -170,15 +170,16 @@ function TeamSwitcher() {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            className="flex max-w-[220px] items-center gap-1.5 rounded-md px-2 py-1 text-sm transition hover:bg-accent"
+            className="topbar-pill max-w-[240px]"
             aria-label="Switch team"
             data-testid="company-switcher"
           >
-            <UsersRound className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <UsersRound className="text-muted-foreground" />
+            <span className="team-label shrink-0 text-muted-foreground">Team</span>
             <span className="truncate font-medium">
-              {current?.name ?? "No team"}
+              {current?.name ?? "None"}
             </span>
-            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <ChevronsUpDown className="text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">

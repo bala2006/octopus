@@ -9,7 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { qk, useCompanyId, useRuns, useWorkspaceId, useWorkspaces } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
-import { cn, initials } from "@/lib/utils";
+import { cn, goalTitle, initials } from "@/lib/utils";
 import { api, unwrap } from "@/lib/api";
 import {
   ConfirmDialog, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
@@ -34,10 +34,9 @@ const LIVE = ["running", "paused", "awaiting_user", "queued"];
  * - the sidebar: projects and recent conversations;
  * - the page header: project / page title, the page's own controls, team status and quick open.
  */
-export function DesktopLayout({ children, header, hideHeader = false }: {
+export function DesktopLayout({ children, header }: {
   children: React.ReactNode;
   header: React.ReactNode;
-  hideHeader?: boolean;
 }) {
   const location = useLocation();
   const w = useWorkspaceId();
@@ -94,16 +93,14 @@ export function DesktopLayout({ children, header, hideHeader = false }: {
             <ProjectSidebar mobile={mobile} collapsed={!open} onClose={() => setDrawer(false)} onNewConversation={newConversation} panelRef={sidebarRef} />
           )}
           <div className="desktop-main">
-            {!hideHeader && (
-              <header className="desktop-topbar">
-                <div className="desktop-header">
-                  {project && <span className="topbar-project" title={project.path}><span>{project.name}</span></span>}
-                  {project && <span className="topbar-breadcrumb-separator" aria-hidden>/</span>}
-                  {header}
-                  {w && <div className="topbar-actions"><TeamPulse /><CommandPalette /></div>}
-                </div>
-              </header>
-            )}
+            <header className="desktop-topbar">
+              <div className="desktop-header">
+                {project && <span className="topbar-project" title={project.path}><span>{project.name}</span></span>}
+                {project && <span className="topbar-breadcrumb-separator" aria-hidden>/</span>}
+                {header}
+                {w && <div className="topbar-actions"><TeamPulse /><CommandPalette /></div>}
+              </div>
+            </header>
             <main id="main-content" className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
           </div>
         </div>
@@ -125,9 +122,10 @@ function Rail() {
       </Link>
       {w && <span className="rail-divider" aria-hidden />}
       {w && SPACES.map((s) => (
-        <NavLink key={s.to} to={`/w/${w}/${s.to}`} aria-label={s.label} title={`${s.label} (Alt+${s.key})`}
+        <NavLink key={s.to} to={`/w/${w}/${s.to}`} title={`${s.label} (Alt+${s.key})`}
           className={() => cn("rail-item", spaceOf(location.pathname)?.to === s.to && "is-active")}>
           <s.icon />
+          <span>{s.label}</span>
         </NavLink>
       ))}
       <div className="flex-1" />
@@ -181,10 +179,12 @@ function ProjectSidebar({ mobile, collapsed, onClose, onNewConversation, panelRe
           <Button variant="ghost" size="icon-sm" aria-label="Close sidebar" onClick={onClose}><X /></Button>
         </div>
       )}
-      <button className="sidebar-new-chat" onClick={onNewConversation}>
-        <SquarePen className="h-4 w-4" />
-        <span>New conversation</span>
-      </button>
+      <div className="sidebar-top">
+        <button className="sidebar-new-chat" onClick={onNewConversation}>
+          <SquarePen className="h-4 w-4" />
+          <span>New conversation</span>
+        </button>
+      </div>
 
       <div className="sidebar-scroll">
         {/* On mobile the rail is hidden, so its destinations move here. */}
@@ -239,9 +239,9 @@ function ProjectSidebar({ mobile, collapsed, onClose, onNewConversation, panelRe
             <button className="sidebar-conversation is-selected" onClick={onNewConversation}><span>New conversation</span><span className="h-1.5 w-1.5 rounded-full bg-primary" /></button>
           )}
           {recentRuns.data?.slice(0, 20).map((run) => (
-            <button key={run.id} className={cn("sidebar-conversation", w && activeRun === run.id && onConversation && "is-selected")} title={run.goal.split("\n")[0]}
+            <button key={run.id} className={cn("sidebar-conversation", w && activeRun === run.id && onConversation && "is-selected")} title={goalTitle(run.goal)}
               onClick={() => target && openConversation(target, run)}>
-              <span>{run.goal.split("\n")[0] || "New conversation"}</span>
+              <span>{goalTitle(run.goal)}</span>
               {run.status === "awaiting_user" ? <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-label="Waiting on you" />
                 : LIVE.includes(run.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-label="Working" />}
             </button>
@@ -313,7 +313,7 @@ function TeamPulse() {
     : live.length === 1 ? (first.status === "paused" ? "Team paused" : "Team working") : `${live.length} working`;
   return (
     <button type="button" className={cn("team-pulse", waiting.length && "is-waiting")} onClick={() => openConversation(w, first)}
-      title={`${first.goal.split("\n")[0]}: open the conversation`} aria-label={`${label}: open the conversation`}>
+      title={`${goalTitle(first.goal)}: open the conversation`} aria-label={`${label}: open the conversation`}>
       {waiting.length ? <CircleAlert /> : first.status === "paused" ? <span className="team-pulse-dot" /> : <Loader2 className="animate-spin" />}
       <span>{label}</span>
     </button>

@@ -11,8 +11,6 @@ import {
   FileCode2,
   FilePlus2,
   FolderPlus,
-  FolderTree,
-  GitBranch,
   Globe,
   Loader2,
   PanelLeftClose,
@@ -32,6 +30,7 @@ import { useWorkspaceId, useWorkspace } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
+import { PageToolbar, SidePanel, ToolbarToggle } from "@/components/ui/surfaces";
 import {
   ConfirmDialog,
   Dialog,
@@ -54,7 +53,7 @@ import { useCompanyId } from "@/hooks/queries";
 
 type FileAction = { kind: "create" } | { kind: "folder" };
 type PanelStyle = React.CSSProperties & {
-  "--explorer-width": string;
+  "--panel-size": string;
   "--preview-width": string;
 };
 
@@ -116,12 +115,12 @@ export default function WorkspacePage() {
   const searchInput = React.useRef<HTMLInputElement>(null);
   const uploadInput = React.useRef<HTMLInputElement>(null);
   const body = React.useRef<HTMLDivElement>(null);
-  const explorerWidth = usePanelSize("explorer", 240, 180, 420);
+  const explorerWidth = usePanelSize("explorer", 264, 200, 420);
   const previewWidth = usePanelSize("preview", 45, 25, 65);
   const commandHeight = usePanelSize("commands", 256, 160, 600);
   const agentWidth = usePanelSize("agent", 380, 300, 620);
   const panelStyle: PanelStyle = {
-    "--explorer-width": `${explorerWidth.size}px`,
+    "--panel-size": `${explorerWidth.size}px`,
     "--preview-width": `${previewWidth.size}%`,
   };
   const selectedPath = params.get("file");
@@ -426,7 +425,46 @@ export default function WorkspacePage() {
       )}
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="view-toolbar">
+          <PageToolbar
+            actions={
+              <>
+                <ToolbarToggle pressed={preview} onClick={() => setPreview(!preview)}>
+                  <Globe />
+                  Preview
+                </ToolbarToggle>
+                <ToolbarToggle
+                  pressed={commands}
+                  aria-label="Commands"
+                  onClick={() => {
+                    setCommandsMounted(true);
+                    setCommands(!commands);
+                  }}
+                >
+                  <Terminal />
+                  <span className="hidden sm:inline">Commands</span>
+                </ToolbarToggle>
+                <ToolbarToggle
+                  pressed={agentsOpen}
+                  aria-label="Toggle agent panel"
+                  title="Ask Octopus (Ctrl+L)"
+                  onClick={() => (agentsOpen ? setAgentsOpen(false) : focusAgent())}
+                >
+                  <Bot />
+                  <span className="hidden sm:inline">Agent</span>
+                </ToolbarToggle>
+                <span className="toolbar-divider" aria-hidden />
+                <Button
+                  size="sm"
+                  onClick={() => void save()}
+                  disabled={!dirty || busy}
+                  loading={busy}
+                >
+                  <Save />
+                  Save
+                </Button>
+              </>
+            }
+          >
             <Button
               variant="ghost"
               size="icon"
@@ -435,134 +473,55 @@ export default function WorkspacePage() {
             >
               {sidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
             </Button>
-            <div className="min-w-0">
-              <h1 className="text-sm font-semibold">Workspace</h1>
-              <p className="hidden text-[11px] text-muted-foreground sm:block">
-                {workspace?.name} <span className="mx-1 text-border">/</span>{" "}
-                Build, edit, and preview
-              </p>
-            </div>
-            <div className="ml-auto flex items-center gap-1">
-              <Button
-                size="sm"
-                variant={agentsOpen ? "secondary" : "ghost"}
-                aria-label="Toggle agent panel"
-                aria-pressed={agentsOpen}
-                onClick={() =>
-                  agentsOpen ? setAgentsOpen(false) : focusAgent()
-                }
-                title="Ask Octopus (Ctrl+L)"
-              >
-                <Bot />
-                <span className="hidden sm:inline">Agent</span>
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-label="Save all files"
-                onClick={() => void saveAll()}
-                disabled={
-                  busy || !project.tabs.some((t) => t.draft !== t.content)
-                }
-                title="Save all (Ctrl+Shift+S)"
-              >
-                Save all
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => startAction({ kind: "create" })}
-              >
-                <FilePlus2 />
-                <span className="hidden sm:inline">New file</span>
-              </Button>
-              <Button
-                size="sm"
-                variant={preview ? "secondary" : "ghost"}
-                aria-pressed={preview}
-                onClick={() => setPreview(!preview)}
-              >
-                <Globe />
-                Preview
-              </Button>
-              <Button
-                size="sm"
-                variant={commands ? "secondary" : "ghost"}
-                aria-label="Commands"
-                aria-pressed={commands}
-                onClick={() => {
-                  setCommandsMounted(true);
-                  setCommands(!commands);
-                }}
-              >
-                <Terminal />
-                <span className="hidden sm:inline">Commands</span>
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => void save()}
-                disabled={!dirty || busy}
-                loading={busy}
-              >
-                <Save />
-                Save
-              </Button>
-            </div>
-          </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => startAction({ kind: "create" })}
+            >
+              <FilePlus2 />
+              <span className="hidden sm:inline">New file</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label="Save all files"
+              onClick={() => void saveAll()}
+              disabled={busy || !project.tabs.some((t) => t.draft !== t.content)}
+              title="Save all (Ctrl+Shift+S)"
+            >
+              Save all
+            </Button>
+          </PageToolbar>
           <div ref={body} style={panelStyle} className="flex min-h-0 flex-1">
             {sidebar && (
-              <aside
-                className="flex w-44 shrink-0 flex-col border-r bg-surface/50 md:w-[var(--explorer-width)]"
-                aria-label="Explorer"
+              <SidePanel
+                label="Explorer"
+                className="is-sized"
+                header={
+                  <div className="segmented" role="group" aria-label="Explorer view">
+                    <button type="button" aria-pressed={panel === "files"} aria-label="Files" onClick={() => setPanel("files")}>Files</button>
+                    <button type="button" aria-pressed={panel === "search"} aria-label="Search project" title="Search project (Ctrl+Shift+F)" onClick={() => setPanel("search")}>Search</button>
+                    <button type="button" aria-pressed={panel === "git"} aria-label="Git changes" title="Review Git changes" onClick={() => setPanel("git")}>Git</button>
+                    <button type="button" aria-pressed={panel === "trash"} aria-label="Project trash" title="Restore deleted files and folders" onClick={() => setPanel("trash")}>Trash</button>
+                  </div>
+                }
               >
-                <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-1 border-b px-2 py-1">
-                  <Button
-                    variant={panel === "files" ? "secondary" : "ghost"}
-                    size="sm"
-                    aria-label="Files"
-                    onClick={() => setPanel("files")}
-                  >
-                    <FolderTree />
-                    Files
-                  </Button>
-                  <Button
-                    variant={panel === "search" ? "secondary" : "ghost"}
-                    size="icon"
-                    aria-label="Search project"
-                    title="Search project (Ctrl+Shift+F)"
-                    onClick={() => setPanel("search")}
-                  >
-                    <Search />
-                  </Button>
-                  <Button
-                    variant={panel === "git" ? "secondary" : "ghost"}
-                    size="icon"
-                    aria-label="Git changes"
-                    title="Review Git changes"
-                    onClick={() => setPanel("git")}
-                  >
-                    <GitBranch />
-                  </Button>
-                  <Button
-                    variant={panel === "trash" ? "secondary" : "ghost"}
-                    size="icon"
-                    aria-label="Project trash"
-                    title="Restore deleted files and folders"
-                    onClick={() => setPanel("trash")}
-                  >
-                    <Trash2 />
-                  </Button>
+                <div className="flex h-10 shrink-0 items-center gap-1 border-b px-3">
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground" title={workspace?.name}>
+                    {workspace?.name ?? "Project"}
+                  </span>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-sm"
                     aria-label="New folder"
+                    title="New folder"
                     onClick={() => startAction({ kind: "folder" })}
                   >
                     <FolderPlus />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-sm"
                     aria-label="Upload file"
                     title="Upload a file or asset"
                     onClick={() => uploadInput.current?.click()}
@@ -582,13 +541,12 @@ export default function WorkspacePage() {
                   />
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="icon-sm"
                     aria-label="Refresh files"
+                    title="Refresh files"
                     onClick={refresh}
                   >
-                    <RefreshCw
-                      className={tree.isFetching ? "animate-spin" : ""}
-                    />
+                    <RefreshCw className={tree.isFetching ? "animate-spin" : ""} />
                   </Button>
                 </div>
                 {tree.isError && (
@@ -679,12 +637,12 @@ export default function WorkspacePage() {
                     </div>
                   </>
                 )}
-                <div className="border-t px-3 py-2 text-[10px] text-muted-foreground">
+                <div className="side-panel-footer">
                   {tree.data?.files.length ?? 0}
                   {tree.data?.truncated ? "+" : ""} files · dependencies and
                   secrets hidden
                 </div>
-              </aside>
+              </SidePanel>
             )}
             {sidebar && (
               <PanelResize
@@ -701,7 +659,10 @@ export default function WorkspacePage() {
               aria-label="Code editor"
             >
               <div
-                className="flex h-11 shrink-0 overflow-x-auto border-b bg-surface/30"
+                className={cn(
+                  "h-[var(--toolbar-h)] shrink-0 overflow-x-auto border-b bg-surface/30",
+                  project.tabs.length ? "flex" : "hidden",
+                )}
                 aria-label="Open files"
               >
                 {project.tabs.map((tab) => (

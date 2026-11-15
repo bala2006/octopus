@@ -2,7 +2,7 @@ import * as React from "react";
 import { tone } from "@/lib/palette";
 import { ArrowRight, Ban, ChevronDown, ChevronRight, CircleCheck, CircleX, FileCode2, Gavel, Loader2, Settings2, Sparkles, Terminal, User } from "lucide-react";
 import { MESSAGE_TYPE_LABEL, statusMeta } from "@/lib/meta";
-import { clockTime, cn } from "@/lib/utils";
+import { clockTime, cn, goalTitle } from "@/lib/utils";
 import { fetchRaw } from "@/lib/api";
 import { useWorkspaceId } from "@/hooks/queries";
 import type { AgentOut, MessageOut } from "@/types";
@@ -123,7 +123,7 @@ export const isDelegationMessage = (meta: Record<string, unknown>) => !!(meta.de
 
 /** First meaningful line of a message, without markdown markers: the collapsed view of a delegation. */
 export function firstLine(text: string): string {
-  const line = text.split("\n").map((l) => l.replace(/^[#>*\-\s]+/, "").trim()).find(Boolean) ?? "";
+  const line = goalTitle(text, "");
   return line.length > 160 ? `${line.slice(0, 159)}…` : line;
 }
 

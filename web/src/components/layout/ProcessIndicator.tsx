@@ -39,7 +39,7 @@ export function ProcessIndicator() {
           <Link
             aria-label="Command running"
             to={`/w/${workspace}/workspace?tool=commands`}
-            className="flex items-center gap-1.5 rounded-full border border-steel/40 bg-steel/10 px-2.5 py-1 text-[11px] font-medium text-steel transition-colors hover:bg-steel/20"
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-steel/40 bg-steel/10 px-3 text-xs font-medium text-steel transition-colors hover:bg-steel/20"
           >
             <Terminal className="h-3 w-3 animate-pulse" />
             <span className="hidden sm:inline">Command</span>
@@ -54,7 +54,7 @@ export function ProcessIndicator() {
           <Link
             aria-label="Development server running"
             to={`/w/${workspace}/workspace?tool=server`}
-            className="flex items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-2.5 py-1 text-[11px] font-medium text-success transition-colors hover:bg-success/20"
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-3 text-xs font-medium text-success transition-colors hover:bg-success/20"
           >
             <Radio className="h-3 w-3 animate-pulse" />
             <span className="hidden sm:inline">Dev server</span>
