@@ -12,6 +12,10 @@ export interface Usage {
   active_seconds: number; input_tokens: number; cached_tokens: number; output_tokens: number;
   reasoning_tokens: number; llm_calls: number; per_agent: Record<string, number>; per_agent_cost: Record<string, number>;
   cost_breakdown: { input: number; cached_input: number; output: number };
+  /** Execution counters, so the cost of a run can be explained: what it called, changed and re-read. */
+  model_ms: number; tool_calls: number; tool_failures: number;
+  file_reads: number; redundant_reads: number; file_writes: number;
+  verifications: number; agent_runs: number;
 }
 export type PhaseStatus = "pending" | "active" | "done" | "skipped" | "failed";
 export interface WorkflowPhase { key: string; title: string; owner: string | null; status: PhaseStatus; loops?: number; summary?: string }

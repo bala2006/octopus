@@ -168,6 +168,7 @@ export const plannerTools = [
     args: z.object({ items: z.array(z.string().min(3)).min(1).describe("Each requirement, in the user's words") }),
     async run(ctx, a) {
       const added = ctx.planner!.addRequirements(a.items);
+      if (!added.length) return { text: "Every one of those is already recorded; nothing new was added. Assign the existing requirements to a task with create_task." };
       return { text: `Recorded ${added.map((r) => `${r.id}: ${r.text}`).join("\n")}\nAssign each to a task with create_task requirements.` };
     },
   }),

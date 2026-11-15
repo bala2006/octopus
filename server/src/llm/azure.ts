@@ -31,7 +31,7 @@ export interface StreamHandlers {
   onToolStart?: (call: { call_id: string; name: string }) => void;
   onToolArgs?: (callId: string, delta: string) => void;
 }
-export interface LlmResult { text: string; thought: string; calls: ToolCall[]; output: Item[]; usage: TokenUsage; costUsd: number; incomplete: string | null }
+export interface LlmResult { text: string; thought: string; calls: ToolCall[]; output: Item[]; usage: TokenUsage; costUsd: number; incomplete: string | null; /** Wall-clock of the request, for the run's execution metrics. */ ms: number }
 
 export interface AzureConnection { baseUrl: string; apiKey: string; auth: "key" | "entra"; options: ProviderOptions }
 
@@ -78,7 +78,8 @@ function body(req: LlmRequest, drop: Set<string>): Item {
     max_output_tokens: req.maxOutputTokens ?? 32_000, include: ["reasoning.encrypted_content"],
   };
   if (req.tools?.length) {
-    b.tools = req.tools;
+    // A deployment that rejected strict schemas keeps the normalised parameters but must not be sent strict mode again.
+    b.tools = drop.has("strict") ? req.tools.map((t) => ({ ...t, strict: false })) : req.tools;
     b.tool_choice = req.toolChoice ?? "auto";
     b.parallel_tool_calls = true;
   }
@@ -95,7 +96,8 @@ function body(req: LlmRequest, drop: Set<string>): Item {
 /** If a 400 names one parameter the deployment does not support, return it so the call can be retried without it. */
 function rejectedParam(message: string, b: Item): string | null {
   const m = message.toLowerCase();
-  if (!/unsupported|not supported|does not support|unrecognized|unknown parameter|invalid value/.test(m)) return null;
+  if (!/unsupported|not supported|does not support|unrecognized|unknown parameter|invalid value|invalid schema/.test(m)) return null;
+  if ((b.tools as FunctionTool[] | undefined)?.some((t) => t.strict) && /strict|additionalproperties|schema|required/.test(m)) return "strict";
   if (m.includes("summary") && b.reasoning?.summary) return "reasoning.summary";
   for (const key of ["reasoning", "include", "parallel_tool_calls", "max_output_tokens", "tool_choice"]) if (m.includes(key) && key in b) return key;
   return null;
@@ -124,7 +126,11 @@ export async function complete(reg: Registry, req: LlmRequest, on: StreamHandler
       await sleep(1000 * 2 ** attempt);
       continue;
     }
-    if (res.ok && res.body) return await readStream(res.body, c.options, on);
+    if (res.ok && res.body) {
+      const started = Date.now();
+      const result = await readStream(res.body, c.options, on);
+      return { ...result, ms: Date.now() - started };
+    }
     const text = await res.text();
     const message = (() => { try { return JSON.parse(text).error?.message ?? text; } catch { return text; } })();
     lastError = `Azure OpenAI ${res.status}: ${String(message).slice(0, 500)}`;
@@ -201,7 +207,7 @@ async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderO
     output: u.output_tokens ?? 0, reasoning: u.output_tokens_details?.reasoning_tokens ?? 0,
   };
   return {
-    text, thought: thought.trim(), calls, usage, costUsd: priceUsage(usage, options),
+    text, thought: thought.trim(), calls, usage, costUsd: priceUsage(usage, options), ms: 0,
     // replay everything except plain message items without content; reasoning items carry encrypted content
     output: output.map(({ status: _s, ...item }) => item),
     incomplete: resp.status === "incomplete" ? resp.incomplete_details?.reason ?? "incomplete" : null,

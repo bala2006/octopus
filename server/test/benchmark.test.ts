@@ -1,0 +1,234 @@
+/**
+ * Execution benchmark: the same task classes driven through the real engine against the scripted model, measured on
+ * what the audit found expensive — model calls, payload characters, file reads, checks and agent activations.
+ *
+ * The point is not a token number from a fake model (it reports a fixed usage); it is the shape of the execution:
+ * how many times the engine calls the model, with how much text, and whether it repeats work it already did.
+ * A regression here is a real regression in cost.
+ */
+import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import path from "node:path";
+import type { FastifyInstance } from "fastify";
+import type { CanvasOut, RunDetail, WorkspaceOut } from "@octopus/shared";
+import { openRegistry, type Registry } from "../src/db/registry";
+import { buildServer } from "../src/http/server";
+import { encrypt } from "../src/lib/secrets";
+import { fakeModel, outputs, turnKind, type FakeModel, type Script } from "./fakeModel";
+
+let app: FastifyInstance;
+let reg: Registry;
+let model: FakeModel;
+let ws: WorkspaceOut;
+let dir = "";
+
+const call = async <T>(method: string, url: string, payload?: unknown): Promise<T> => {
+  const res = await app.inject({ method: method as "GET", url, payload: payload as object, headers: { host: "127.0.0.1" } });
+  if (res.statusCode >= 400) throw new Error(`${method} ${url} → ${res.statusCode}: ${res.body}`);
+  return res.json() as T;
+};
+const W = () => `/api/v1/w/${ws.id}`;
+
+async function until(runId: string, statuses: string[], ms = 60_000): Promise<RunDetail> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const r = await call<RunDetail>("GET", `${W()}/runs/${runId}`);
+    if (statuses.includes(r.status)) return r;
+    if (Date.now() > end) throw new Error(`run stayed ${r.status}: ${r.halt_reason}`);
+    await new Promise((res) => setTimeout(res, 20));
+  }
+}
+
+beforeAll(async () => {
+  model = await fakeModel((b) => script(b));
+  reg = openRegistry(path.join(process.env.TEST_BASE_DIR!, "home", "registry-bench.db"));
+  reg.setSetting("provider.azure", { base_url: model.url, key_enc: encrypt("test-key"), options: { auth: "key" }, updated_at: "" });
+  app = await buildServer(reg);
+});
+afterAll(async () => { await app.close(); await model.close(); });
+
+let script: Script = () => ({ text: "ok" });
+
+interface Result { calls: number; instructions: number; input: number; reads: number; writes: number; checks: number; agents: number; status: string; redundant: number }
+
+/** Run one scenario and measure the requests the engine made for it. */
+async function measure(name: string, files: Record<string, string>, template: string, goal: string, s: Script, budget?: Record<string, unknown>): Promise<Result> {
+  dir = path.join(process.env.TEST_BASE_DIR!, `b${Math.random().toString(36).slice(2, 8)}`);
+  mkdirSync(dir);
+  for (const [p, c] of Object.entries(files)) { mkdirSync(path.dirname(path.join(dir, p)), { recursive: true }); writeFileSync(path.join(dir, p), c); }
+  ws = await call<WorkspaceOut>("POST", "/api/v1/workspaces", { path: dir });
+  reg.setSetting("approval_mode", "auto");
+  script = s;
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: template, name: "Octopus" });
+  const before = model.requests.length;
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal, budget });
+  const done = await until(run.id, ["completed", "incomplete", "failed"]);
+  const reqs = model.requests.slice(before) as { instructions: string; input: unknown }[];
+  const usage = (done.state as { usage?: { file_reads?: number; file_writes?: number; verifications?: number; redundant_reads?: number; agent_runs?: number } }).usage ?? {};
+  const result: Result = {
+    calls: reqs.length,
+    instructions: reqs.reduce((n, r) => n + r.instructions.length, 0),
+    input: reqs.reduce((n, r) => n + JSON.stringify(r.input).length, 0),
+    reads: usage.file_reads ?? 0, writes: usage.file_writes ?? 0, checks: usage.verifications ?? 0,
+    redundant: usage.redundant_reads ?? 0, agents: usage.agent_runs ?? 0, status: done.status,
+  };
+  console.log(`bench ${name.padEnd(26)} calls=${result.calls} instr=${Math.round(result.instructions / 1000)}k input=${Math.round(result.input / 1000)}k reads=${result.reads} redundant=${result.redundant} writes=${result.writes} checks=${result.checks} turns=${result.agents} status=${result.status}`);
+  if (done.status !== "completed") {
+    const tasks = await call<{ key: string; kind: string; title: string; status: string; result: string }[]>("GET", `${W()}/runs/${run.id}/tasks`);
+    console.log(`  ${name}: ${done.halt_reason ?? "no reason"} | ${tasks.map((t) => `${t.key} ${t.kind}=${t.status}${t.result ? ` (${t.result.replace(/\s+/g, " ").slice(0, 120)})` : ""}`).join(" ; ")}`);
+  }
+  return result;
+}
+
+/** The stock one-file build, as in the audit. */
+const buildScript: Script = (b) => {
+  const kind = turnKind(b);
+  const n = outputs(b).length;
+  if (kind === "plan") return n === 0
+    ? { calls: [{ name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
+      { name: "create_task", args: { title: "Build the landing page", description: "Create index.html with a hero section.", acceptance_criteria: "- index.html exists", assignee: "Lena", kind: "build" } }] }
+    : { calls: [{ name: "start_work", args: { note: "Lena builds the page." } }] };
+  if (kind === "work") return n === 0
+    ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n", note: "Landing page" } }] }
+    : { calls: [{ name: "complete_task", args: { summary: "Built index.html with the hero.", verification: "Opened the file" } }] };
+  if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks good." } }] };
+  return { text: "The landing page is ready in index.html." };
+};
+
+/** Respond to review findings only on a task that actually carries them. */
+const answers = (input: unknown) => {
+  const s = JSON.stringify(input);
+  if (!/Open findings/.test(s)) return undefined;
+  return [...new Set(s.match(/F\d+/g) ?? [])].map((id) => ({ id, status: "fixed" as const, response: "Done as asked." }));
+};
+
+/** A small page with one review round that requests a change, and one acceptance failure. */
+const revisionScript = (withSpecialists: boolean): Script => {
+  let reviews = 0, accepts = 0;
+  return (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const ids = [...new Set(JSON.stringify(b.input).match(/\bR\d+\b/g) ?? [])];
+    if (kind === "plan") {
+      if (!withSpecialists) return n === 0
+        ? { calls: [
+          { name: "set_requirements", args: { items: ["A landing page with a hero section and a pricing table"] } },
+          { name: "create_task", args: { title: "Build the landing page", description: "Create index.html with a hero and a pricing table.", acceptance_criteria: "- hero section", assignee: "Lena", kind: "build", requirements: ["R1"], files: ["index.html"] } }] }
+        : { calls: [{ name: "start_work", args: { note: "Lena builds the page." } }] };
+      if (n === 0) return { calls: [
+        { name: "hire_agent", args: { role_key: "designer", title: "UI/UX Designer", department: "Product & Design", reason: "Judges the look" } },
+        { name: "hire_agent", args: { role_key: "qa", title: "QA Engineer", department: "Quality & Ops", reason: "Checks the page" } }] };
+      if (n === 2) return { calls: [
+        { name: "set_requirements", args: { items: ["A landing page with a hero section and a pricing table"] } },
+        { name: "create_task", args: { title: "Build the landing page", description: "Create index.html with a hero and a pricing table.", acceptance_criteria: "- hero section", assignee: "Lena", kind: "build", requirements: ["R1"], files: ["index.html"], specialists: ["Iris", "Sam"] } }] };
+      return { calls: [{ name: "start_work", args: { note: "The team builds the page." } }] };
+    }
+    if (kind === "work") return n === 0
+      ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n<table></table>\n", note: "Page" } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Built index.html.", verification: "Opened it", ...(answers(b.input) ? { responses: answers(b.input) } : {}) } }] };
+    if (kind === "review") { reviews++; return reviews === 1
+      ? { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "The pricing table is empty.", findings: [{ severity: "major", problem: "The pricing table has no rows", evidence: "Read index.html", fix: "Add three plan rows" }] } }] }
+      : { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Fixed." } }] }; }
+    if (kind === "acceptance") { accepts++; return { calls: [{ name: "submit_acceptance", args: { results: ids.map((id) => accepts === 1
+      ? { id, met: false, evidence: "The pricing table is empty in the browser" }
+      : { id, met: true, evidence: "Saw three plan rows" }) } }] }; }
+    return { text: "The landing page is in index.html." };
+  };
+};
+
+describe("execution benchmark", () => {
+  test("a question needs one model call and no agents beyond the lead", async () => {
+    const r = await measure("question", {}, "small_dev_team", "What does this project do?",
+      (b) => (turnKind(b) === "plan" ? { calls: [{ name: "reply_to_user", args: { message: "A Vite + Fastify app." } }] } : { text: "A Vite + Fastify app." }));
+    expect(r.calls).toBe(1);
+    expect(r.status).toBe("completed");
+  }, 60_000);
+
+  test("a one-file change: one worker, one diff review, no separate report call", async () => {
+    const r = await measure("one-file page", {}, "adaptive", "Build a landing page", buildScript);
+    expect(r.calls).toBeLessThanOrEqual(5);
+    expect(r.status).toBe("completed");
+    expect(r.checks).toBe(0);
+  }, 60_000);
+
+  test("a small page with a review round and a failed acceptance stays bounded", async () => {
+    const r = await measure("review + acceptance", {}, "small_dev_team", "Build a landing page", revisionScript(false));
+    // Two work rounds, the diff reviews, two acceptance passes and a report: the floor for this shape is the work.
+    expect(r.calls).toBeLessThanOrEqual(19);
+    expect(r.instructions).toBeLessThan(60_000);
+    expect(r.status).toBe("completed");
+  }, 90_000);
+
+  test("design + QA specialists add their lens, not a second copy of the task", async () => {
+    const r = await measure("+ designer & QA", {}, "small_dev_team", "Build a landing page", revisionScript(true));
+    expect(r.calls).toBeLessThanOrEqual(25);
+    expect(r.instructions).toBeLessThan(80_000);
+  }, 90_000);
+
+  test("a follow-up reuses the warm lead session instead of paying for a cold one", async () => {
+    const s: Script = (b) => {
+      const kind = turnKind(b);
+      const n = outputs(b).length;
+      if (kind === "plan") return n === 0
+        ? { calls: [{ name: "create_task", args: { title: "Make the hero bigger", description: "Increase the hero heading size.", acceptance_criteria: "- h1 is larger", assignee: "Lena", kind: "build", files: ["index.html"] } }] }
+        : { calls: [{ name: "start_work", args: { note: "Lena updates the hero." } }] };
+      if (kind === "work") return n === 0
+        ? { calls: [{ name: "read_file", args: { path: "index.html" } }] }
+        : n === 1 ? { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1 style=\"font-size:4rem\">Acme</h1>" } }] }
+        : { calls: [{ name: "complete_task", args: { summary: "Bigger hero.", verification: "Read it back" } }] };
+      if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Fine." } }] };
+      return { text: "Done." };
+    };
+    dir = path.join(process.env.TEST_BASE_DIR!, `b${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, "index.html"), "<h1>Acme</h1>\n");
+    ws = await call<WorkspaceOut>("POST", "/api/v1/workspaces", { path: dir });
+    reg.setSetting("approval_mode", "auto");
+    script = (b) => (turnKind(b) === "plan" && outputs(b).length === 0
+      ? { calls: [{ name: "create_task", args: { title: "Build the landing page", description: "Write index.html.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", files: ["index.html"] } }] }
+      : buildScript(b));
+    const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "small_dev_team", name: "Octopus" });
+    const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build the landing page", budget: { review: false } });
+    await until(run.id, ["completed", "incomplete", "failed"]);
+    const before = model.requests.length;
+    script = s;
+    await call("POST", `${W()}/runs/${run.id}/continue`, { content: "Make the hero bigger" });
+    const done = await until(run.id, ["completed", "incomplete", "failed"]);
+    const after = model.requests.length;
+    const usage = (done.state as { usage?: { file_reads?: number; file_writes?: number; agent_runs?: number } }).usage ?? {};
+    console.log(`bench ${"follow-up".padEnd(26)} calls=${after - before} reads=${usage.file_reads ?? 0} writes=${usage.file_writes ?? 0} turns=${usage.agent_runs ?? 0} status=${done.status}`);
+    expect(after - before).toBeLessThanOrEqual(5);
+    expect(done.status).toBe("completed");
+  }, 90_000);
+
+  test("a tool that keeps failing ends the turn in a few calls", async () => {
+    const r = await measure("persistent failure", {}, "adaptive", "Build a landing page",
+      (b) => (turnKind(b) === "plan"
+        ? { calls: [{ name: "create_task", args: { title: "Do the thing", description: "Nothing can own this task.", acceptance_criteria: "- done", assignee: "Octopus", kind: "build" } }] }
+        : buildScript(b)));
+    expect(r.calls).toBeLessThanOrEqual(6);
+    expect(r.status).toBe("incomplete");
+  }, 60_000);
+
+  test("a cycle that only touches documents runs no project checks", async () => {
+    const s: Script = (b) => {
+      const kind = turnKind(b);
+      const n = outputs(b).length;
+      if (kind === "plan") return n === 0
+        ? { calls: [{ name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Writes the documentation" } }] }
+        : n === 1 ? { calls: [{ name: "create_task", args: { title: "Write the README", description: "Document the project in README.md.", acceptance_criteria: "- README exists", assignee: "Lena", kind: "build", files: ["README.md"] } }] }
+                    : { calls: [{ name: "start_work", args: { note: "Lena writes the README." } }] };
+        if (kind === "work") return n === 0
+        ? { calls: [{ name: "write_file", args: { path: "README.md", content: "# Project\n\nDocs.\n" } }] }
+        : { calls: [{ name: "complete_task", args: { summary: "Wrote the README.", verification: "Read it" } }] };
+      if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Clear." } }] };
+      return { text: "Documented." };
+    };
+    const r = await measure("docs-only change", {
+      "package.json": JSON.stringify({ name: "x", scripts: { test: "node should-not-run.js" } }),
+      "should-not-run.js": "require('fs').writeFileSync('CHECK_RAN', '1'); process.exit(1);",
+    }, "adaptive", "Document the project", s);
+    expect(r.checks).toBe(0);
+    expect(existsSync(path.join(dir, "CHECK_RAN"))).toBe(false);
+    expect(r.status).toBe("completed");
+  }, 60_000);
+});

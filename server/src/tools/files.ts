@@ -14,11 +14,16 @@ import { Denied, defineTool, MAX_TOOL_OUTPUT, type ToolContext } from "./types";
 /** Lockfiles, minified bundles and source maps: large, generated, and almost never worth reading whole. */
 const GENERATED = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock|Cargo\.lock|poetry\.lock|composer\.lock)$|\.min\.(js|css)$|\.map$/;
 
-/** The lines from `from` that fit in one tool result, stopping at `to`. Always at least one line. */
-function page(lines: string[], from: number, to: number): number {
+/**
+ * The lines from `from` that fit in one read, stopping at `to`. Always at least one line. A page is deliberately much
+ * smaller than the maximum tool result: orienting in a file should cost a few thousand tokens, and the header says
+ * where to continue.
+ */
+const READ_PAGE = 12_000;
+function page(lines: string[], from: number, to: number, limit = READ_PAGE): number {
   let size = 0;
   let end = from - 1;
-  while (end < to && size + lines[end]!.length + 1 <= MAX_TOOL_OUTPUT) size += lines[end++]!.length + 1;
+  while (end < to && size + lines[end]!.length + 1 <= limit) size += lines[end++]!.length + 1;
   return Math.max(end, from);
 }
 
@@ -76,13 +81,15 @@ export const fileTools = [
         return { text: `${rel} is a generated file (${lines.length} lines). Use search_project to find what you need in it, or read a line range.` };
       ctx.seen.set(rel, hash);
       const from = Math.min(a.start_line ?? 1, lines.length);
-      const to = page(lines, from, Math.min(a.end_line ?? lines.length, lines.length));
+      // An explicit range was asked for: fill it. Opening a file without one is paged, so orienting stays cheap.
+      const explicit = a.start_line !== undefined || a.end_line !== undefined;
+      const to = page(lines, from, Math.min(a.end_line ?? lines.length, lines.length), explicit ? MAX_TOOL_OUTPUT : READ_PAGE);
       const prior = ctx.shown.get(rel);
       if (prior?.hash === hash && prior.ranges.some(([f, t]) => f <= from && t >= to))
-        return { text: `${rel} lines ${from}-${to} have not changed since you read them; they are earlier in this conversation.` };
+        return { text: `${rel} lines ${from}-${to} have not changed since you read them; they are earlier in this conversation.`, metrics: { read: true, redundant: true } };
       ctx.shown.set(rel, { hash, ranges: [...(prior?.hash === hash ? prior.ranges : []), [from, to]] });
       const range = to < lines.length ? `, showing ${from}-${to}; continue with start_line ${to + 1}` : from > 1 ? `, showing ${from}-${to}` : "";
-      return { text: `${rel} (${lines.length} lines${range})\n${clip(lines.slice(from - 1, to).join("\n"), MAX_TOOL_OUTPUT)}` };
+      return { text: `${rel} (${lines.length} lines${range})\n${clip(lines.slice(from - 1, to).join("\n"), MAX_TOOL_OUTPUT)}`, metrics: { read: true } };
     },
   }),
   defineTool({
@@ -121,7 +128,7 @@ export const fileTools = [
       writeText(ctx, rel, a.content);
       ctx.shown.set(rel, { hash: sha1(a.content), ranges: [[1, a.content.split("\n").length]] });
       ctx.recordFile(rel, before, a.content, a.note ?? "");
-      return { text: `${before === null ? "Created" : "Updated"} ${rel} (${a.content.split("\n").length} lines).` };
+      return { text: `${before === null ? "Created" : "Updated"} ${rel} (${a.content.split("\n").length} lines).`, metrics: { wrote: true } };
     },
   }),
   defineTool({
@@ -139,8 +146,17 @@ export const fileTools = [
       ctx.setStatus("writing", `Editing ${rel}`);
       await guardWrite(ctx, rel, "write_file", before, after, `Edit ${rel}`);
       writeText(ctx, rel, after);
+      // The edited lines are in this conversation now: a later read of them costs one line. The rest of the file is not,
+      // so it is left out of the ledger and a read of it still returns the content.
+      if (a.replace_all) ctx.shown.delete(rel);
+      else {
+        const at = before.indexOf(a.old_string);
+        const from = before.slice(0, at).split("\n").length;
+        const to = from + a.new_string.split("\n").length - 1;
+        ctx.shown.set(rel, { hash: sha1(after), ranges: [[from, Math.max(from, to)]] });
+      }
       ctx.recordFile(rel, before, after, a.note ?? "");
-      return { text: `Edited ${rel} (${count > 1 ? `${count} replacements` : "1 replacement"}).` };
+      return { text: `Edited ${rel} (${count > 1 ? `${count} replacements` : "1 replacement"}).`, metrics: { wrote: true } };
     },
   }),
   defineTool({
@@ -160,7 +176,7 @@ export const fileTools = [
       const content = read(ctx, to);
       if (content !== null) { ctx.recordFile(from, content, null, `Moved to ${to}`); ctx.recordFile(to, null, content, `Moved from ${from}`); }
       ctx.emit("file_moved", { from, to });
-      return { text: `Moved ${from} to ${to}.` };
+      return { text: `Moved ${from} to ${to}.`, metrics: { wrote: true } };
     },
   }),
   defineTool({
@@ -175,7 +191,7 @@ export const fileTools = [
       trash(ctx.fs, rel, "agent");
       if (before !== null) ctx.recordFile(rel, before, null, a.reason ?? "Deleted");
       ctx.emit("file_moved", { from: rel, to: "" });
-      return { text: `Moved ${rel} to the trash.` };
+      return { text: `Moved ${rel} to the trash.`, metrics: { wrote: true } };
     },
   }),
 ];

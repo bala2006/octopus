@@ -232,6 +232,7 @@ test("a review without a verdict is retried, then blocks the work instead of app
 });
 
 test("a worker that keeps testing is told to wrap up, then finishes instead of running out of steps", async () => {
+  writeFileSync(path.join(dir, "index.html"), "<h1>Acme</h1>\n");
   script = (b) => {
     if (turnKind(b) !== "work") return buildScript(b);
     if (!JSON.stringify(b.input).includes("almost out of steps")) return { calls: [{ name: "read_file", args: { path: "index.html" } }] };
@@ -661,8 +662,9 @@ test("specialists sharpen a part in parallel, and the owner gets all their feedb
   const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
   expect((await until(run.id, ["completed", "incomplete"])).status).toBe("completed");
   const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  // Iris and Sam asked for changes, so only they read the revision; Kai approved and keeps that approval.
   expect(tasks.filter((t) => t.kind === "review").map((t) => t.title.split(" T1")[0]).sort())
-    .toEqual(["Play review", "Play review", "Review", "Review", "Visual review", "Visual review"]);
+    .toEqual(["Play review", "Play review", "Review", "Visual review", "Visual review"]);
   expect(revisions).toHaveLength(1);
   expect(revisions[0]).toContain("### Iris (art direction)");
   expect(revisions[0]).toContain("The hero should be red");
@@ -911,4 +913,40 @@ test("a small change is reviewed from its diff in one step, with only the verdic
   expect(reviews).toHaveLength(1);
   expect(reviews[0]!.tools.map((t) => t.name).sort()).toEqual(["block_task", "submit_review"]);
   expect(JSON.stringify(reviews[0]!.input)).toMatch(/\+.*Acme/);
+}, 30_000);
+
+test("a tool that keeps failing ends the turn instead of spending the planning budget, and the run says so", async () => {
+  let planCalls = 0;
+  script = (b) => {
+    if (turnKind(b) !== "plan") return buildScript(b);
+    planCalls++;
+    // The lead cannot own a part, so this call fails identically every round.
+    return { calls: [{ name: "create_task", args: { title: "Do the thing", description: "Nothing can own this task.", acceptance_criteria: "- done", assignee: "Octopus", kind: "build" } }] };
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  const done = await until(run.id, ["completed", "incomplete", "failed"]);
+  expect(done.status).toBe("incomplete");
+  expect(planCalls).toBeLessThanOrEqual(4);
+  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+  expect(messages.at(-1)!.content).toContain("could not plan this request");
+  expect(messages.at(-1)!.content).toContain("create_task");
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks).toHaveLength(0);
+}, 30_000);
+
+test("a worker that ends with prose instead of submitting a result is blocked, not reported as finished", async () => {
+  script = (b) => {
+    const kind = turnKind(b);
+    if (kind === "work") return { text: "I have finished the page, everything works." };
+    if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks right." } }] };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  const done = await until(run.id, ["completed", "incomplete", "failed"]);
+  expect(done.status).toBe("incomplete");
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks.find((t) => t.kind === "build")?.status).toBe("blocked");
+  expect(tasks.find((t) => t.kind === "build")?.result).toContain("nothing was submitted as finished");
 }, 30_000);

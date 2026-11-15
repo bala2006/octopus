@@ -35,6 +35,8 @@ export const config = {
   },
   defaultModel: env("DEFAULT_MODEL", "gpt-6-luna"),
   defaultEffort: env("DEFAULT_REASONING_EFFORT", "high"),
+  /** Tool schemas in the provider's strict mode. Off until the deployment is known to accept the normalised schemas. */
+  strictTools: flag("AZURE_STRICT_TOOLS", false),
   nativeDialogs: flag("NATIVE_DIALOGS", true),
   browserEnabled: flag("BROWSER_ENABLED", true),
   browserHeadless: flag("PLAYWRIGHT_HEADLESS", true),

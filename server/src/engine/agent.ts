@@ -4,6 +4,7 @@
  * answers in plain text.
  */
 import type { Effort } from "@octopus/shared";
+import { config } from "../config";
 import type { Registry } from "../db/registry";
 import { complete, type FunctionTool, type Item, type LlmResult, type ToolCall } from "../llm/azure";
 import { clip, UserError } from "../lib/util";
@@ -16,7 +17,7 @@ export interface LoopEvents {
   toolStart(call: { call_id: string; name: string }): void;
   toolArgs(callId: string, delta: string): void;
   toolCall(callId: string, name: string, args: Record<string, unknown>): void;
-  toolResult(callId: string, name: string, ok: boolean, output: string): void;
+  toolResult(callId: string, name: string, ok: boolean, output: string, metrics?: import("../tools/types").ToolMetrics): void;
   usage(r: LlmResult): void;
   /** Called before every model call; throw to stop (budget, cancellation). Await to pause. */
   beforeCall(): Promise<void>;
@@ -54,6 +55,14 @@ const WRAP_UP_STEPS = 5;
 const WRAP_UP = "You are almost out of steps for this turn. Stop exploring, testing and polishing. Call the tool that ends the turn now (complete_task, submit_review, start_work or reply_to_user), and say what is done and what is not verified. If the work cannot be finished as specified, say so in that tool.";
 /** Identical consecutive calls at these counts get a reminder that the agent is repeating itself. */
 const REPEAT_REMINDERS = [3, 5, 8];
+/**
+ * The same tool failing the same way: at the second time the agent is told exactly what went wrong and how to change
+ * approach; at the third the turn ends instead of spending the rest of its budget on a call that cannot succeed.
+ */
+const FAILURE_RECOVER = 2;
+const FAILURE_STOP = 3;
+/** Different tools failing in a row before the turn ends: more calls will not help an agent that can do nothing right. */
+const MAX_CONSECUTIVE_FAILURES = 5;
 export const CHECKPOINT_REQUEST = `Write a checkpoint of your work so far. It replaces the earlier part of this conversation, so include everything you need to carry on without it:
 ## Goal: the task and its acceptance criteria, in a few lines
 ## Done: what you built or changed, file by file, with the decisions behind it
@@ -113,20 +122,35 @@ async function summarize(o: LoopOptions, functions: FunctionTool[]): Promise<boo
   return true;
 }
 
-function parseArgs(call: ToolCall): Record<string, unknown> {
-  try { const v = JSON.parse(call.arguments || "{}"); return v && typeof v === "object" ? v : {}; } catch { return {}; }
+/** The model's arguments, or the parse failure that has to be reported back to it. */
+function parseArgs(call: ToolCall): { args: Record<string, unknown> } | { error: string } {
+  const raw = call.arguments || "{}";
+  try {
+    let v: unknown = JSON.parse(raw);
+    if (!v || typeof v !== "object" || Array.isArray(v)) return { error: `${call.name} needs one JSON object, not ${Array.isArray(v) ? "an array" : typeof v}` };
+    // Strict schemas express "this property is optional" as null: drop those keys before validation.
+    if (config.strictTools) v = Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== null));
+    return { args: v as Record<string, unknown> };
+  } catch (e) {
+    return { error: `the arguments were not valid JSON (${(e as Error).message}). Send one JSON object. Received: ${raw.slice(0, 300)}` };
+  }
 }
 
-async function runCall(o: LoopOptions, call: ToolCall, byName: Map<string, Tool>): Promise<{ output: string; ok: boolean; image?: string; stop?: Stop }> {
+async function runCall(o: LoopOptions, call: ToolCall, byName: Map<string, Tool>): Promise<{ output: string; ok: boolean; image?: string; stop?: Stop; metrics?: import("../tools/types").ToolMetrics }> {
   const tool = byName.get(call.name);
-  const args = parseArgs(call);
+  const parsedArgs = parseArgs(call);
+  if ("error" in parsedArgs) {
+    o.events.toolCall(call.call_id, call.name, { raw: call.arguments.slice(0, 300) });
+    return { output: `Could not read the call to ${call.name}: ${parsedArgs.error}`, ok: false };
+  }
+  const args = parsedArgs.args;
   o.events.toolCall(call.call_id, call.name, args);
   if (!tool) return { output: `There is no tool called ${call.name}. Available: ${[...byName.keys()].join(", ")}`, ok: false };
   const parsed = tool.args.safeParse(args);
-  if (!parsed.success) return { output: `Invalid arguments for ${call.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ")}`, ok: false };
+  if (!parsed.success) return { output: `Invalid arguments for ${call.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ")}. Arguments received: ${call.arguments.slice(0, 300) || "(none)"}`, ok: false };
   try {
     const r = await tool.run(o.ctx, parsed.data, call.call_id);
-    return { output: r.text, ok: r.ok !== false, image: r.image, stop: r.stop };
+    return { output: r.text, ok: r.ok !== false, image: r.image, stop: r.stop, metrics: r.metrics };
   } catch (e) {
     if (o.ctx.signal.aborted) throw e;
     if (e instanceof Denied) return { output: `Not allowed: ${e.message}`, ok: false };
@@ -137,12 +161,17 @@ async function runCall(o: LoopOptions, call: ToolCall, byName: Map<string, Tool>
 
 export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   const byName = new Map(o.tools.map((t) => [t.name, t]));
-  const functions = o.tools.map(toFunction);
+  const functions = o.tools.map((t) => toFunction(t, config.strictTools));
   const input = o.input;
   let nudged = false;
   let lastText = "";
   let lastCall = "";
   let repeats = 0;
+  /** Failures by signature (tool, arguments, error) this turn, so a hopeless call ends the turn instead of the budget. */
+  const failures = new Map<string, number>();
+  const recovered = new Set<string>();
+  let consecutiveFailures = 0;
+  let lastFailure: { name: string; output: string } | null = null;
   for (let round = 1; round <= o.maxRounds; round++) {
     if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: WRAP_UP });
     await o.events.beforeCall();
@@ -176,15 +205,36 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     for (const call of res.calls) {
       if (stop) { input.push({ type: "function_call_output", call_id: call.call_id, output: "Skipped: the turn already ended." }); continue; }
       const r = await runCall(o, call, byName);
-      o.events.toolResult(call.call_id, call.name, r.ok, r.output);
+      o.events.toolResult(call.call_id, call.name, r.ok, r.output, r.metrics);
       input.push({ type: "function_call_output", call_id: call.call_id, output: clip(r.output, MAX_TOOL_OUTPUT) });
       if (r.image) images.push(r.image);
       if (r.stop) stop = r.stop;
+      if (r.ok) consecutiveFailures = 0;
+      else {
+        consecutiveFailures++;
+        lastFailure = { name: call.name, output: r.output };
+        const failure = `${call.name}:${call.arguments.slice(0, 300)}:${clip(r.output, 160)}`;
+        failures.set(failure, (failures.get(failure) ?? 0) + 1);
+      }
       const sig = `${call.name}:${call.arguments}`;
       repeats = sig === lastCall ? repeats + 1 : 1;
       lastCall = sig;
     }
     if (stop) return { stop, text: lastText, rounds: round };
+    const hopeless = [...failures.values()].some((n) => n >= FAILURE_STOP) || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES;
+    if (hopeless && lastFailure) {
+      return {
+        stop: { kind: "block", reason: `repeated tool failures; the last was ${lastFailure.name}: ${clip(lastFailure.output, 300)}` },
+        text: lastText, rounds: round,
+      };
+    }
+    for (const [failure, count] of failures) {
+      if (count < FAILURE_RECOVER || recovered.has(failure)) continue;
+      recovered.add(failure);
+      const name = failure.slice(0, failure.indexOf(":"));
+      const output = lastFailure?.name === name ? lastFailure.output : failure.slice(failure.lastIndexOf(":") + 1);
+      input.push({ role: "user", content: `${name} has failed ${count} times in a row with the same arguments. The error: ${clip(output, 500)}\nChange the approach instead of repeating it: correct the arguments, use a different tool, or call block_task with exactly what is missing.` });
+    }
     if (REPEAT_REMINDERS.includes(repeats)) {
       input.push({ role: "user", content: `You have made the same ${lastCall.split(":")[0]} call ${repeats} times in a row with identical arguments, and it keeps giving the same result. Change your approach: try something different, ask a teammate, or finish with what you have.` });
     }

@@ -34,7 +34,10 @@ export type Stop =
   /** The agent answered the message its turn was started for. */
   | { kind: "answered"; text: string };
 
-export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop }
+/** What a tool did, for the run's execution metrics. */
+export interface ToolMetrics { read?: boolean; redundant?: boolean; wrote?: boolean }
+
+export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop; metrics?: ToolMetrics }
 
 /** The most of one tool result an agent sees. read_file pages within it, so a read is never cut by the loop. */
 export const MAX_TOOL_OUTPUT = 40_000;
@@ -108,9 +111,32 @@ export const defineTool = <S extends z.ZodType>(t: { name: string; description: 
 
 export class Denied extends Error {}
 
-export function toFunction(t: Tool): FunctionTool {
-  if (t.parameters) return { type: "function", name: t.name, description: t.description.slice(0, 1000), parameters: t.parameters, strict: false };
-  const schema = z.toJSONSchema(t.args, { target: "draft-7", unrepresentable: "any" }) as Record<string, unknown>;
-  delete schema.$schema;
-  return { type: "function", name: t.name, description: t.description, parameters: schema, strict: false };
+/**
+ * The strict-mode form of a JSON schema: every property required, nothing additional allowed, and a property that was
+ * optional becomes nullable (which is how strict mode expresses "may be absent"). Nulls are stripped before validation.
+ */
+export function strictParameters(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
+  const s = schema as Record<string, unknown>;
+  if (s.type === "object" && s.properties && typeof s.properties === "object") {
+    const props = s.properties as Record<string, unknown>;
+    const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+    return {
+      ...s, additionalProperties: false, required: Object.keys(props),
+      properties: Object.fromEntries(Object.entries(props).map(([k, v]) => [k, required.has(k) ? strictParameters(v) : { anyOf: [strictParameters(v), { type: "null" }] }])),
+    };
+  }
+  if (s.items) return { ...s, items: strictParameters(s.items) };
+  if (Array.isArray(s.anyOf)) return { ...s, anyOf: s.anyOf.map(strictParameters) };
+  return s;
+}
+
+export function toFunction(t: Tool, strict = false): FunctionTool {
+  const schema = t.parameters ?? (() => {
+    const s = z.toJSONSchema(t.args, { target: "draft-7", unrepresentable: "any" }) as Record<string, unknown>;
+    delete s.$schema;
+    return s;
+  })();
+  const parameters = (strict ? strictParameters(schema) : schema) as Record<string, unknown>;
+  return { type: "function", name: t.name, description: t.description.slice(0, 1000), parameters, strict };
 }

@@ -18,6 +18,9 @@ export interface Usage {
   input_tokens?: number; cached_tokens?: number; cache_write_tokens?: number; output_tokens?: number; reasoning_tokens?: number; llm_calls?: number; estimated_calls?: number;
   cost_breakdown?: { input?: number; cached_input?: number; cache_write?: number; output?: number };
   per_agent_cost?: Record<string, number>;
+  /** execution counters: what the run called, changed and re-read */
+  model_ms?: number; tool_calls?: number; tool_failures?: number; file_reads?: number; redundant_reads?: number;
+  file_writes?: number; verifications?: number; agent_runs?: number;
   /** last turn that changed a file or moved the task board, and how many turns ago that was */
   progress_turn?: number; turns_since_progress?: number;
 }

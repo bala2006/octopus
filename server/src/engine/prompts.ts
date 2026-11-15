@@ -102,6 +102,8 @@ export interface PromptContext {
   overview: string;
   memory: { own: MemoryOut[]; shared: MemoryOut[] };
   skills: SkillOut[];
+  /** Skills this task asked for by name: only those are worth their whole playbook. */
+  wanted?: string[];
 }
 
 const roster = (team: AgentOut[], me: AgentOut) => team.filter((a) => a.active).map((a) => {
@@ -118,7 +120,7 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
   const extra = a.behavior.extra_instructions ? `\n\n${fill(a.behavior.extra_instructions, vars)}` : "";
   const process = {
     orchestrator: ORCHESTRATOR_PROCEDURE,
-    report: ORCHESTRATOR_PROCEDURE,
+    report: "## Your task\nWrite the report the user reads: what changed, where, how it was verified, and anything still open. This turn has no tools, so every claim must come from the task outcomes in the brief; never describe work that is not in it. Keep it to a short opening paragraph; the brief already carries the tables.",
     worker: "## Your task\nYou own this part. Build it completely and well, the way the user described it, not a reduced version. Before you finish, look at the result the way the user will (run it, open it, screenshot it) and fix what falls short; check each acceptance criterion with the cheapest check that proves it. Then call complete_task: specialists review your part next and their feedback comes back to you in this conversation, so do not polish endlessly. If you cannot do it as specified, call block_task with what you need. Message a teammate for facts only they have or to change something in their part; ask the user only for decisions only they can make.",
     quick_review: `## Your task\nYou are reviewing a teammate's work, a small change shown as a diff in the brief. You cannot open files: judge the change from the diff and the brief. Check that it does what was asked, is correct, and breaks nothing next to it. Call submit_review once with a verdict and specific comments. Call block_task only if the diff cannot be judged.`,
       reviewer: `## Your task\nYou are reviewing a teammate's work. You do not edit files: you report what must change. Once you have checked the work, give your verdict with submit_review and stop; do not keep re-reading files.\n\n${REVIEW_STANDARD}`,
@@ -126,13 +128,20 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
     chat: "## Direct chat\nThe developer is talking to you one-on-one. Answer as yourself, concisely and specifically, using your tools to look at the project when it helps. You cannot change files in this chat; suggest they ask the company in the main conversation for changes.",
     consult: "## A teammate's question\nA teammate needs a quick, precise answer from you. Look at the project if needed. Answer in a few sentences or a short list.",
   }[mode];
+  // Each mode gets what it can use. A diff review does not need the team roster or the project layout, and a report
+  // turn needs neither; the operating procedure is never sent to a turn that cannot execute it.
+  const needsProject = mode === "orchestrator" || mode === "worker" || mode === "acceptance";
+  const needsTeam = mode !== "quick_review" && mode !== "report";
+  const playbooks = p.skills.length
+    ? `## Playbooks\n${p.skills.map((s) => (p.wanted?.includes(s.name) ? `### ${s.name}\n${s.body}` : `- ${s.name}: ${s.description}`)).join("\n\n")}`
+    : "";
   const sections = [
     identity, own + extra, process,
     mode === "worker" ? WRITER_STANDARD : "",
-    p.skills.length ? `## Playbooks\n${p.skills.map((s) => `### ${s.name}\n${s.body}`).join("\n\n")}` : "",
+    playbooks,
     notes(p.memory.own, p.memory.shared),
-    `## Team\n${roster(p.team, a)}`,
-    `## Project\n${p.overview}`,
+    needsTeam ? `## Team\n${roster(p.team, a)}` : "",
+    needsProject && p.overview ? `## Project\n${p.overview}` : "",
     "Formatting: Markdown. Be concise. Refer to files by their project path.",
   ];
   return sections.filter((s) => s.trim()).join("\n\n");

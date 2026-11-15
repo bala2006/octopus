@@ -6,7 +6,7 @@ export type Effort = "default" | "none" | "low" | "medium" | "high" | "xhigh" | 
 
 /** gpt-6-luna reasoning effort (sent as `reasoning.effort`). More effort = better answers on hard work, more tokens and time. */
 export const EFFORTS: { value: Effort; label: string; hint: string }[] = [
-  { value: "default", label: "Auto", hint: "Octopus default: X-High, best quality for agent work (set DEFAULT_REASONING_EFFORT to change)" },
+  { value: "default", label: "Auto", hint: "By task: high while planning and building, medium for reviews and acceptance, low for reports and quick answers" },
   { value: "none", label: "None", hint: "No reasoning: fastest, cheapest; fine for simple replies" },
   { value: "low", label: "Low", hint: "Quick thinking for routine tasks" },
   { value: "medium", label: "Medium", hint: "Balanced (the model default)" },
