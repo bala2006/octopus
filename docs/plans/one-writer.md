@@ -1,6 +1,6 @@
 # One writer, read-only specialists
 
-Status: Phases 1 and 2 done on `feat/one-writer`, branched from `main` at `0285ddf`. Phase 2 pinning is deferred (see below).
+Status: Phases 1 to 4 done on `feat/one-writer`, branched from `main` at `0285ddf`. Open: pinning (phase 2), trimming the lead procedure (phase 3), the default for the new critics (phase 4), and the live run (phase 5).
 
 ## Goal
 
@@ -68,12 +68,16 @@ and no self-review. The gaps, checked in code:
   split when the brief asks for one file, and the test-hook names. Critics get checklists, not playbooks.
 - Every prompt says that the user's request wins. A conflict is shown to the user, not resolved silently.
 - Done when: prompt snapshot tests pass, and no shipped playbook contradicts the single-file or no-CDN rules.
+- Status: done for the writer, the critics, the CEO and lead templates, and the web-game playbook (`server/test/prompts.test.ts`).
+  Open: the lead procedure is about 45 lines and is not trimmed yet.
 
 ### Phase 4: specialist roster
 
 - New critic roles: code quality and duplication checker.
 - A build task that writes code gets both critics by default. Whether they always run or are chosen per task is an
   open question for the user.
+- Status: the roles (`codequality`, `duplication`) and the `duplication` lens exist. They are opt-in: the lead attaches
+  them to a part. The default is still open.
 - Done when: role library tests pass, and a build task created by the lead receives both critics.
 
 ### Phase 5: verification and pull request
@@ -93,3 +97,6 @@ and no self-review. The gaps, checked in code:
 | 6 | Findings are structured; approve carries only minor notes | A free-text comment cannot be answered one by one | `server/src/lib/findings.ts` |
 | 7 | The writer answers findings in `complete_task`, not in a new tool | A new tool would need the engine state inside the tool; the stop path already has it | `tools/team.ts`, `engine/conversation.ts` settle |
 | 8 | Three sends back for open findings, then the part is blocked | Bounds a writer that never answers | `engine/conversation.ts` settle |
+| 9 | The one-writer rule is enforced in code (`policyFor`), not only in prompts | A prompt cannot stop a tool call | `server/src/tools/index.ts` |
+| 10 | Critic prompts say what to report, never what to write | The old ones told the PM, architect and QA to write files | `server/src/catalog/roles.ts` |
+| 11 | The new critics are opt-in per part | Keeps review rounds and their cost unchanged until the user decides | `catalog/roles.ts`, this plan |

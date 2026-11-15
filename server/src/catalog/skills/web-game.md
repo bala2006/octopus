@@ -6,8 +6,8 @@ roles: gameplay_programmer, game_director, game_designer, fullstack_dev, fronten
 # Web game
 
 ## Structure
-- **Modules, one concern each**: `world/` (level, materials, lights), `actors/` (enemies, player), `weapon/` (view model,
-  firing, effects), `game/` (state machine, waves, rules: pure and unit-tested), `ui/` (HUD, menus). No file over ~400
+- **Structure**: when the brief allows several files, one concern per module (below). When it asks for one file, keep the same sections in that one file. `world/` (level, materials, lights), `actors/` (enemies, player), `weapon/` (view model,
+  firing, effects), `game/` (state machine, waves, rules: pure and unit-tested), `ui/` (HUD, menus). Keep each module under ~400
   lines, so you can rework one area without rereading the rest and each specialist can review the area they care about.
 - **Game states**: title, playing, paused, game over, restart, plus any transition the brief asks for (for example
   travel between levels). Every state has a screen and a key or click path; pausing works in every state.
@@ -15,7 +15,7 @@ roles: gameplay_programmer, game_director, game_designer, fullstack_dev, fronten
   pause when `document.hidden`.
 - **Input**: keyboard state map, mouse, touch. First-person controls use Pointer Lock behind a "click to play" overlay;
   losing the lock pauses; menus release the lock and focus their main button.
-- **Test hook**: `window.__game` with `state()` (phase, wave, health, ammo, enemies, player position), `step(ms)`, and
+- **Test hook**: `window.__app` with `state()` (phase, wave, health, ammo, enemies, player position), `step(ms)`, and
   actions (`start()`, `fire()`, `aimAt(x, y, z)`, `moveTo(x, z)`, `skipTo(phase)`) so browser automation can play what
   pointer lock and real-time input prevent. Keep it small and always present.
 
@@ -33,11 +33,11 @@ Match the brief's words, element by element. Primitives are a starting point, ne
 - **Destruction**: break meshes into debris pieces with velocity, gravity and floor collision (or `cannon-es`), decals
   for impacts. Pool debris and particles.
 - One renderer, `setPixelRatio(Math.min(devicePixelRatio, 2))`, resize handler, reuse geometries and materials, dispose on
-  restart. Use the project's bundler and `npm i three` when the project has one; else a pinned CDN import map.
+  restart. Load Three.js the way the brief allows: inline or bundled for a one-file deliverable, otherwise the project's bundler or a pinned import map.
 
 ## Verify by playing
 1. `start_dev_server`, open the URL, read the console: it must be clean.
-2. Drive a full loop through `window.__game` with `browser_evaluate`: start, fire at an enemy, take damage, clear a
+2. Drive a full loop through `window.__app` with `browser_evaluate`: start, fire at an enemy, take damage, clear a
    wave, every transition, game over, restart. Check `state()` after each step.
 3. Screenshot the key moments and compare them with the brief's description, element by element.
 4. Frame budget: sample 5 s of rAF timings; average frame under 33 ms.
