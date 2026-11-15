@@ -218,7 +218,7 @@ export function lensOf(agent: AgentOut): Lens {
 }
 
 /** One critic's verdict in a review round. `none` when it could not give one. */
-export interface Verdict { critic: string; lens: Lens; verdict: "approve" | "request_changes" | "none"; comments: string }
+export interface Verdict { critic: string; lens: Lens; verdict: "approve" | "request_changes" | "none"; comments: string; findings?: import("../lib/findings").Finding[] }
 
 /** The next turn of a session: why the work came back, and how to finish. */
 export function revisionNote(t: TaskOut, why: { from: string; text: string }, finish: string): string {

@@ -21,6 +21,7 @@ import type { Registry } from "../db/registry";
 import { effectiveRoles, roleByKey } from "../catalog/roles";
 import { effectiveSkills, skillsFor } from "../catalog/skills";
 import { kindOf, staffingError } from "../catalog/kinds";
+import { addFindings, answerFindings, blockingOpen, renderFindings, settlePrior, type Finding } from "../lib/findings";
 import type { Item } from "../llm/azure";
 import { costParts } from "../llm/pricing";
 import { connection } from "../llm/azure";
@@ -71,6 +72,10 @@ interface RunState {
   acceptance_rounds: number;
   /** Review comments left open when a task hit the revision limit, by task id. */
   open_comments: Record<string, string>;
+  /** Review findings of each part, with the writer's answers. */
+  findings: Record<string, Finding[]>;
+  /** How often a part was sent back to answer its open findings before it could finish. */
+  gate_tries: Record<string, number>;
   /** Index of the first task of the current request; earlier tasks belong to earlier requests. */
   cycle_from: number;
   /** Index of the first requirement recorded for the current request. */
@@ -117,7 +122,7 @@ function emptyUsage(): Usage {
 function initialState(): RunState {
   return { agent_status: {}, activity: {}, usage: emptyUsage(), history: [], questions: [], answers: {}, feedback: {}, revisions: {}, files_by_task: {}, diffs_by_task: {},
     resume: {}, continues: {}, requirements: [], pins: [], rounds: {}, verdicts: {},
-    always: [], verify_rounds: 0, acceptance_rounds: 0, open_comments: {}, cycle_from: 0, req_from: 0, unchecked: false, unaccepted: false, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
+    always: [], verify_rounds: 0, acceptance_rounds: 0, open_comments: {}, findings: {}, gate_tries: {}, cycle_from: 0, req_from: 0, unchecked: false, unaccepted: false, verification: [], workflow: { track: null, index: 0, ended: false, phases: PHASES.map(([key, title]) => ({ key, title, owner: null, status: "pending" })) } };
 }
 
 export class Conversation {
@@ -1122,14 +1127,37 @@ export class Conversation {
     if (task.kind === "review") {
       const work = this.tasks.find((x) => x.key === task.depends_on[0]);
       if (stop?.kind !== "review") return;
-      const { verdict, comments } = stop;
+      const { verdict, comments, findings } = stop;
       this.saveTask({ ...task, status: "done", result: `${verdict === "approve" ? "Approved" : "Changes requested"}: ${comments}` });
       if (!work) return;
-      this.state.verdicts[task.id] = { critic: agent.name, lens: lensOf(agent), verdict, comments };
+      const recorded = addFindings(this.findingsOf(work.id), agent.name, findings);
+      this.setFindings(work.id, recorded.list);
+      this.state.verdicts[task.id] = { critic: agent.name, lens: lensOf(agent), verdict, comments, findings: recorded.added };
       this.post({ from: agent.id, to: work.assignee_agent_id, type: "review_result", content: comments,
         meta: { verdict, task_id: work.key, review: { revisions: this.state.revisions[work.id] ?? 0, max_revisions: this.budget.max_revisions } } });
       this.closeRound(work, task.id);
       return;
+    }
+    if (stop?.kind === "complete" && (task.kind === "build" || task.kind === "fix")) {
+      const answered = answerFindings(this.findingsOf(task.id), stop.responses ?? []);
+      this.setFindings(task.id, answered.list);
+      const open = blockingOpen(answered.list);
+      if (open.length || answered.unknown.length) {
+        const why = [
+          open.length ? `Answer each open finding before finishing: ${open.map((f) => f.id).join(", ")}.` : "",
+          answered.unknown.length ? `These ids match no finding: ${answered.unknown.join(", ")}.` : "",
+        ].filter(Boolean).join(" ");
+        const tries = (this.state.gate_tries?.[task.id] ?? 0) + 1;
+        this.state.gate_tries = { ...(this.state.gate_tries ?? {}), [task.id]: tries };
+        if (tries >= 3) {
+          this.saveTask({ ...task, status: "blocked", result: why });
+          this.post({ from: agent.id, to: lead.id, type: "status_update", content: `Blocked on ${task.key}: ${why}`, meta: { task_id: task.key } });
+          return;
+        }
+        this.state.resume[task.id] = { from: "Open findings", text: `${why}\n\n${renderFindings(open)}` };
+        this.saveTask({ ...task, status: "todo" });
+        return;
+      }
     }
     const summary = stop?.kind === "complete" ? `${stop.summary}${stop.verification ? `\n\nVerified: ${stop.verification}` : ""}` : text;
     const changed = (this.state.files_by_task[task.id] ?? []).length > 0;
@@ -1166,6 +1194,15 @@ export class Conversation {
    * When every critic of the current round has finished, decide: approved, or one revision for the owner with all the
    * requested changes together. A round where nobody could give a verdict blocks the work.
    */
+  /** The findings kept for a part. Runs saved before findings existed have none. */
+  private findingsOf(workId: string): Finding[] {
+    return this.state.findings?.[workId] ?? [];
+  }
+
+  private setFindings(workId: string, list: Finding[]) {
+    this.state.findings = { ...(this.state.findings ?? {}), [workId]: list };
+  }
+
   private closeRound(work: TaskOut, reviewTaskId: string) {
     // A conversation saved before rounds were recorded has none: the review being settled is its whole round.
     const ids = this.state.rounds[work.id] ?? [reviewTaskId];
@@ -1178,9 +1215,10 @@ export class Conversation {
       this.saveTask({ ...current, status: "blocked", result: `${current.result}\n\nNot reviewed: ${verdicts.map((v) => v.comments).join("; ") || "no verdict"}` });
       return;
     }
+    this.setFindings(work.id, settlePrior(this.findingsOf(work.id))); // fixed or disputed findings are checked by this round
     delete this.state.diffs_by_task[work.id]; // the next round looks only at what changes after this one
     const changes = given.filter((v) => v.verdict === "request_changes");
-    const merged = changes.map((v) => `### ${v.critic} (${LENS[v.lens].name})\n${v.comments}`).join("\n\n");
+    const merged = changes.map((v) => `### ${v.critic} (${LENS[v.lens].name})\n${v.comments}${v.findings?.length ? `\n\n${renderFindings(v.findings)}` : ""}`).join("\n\n");
     const rounds = this.state.revisions[work.id] ?? 0;
     if (!changes.length || rounds >= this.budget.max_revisions) {
       if (changes.length) this.state.open_comments[work.id] = merged;

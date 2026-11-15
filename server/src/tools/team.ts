@@ -6,6 +6,7 @@ import { z } from "zod";
 import { newId, now } from "../lib/util";
 import { SHARED_MEMORY } from "../db/project";
 import { defineTool } from "./types";
+import { reviewError } from "../lib/findings";
 
 const options = z.array(z.object({
   label: z.string().describe("Short answer the user can pick"),
@@ -82,8 +83,16 @@ export const workerTools = [
   defineTool({
     name: "complete_task",
     description: "Finish your task. Only call this when the acceptance criteria are met and you have verified the result (ran it, tested it, or re-read it). Summarise what you did, which files changed and how you verified it.",
-    args: z.object({ summary: z.string().min(10), verification: z.string().describe("What you ran or checked, and the result") }),
-    async run(_ctx, a) { return { text: "Task submitted.", stop: { kind: "complete", summary: a.summary, verification: a.verification } }; },
+    args: z.object({
+      summary: z.string().min(10),
+      verification: z.string().describe("What you ran or checked, and the result"),
+      responses: z.array(z.object({
+        id: z.string().min(2).describe("Finding id from the review, e.g. F2"),
+        status: z.enum(["fixed", "disputed"]),
+        response: z.string().min(5).describe("What you changed, or why you disagree"),
+      })).optional().describe("Your answer to each open blocker or major finding"),
+    }),
+    async run(_ctx, a) { return { text: "Task submitted.", stop: { kind: "complete", summary: a.summary, verification: a.verification, responses: a.responses ?? [] } }; },
   }),
   defineTool({
     name: "block_task",
@@ -113,9 +122,25 @@ export const acceptanceTool = defineTool({
 
 export const reviewTool = defineTool({
   name: "submit_review",
-  description: "Submit your review. approve only if the work meets the acceptance criteria, is correct, secure and maintainable. Otherwise request_changes with numbered, actionable comments (file, problem, fix).",
-  args: z.object({ verdict: z.enum(["approve", "request_changes"]), comments: z.string().min(5) }),
-  async run(_ctx, a) { return { text: "Review submitted.", stop: { kind: "review", verdict: a.verdict, comments: a.comments } }; },
+  description: "Submit your review. approve only if the work meets the acceptance criteria, is correct, secure and maintainable, and carries no blocker or major finding. Otherwise request_changes with one finding per problem: severity, file and lines, the problem, your evidence, and the concrete fix.",
+  args: z.object({
+    verdict: z.enum(["approve", "request_changes"]),
+    comments: z.string().min(5).describe("A short summary of your review"),
+    findings: z.array(z.object({
+      severity: z.enum(["blocker", "major", "minor"]),
+      file: z.string().optional(),
+      lines: z.string().optional().describe("Line range, e.g. 40-52"),
+      problem: z.string().min(5),
+      evidence: z.string().min(5).describe("What you saw or ran that shows the problem"),
+      fix: z.string().min(5),
+    })).optional(),
+  }),
+  async run(_ctx, a) {
+    const findings = a.findings ?? [];
+    const error = reviewError(a.verdict, findings);
+    if (error) return { text: error, ok: false };
+    return { text: "Review submitted.", stop: { kind: "review", verdict: a.verdict, comments: a.comments, findings } };
+  },
 });
 
 export const plannerTools = [

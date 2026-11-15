@@ -1,6 +1,6 @@
 # One writer, read-only specialists
 
-Status: Phase 1 in progress on `feat/one-writer`, branched from `main` at `0285ddf`.
+Status: Phases 1 and 2 done on `feat/one-writer`, branched from `main` at `0285ddf`. Phase 2 pinning is deferred (see below).
 
 ## Goal
 
@@ -52,6 +52,10 @@ and no self-review. The gaps, checked in code:
 - The next round's critics mark each earlier finding resolved or still open. New problems get new ids.
 - Done when: unit tests cover the gate and the stale check, and a conversation test shows that a writer cannot
   complete with an open finding.
+- Status: findings, responses and the gate are done (`server/src/lib/findings.ts`, `server/test/findings.test.ts`,
+  and the gate test in `server/test/conversation.test.ts`). Pinning is deferred: the engine already starts a review
+  round after each `complete_task`. The real gap is that a writer can ask reviewers for a review with `send_message`,
+  and keep editing; that channel needs its own rule, not a fingerprint check.
 
 ### Phase 3: minimal prompts
 
@@ -86,3 +90,6 @@ and no self-review. The gaps, checked in code:
 | 3 | Acceptance keeps `start_dev_server` | The verifier must run the app to check it | acceptance procedure |
 | 4 | Custom roles keep the file-write meaning | Changing them silently would change users' teams | `catalog/roles.ts`, Settings |
 | 5 | A spec document is written by a technical writer, not the PM | The PM is a critic and cannot write files | `server/test/conversation.test.ts` |
+| 6 | Findings are structured; approve carries only minor notes | A free-text comment cannot be answered one by one | `server/src/lib/findings.ts` |
+| 7 | The writer answers findings in `complete_task`, not in a new tool | A new tool would need the engine state inside the tool; the stop path already has it | `tools/team.ts`, `engine/conversation.ts` settle |
+| 8 | Three sends back for open findings, then the part is blocked | Bounds a writer that never answers | `engine/conversation.ts` settle |
