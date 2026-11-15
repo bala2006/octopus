@@ -1,209 +1,170 @@
 # Implementation report: performance and intelligence roadmap
 
-This follows `performance-audit.md` (findings F1–F19). It records what was changed, what was measured, and what remains.
-Measurements use the scripted model in `server/test/fakeModel.ts`, so they describe **execution shape** — model calls,
-instruction characters, tool work — and not provider token quality.
+This report follows `performance-audit.md` (findings F1 to F19). It describes what the code on this branch does now, after the review corrections to PR #101. Where an older claim was wrong, this report says so.
 
-## 1. What changed
+The measurements use the scripted model in `server/test/fakeModel.ts`. They count model calls, instruction characters and tool work. They do not measure wall-clock time, real token counts, cost or answer quality. No Azure deployment was used, so none of those is claimed here.
 
-### Stage 1 — correctness
+## 1. What the code does
 
-**F1 Agent capabilities** (`catalog/kinds.ts`, `engine/conversation.ts`)
-Capability now derives from role kind, never from `is_manager`:
+### Capability: who may build and review (F1)
 
-- `kindOf(agent)` — built-in role kind → catalog kind (`manager` kind only when the role genuinely is one).
-- `canWrite(agent)` — the role's tools include `write_file`/`edit_file` and its kind is a writer kind.
-- `canReview(agent)` — kind is `critic` **and** the agent can read files. A stale `file_write` tool on a QA cannot make it a writer.
-- `canVerify(agent)` — the role can read files and run commands.
-- `criticsFor` warns through the run's error channel instead of silently dropping a specialist; `verifierFor` and
-  `reviewerFor` use the same predicates.
+`server/src/catalog/kinds.ts` decides what an agent may do from its toolbox and its role.
 
-**F2 Failure loops and false completion** (`engine/agent.ts`, `engine/conversation.ts`)
+- `canWrite(agent)` is true only when the role is meant to build and its toolbox allows writing: `file_write` is not `false` and `file_read` is not `false`. A built-in writer such as `frontend` with `file_write` switched off cannot own a part.
+- Lead roles (`orchestrator`, `ceo`, `pm`) never own a part.
+- A built-in critic such as `designer` stays a critic even if its `file_write` is on.
+- `canReview` and `canVerify` are unchanged: a critic that can read, and can run or open the product.
 
-- Failure signatures (tool + normalised error) drive escalation: a second identical failure gets a targeted "you already
-  tried this" message with the previous output; a third ends the turn with `stop.kind = "block"`; five consecutive
-  failures also end it. The planner turns a blocked turn into `incomplete` instead of looping to its step cap.
-- A task turn that ends without `complete_task` is blocked, not done ("Stopped without calling complete_task, so nothing
-  was submitted as finished."), and `report()` treats `open` requirements as unresolved.
+The predicate is used in three places. `staffingError` refuses an owner that cannot write, with the reason. `directTask` creates a `build` task only for an agent that can write. `policyFor` in `server/src/tools/index.ts` gives write and command tools only to an agent that can write.
 
-### Stage 2 — orchestration and process
+### Completion: a run is incomplete when work is unresolved (F2, F11)
 
-**F4 Risk-based execution.** Review, acceptance and report remain available, but the engine no longer adds a separate
-report turn for a cycle that succeeded plainly (see F18), and effort is scaled by turn kind (F7), so a simple build no
-longer pays reasoning prices three times.
+- A failing tool still escalates. A second identical failure gets a targeted message. A third ends the turn as blocked. Five failures in a row end it too. This is unchanged from the PR.
+- A run's status comes from `cycleStatus` in `server/src/engine/conversation.ts`. It is `incomplete` when any task in the cycle is blocked, a project check failed, a requirement is open or unmet, or a blocking finding is unresolved.
+- A finding is unresolved until a later review round settles it. An answer of `fixed` or `disputed` alone does not settle it. A fix that changes no file gets no review, so its finding stays unresolved and the run is `incomplete`.
+- A part whose review comments are still open at the revision limit is `blocked`. Before this change it was `done`, and the run could still finish `completed`.
 
-**F17 Teammate questions.** An idle agent answers with at most 2 steps, and only loads its own transcript when that
-transcript is under 80k characters; otherwise it answers from the question and the shared summary.
+### Risk routing: how much checking a change gets (F4)
 
-**F18 Redundant prompt blocks and reporting.** A cycle with no cycle requirements, no blocked task, no open review
-comment, no revision and no failed check is reported by the engine from the owners' own summaries, the changed files and
-the checks. The model-written report is still used when there is something to explain (unmet requirements, blocked work,
-review disputes), and its prompt is now a ~300-character report card instead of the 3.9k-character orchestration
-procedure a tool-less turn cannot execute. The roster, project overview and playbooks are scoped as described under F3.
+`server/src/engine/risk.ts` assigns each finished build or fix one of four tiers. The inputs are the files the part changed, the changed lines since its last review, the specialists attached to it, whether requirements are open, and whether it was sent back by review.
 
-**F9 Review cost.** A critic that approved a work item keeps its approval: only critics who asked for changes read the
-revision (`reviewersFor` / `priorVerdicts`). A revision that nobody objected to still goes to one critic, so nothing
-ships unreviewed, and a round where several lenses object still merges all their feedback into one revision. In the
-two-specialist benchmark this removed two review turns per repair round.
-
-**F12 Verification scope.** Checks are skipped when every file the cycle changed is a document or an asset, and a check
-command that already passed for exactly the same file contents in this conversation is not run again. A cycle that only
-edited `README.md` no longer runs the test suite.
-
-**F11 Findings.** Findings belong to the work item, and a revision (a fix after review **or after a failed acceptance**)
-answers that item's findings. Previously a revision task's findings list was empty, so answering the finding it was just
-told about was rejected with "These ids match no finding", and the task blocked. Fixed in `settle()` via
-`state.continues[task.id] ?? task.id`.
-
-**F11b Acceptance repair loop.** When acceptance found a requirement unmet and created a fix, `state.unaccepted` stayed
-false, so no re-acceptance was ever queued and the requirement stayed `unmet` forever. `settleAcceptance()` now re-arms
-the acceptance after creating fix tasks. This was the difference between the benchmark's two-round scenario ending
-`incomplete` and ending `completed`.
-
-### Stage 3 — sessions and context
-
-**F3 Prompt construction** (`engine/prompts.ts`)
-`instructions()` builds only what a mode can use: the project overview goes to planning, building and acceptance turns;
-the team roster is left out of diff reviews and reports; only the playbooks the task asked for get their full text, role
-defaults are listed by name and description. Measured instruction payload dropped by 50–60% (section 3).
-
-**F5 Sessions** (`engine/conversation.ts`)
-`finishCycle` no longer clears every session — it keeps them and drops any transcript over `SESSION_MAX_CHARS`, so the
-lead's knowledge of the project survives across requests in a conversation. The lead now has a single session for the
-conversation. On every user message `refreshFileState()` re-hashes the files each live session holds and drops the
-entries that changed on disk, so the rename guard and the "unchanged since you read it" shortcut cannot use stale hashes.
-
-**F6 Compaction.** Existing behaviour is preserved: the transcript is rebuilt from kept items plus a checkpoint instead
-of mutating transmitted history, and `shown` survives with the session.
-
-**F16 Editing state** (`tools/files.ts`)
-`edit_file` now records the edited line range in the read ledger (hash of the file, range of the edit), so re-reading the
-edited lines costs a line; `replace_all` clears the entry because it cannot name the ranges.
-
-### Stage 4 — tokens and tools
-
-**F7 Effort per operation.** `EFFORT` maps orchestrator/worker → high, reviewer/acceptance → medium,
-quick_review/report/chat/consult → low, with the conversation budget and the agent's own setting still overriding it.
-The UI's "Auto" now says what it does.
-
-**F10 File exploration.** An unqualified read is paged at 12k characters with a "continue with start_line N" header; an
-explicit line range still fills up to the 40k tool limit, so targeting a function costs one small read instead of a whole
-file.
-
-**F13 Tool arguments.** Malformed JSON is no longer silently parsed as `{}` (which produced confusing "Required" schema
-errors). The model is told the arguments were not valid JSON, plus the first 300 characters it sent, and the same for
-non-object arguments. Schema failures also echo the received arguments.
-
-Strict schemas are implemented and off by default: `strictParameters()` normalises a schema for strict mode (every
-property required, `additionalProperties: false`, optional properties become nullable), `toFunction(tool, strict)`
-advertises it, nulls from the model are stripped before validation, and a 400 that complains about the schema drops
-strict mode for that model and retries. `AZURE_STRICT_TOOLS=1` turns it on. It stays off until it has been validated
-against the deployment, because a wrong strict schema fails every call.
-
-**F14 Configuration.** `max_output_tokens` already reaches the provider; the effort setting's "Auto" description was
-corrected to describe the real behaviour. No UI control was found that does not reach the provider.
-
-## 2. Observability
-
-`Usage` (shared) now carries execution counters alongside provider token counts, updated by the engine itself:
-
-| Field | Source |
-|---|---|
-| `llm_calls`, `input_tokens`, `cached_tokens`, `output_tokens`, `reasoning_tokens`, `cost_usd` | provider usage per call (unchanged) |
-| `model_ms` | wall-clock of each model request (`LlmResult.ms`) |
-| `agent_runs` | one per agent turn |
-| `tool_calls`, `tool_failures` | every tool result, success and failure |
-| `file_reads`, `redundant_reads` | `read_file` results; redundant = served from the session ledger |
-| `file_writes` | writes, edits, moves and deletes |
-| `verifications` | checks actually executed |
-
-They are shown in the run's usage popover ("Execution": agent turns, tool calls, files read, files changed, checks run,
-model time) next to the token table, so a run's cost can be explained without reading logs. No file contents, prompts or
-credentials are collected.
-
-## 3. Benchmark: before and after
-
-`server/test/benchmark.test.ts` drives the real HTTP API and engine against the scripted model. Each test asserts a call
-budget and a payload ceiling, so a regression fails the suite. Numbers are per scenario:
-
-| Scenario | Calls before | Calls after | Instruction chars before | after | Agent turns after | Outcome |
-|---|---|---|---|---|---|---|
-| Simple question | 1 | 1 | 9k | 5k | 1 | completed |
-| Single-file page | 6 | 5 | 41k | 17k | 3 | completed |
-| Page + review round + failed acceptance | 16 | 15 | 98k | 41k | 10 | completed (before: requirement never re-accepted) |
-| Same + designer and QA | 21 | 18 | 129k | 53k | 12 | completed |
-| Follow-up on a changed file | 6 | 5 | — | — | 4 | completed |
-| Persistent tool failure | 30, then reported completed | 3 | — | 15k | 1 | **incomplete** (correct) |
-| Docs-only change | ran the project's checks | 6 calls, 0 checks | — | 22k | 3 | completed |
-
-Reading the table: the payload fell by 55–58% because prompts are scoped and the report turn lost a procedure it could
-not use; one model call disappeared because plain cycles no longer get a separate narrator; and the failure loop collapsed from an exhausted budget to three calls with an honest
-`incomplete`. The two-round scenarios still spend a call per review/acceptance pass — that is verification work, not
-overhead, and it is the part that must not be cut blindly.
-
-Not measured here: real token and reasoning-token counts, cached-input ratio, and model quality. The scripted model
-reports fixed usage. Those need the Azure deployment and a live A/B run (see limitations).
-
-## 4. Tests
-
-- Baseline before work: 125 passing (`server`, vitest).
-- Now: 157 passing, typecheck clean in every workspace.
-- New: `server/test/kinds.test.ts` (capability predicates and every shipped template's ability to start its work),
-  two F2 tests in `conversation.test.ts` (a failing planner stops within four calls; a prose-only worker is blocked), and
-  seven benchmark scenarios.
-- Rewritten rather than relaxed: the "keeps testing" test created its file first, so its repeated reads succeed; the bug
-  it guards (re-reading the same content) is still asserted.
-
-## 5. Lifecycle after the change
-
-```
-user message
-  └─ lead (persistent session)
-       ├─ plain question ─────────────────────────────► reply (1 call)
-       ├─ direct message to a teammate ───────────────► answer, ≤2 steps, live session only if <80k
-       └─ work
-            ├─ hire / tasks / requirements
-            ├─ workers (per work item, session reused across revisions)
-            │    ├─ read_file (12k page, ledger shortcut) · edit_file (ledger updated)
-            │    ├─ failures escalate: 2 → targeted retry, 3 → block, 5 consecutive → block
-            │    └─ findings of the work item must be answered before complete_task
-            ├─ reviews (diff packet for small code changes; lens review when it needs the product)
-            ├─ checks: skipped for docs/assets, cached per file content, then targeted
-            ├─ acceptance: unmet → fix task → re-acceptance (now re-armed)
-            └─ report: engine-written for plain success; model-written only when there is something to explain
-```
-
-## 6. Findings status
-
-| ID | Status | Notes |
+| Tier | When | What runs |
 |---|---|---|
-| F1 | Fixed | Capability from role kind + tools; templates tested |
-| F2 | Fixed | Signature escalation, no-stop-turn blocking, open requirements block completion |
-| F3 | Fixed | Mode-scoped prompts, playbooks only when requested |
-| F4 | Partially fixed | Effort and reporting scale with the task; presets still decide the review pipeline |
-| F5 | Partially fixed | Lead persists across requests; per-task worker sessions still start cold by design (a new task's transcript genuinely lacks the file) |
-| F6 | Preserved/verified | Rebuild-from-checkpoint kept; `shown` survives |
-| F7 | Fixed | Per-mode effort, budget and agent override |
-| F8 | Partially fixed | Task briefs carry deps, findings, requirements, docs; planner file-reading duplication untouched |
-| F9 | Fixed | Approving critics are not asked again; a change nobody objected to still gets one reviewer |
-| F10 | Partially fixed | Paged reads, explicit ranges, ledger dedupe; no symbol outline and no search cache (a cache would return stale results or duplicate text) |
-| F11 | Fixed | Work-item findings, re-armed acceptance |
-| F12 | Fixed | Docs/assets skip, content-keyed check cache |
-| F13 | Fixed (opt-in) | Honest parse errors; strict schemas implemented behind `AZURE_STRICT_TOOLS`, off until validated |
-| F14 | Fixed | Effort "Auto" description corrected; output cap reaches the provider |
-| F15 | Investigated, unchanged | Encrypted reasoning still replayed; measurement needs a live deployment |
-| F16 | Fixed | `edit_file` range ledger, stale-write guard unchanged |
-| F17 | Fixed | Answer turns ≤2 steps, live session only under 80k chars |
-| F18 | Fixed | Report card replaces the orchestration procedure (3.9k → 0.3k chars); engine-written report for plain cycles; roster/overview/playbooks scoped |
-| F19 | Fixed | `set_requirements` reports duplicates instead of "Recorded" with nothing; `answerTurn` settles a question once; the misleading lead-critic message disappeared with `is_manager` |
+| trivial | one file, 20 changed lines or fewer, no requirements, no specialists, no configuration or sensitive path, not revised | no review. The owner's `complete_task` summary is the record. Project checks still run. |
+| small | more than a trivial edit, up to two files and 80 lines, or any part sent back by review | one quick review from the diff, with no tools. This is the existing quick-review path. |
+| normal | requirements still open or unmet, a configuration or dependency file, more than two files, or more than 80 lines | one reviewer with tools. A diff that fits the quick-review limit still gets the quick review. |
+| high | specialists attached, a sensitive path, more than eight files, or more than 400 lines | every critic attached to the part, with tools. |
 
-## 7. Limitations
+A sensitive path is one with a whole-word match on `auth`, `login`, `session`, `password`, `token`, `secret`, `credential`, `crypto`, `permission`, `payment`, `billing`, `migration`, `schema`, `security`, `env`, `docker`, `github` or `workflows`. A configuration file is a manifest or lock file, a `tsconfig*.json`, a build tool config such as `vite.config.ts`, a `Makefile` or a `.nvmrc`.
 
-- **No Azure deployment here.** Token counts, cached-input ratio, reasoning tokens and real quality cannot be measured.
-  The benchmark measures calls and characters. A live A/B needs the same deployment, prompts and parameters.
-- **Strict tool schemas default to off.** The normaliser and the null stripping are unit-tested, but only a live
-deployment can confirm that every tool schema is accepted; turning it on blind could break every call, so it is one
-environment variable away rather than on.
-- **First-round review is still one turn per lens.** A designer, a QA and a code reviewer each read a new change with
-their own brief. Merging them into a single multi-lens review is the remaining F9 opportunity.
-- **Sessions persist in memory.** A server restart starts cold; the file ledger is re-derived from reads.
+Acceptance is unchanged. It runs when requirements are open or unmet. A cycle with requirements is never `trivial`, so the router does not skip a check the user asked for.
+
+Every decision is a `thought` event, for example "T1 is a trivial change (1 file, 2 changed lines), so it is not reviewed."
+
+The router does not let the user or the lead pin a tier. The lead raises the tier only by attaching specialists.
+
+### Context: the file-read ledger survives summarizing (F6)
+
+Compaction still rewrites the transcript in place, as it did before this change. `summarize()` in `server/src/engine/agent.ts` replaces the middle of the transcript with a checkpoint. `truncate()` shortens older tool outputs. The brief and the recent tail are never edited. A test checks the brief and the last output of the transcript.
+
+The file-read ledger (`shown`) is what changed. Each entry now records the transcript position of the tool output that carries its content (`at`).
+
+- Summarizing removes entries whose output was replaced by the checkpoint, and moves the remaining entries to their new positions.
+- Shortening removes the entries of the outputs it shortened.
+- A read that extends an earlier read of the same content keeps the earlier position. The entry then depends on the older output, which can drop it earlier than needed. That costs one re-read and never returns stale content.
+
+The PR report said the ledger "survives" compaction. That was not true. The code cleared the whole ledger on every summarize and truncate. It is now position-tracked as described above.
+
+`truncate()` also had a size bug. It counted a shortened output as 1,500 characters when it is about 1,300, so it shortened outputs that fit the budget. It now counts the real difference.
+
+### Execution metrics (item 5)
+
+- `model_ms` runs from the first attempt to the last streamed byte. It includes the first network wait, streaming, retries and the waits between retries. Before, it started after the response headers, so a retried call reported almost no time.
+- `file_writes` counts write operations: each successful write, edit, move or delete.
+- `files_changed` counts distinct project paths the run changed.
+- `searches` counts `search_project` calls, including one with an invalid regular expression.
+- `listings` counts `list_files` calls.
+
+The run's Execution popover shows "Searches", "Folder listings", "Files changed" (unique paths) and "Files read". The "Files changed" row gives the write-operation count as a hint.
+
+### Check scope: documents and assets (F12, item 6)
+
+Checks are skipped only when every changed file is a document or an asset, and no other project text file names it. `server/src/engine/checkScope.ts` makes that test. A file counts as named when a source file contains its basename, or the folder it sits in followed by `/`.
+
+A manifest such as `requirements.txt` never skips checks. A fixture that a test loads, or an icon that a component imports, runs the checks.
+
+The scan matches names. A file read through a glob that names no folder is not detected, so the checks can be skipped for it. Only text files are scanned, and only for a change that is all documents or assets.
+
+### Unchanged from the PR
+
+F3 (mode-scoped prompts), F7 (effort per mode), F9 (only critics that asked for changes read the revision), F10 (12k-character pages with explicit ranges), F13 (strict tool schemas, off by default), F16 (edit ledger), F17 (answer turns capped at two steps) and F18 (short report card, engine-written report for plain cycles) work as the PR describes.
+
+## 2. Measured results
+
+Both sides ran the same scripted scenarios with the same harness, `server/test/benchmark.test.ts`. "Before" is `origin/main` at `b93a897`. "After" is this branch.
+
+| Scenario | Calls before | Calls after | Instruction chars before | After | Status before | After |
+|---|---|---|---|---|---|---|
+| Question | 1 | 1 | 8,509 | 5,338 | completed | completed |
+| One-file page, no requirements | 6 | 4 | 40,803 | 15,348 | completed | completed |
+| Page, review round, failed acceptance | 18 | 15 | 108,957 | 41,330 | incomplete | completed |
+| Same, with designer and QA | 23 | 18 | 140,556 | 52,570 | incomplete | completed |
+| Follow-up on a changed file | 6 | 5 | not logged | not logged | completed | completed |
+| Persistent tool failure | 30 | 3 | 249,900 | 15,477 | completed | incomplete |
+| Documents-only change | 9 | 5 | 60,798 | 20,682 | incomplete | completed |
+
+Each side ran five times, alternating. Both sides gave the same call count in every run, because the scripted model is deterministic.
+
+The counts above are not a latency result. The scripted model answers instantly. The benchmark asserts calls and characters only.
+
+Some reads of this table:
+
+- The persistent-failure run on `origin/main` reports `completed` after 30 calls. That was the false completion from F2. This branch stops after 3 calls and reports `incomplete`.
+- The one-file page makes no review call. It is a trivial change under the router.
+- The review, designer and documents rows end `incomplete` on `origin/main` and `completed` here. This report does not investigate the cause of the `origin/main` status.
+- `origin/main` has no usage counters, so its reads, writes, turns and failures are not measured. The branch's values are in the benchmark log. The one-file page writes one file. The follow-up reads `index.html` once with no redundant read, then writes twice. The persistent failure has three tool failures.
+
+The PR report gave 16 and 21 calls before the change for the review and designer rows. This harness measures 18 and 23 on `origin/main`. The table above replaces the PR's numbers.
+
+Instruction characters for three scenarios are pinned exactly in `server/test/benchmark.test.ts`. Any prompt change that adds text fails that test on purpose.
+
+## 3. Validation
+
+Environment: Windows, Node 24.22.3, npm 11.19.1.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` (shared, server, web) | passes |
+| `npm test`, server (vitest) | 186 tests pass across 16 files |
+| `npm test`, web (vitest) | 113 tests pass across 24 files |
+| `npm run build` (web: tsc, then vite build) | passes |
+| Benchmark, five runs per side | identical counts in every run |
+
+The CI matrix in `.github/workflows/ci.yml` also runs on `ubuntu-latest`. That leg has not run for this branch. The WSL Ubuntu distro does not start on this machine, and validation is limited to Node and TypeScript. Run the CI workflow before merging.
+
+Regression tests added for the corrections:
+
+- `server/test/kinds.test.ts`: customized built-in roles, both writer and reviewer cases, and the command tool a read-only writer gets.
+- `server/test/conversation.test.ts`: an open blocking finding at the revision limit makes the run `incomplete`; a one-line change gets no review; a change to an authentication file still gets one; usage counts file operations, unique files and searches; a fixture that a check reads still runs the checks; a built-in writer whose file tools are off is refused a part, and the planner is told why.
+- `server/test/agent.test.ts`: the ledger keeps files still in the transcript after summarizing, drops the ones whose output was shortened, and leaves the brief and the tail unchanged.
+- `server/test/azure.test.ts`: model time includes the first wait and the retry wait.
+- `server/test/checkScope.test.ts` and `server/test/risk.test.ts`: the skip rule and the tier rules, including whole-word sensitive paths.
+
+Existing tests changed on purpose, with their intent kept:
+
+- Review tests that wrote a one-line page now write a 26-line page (`reviewedPage`), because a one-line change is trivial now and the test is about review.
+- "A small change is reviewed from its diff in one step" still checks the quick review through the reviewed page.
+- "A follow-up is accepted against its own requirements" now expects only the build task, because its change is a one-line rename. It still checks that the earlier request's requirement does not reach the follow-up.
+- The benchmark's one-file scenario now asserts two agent turns and no review, where it used to assert one diff review.
+
+## 4. Findings status
+
+| ID | Status | What the code does | Remaining |
+|---|---|---|---|
+| F1 | Fixed | Capability comes from the toolbox and the role. Covered by kinds, policy and conversation tests. | None known. |
+| F2 | Fixed, with one open item | Failure escalation, blocked turns and open requirements all stop false completion. Unresolved blocking findings make a run incomplete. | The planner still has a 30-round budget. The audit's adaptive budget is not built. |
+| F3 | Fixed (PR) | Prompts are scoped per mode. | None known. |
+| F4 | Partly fixed | The four tiers choose review depth, and each decision is shown as a thought. | No user or lead pin of a tier. A sensitive path does not add a security reviewer by itself; only attached specialists do. The first review round still runs one turn per lens (F9). |
+| F5 | Partly fixed | The lead keeps one session for the conversation. Sessions survive a cycle and are dropped above 600,000 characters. File hashes are re-checked on each user message. | Worker sessions start cold for each new task, by design. Every planning turn still resends the role library, the skill list, the limits, the 12-message history digest and the task lists (`orchestratorInput` in `conversation.ts`). |
+| F6 | Partly fixed | The ledger survives summarizing and shortening where its content is still in the transcript. The brief and the tail are never edited. | Compaction still rewrites the transcript in place. The audit's append-only projection and structured engine checkpoint are not built. |
+| F7 | Fixed (PR) | Effort depends on the turn kind, with the agent and budget settings still overriding it. | None known. |
+| F8 | Partly fixed | The lead's session is reused, so planning follows earlier turns. | The per-turn resend described under F5 is still there. A worker still gets a text brief from the lead, not the lead's transcript. |
+| F9 | Partly fixed | A critic that approved a part does not read its revision again. | First-round reviews are still one turn per lens, with no shared review packet. |
+| F10 | Partly fixed | Reads are paged at 12,000 characters, and an explicit range fills up to the tool limit. | No outline or symbol tool. `search_project` has no cache and walks up to 4,000 files on each call. |
+| F11 | Fixed, with one caveat | Findings belong to the part, a revision answers them, and acceptance is re-armed. A blocker still open after the last review makes the run `incomplete`. | A fix answered `fixed` with no file change has no review, so it stays unresolved. That is the intended result, but it can surprise a user. |
+| F12 | Fixed, with a limit | Documents and assets skip checks only when no source file names them. Results are cached per file content. | The name match misses a file read through a glob that names no folder. |
+| F13 | Fixed, opt-in | Malformed JSON is reported as such. Strict schemas exist behind `AZURE_STRICT_TOOLS`. | Strict mode is off by default because it is not checked against a live deployment. |
+| F14 | Not fixed | The PR report said no dead control remained. That is wrong. `temperature`, `assertiveness`, `creativity`, `strictness`, `debate_style` and `max_autonomous_turns` are still stored and written by `web/src/stores/canvas.ts`. No server code reads the behavior keys. `temperature` is not sent to the model. | Remove the keys or label them as unused. This branch does not change them. |
+| F15 | Not fixed | Encrypted reasoning items are still replayed on every round. | Needs a live deployment: measure input tokens per round with and without replay. |
+| F16 | Fixed (PR) | `edit_file` records the edited range in the ledger. | None known. |
+| F17 | Fixed (PR) | An idle teammate answers in at most two steps, and reuses its session only under 80,000 characters. | None known. |
+| F18 | Fixed (PR) | The report card replaces the orchestration procedure, and plain cycles get an engine-written report. | None known. |
+| F19 | Partly fixed | A reply made with the reply tool settles the question once. `answerTurn` then calls `collab.answer` again, which does nothing. | The second call is not removed. |
+
+## 5. Limits and open items
+
+- No Azure measurement. Token counts, cached input, reasoning tokens, cost and answer quality are unmeasured. The benchmark counts calls and characters, and it has no latency.
+- `model_ms` is measured in code and covered by a unit test against a local server that returns a retry. Its value on a real deployment is unmeasured.
+- Routing trades review for cost. A one-line change now gets no review. Project checks still run, when the project has them. A one-line change on a sensitive path still gets a review. Whether other one-line changes should be reviewed is a product decision. A team that wants more review can change the rules in `tierOf`.
+- Sessions live in memory. A restart starts each conversation from its brief.
+- The Linux CI leg has not run for this branch.
