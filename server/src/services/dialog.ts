@@ -25,7 +25,7 @@ export const availability = () => (cached ??= method());
 
 /**
  * The Windows folder dialog, in the Explorer style of the file dialogs. The server is a background process, so Windows
- * opens its dialog behind the browser. A helper thread makes that dialog topmost. The script is sent base64-encoded so
+ * opens its dialog behind the browser. A hidden owner window makes it modal, so it opens in front. The script is sent base64-encoded so
  * its quotes survive cmd.exe.
  */
 function folderScript(start: string): string {
@@ -33,13 +33,14 @@ function folderScript(start: string): string {
   return [
     "$ProgressPreference = 'SilentlyContinue'",
     "Add-Type -AssemblyName System.Windows.Forms",
-    `Add-Type -MemberDefinition '[DllImport(\"user32.dll\", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags); public static void MakeTopmost(string title) { var t = new System.Threading.Thread(() => { for (int i = 0; i < 400; i++) { IntPtr h = FindWindow(\"#32770\", title); if (h != IntPtr.Zero) { SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, 0x0003); return; } System.Threading.Thread.Sleep(50); } }); t.IsBackground = true; t.Start(); }' -Name Fg -Namespace Octo`,
-    `[Octo.Fg]::MakeTopmost('${PROMPT}')`,
+    "[System.Windows.Forms.Application]::EnableVisualStyles()",
+    `$owner = New-Object System.Windows.Forms.Form -Property @{ Text = '${PROMPT}'; TopMost = $true; ShowInTaskbar = $false; StartPosition = 'CenterScreen'; Opacity = 0; Width = 1; Height = 1 }`,
+    "$owner.Show(); $owner.Activate()",
     `$d = New-Object System.Windows.Forms.OpenFileDialog -Property @{Title='${PROMPT}'; FileName='Folder Selection.'; ValidateNames=$false; CheckFileExists=$false; InitialDirectory='${q(start)}'}`,
-    "if ($d.ShowDialog() -eq 'OK') { $p = $d.FileName; if (-not (Test-Path -LiteralPath $p -PathType Container)) { $p = [System.IO.Path]::GetDirectoryName($p) }; [Console]::Out.WriteLine('OCTOPUS_PICK:' + $p) }",
+    "$result = $d.ShowDialog($owner); $owner.Close()",
+    "if ($result -eq 'OK') { $p = $d.FileName; if (-not (Test-Path -LiteralPath $p -PathType Container)) { $p = [System.IO.Path]::GetDirectoryName($p) }; [Console]::Out.WriteLine('OCTOPUS_PICK:' + $p) }",
   ].join("; ");
 }
-
 function command(m: string, start: string): string[] {
   switch (m) {
     case "osascript": return ["osascript", "-e", `POSIX path of (choose folder with prompt "${PROMPT}" default location (POSIX file "${start}"))`];
