@@ -20,6 +20,10 @@ export default defineConfig({
       "monaco-workers": path.join(monaco, "esm/vs"),
     },
   },
+  // Monaco loads its workers through ?worker imports. Pre-bundling them makes the dev optimizer fail, so they are served as source.
+  optimizeDeps: {
+    exclude: ["monaco-editor", "monaco-workers"],
+  },
   server: {
     host: "127.0.0.1",
     port: PORT,
