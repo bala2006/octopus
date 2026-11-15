@@ -31,7 +31,7 @@ export interface StreamHandlers {
   onToolStart?: (call: { call_id: string; name: string }) => void;
   onToolArgs?: (callId: string, delta: string) => void;
 }
-export interface LlmResult { text: string; thought: string; calls: ToolCall[]; output: Item[]; usage: TokenUsage; costUsd: number; incomplete: string | null; /** Wall-clock of the request, for the run's execution metrics. */ ms: number }
+export interface LlmResult { text: string; thought: string; calls: ToolCall[]; output: Item[]; usage: TokenUsage; costUsd: number; incomplete: string | null; /** Wall-clock from the first attempt to the last streamed byte: network wait, streaming, retries and their waits. */ ms: number }
 
 export interface AzureConnection { baseUrl: string; apiKey: string; auth: "key" | "entra"; options: ProviderOptions }
 
@@ -109,6 +109,7 @@ async function headers(c: AzureConnection): Promise<Record<string, string>> {
 
 /** One model call, streamed. Throws UserError with a readable message on configuration problems. */
 export async function complete(reg: Registry, req: LlmRequest, on: StreamHandlers = {}): Promise<LlmResult> {
+  const started = Date.now();
   const c = connection(reg);
   if (!c) throw new UserError("Azure OpenAI is not connected. Open Settings → Model and add your endpoint and key.", 412);
   const drop = dropped.get(req.model) ?? new Set<string>();
@@ -127,7 +128,6 @@ export async function complete(reg: Registry, req: LlmRequest, on: StreamHandler
       continue;
     }
     if (res.ok && res.body) {
-      const started = Date.now();
       const result = await readStream(res.body, c.options, on);
       return { ...result, ms: Date.now() - started };
     }
@@ -151,7 +151,7 @@ export async function complete(reg: Registry, req: LlmRequest, on: StreamHandler
   throw new UserError(lastError || "Azure OpenAI did not respond");
 }
 
-async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderOptions, on: StreamHandlers): Promise<LlmResult> {
+async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderOptions, on: StreamHandlers): Promise<Omit<LlmResult, "ms">> {
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
@@ -207,7 +207,7 @@ async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderO
     output: u.output_tokens ?? 0, reasoning: u.output_tokens_details?.reasoning_tokens ?? 0,
   };
   return {
-    text, thought: thought.trim(), calls, usage, costUsd: priceUsage(usage, options), ms: 0,
+    text, thought: thought.trim(), calls, usage, costUsd: priceUsage(usage, options),
     // replay everything except plain message items without content; reasoning items carry encrypted content
     output: output.map(({ status: _s, ...item }) => item),
     incomplete: resp.status === "incomplete" ? resp.incomplete_details?.reason ?? "incomplete" : null,

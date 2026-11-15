@@ -12,9 +12,17 @@ export interface Usage {
   active_seconds: number; input_tokens: number; cached_tokens: number; output_tokens: number;
   reasoning_tokens: number; llm_calls: number; per_agent: Record<string, number>; per_agent_cost: Record<string, number>;
   cost_breakdown: { input: number; cached_input: number; output: number };
-  /** Execution counters, so the cost of a run can be explained: what it called, changed and re-read. */
+  /** Execution counters, so the cost of a run can be explained: what it called, changed, searched and re-read. */
+  /** Wall-clock of every model request, retries and their waits included. */
   model_ms: number; tool_calls: number; tool_failures: number;
-  file_reads: number; redundant_reads: number; file_writes: number;
+  /** Read operations, and how many of them returned content the transcript already held. */
+  file_reads: number; redundant_reads: number;
+  /** Write operations: each successful write, edit, move or delete. One file can take several. */
+  file_writes: number;
+  /** Distinct project paths the run changed. */
+  files_changed: number;
+  /** Repository search operations, and folder listings. */
+  searches: number; listings: number;
   verifications: number; agent_runs: number;
 }
 export type PhaseStatus = "pending" | "active" | "done" | "skipped" | "failed";

@@ -1,7 +1,7 @@
 /** Which tools an agent gets, from its kind (writer, critic or lead), its tool switches and what it is doing right now. */
 import type { AgentOut } from "@octopus/shared";
 import type { Registry } from "../db/registry";
-import { kindOf } from "../catalog/kinds";
+import { canWrite, kindOf } from "../catalog/kinds";
 import { browserTools, serverTools } from "../services/mcp";
 import { commandTools } from "./commands";
 import { fileTools } from "./files";
@@ -24,11 +24,11 @@ export function policyFor(agent: AgentOut, mode: Mode): Policy {
   const t = agent.tools;
   const kind = kindOf(agent);
   const checks = mode === "worker" || mode === "reviewer" || mode === "acceptance";
-  const build = kind === "writer" && mode === "worker";
+  const build = canWrite(agent) && mode === "worker";
   let commands: Policy["commands"] = "none";
   if (checks && t.terminal) commands = build ? "all" : mode === "acceptance" ? "start" : "none";
   return {
-    files: build && t.file_write !== false,
+    files: build,
     commands,
     browser: !!t.browser && checks,
     mcp: !(kind === "critic" && checks),

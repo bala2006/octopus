@@ -6,7 +6,8 @@ import type { AgentOut } from "@octopus/shared";
 import { BUILTIN_TEMPLATES, buildTemplate } from "../src/catalog/templates";
 import { BUILTIN_ROLES } from "../src/catalog/roles";
 import { canReview, canVerify, canWrite, kindOf, staffingError } from "../src/catalog/kinds";
-import { openRegistry } from "../src/db/registry";
+import { openRegistry, type Registry } from "../src/db/registry";
+import { toolbox } from "../src/tools";
 
 const reg = openRegistry(path.join(mkdtempSync(path.join(tmpdir(), "kinds-")), "registry.db"));
 
@@ -55,6 +56,37 @@ describe("capability, not rank", () => {
     expect(canReview(blind)).toBe(false);
     expect(canVerify(blind)).toBe(false);
     expect(staffingError(asAgent({ id: "owner", name: "Lena" }), [blind])).toContain("cannot read the project");
+  });
+});
+
+describe("built-in roles with customized tool permissions", () => {
+  const readOnlyFrontend = () => asAgent({ id: "lena", name: "Lena", behavior: { template_key: "frontend" }, tools: { file_read: true, file_write: false, terminal: true } });
+
+  test("a built-in writer whose toolbox forbids writing cannot own a part", () => {
+    const lena = readOnlyFrontend();
+    expect(canWrite(lena)).toBe(false);
+    expect(staffingError(lena, [])).toMatch(/cannot change files/);
+  });
+
+  test("a built-in writer whose read permission is off cannot own a part", () => {
+    const diego = asAgent({ id: "d", name: "Diego", behavior: { template_key: "backend" }, tools: { file_read: false, file_write: true, terminal: true } });
+    expect(canWrite(diego)).toBe(false);
+    expect(staffingError(diego, [])).not.toBeNull();
+  });
+
+  test("a read-only built-in writer is a critic that may review, and gets no command tool that could change files", async () => {
+    const lena = readOnlyFrontend();
+    expect(kindOf(lena)).toBe("critic");
+    expect(canReview(lena)).toBe(true);
+    const { tools } = await toolbox({} as Registry, ".", lena, "worker");
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain("write_file");
+    expect(names).not.toContain("run_command");
+  });
+
+  test("a built-in reviewer given write permission is still not handed a build", () => {
+    const designer = asAgent({ id: "d", name: "Iris", behavior: { template_key: "designer" }, tools: { file_read: true, file_write: true } });
+    expect(canWrite(designer)).toBe(false);
   });
 });
 

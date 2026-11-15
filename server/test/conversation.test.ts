@@ -8,6 +8,7 @@ import { buildServer } from "../src/http/server";
 import { encrypt } from "../src/lib/secrets";
 import { publish } from "../src/engine/bus";
 import { Conversation } from "../src/engine/conversation";
+import { BUILTIN_ROLES } from "../src/catalog/roles";
 import { openProject } from "../src/db/project";
 import { project } from "../src/workspace/projects";
 import { stopAll } from "../src/workspace/processes";
@@ -30,7 +31,13 @@ const W = () => `/api/v1/w/${ws.id}`;
 const answers = (input: unknown) => [...new Set([...JSON.stringify(input).matchAll(/F\d+(?= \[(?:blocker|major)\])/g)].map((m) => m[0]))].map((id) => ({ id, status: "fixed" as const, response: "Done as asked." }));
 /** A critic's request for a change, with one major finding. */
 const finding = (problem: string) => [{ severity: "major", problem, evidence: "Read the page as written.", fix: "Make the change the problem describes." }];
-
+/** A page of more than one line. The engine reviews a change this size; a one-line edit is trivial and is not reviewed. */
+const longPage = (seed: string) => `${Array.from({ length: 25 }, (_, i) => `<p>${seed} ${i}</p>`).join("\n")}\n`;
+const reviewedPage = `<h1>Acme</h1>\n${longPage("Section")}`;
+/** The builder of a one-line change: one single-line write, then done. */
+const oneLineWork = (b: { input: { type?: string; role?: string; output?: string }[] }) => (outputs(b).length === 0
+  ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] }
+  : { calls: [{ name: "complete_task", args: { summary: "Built index.html with the hero.", verification: "Opened the file" } }] });
 async function until(runId: string, statuses: string[], ms = 15_000): Promise<RunDetail> {
   const end = Date.now() + ms;
   for (;;) {
@@ -65,7 +72,7 @@ const buildScript: Script = (b) => {
       { name: "create_task", args: { title: "Build the landing page", description: "Create index.html with a hero section.", acceptance_criteria: "- index.html exists", assignee: "Lena", kind: "build" } }] }
     : { calls: [{ name: "start_work", args: { note: "Lena builds the page." } }] };
   if (kind === "work") return n === 0
-    ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n", note: "Landing page" } }] }
+    ? { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage, note: "Landing page" } }] }
     : { calls: [{ name: "complete_task", args: { summary: "Built index.html with the hero.", verification: "Opened the file" } }] };
   if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks good." } }] };
   if (kind === "acceptance") {
@@ -129,7 +136,7 @@ test("review requests changes, the author revises, and the project's tests run",
     }
     if (kind === "work") {
       const revising = brief.includes("Review feedback to address");
-      if (n === 0) return revising ? { calls: [{ name: "read_file", args: { path: "index.html" } }] } : { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] };
+      if (n === 0) return revising ? { calls: [{ name: "read_file", args: { path: "index.html" } }] } : { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] };
       if (revising && n === 1) return { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1>Acme</h1><p>Plans</p>" } }] };
       return { calls: [{ name: "complete_task", args: { summary: revising ? "Added the plans section." : "Built the landing page.", verification: "read it", responses: answers(b.input) } }] };
     }
@@ -163,7 +170,7 @@ test("a writer cannot finish with an open blocker or major finding; it is sent b
         : { calls: [{ name: "complete_task", args: { summary: "Added pricing.", verification: "Re-read it" } }] };
     }
     if (kind === "work") return n === 0
-      ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] }
+      ? { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] }
       : { calls: [{ name: "complete_task", args: { summary: "Built the page.", verification: "Opened it" } }] };
     return buildScript(b);
   };
@@ -452,7 +459,7 @@ test("review comments still open at the revision limit are listed in the report,
     const n = outputs(b).length;
     if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "1. index.html: the footer is missing.", findings: finding("The footer is missing.") } }] };
     if (kind === "work") return n === 0
-      ? { calls: [{ name: "write_file", args: { path: "index.html", content: `<h1>Acme ${Math.random()}</h1>\n` } }] }
+      ? { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage.replace("Acme", `Acme ${Math.random()}`) } }] }
       : { calls: [{ name: "complete_task", args: { summary: "Built and revised the page.", verification: "Opened it", responses: answers(b.input) } }] };
     if (kind === "report") return { text: "The page is built and the footer was added." };
     return buildScript(b);
@@ -482,7 +489,7 @@ test("a message sent while a task runs is planned at once, and amend_task reache
         if (!posted) { posted = true; setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Use three.js" }), 100); }
         return { calls: [{ name: "run_command", args: { command: "node wait.js" } }] };
       }
-      if (n === 1) { builderSaw = JSON.stringify(b.input); return { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] }; }
+      if (n === 1) { builderSaw = JSON.stringify(b.input); return { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] }; }
       return { calls: [{ name: "complete_task", args: { summary: "Built the page with three.js.", verification: "Opened it" } }] };
     }
     if (kind === "review") reviewBrief = JSON.stringify(b.input[0]);
@@ -528,7 +535,7 @@ test("a follow-up is accepted against its own requirements, not the earlier requ
   await new Promise((r) => setTimeout(r, 300));
   const done = await until(run.id, ["completed", "incomplete"]);
   const later = (await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`)).slice(before);
-  expect(later.map((t) => t.kind)).toEqual(["build", "review"]);
+  expect(later.map((t) => t.kind)).toEqual(["build"]); // a one-line rename is trivial, so it is not reviewed
   expect(done.status).toBe("completed");
   const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
   expect(messages.at(-1)!.content).not.toContain("### Requirements");
@@ -698,7 +705,7 @@ test("a long turn summarizes its earlier work and keeps going, and repeating the
       }
       if (step === 4) reminder = JSON.stringify(b.input.at(-1));
       if (step < 12) return { calls: [{ name: "read_file", args: { path: "big.js", start_line: (step - 4) * 100 + 1, end_line: (step - 3) * 100 } }] };
-      if (step === 12) return { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] };
+      if (step === 12) return { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] };
       return { calls: [{ name: "complete_task", args: { summary: "Built the page after reading big.js.", verification: "Read it" } }] };
     };
     const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
@@ -825,7 +832,7 @@ test("a message that reaches an agent as it finishes is still answered, and aski
       }
       if (kind === "work") {
         lenaStep++;
-        if (lenaStep === 1) return { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] };
+        if (lenaStep === 1) return { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] };
         if (!sentLate) {
           sentLate = true;
           setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Is the heading final?", to_agent_id: ids.Lena }), 100);
@@ -949,4 +956,129 @@ test("a worker that ends with prose instead of submitting a result is blocked, n
   const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
   expect(tasks.find((t) => t.kind === "build")?.status).toBe("blocked");
   expect(tasks.find((t) => t.kind === "build")?.result).toContain("nothing was submitted as finished");
+}, 30_000);
+
+
+test("a one-line change with no requirements goes to no review and no acceptance", async () => {
+  script = (b) => (turnKind(b) === "work" ? oneLineWork(b) : buildScript(b));
+  const before = model.requests.length;
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  const done = await until(run.id, ["completed", "incomplete"]);
+  expect(done.status).toBe("completed");
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks.map((t) => t.kind)).toEqual(["build"]);
+  expect(model.requests.slice(before).filter((r) => turnKind(r) === "review")).toHaveLength(0);
+}, 30_000);
+
+test("a change to an authentication file is still reviewed, however small", async () => {
+  script = (b) => {
+    if (turnKind(b) === "work") return outputs(b).length === 0
+      ? { calls: [{ name: "write_file", args: { path: "auth.js", content: "module.exports = { check: () => true };\n" } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Added the auth check.", verification: "Read it" } }] };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Add an auth check" });
+  await until(run.id, ["completed", "incomplete"]);
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  expect(tasks.map((t) => t.kind)).toEqual(["build", "review"]);
+}, 30_000);
+
+test("an open blocking finding at the revision limit makes the run incomplete, not completed", async () => {
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "1. index.html: the footer is missing.", findings: finding("The footer is missing.") } }] };
+    if (kind === "work") return n === 0
+      ? { calls: [{ name: "write_file", args: { path: "index.html", content: longPage(String(Math.random())) } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Built and revised the page.", verification: "Opened it", responses: answers(b.input) } }] };
+    if (kind === "report") return { text: "The page is built and the footer was added." };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  const done = await until(run.id, ["completed", "incomplete"]);
+  expect(done.status).toBe("incomplete");
+  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+  expect(messages.at(-1)!.content).toMatch(/Still open/);
+}, 30_000);
+
+test("usage counts file operations, unique files changed and searches as separate numbers", async () => {
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    if (kind === "work") return [
+      { calls: [{ name: "search_project", args: { query: "Acme" } }] },
+      { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] },
+      { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "Acme", new_string: "Acme Co" } }] },
+      { calls: [{ name: "complete_task", args: { summary: "Named the company.", verification: "Read it" } }] },
+    ][n] ?? { text: "done" };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+  const done = await until(run.id, ["completed", "incomplete"]);
+  const usage = (done.state as { usage: Record<string, number> }).usage;
+  expect(usage.file_writes).toBe(2); // two write operations
+  expect(usage.files_changed).toBe(1); // one file
+  expect(usage.searches).toBe(1);
+  expect(usage.file_reads).toBe(0);
+}, 30_000);
+
+test("a fixture that a project check reads is not a documents-only change, so the checks run", async () => {
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture-check", scripts: { test: "node check.js" } }));
+  writeFileSync(path.join(dir, "check.js"), `const fs = require("fs");\nif (fs.readFileSync("fixtures/data.txt", "utf8").trim() !== "ok") { console.error("data is wrong"); process.exit(1); }\n`);
+  mkdirSync(path.join(dir, "fixtures"));
+  writeFileSync(path.join(dir, "fixtures", "data.txt"), "ok\n");
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const last = JSON.stringify(b.input.findLast((i: { role?: string }) => i.role === "user"));
+    if (kind === "plan") return n === 0
+      ? { calls: [{ name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Edits the data" } },
+        { name: "create_task", args: { title: "Change the data", description: "Set fixtures/data.txt.", acceptance_criteria: "- data is ok", assignee: "Lena", kind: "build", files: ["fixtures/data.txt"] } }] }
+      : { calls: [{ name: "start_work", args: { note: "Lena changes the data." } }] };
+    if (kind === "work" && last.includes("Fix failing checks")) return n === 0
+      ? { calls: [{ name: "write_file", args: { path: "fixtures/data.txt", content: "ok\n" } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Restored the data.", verification: "Read it" } }] };
+    if (kind === "work") return n === 0
+      ? { calls: [{ name: "read_file", args: { path: "fixtures/data.txt" } }] }
+      : n === 1 ? { calls: [{ name: "write_file", args: { path: "fixtures/data.txt", content: "broken\n" } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Changed the data.", verification: "None" } }] };
+    return { text: "Done." };
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Change the data" });
+  const done = await until(run.id, ["completed", "incomplete"]);
+  const usage = (done.state as { usage: Record<string, number> }).usage;
+  expect(usage.verifications).toBeGreaterThan(0);
+  expect(readFileSync(path.join(dir, "fixtures", "data.txt"), "utf8")).toBe("ok\n");
+  expect(done.status).toBe("completed");
+}, 60_000);
+
+test("a built-in writer whose file tools are switched off is refused a part, and the planner is told why", async () => {
+  // The user changed the Frontend Developer role to read-only in Settings: its toolbox no longer lets it write.
+  const frontend = BUILTIN_ROLES.find((r) => r.key === "frontend")!;
+  reg.roles.upsert({ key: "frontend", deleted: false, updated_at: new Date().toISOString(), data: { ...frontend, tools: { ...frontend.tools, file_write: false } } });
+  try {
+    let refusal = "";
+    script = (b) => {
+      if (turnKind(b) !== "plan") return { text: "unused" };
+      if (outputs(b).length === 0) return { calls: [
+        { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
+        { name: "create_task", args: { title: "Build the landing page", description: "Create index.html.", acceptance_criteria: "- index.html exists", assignee: "Lena", kind: "build" } },
+      ] };
+      refusal = outputs(b).map((o) => String(o.output)).join("\n");
+      return { calls: [{ name: "reply_to_user", args: { message: "Lena cannot change files, so nobody was assigned." } }] };
+    };
+    const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+    const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+    await until(run.id, ["completed", "incomplete"]);
+    expect(refusal).toContain("cannot change files with its current tools");
+    const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+    expect(tasks).toHaveLength(0);
+  } finally {
+    reg.roles.remove("frontend");
+  }
 }, 30_000);

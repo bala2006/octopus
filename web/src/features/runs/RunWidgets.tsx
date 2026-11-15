@@ -44,8 +44,10 @@ export function UsageBreakdown({ usage, children }: { usage: RunLive["usage"]; c
             {([
               ["Agent turns", usage.agent_runs, `${usage.llm_calls ?? 0} model calls`],
               ["Tool calls", usage.tool_calls, usage.tool_failures ? `${usage.tool_failures} failed` : undefined],
+              ["Searches", usage.searches, undefined],
+              ["Folder listings", usage.listings, undefined],
               ["Files read", usage.file_reads, usage.redundant_reads ? `${usage.redundant_reads} already in context` : undefined],
-              ["Files changed", usage.file_writes, undefined],
+              ["Files changed", usage.files_changed, usage.file_writes ? `${usage.file_writes} write operations` : undefined],
               ["Checks run", usage.verifications, undefined],
               ["Model time", usage.model_ms ? Math.round(usage.model_ms / 1000) : 0, usage.model_ms ? "seconds" : undefined],
             ] as [string, number | undefined, string | undefined][]).map(([label, n, hint]) => (

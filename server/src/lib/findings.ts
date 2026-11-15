@@ -69,6 +69,14 @@ export function blockingOpen(list: Finding[]): Finding[] {
   return list.filter((f) => f.status === "open" && f.severity !== "minor");
 }
 
+/**
+ * Blocking findings a run cannot count as finished: anything not yet resolved. A fix or a dispute is only resolved once
+ * a later review round has checked it, so an answer alone does not settle a blocker.
+ */
+export function unresolvedBlocking(list: Finding[]): Finding[] {
+  return list.filter((f) => f.severity !== "minor" && f.status !== "resolved");
+}
+
 /** The text the writer reads for a set of findings. */
 export function renderFindings(list: Finding[]): string {
   return list

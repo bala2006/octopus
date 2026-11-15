@@ -20,8 +20,8 @@ import { SHARED_MEMORY, type RunRow } from "../db/project";
 import type { Registry } from "../db/registry";
 import { effectiveRoles, roleByKey } from "../catalog/roles";
 import { effectiveSkills, skillsFor } from "../catalog/skills";
-import { canReview, canVerify, kindOf, staffingError } from "../catalog/kinds";
-import { addFindings, answerFindings, blockingOpen, renderFindings, settlePrior, type Finding } from "../lib/findings";
+import { canReview, canVerify, canWrite, kindOf, staffingError } from "../catalog/kinds";
+import { addFindings, answerFindings, blockingOpen, renderFindings, settlePrior, type Finding, unresolvedBlocking } from "../lib/findings";
 import type { Item } from "../llm/azure";
 import { costParts } from "../llm/pricing";
 import { connection } from "../llm/azure";
@@ -29,6 +29,7 @@ import { run as runProcess, safeEnv } from "../lib/proc";
 import { clip, deferred, firstLine, newId, now, sha1, sleep, UserError } from "../lib/util";
 import { changedLines } from "../lib/diff";
 import { parseCommand } from "../safety/commands";
+import { isBinaryPath, isSecretPath } from "../safety/paths";
 import { toolbox, type Mode } from "../tools";
 import { Denied, type GuardRequest, type HireSpec, type Planner, type Stop, type TaskSpec, type ToolContext } from "../tools/types";
 import { recordVersion, artifactOut } from "../workspace/artifacts";
@@ -36,8 +37,10 @@ import { projectOverview, projectTasks, verificationChecks } from "../workspace/
 import { processes } from "../workspace/processes";
 import type { Project } from "../workspace/projects";
 import { agentLoop, type LoopEvents } from "./agent";
+import { checksCanBeSkipped, DOC_OR_ASSET, type SourceFile } from "./checkScope";
 import { publish } from "./bus";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
+import { tierOf, type Tier } from "./risk";
 import { canRunBeside, owns, writes } from "./ownership";
 import { Collab, formatPin, type Pin, type Session } from "./collab";
 import { acceptanceBrief, instructions, lensOf, LENS, libraryList, outcomeSection, type Verdict, reAcceptanceBrief, reReviewBrief, reviewBrief, revisionNote, skillList, taskBrief } from "./prompts";
@@ -101,8 +104,6 @@ const STEPS: Partial<Record<Mode, number>> = { worker: 150, reviewer: 60, accept
  * report and a teammate's factual answer do not. An agent or the conversation budget can still override this.
  */
 const EFFORT: Record<Mode, Effort> = { orchestrator: "high", worker: "high", acceptance: "medium", reviewer: "medium", quick_review: "low", report: "low", chat: "low", consult: "low" };
-/** Files that are not code: a cycle that only touches these has nothing for the project's tests to say. */
-const DOC_OR_ASSET = /\.(md|mdx|txt|rst|adoc|png|jpe?g|gif|webp|ico|bmp|svg|pdf|woff2?|ttf|otf|mp3|mp4|webm|wav)$/i;
 /** Documents from finished dependencies up to this size go inside the brief instead of being read with tools. */
 const DOCS_IN_BRIEF = 20_000;
 /** Longest message between agents; longer material goes in a file and the message names it. */
@@ -125,7 +126,7 @@ function emptyUsage(): Usage {
   return { tokens: 0, cost_usd: 0, turns: 0,
     active_seconds: 0, input_tokens: 0, cached_tokens: 0, output_tokens: 0, reasoning_tokens: 0, llm_calls: 0, per_agent: {}, per_agent_cost: {},
     cost_breakdown: { input: 0, cached_input: 0, output: 0 },
-    model_ms: 0, tool_calls: 0, tool_failures: 0, file_reads: 0, redundant_reads: 0, file_writes: 0, verifications: 0, agent_runs: 0 };
+    model_ms: 0, tool_calls: 0, tool_failures: 0, file_reads: 0, redundant_reads: 0, file_writes: 0, files_changed: 0, searches: 0, listings: 0, verifications: 0, agent_runs: 0 };
 }
 
 function initialState(): RunState {
@@ -430,6 +431,8 @@ export class Conversation {
         if (metrics?.read) u.file_reads++;
         if (metrics?.redundant) u.redundant_reads++;
         if (metrics?.wrote) u.file_writes++;
+        if (metrics?.searched) u.searches++;
+        if (metrics?.listed) u.listings++;
         this.emit("tool_result", { call_id, agent_id: agent.id, tool, ok, output: clip(output, 4000) });
       },
       usage: (r) => {
@@ -470,6 +473,7 @@ export class Conversation {
       recordFile: (rel, before, after, note) => {
         const { row, lines, previous_lines } = recordVersion(this.p.db, { runId: this.row.id, path: rel, before, after, author: agent.id, note });
         if (task) this.state.files_by_task[task.id] = [...new Set([...(this.state.files_by_task[task.id] ?? []), rel])];
+        this.state.usage.files_changed = new Set(Object.values(this.state.files_by_task).flat()).size;
         if (task) this.recordDiff(task.id, rel, before, after);
         this.state.unchecked = true;
         this.state.unaccepted = true;
@@ -497,6 +501,16 @@ export class Conversation {
     for (const s of this.sessions.values()) {
       for (const [rel, hash] of s.seen) if (this.fileHash(rel) !== hash) { s.seen.delete(rel); s.shown.delete(rel); }
     }
+  }
+
+  /** The project's text files that are not documents or assets: what a check or a build could read. */
+  private sourceFiles(): SourceFile[] {
+    const files: SourceFile[] = [];
+    for (const f of this.p.fs.walk({ max: 20_000 }).files) {
+      if (DOC_OR_ASSET.test(f) || isBinaryPath(f) || isSecretPath(f) || this.p.fs.size(f) > 1_000_000) continue;
+      try { files.push({ path: f, text: readFileSync(this.p.fs.abs(f), "utf8") }); } catch { continue; }
+    }
+    return files;
   }
 
   private fileHash(rel: string): string | null {
@@ -557,7 +571,8 @@ export class Conversation {
         throw e;
       }
       // Documents put in the brief count as read, so the agent is not sent them twice.
-      for (const d of opts.preload ?? []) { const hash = sha1(d.content); s.seen.set(d.path, hash); s.shown.set(d.path, { hash, ranges: [[1, d.content.split("\n").length]] }); }
+      // The brief is the first item of the transcript, so a document in it is at position 0 and is never summarized away.
+      for (const d of opts.preload ?? []) { const hash = sha1(d.content); s.seen.set(d.path, hash); s.shown.set(d.path, { hash, ranges: [[1, d.content.split("\n").length]], at: 0 }); }
     }
     // What arrived while the session was idle comes first, so the new instruction is the last thing the agent reads.
     if (s.inbox.length) s.input.push({ role: "user", content: s.inbox.splice(0).join("\n\n") });
@@ -671,7 +686,7 @@ export class Conversation {
     const live = this.collab.latestSession(agent.id);
     const prior = live?.session.mode === "worker" ? /^[^:]+:([^:]+)$/.exec(live.key)?.[1] : undefined; // worker sessions are keyed agent:task
     const t = this.newTask({ title: firstLine(msg.display, 80), description: msg.content, acceptance_criteria: "Do what the user asked; verify it.", assignee_agent_id: agent.id,
-      kind: agent.tools.file_write === false ? "research" : "build", depends_on: [], created_by: null, files: this.tasks.find((x) => x.id === prior)?.files ?? [] });
+      kind: canWrite(agent) ? "build" : "research", depends_on: [], created_by: null, files: this.tasks.find((x) => x.id === prior)?.files ?? [] });
     if (prior) this.state.continues[t.id] = prior;
   }
 
@@ -747,6 +762,21 @@ export class Conversation {
     const diff = this.state.diffs_by_task[work.id];
     const fits = !!diff && diff.lines <= SMALL_CHANGE.lines && (diff.files ?? []).length <= SMALL_CHANGE.files && diff.text.length < SMALL_CHANGE.chars;
     return fits ? diff : null;
+  }
+
+  /**
+   * How much checking a part's change gets, decided from what it touched. The choice is shown in the run, so a skipped
+   * review is visible rather than silent.
+   */
+  private riskOf(task: TaskOut, agent: AgentOut): Tier {
+    const files = this.state.files_by_task[task.id] ?? [];
+    const lines = this.state.diffs_by_task[task.id]?.lines ?? 0;
+    const requirements = this.cycleRequirements().filter((r) => r.status === "open" || r.status === "unmet").length;
+    const revised = (this.state.revisions[this.state.continues[task.id] ?? task.id] ?? 0) > 0;
+    const tier = tierOf({ files, lines, specialists: task.specialists.length, requirements, revised });
+    const size = `${files.length} file${files.length === 1 ? "" : "s"}, ${lines} changed line${lines === 1 ? "" : "s"}`;
+    this.emit("thought", { agent_id: agent.id, text: `${task.key} is a ${tier} change (${size})${tier === "trivial" ? ", so it is not reviewed" : ""}.` });
+    return tier;
   }
 
   /** The documents finished dependencies wrote, when they are small enough to hand over inside the brief. */
@@ -828,7 +858,7 @@ export class Conversation {
       this.driving = false;
       if (this.row.status === "running" && !this.queue.length) {
         if (this.state.questions.length) this.setRunStatus("awaiting_user", { reason: "Waiting for your answer" });
-        else this.setRunStatus(this.tasks.some((t) => t.status === "blocked") ? "incomplete" : "completed", { reason: "" });
+        else this.setRunStatus(this.cycleStatus(this.tasks.slice(this.state.cycle_from)), { reason: "" });
       }
       this.save();
       if (this.queue.length) {
@@ -1222,7 +1252,8 @@ export class Conversation {
     const summary = stop?.kind === "complete" ? `${stop.summary}${stop.verification ? `\n\nVerified: ${stop.verification}` : ""}` : text;
     const changed = (this.state.files_by_task[task.id] ?? []).length > 0;
     this.post({ from: agent.id, to: agent.reports_to ?? lead.id, type: "status_update", content: summary, meta: { task_id: task.key } });
-    if (this.budget.review && (task.kind === "build" || task.kind === "fix") && changed) {
+    const reviewed = this.budget.review && (task.kind === "build" || task.kind === "fix") && changed && this.riskOf(task, agent) !== "trivial";
+    if (reviewed) {
       this.saveTask({ ...task, status: "review", result: summary });
       // Every specialist on this part critiques the same round in parallel; the owner gets their feedback together.
       const ids: string[] = [];
@@ -1311,10 +1342,16 @@ export class Conversation {
     const changes = given.filter((v) => v.verdict === "request_changes");
     const merged = changes.map((v) => `### ${v.critic} (${LENS[v.lens].name})\n${v.comments}${v.findings?.length ? `\n\n${renderFindings(v.findings)}` : ""}`).join("\n\n");
     const rounds = this.state.revisions[work.id] ?? 0;
-    if (!changes.length || rounds >= this.budget.max_revisions) {
-      if (changes.length) this.state.open_comments[work.id] = merged;
-      this.saveTask({ ...current, status: "done", result: changes.length ? `${current.result}\n\nOpen review comments (revision limit reached):\n${merged}` : current.result });
+    if (!changes.length) {
+      this.saveTask({ ...current, status: "done" });
       this.phase("review", "done");
+      return;
+    }
+    if (rounds >= this.budget.max_revisions) {
+      // Comments still open at the limit are not finished work: the part is blocked, and the run cannot be completed.
+      this.state.open_comments[work.id] = merged;
+      this.saveTask({ ...current, status: "blocked", result: `${current.result}\n\nOpen review comments (revision limit reached):\n${merged}` });
+      this.phase("review", "failed", undefined, "Review comments still open at the revision limit");
       return;
     }
     this.state.revisions[work.id] = rounds + 1;
@@ -1344,9 +1381,10 @@ export class Conversation {
     const checks = verificationChecks(this.p.fs);
     if (!checks.length) { this.phase("verify", "skipped", null, "The project has no automated checks"); return false; }
     const changedFiles = [...new Set(changedTasks.flatMap((t) => this.state.files_by_task[t.id] ?? []))];
-    // Documents and images cannot break a test suite: running one after a README edit is pure wall-clock cost.
-    if (changedFiles.length && changedFiles.every((f) => DOC_OR_ASSET.test(f))) {
-      this.phase("verify", "skipped", null, "Only documents and assets changed");
+    // Documents and images cannot break a test suite, unless the project reads them: a README edit should not run the
+    // suite, but a fixture that a test loads still needs it.
+    if (changedFiles.every((f) => DOC_OR_ASSET.test(f)) && checksCanBeSkipped(changedFiles, this.sourceFiles())) {
+      this.phase("verify", "skipped", null, "Only documents and assets changed, and nothing in the project reads them");
       return false;
     }
     // The same files already passed these checks in this conversation: no new content, no new run.
@@ -1474,10 +1512,11 @@ export class Conversation {
     const tasks = cycle.map((t) => `- ${t.key} [${t.status}] ${t.title} (${who(t.assignee_agent_id)}): ${clip(t.result, 800)}`).join("\n");
     const files = [...new Set(cycle.flatMap((t) => this.state.files_by_task[t.id] ?? []))];
     const checks = this.state.verification.map((v) => `- ${v.name}: ${v.ok ? "passed" : "failed"}`).join("\n");
+    const unresolved = this.unresolvedIn(cycle);
     const outcome = outcomeSection({
       requirements: this.cycleRequirements(),
       open: [
-        ...cycle.filter((t) => t.status === "blocked").map((t) => `${t.key} ${t.title} (${who(t.assignee_agent_id)}) is blocked: ${firstLine(t.result, 300)}`),
+        ...cycle.filter((t) => t.status === "blocked" && !this.state.open_comments[t.id]).map((t) => `${t.key} ${t.title} (${who(t.assignee_agent_id)}) is blocked: ${firstLine(t.result, 300)}`),
         ...cycle.filter((t) => this.state.open_comments[t.id]).map((t) => `${t.key} ${t.title.replace(/^Revise: /, "")}: review comments still open after ${this.budget.max_revisions} revisions: ${clip(this.state.open_comments[t.id]!.replace(/^### (.+)\n/gm, "$1: ").replace(/\s*\n+\s*/g, " "), 400)}`),
         ...this.state.verification.filter((v) => !v.ok).map((v) => `\`${v.command}\` fails.`),
       ],
@@ -1490,7 +1529,7 @@ export class Conversation {
     ].filter(Boolean).join("\n\n");
     // A plain cycle needs no narrator: the owner already wrote what it changed and how it verified it, and the engine
     // appends the requirement table either way. Only a cycle with something to explain gets a model-written report.
-    const plain = !this.cycleRequirements().length
+    const plain = !this.cycleRequirements().length && !unresolved.length
       && !cycle.some((t) => t.status === "blocked" || this.state.open_comments[t.id] || this.state.revisions[t.id])
       && this.state.verification.every((v) => v.ok);
     let text = plain ? this.factualReport(cycle, files) : "";
@@ -1501,11 +1540,24 @@ export class Conversation {
       if (e instanceof Halt || this.stopped) throw e;
       text = `The work is done, but I could not write the summary (${(e as Error).message}).\n\n${tasks}`;
     }
-    // A requirement that was never checked is not a met requirement: open counts as unresolved too.
-    const blocked = cycle.some((t) => t.status === "blocked") || this.state.verification.some((v) => !v.ok)
-      || this.cycleRequirements().some((r) => r.status === "open" || r.status === "unmet");
     this.phase("report", "done", lead.id);
-    this.finishCycle([text || "Done.", outcome].filter(Boolean).join("\n\n"), blocked ? "incomplete" : "completed", files);
+    this.finishCycle([text || "Done.", outcome].filter(Boolean).join("\n\n"), this.cycleStatus(cycle), files);
+  }
+
+  /**
+   * A cycle is completed only when nothing in it is blocked, failed, unmet, unchecked or left open by a reviewer. A
+   * requirement that was never checked is not a met requirement, so open counts as unresolved too.
+   */
+  private cycleStatus(cycle: TaskOut[]): RunStatus {
+    const blocked = cycle.some((t) => t.status === "blocked") || this.state.verification.some((v) => !v.ok);
+    const owed = this.cycleRequirements().some((r) => r.status === "open" || r.status === "unmet");
+    return blocked || owed || this.unresolvedIn(cycle).length ? "incomplete" : "completed";
+  }
+
+  /** Blocking review findings of the parts this cycle touched that no later review round has settled. */
+  private unresolvedIn(cycle: TaskOut[]): Finding[] {
+    const parts = new Set(cycle.map((t) => this.state.continues[t.id] ?? t.id));
+    return [...parts].flatMap((id) => unresolvedBlocking(this.findingsOf(id)));
   }
 
   /** The report of a plain, verified cycle: the team's own summaries, the files, the checks. No extra model call. */

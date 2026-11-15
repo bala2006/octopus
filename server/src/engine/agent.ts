@@ -8,7 +8,7 @@ import { config } from "../config";
 import type { Registry } from "../db/registry";
 import { complete, type FunctionTool, type Item, type LlmResult, type ToolCall } from "../llm/azure";
 import { clip, UserError } from "../lib/util";
-import { Denied, MAX_TOOL_OUTPUT, toFunction, type Stop, type Tool, type ToolContext } from "../tools/types";
+import { Denied, MAX_TOOL_OUTPUT, toFunction, type Shown, type Stop, type Tool, type ToolContext } from "../tools/types";
 
 export interface LoopEvents {
   text(delta: string): void;
@@ -71,19 +71,41 @@ export const CHECKPOINT_REQUEST = `Write a checkpoint of your work so far. It re
 ## Next: the exact next steps
 Be specific and complete; do not call any tool.`;
 
-/** Older tool outputs are shortened when the transcript grows too long; the latest rounds stay intact. Returns whether anything was shortened. */
-function truncate(input: Item[]): boolean {
+/**
+ * Older tool outputs are shortened when the transcript grows too long; the latest rounds stay intact. Returns the transcript
+ * positions of the outputs it shortened, so their file-read entries can be dropped.
+ */
+function truncate(input: Item[]): Set<number> {
   let size = JSON.stringify(input).length;
-  let changed = false;
-  for (const item of input) {
-    if (size <= contextLimits.truncateAt) break;
+  const shortened = new Set<number>();
+  for (let at = 0; at < input.length && size > contextLimits.truncateAt; at++) {
+    const item = input[at]!;
     if (item.type === "function_call_output" && typeof item.output === "string" && item.output.length > 1500) {
-      size -= item.output.length - 1500;
+      const before = item.output.length;
       item.output = `${item.output.slice(0, 1200)}\n… [shortened to save context; run the tool again if you need it]`;
-      changed = true;
+      size -= before - item.output.length;
+      shortened.add(at);
     }
   }
-  return changed;
+  return shortened;
+}
+
+/** Drop the file-read entries whose output is gone. An entry with no position cannot be placed, so it goes too. */
+function dropShown(shown: Shown, gone: (at: number) => boolean) {
+  for (const [file, entry] of shown) if (entry.at === undefined || gone(entry.at)) shown.delete(file);
+}
+
+/**
+ * The file-read entries a tool call created or changed now hold the content of its output, at `position`. A read that
+ * extends an earlier version of the same content depends on that earlier output too, so the earlier position is kept.
+ */
+function tagShown(shown: Shown, before: Shown, position: number) {
+  for (const [file, entry] of shown) {
+    const prior = before.get(file);
+    if (prior === entry) continue;
+    const earlier = prior?.hash === entry.hash ? prior.at : undefined;
+    entry.at = earlier === undefined ? position : Math.min(earlier, position);
+  }
 }
 
 /**
@@ -104,22 +126,24 @@ export function keptFrom(input: Item[], head: number, keepTail: number): number 
   return start <= head + 1 || start >= input.length ? null : start;
 }
 
-async function summarize(o: LoopOptions, functions: FunctionTool[]): Promise<boolean> {
+async function summarize(o: LoopOptions, functions: FunctionTool[]): Promise<void> {
   const input = o.input;
   const head = Math.max(1, o.keepHead ?? 1);
   const start = keptFrom(input, head, contextLimits.keepTail);
-  if (start === null) return false;
+  if (start === null) return;
   const res = await complete(o.reg, {
     model: o.model, instructions: o.instructions, input: [...input, { role: "user", content: CHECKPOINT_REQUEST }], tools: functions, toolChoice: "none",
     effort: o.effort, signal: o.ctx.signal, maxOutputTokens: 8_000,
   });
   o.events.usage(res);
   const summary = res.text.trim();
-  if (!summary) return false;
+  if (!summary) return;
   const before = JSON.stringify(input).length;
-  input.splice(head, start - head, { role: "user", content: `<checkpoint>\n${summary}\n</checkpoint>\nThis checkpoint replaces your earlier work in this conversation. Continue from it; files you read before must be read again if you need their content.` });
+  // The checkpoint replaces the items from `head` to `start`. Their outputs are gone, and the entries after them move up.
+  dropShown(o.ctx.shown, (at) => at >= head && at < start);
+  for (const entry of o.ctx.shown.values()) if (entry.at !== undefined && entry.at >= start) entry.at -= start - head - 1;
+  input.splice(head, start - head, { role: "user", content: `<checkpoint>\n${summary}\n</checkpoint>\nThis checkpoint replaces your earlier work in this conversation. Continue from it. Files you read in the replaced part must be read again if you need their content; the rest of the transcript is unchanged.` });
   o.events.thought(`Summarized earlier work to keep the context focused (${Math.round(before / 1000)}k → ${Math.round(JSON.stringify(input).length / 1000)}k characters).`);
-  return true;
 }
 
 /** The model's arguments, or the parse failure that has to be reported back to it. */
@@ -176,13 +200,12 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: WRAP_UP });
     await o.events.beforeCall();
     if (o.inbox?.length) input.push({ role: "user", content: o.inbox.splice(0).join("\n\n") });
-    // A summarized or shortened read no longer holds the file, so the next read of it must return the content again.
     if (JSON.stringify(input).length > contextLimits.summarizeAt) {
-      let done = false;
-      try { done = await summarize(o, functions); } catch (e) { if (o.ctx.signal.aborted) throw e; }
-      if (done) o.ctx.shown.clear();
+      try { await summarize(o, functions); } catch (e) { if (o.ctx.signal.aborted) throw e; }
     }
-    if (truncate(input)) o.ctx.shown.clear();
+    // A shortened output no longer holds its file, so its entry goes. The other entries still hold their content.
+    const shortened = truncate(input);
+    dropShown(o.ctx.shown, (at) => shortened.has(at));
     const res = await complete(o.reg, {
       model: o.model, instructions: o.instructions, input, tools: functions, effort: o.effort, signal: o.ctx.signal,
       maxOutputTokens: 48_000,
@@ -204,7 +227,10 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     const images: string[] = [];
     for (const call of res.calls) {
       if (stop) { input.push({ type: "function_call_output", call_id: call.call_id, output: "Skipped: the turn already ended." }); continue; }
+      const position = input.length; // where this call's output goes
+      const shownBefore = new Map(o.ctx.shown);
       const r = await runCall(o, call, byName);
+      tagShown(o.ctx.shown, shownBefore, position);
       o.events.toolResult(call.call_id, call.name, r.ok, r.output, r.metrics);
       input.push({ type: "function_call_output", call_id: call.call_id, output: clip(r.output, MAX_TOOL_OUTPUT) });
       if (r.image) images.push(r.image);

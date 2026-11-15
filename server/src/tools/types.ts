@@ -35,15 +35,18 @@ export type Stop =
   | { kind: "answered"; text: string };
 
 /** What a tool did, for the run's execution metrics. */
-export interface ToolMetrics { read?: boolean; redundant?: boolean; wrote?: boolean }
+export interface ToolMetrics { read?: boolean; redundant?: boolean; wrote?: boolean; searched?: boolean; listed?: boolean }
 
 export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop; metrics?: ToolMetrics }
 
 /** The most of one tool result an agent sees. read_file pages within it, so a read is never cut by the loop. */
 export const MAX_TOOL_OUTPUT = 40_000;
 
-/** File contents already in an agent's transcript: the content hash and the line ranges shown. */
-export type Shown = Map<string, { hash: string; ranges: [number, number][] }>
+/**
+ * File contents already in an agent's transcript: the content hash, the line ranges shown, and the transcript position of
+ * the tool output that carries them. The position is what lets compaction forget a file whose output it removed.
+ */
+export type Shown = Map<string, { hash: string; ranges: [number, number][]; at?: number }>
 
 export interface HireSpec { role_key?: string; title: string; name?: string; department: string; reports_to?: string; manager?: boolean; instructions?: string; reason: string }
 export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[]; requirements: string[]; files: string[]; skills: string[]; specialists: string[] }

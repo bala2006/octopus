@@ -60,8 +60,8 @@ export const fileTools = [
     async run(ctx, a) {
       ctx.setStatus("reading", `Listing ${a.path || "files"}`);
       const { files, truncated } = ctx.fs.walk({ base: a.path, max: 600, actor: "agent" });
-      if (!files.length) return { text: a.path ? `${a.path} is empty or does not exist.` : "The project folder is empty." };
-      return { text: files.map((f) => `${f}  (${ctx.fs.size(f)} B)`).join("\n") + (truncated ? "\n… more files not shown; list a subfolder." : "") };
+      if (!files.length) return { text: a.path ? `${a.path} is empty or does not exist.` : "The project folder is empty.", metrics: { listed: true } };
+      return { text: files.map((f) => `${f}  (${ctx.fs.size(f)} B)`).join("\n") + (truncated ? "\n… more files not shown; list a subfolder." : ""), metrics: { listed: true } };
     },
   }),
   defineTool({
@@ -100,7 +100,7 @@ export const fileTools = [
       ctx.setStatus("reading", `Searching for “${a.query}”`);
       let re: RegExp;
       try { re = a.regex ? new RegExp(a.query, "i") : new RegExp(a.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"); }
-      catch (e) { return { text: `Invalid regular expression: ${(e as Error).message}`, ok: false }; }
+      catch (e) { return { text: `Invalid regular expression: ${(e as Error).message}`, ok: false, metrics: { searched: true } }; }
       const hits: string[] = [];
       for (const f of ctx.fs.walk({ base: a.path, max: 4000, actor: "agent" }).files) {
         if (isBinaryPath(f) || isSecretPath(f) || ctx.fs.size(f) > 1_000_000) continue;
@@ -108,7 +108,7 @@ export const fileTools = [
         lines.forEach((l, i) => { if (hits.length < 120 && re.test(l)) hits.push(`${f}:${i + 1}: ${l.trim().slice(0, 200)}`); });
         if (hits.length >= 120) break;
       }
-      return { text: hits.length ? hits.join("\n") : "No matches." };
+      return { text: hits.length ? hits.join("\n") : "No matches.", metrics: { searched: true } };
     },
   }),
   defineTool({
