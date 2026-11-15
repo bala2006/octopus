@@ -20,10 +20,12 @@ export interface GuardRequest {
   key: string;
 }
 
+import type { Answer, FindingInput } from "../lib/findings";
+
 /** How a tool can end the agent's turn on its task. */
 export type Stop =
-  | { kind: "complete"; summary: string; verification: string }
-  | { kind: "review"; verdict: "approve" | "request_changes"; comments: string }
+  | { kind: "complete"; summary: string; verification: string; responses?: Answer[] }
+  | { kind: "review"; verdict: "approve" | "request_changes"; comments: string; findings: FindingInput[] }
   | { kind: "ask"; question: string; options: { label: string; description?: string; recommended?: boolean }[] }
   | { kind: "block"; reason: string }
   | { kind: "plan_ready"; note: string }

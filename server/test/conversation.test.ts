@@ -26,6 +26,10 @@ const call = async <T>(method: string, url: string, payload?: unknown): Promise<
   return res.json() as T;
 };
 const W = () => `/api/v1/w/${ws.id}`;
+/** A writer that answers every blocker or major finding that the brief shows as fixed. */
+const answers = (input: unknown) => [...new Set([...JSON.stringify(input).matchAll(/F\d+(?= \[(?:blocker|major)\])/g)].map((m) => m[0]))].map((id) => ({ id, status: "fixed" as const, response: "Done as asked." }));
+/** A critic's request for a change, with one major finding. */
+const finding = (problem: string) => [{ severity: "major", problem, evidence: "Read the page as written.", fix: "Make the change the problem describes." }];
 
 async function until(runId: string, statuses: string[], ms = 15_000): Promise<RunDetail> {
   const end = Date.now() + ms;
@@ -117,7 +121,7 @@ test("review requests changes, the author revises, and the project's tests run",
     const kind = turnKind(b);
     const n = outputs(b).length;
     const brief = JSON.stringify(b.input);
-    if (kind === "review") return { calls: [{ name: "submit_review", args: reviews++ === 0 ? { verdict: "request_changes", comments: "1. Add a pricing section." } : { verdict: "approve", comments: "Good." } }] };
+    if (kind === "review") return { calls: [{ name: "submit_review", args: reviews++ === 0 ? { verdict: "request_changes", comments: "1. Add a pricing section.", findings: finding("There is no pricing section.") } : { verdict: "approve", comments: "Good.", findings: [] } }] };
     if (kind === "work" && brief.includes("Checks failed") === false && brief.includes("checks fail")) {
       return n === 0 ? { calls: [{ name: "read_file", args: { path: "index.html" } }] } : n === 1
         ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1><section>Pricing</section>\n" } }] }
@@ -127,7 +131,7 @@ test("review requests changes, the author revises, and the project's tests run",
       const revising = brief.includes("Review feedback to address");
       if (n === 0) return revising ? { calls: [{ name: "read_file", args: { path: "index.html" } }] } : { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] };
       if (revising && n === 1) return { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1>Acme</h1><p>Plans</p>" } }] };
-      return { calls: [{ name: "complete_task", args: { summary: revising ? "Added the plans section." : "Built the landing page.", verification: "read it" } }] };
+      return { calls: [{ name: "complete_task", args: { summary: revising ? "Added the plans section." : "Built the landing page.", verification: "read it", responses: answers(b.input) } }] };
     }
     return buildScript(b);
   };
@@ -140,6 +144,39 @@ test("review requests changes, the author revises, and the project's tests run",
   expect(done.status).toBe("completed");
   expect((done.state as { verification: { ok: boolean }[] }).verification.every((v) => v.ok)).toBe(true);
 });
+
+test("a writer cannot finish with an open blocker or major finding; it is sent back to answer it", async () => {
+  let reviews = 0;
+  const sentBack: string[] = [];
+  script = (b) => {
+    const kind = turnKind(b);
+    const n = outputs(b).length;
+    const last = JSON.stringify(b.input.findLast((i: { role?: string }) => i.role === "user"));
+    if (kind === "review") return { calls: [{ name: "submit_review", args: reviews++ === 0 ? { verdict: "request_changes", comments: "1. Add a pricing section.", findings: finding("There is no pricing section.") } : { verdict: "approve", comments: "Good.", findings: [] } }] };
+    if (kind === "work" && last.includes("again:")) {
+      if (last.includes("Open findings")) {
+        sentBack.push(last);
+        return { calls: [{ name: "complete_task", args: { summary: "Added the pricing section.", verification: "Re-read it", responses: answers(b.input) } }] };
+      }
+      return n === 0
+        ? { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1>Acme</h1><section>Pricing</section>" } }] }
+        : { calls: [{ name: "complete_task", args: { summary: "Added pricing.", verification: "Re-read it" } }] };
+    }
+    if (kind === "work") return n === 0
+      ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] }
+      : { calls: [{ name: "complete_task", args: { summary: "Built the page.", verification: "Opened it" } }] };
+    return buildScript(b);
+  };
+  const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
+  const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Landing page" });
+  const done = await until(run.id, ["completed", "incomplete"]);
+  expect(sentBack).toHaveLength(1);
+  expect(sentBack[0]).toContain("Answer each open finding before finishing: F1.");
+  const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
+  const build = tasks.find((t) => t.key === "T1")!;
+  expect((done.state as { findings: Record<string, { id: string; status: string }[]> }).findings[build.id]).toEqual([expect.objectContaining({ id: "F1", status: "resolved" })]);
+  expect(done.status).toBe("completed");
+}, 30_000);
 
 test("in ask mode, editing your files waits for approval; destructive commands never run", async () => {
   reg.setSetting("approval_mode", "ask");
@@ -245,13 +282,13 @@ test("a revision continues the author's session, and the re-review sees only the
     if (kind === "work") {
       if (last.includes("again:")) return n === 0
         ? { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<p>Section 7</p>", new_string: "<p>Pricing</p>" } }] }
-        : { calls: [{ name: "complete_task", args: { summary: "Replaced section 7 with pricing.", verification: "Re-read the change" } }] };
+        : { calls: [{ name: "complete_task", args: { summary: "Replaced section 7 with pricing.", verification: "Re-read the change", responses: answers(b.input) } }] };
       return n === 0 ? { calls: [{ name: "write_file", args: { path: "index.html", content: page } }] }
         : { calls: [{ name: "complete_task", args: { summary: "Built the page.", verification: "Opened it" } }] };
     }
     if (kind === "review") {
       if (reviews === 0 && n === 0) return { calls: [{ name: "read_file", args: { path: "index.html" } }] };
-      return { calls: [{ name: "submit_review", args: reviews++ === 0 ? { verdict: "request_changes", comments: "1. index.html: section 7 should be pricing." } : { verdict: "approve", comments: "Resolved." } }] };
+      return { calls: [{ name: "submit_review", args: reviews++ === 0 ? { verdict: "request_changes", comments: "1. index.html: section 7 should be pricing.", findings: finding("Section 7 is not a pricing section.") } : { verdict: "approve", comments: "Resolved.", findings: [] } }] };
     }
     return buildScript(b);
   };
@@ -333,9 +370,9 @@ test("a small document a task depends on is handed over in its brief, so it is n
     const kind = turnKind(b);
     const n = outputs(b).length;
     if (kind === "plan") return n === 0 ? { calls: [
-      { name: "hire_agent", args: { role_key: "pm", title: "Product Manager", department: "Product", reason: "Writes the spec" } },
+      { name: "hire_agent", args: { role_key: "writer", title: "Technical Writer", department: "Product", reason: "Writes the spec" } },
       { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
-      { name: "create_task", args: { title: "Write the spec", description: "Write .octopus/work/spec.md.", acceptance_criteria: "- exists", assignee: "Priya", kind: "docs", files: [".octopus/work/spec.md"] } },
+      { name: "create_task", args: { title: "Write the spec", description: "Write .octopus/work/spec.md.", acceptance_criteria: "- exists", assignee: "Ruth", kind: "docs", files: [".octopus/work/spec.md"] } },
       { name: "create_task", args: { title: "Build the page", description: "Build index.html from the spec.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", depends_on: ["T1"], files: ["index.html"] } },
     ] } : { calls: [{ name: "start_work", args: { note: "Spec, then page." } }] };
     if (kind === "work" && JSON.stringify(b.input[0]).includes("# T1: Write the spec")) return n === 0
@@ -412,10 +449,10 @@ test("review comments still open at the revision limit are listed in the report,
   script = (b) => {
     const kind = turnKind(b);
     const n = outputs(b).length;
-    if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "1. index.html: the footer is missing." } }] };
+    if (kind === "review") return { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "1. index.html: the footer is missing.", findings: finding("The footer is missing.") } }] };
     if (kind === "work") return n === 0
       ? { calls: [{ name: "write_file", args: { path: "index.html", content: `<h1>Acme ${Math.random()}</h1>\n` } }] }
-      : { calls: [{ name: "complete_task", args: { summary: "Built and revised the page.", verification: "Opened it" } }] };
+      : { calls: [{ name: "complete_task", args: { summary: "Built and revised the page.", verification: "Opened it", responses: answers(b.input) } }] };
     if (kind === "report") return { text: "The page is built and the footer was added." };
     return buildScript(b);
   };
@@ -610,12 +647,12 @@ test("specialists sharpen a part in parallel, and the owner gets all their feedb
       const who = /\(by Lena|revision \d+ by Lena/.test(first + last) ? (b.instructions.match(/You are (\w+),/)?.[1] ?? "?") : "?";
       if (n === 0) reviews.push({ who, first, tools: (b.tools ?? []).map((t: { name: string }) => t.name) });
       const r = (round[who] = (round[who] ?? 0) + (n === 0 ? 1 : 0));
-      const ask = r === 1 && who !== "Kai" ? { verdict: "request_changes", comments: who === "Iris" ? "1. The hero should be red." : "1. The button does nothing." } : { verdict: "approve", comments: "Good." };
+      const ask = r === 1 && who !== "Kai" ? { verdict: "request_changes", comments: who === "Iris" ? "1. The hero should be red." : "1. The button does nothing.", findings: finding(who === "Iris" ? "The hero is not red." : "The button does nothing.") } : { verdict: "approve", comments: "Good.", findings: [] };
       return { calls: [{ name: "submit_review", args: ask }] };
     }
     if (kind === "work" && last.includes("again:")) {
       if (n === 0) { revisions.push(last); return { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1 style=\"color:red\">Acme</h1><button onclick=\"go()\">Go</button>" } }] }; }
-      return { calls: [{ name: "complete_task", args: { summary: "Made the hero red and wired the button.", verification: "Opened it" } }] };
+      return { calls: [{ name: "complete_task", args: { summary: "Made the hero red and wired the button.", verification: "Opened it", responses: answers(b.input) } }] };
     }
     if (kind === "acceptance") return { calls: [{ name: "submit_acceptance", args: { results: [] } }] };
     return buildScript(b);

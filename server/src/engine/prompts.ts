@@ -6,28 +6,16 @@
 import type { AgentOut, MemoryOut, Requirement, RoleTemplateOut, SkillOut, TaskOut } from "@octopus/shared";
 import { firstLine } from "../lib/util";
 
-export const STANDARDS = `
-## Standards
-Work like the best senior practitioner in your field would, on a codebase they will maintain for years.
-- Understand before you change: read the files involved and follow the project's existing conventions, structure and
-  libraries. Do not add a dependency when the project already has a way to do it.
-- Make the smallest change that fully solves the task. No unrequested features, no speculative abstractions, no drive-by
-  refactors of unrelated code.
-- Write complete, working code: no placeholders, TODOs, stubs, "rest of the code here" or invented APIs. Handle errors
-  and edge cases (empty, missing, invalid, concurrent). Validate input at trust boundaries. Never put secrets in code.
-- Keep it readable: clear names, small functions, one responsibility each; comments explain why, not what. Keep files
-  small (one module per concern, about 400 lines at most) so a teammate can read and change one part without the rest.
-- Products feel finished: real copy (never lorem ipsum), accessible (labels, focus, contrast, keyboard), responsive, with
-  loading, empty and error states. Match the user's own words for how it should look and behave, not a reduced version.
-- Make it checkable: an interactive UI or game exposes a small test hook (for example window.__app with its state and
-  actions) so browser automation can drive what a mouse or pointer lock would.
-- Verify before you say it is done: run the build, the tests and the linters that exist; add or update tests for the
-  behaviour you change when the project has tests; open UIs in the browser when you have one and check the console.
-- Work in few steps: read or write several independent files in one step, do not re-read a file you just wrote, and
-  when tuning visuals decide each change from one screenshot instead of nudging values one at a time.
-- Be honest: never claim you did, ran or checked something you did not. If something could not be verified, say so.
-- Stay safe: only touch files your task needs. Delete with delete_file (recoverable), never with commands.`.trim();
-
+export const WRITER_STANDARD = `
+## How you work
+You are the one writer for this part. Only you change its files; reviewers report findings and you decide each fix.
+- The user's request is the source of truth. A playbook or habit that conflicts with it gives way.
+- Write complete code: no placeholders, no duplicated blocks, no unused code. Keep modules small when the brief allows several files.
+- Before you finish, run the product or its tests and check the result yourself.
+- Answer every blocker and major finding in complete_task: fixed (what you changed) or disputed (why it is wrong).
+- Report honestly: say what you verified and what you could not verify.
+- Read several independent files in one step, and do not re-read a file you just wrote.
+`.trim();
 const REVIEW_STANDARD = `
 ## How to review
 You are a specialist sharpening a teammate's part. The brief names your lens (code, art direction, play testing or
@@ -86,6 +74,7 @@ what they want, staff it, brief the team so well that nobody needs to ask, and m
    - an art director (role designer) for anything people look at: a UI, a game, a page;
    - a QA engineer (role qa) for anything people use or play;
    - a security engineer for authentication, payments or untrusted input.
+   - a code quality reviewer and a duplication checker for any part that writes code.
    A code reviewer is added automatically. Choose specialists for what the user cares about most: when the request is
    about how something looks, the art director matters as much as the owner.
 6. Side work that does not write the product, such as researching techniques or libraries, can be its own research
@@ -139,7 +128,7 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
   }[mode];
   const sections = [
     identity, own + extra, process,
-    mode === "worker" || mode === "orchestrator" ? STANDARDS : "",
+    mode === "worker" ? WRITER_STANDARD : "",
     p.skills.length ? `## Playbooks\n${p.skills.map((s) => `### ${s.name}\n${s.body}`).join("\n\n")}` : "",
     notes(p.memory.own, p.memory.shared),
     `## Team\n${roster(p.team, a)}`,
@@ -197,7 +186,7 @@ export function reReviewBrief(work: TaskOut, o: { author: string; summary: strin
 }
 
 /** What a critic looks at. A part's specialists each bring one; a code reviewer is always one of them. */
-export type Lens = "code" | "visual" | "play" | "security";
+export type Lens = "code" | "visual" | "play" | "security" | "duplication";
 
 export const LENS: Record<Lens, { title: string; name: string; how: string }> = {
   code: { title: "Review", name: "code review", how: "Read the change and the code around it. Judge correctness, edge cases, security, and fit with the codebase; run the tests or the program when you can." },
@@ -205,6 +194,7 @@ export const LENS: Record<Lens, { title: string; name: string; how: string }> = 
     how: "Run the product (start_dev_server, then the browser) and screenshot the views that matter, driving it through its test hook where needed. Compare what you see with the user's own words, element by element. Request changes for anything missing, flat, placeholder-looking or wrong, in priority order, each with a concrete direction the owner can act on: the technique, the values, where in the code. Approve only when it looks like what the user described." },
   play: { title: "Play review", name: "play testing",
     how: "Use the product as the user would: every flow in the acceptance criteria and the requirements, then the edge cases (restart, pause, resize, wrong input). Drive real-time or pointer-locked apps through their test hook. Request changes with exact reproduction steps, expected and actual results." },
+  duplication: { title: "Duplication review", name: "duplication check", how: "Find code that repeats or nearly repeats, within the change and against the code around it. Report each case with both line ranges and the one shared function or constant that should replace them. Never change files." },
   security: { title: "Security review", name: "security review", how: "Look for injection, unsafe input handling, secrets, broken access control and risky dependencies in the change. Rank findings by severity with evidence and a concrete fix." },
 };
 
@@ -214,11 +204,12 @@ export function lensOf(agent: AgentOut): Lens {
   if (["designer", "ux_designer", "creative_director", "art_director", "game_designer"].includes(role)) return "visual";
   if (["qa", "qa_engineer", "playtester", "e2e_tester"].includes(role)) return "play";
   if (["security", "security_lead"].includes(role)) return "security";
+  if (role === "duplication") return "duplication";
   return "code";
 }
 
 /** One critic's verdict in a review round. `none` when it could not give one. */
-export interface Verdict { critic: string; lens: Lens; verdict: "approve" | "request_changes" | "none"; comments: string }
+export interface Verdict { critic: string; lens: Lens; verdict: "approve" | "request_changes" | "none"; comments: string; findings?: import("../lib/findings").Finding[] }
 
 /** The next turn of a session: why the work came back, and how to finish. */
 export function revisionNote(t: TaskOut, why: { from: string; text: string }, finish: string): string {
