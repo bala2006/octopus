@@ -4,7 +4,7 @@ import type { Registry } from "../db/registry";
 import { browserTools, serverTools } from "../services/mcp";
 import { commandTools } from "./commands";
 import { fileTools } from "./files";
-import { acceptanceTool, askUser, consultTool, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
+import { acceptanceTool, askUser, collabTools, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
 import type { Tool } from "./types";
 import { webTools } from "./web";
 
@@ -30,7 +30,7 @@ export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode
   }
   if (t.mcp_servers?.length && mode !== "consult") tools.push(...await serverTools(reg, t.mcp_servers));
   if (mode !== "consult") tools.push(...memoryTools);
-  if ((mode === "worker" || mode === "reviewer") && t.send_message !== false) tools.push(consultTool);
+  if (checks && t.send_message !== false) tools.push(...collabTools);
   if ((mode === "worker" || mode === "reviewer") && t.ask_user !== false) tools.push(askUser);
   if (mode === "worker") tools.push(...workerTools);
   if (mode === "reviewer") tools.push(reviewTool, blockTask);

@@ -1,25 +1,27 @@
 ---
 name: intake-and-plan
-description: Take in a request as the company head, size the work, staff it with one owner per deliverable and write briefs that let specialists work without asking.
+description: Take in a request as the company head, split it into parts with one owner each, attach the specialists who sharpen each part, and write briefs that let everyone work without asking.
 roles: orchestrator, ceo
 ---
 # Intake and plan
 
 You turn a request into a staffed plan. You do not design or build it yourself.
 
-## Sizing
-- *Quick*: one coherent change (a fix, a script, one page). One builder, no requirements list.
-- *Standard*: a feature with a few parts. Requirements, then one or two builders on separate files.
-- *Large*: a product or several parts (frontend, backend, data; or world, actors, weapon, game loop for a game).
-  Requirements, a design task that fixes the module layout, owned paths and interfaces, then parallel builders, each
-  owning separate paths, and a QA engineer for the acceptance check.
+## Shape of a plan
+- *Quick*: one coherent change (a fix, a script, one page). One owner and the automatic code reviewer, no
+  requirements list.
+- *Feature or product in one piece* (a page, an app, a game): one owner who builds it end to end, plus the
+  specialists for what the user cares about: an art director for the look, a QA engineer for how it plays or works.
+  Research tasks for unfamiliar techniques can run in parallel.
+- *Several independent parts* (a backend and a frontend, a service and a CLI): an owner per part. The first task builds
+  a runnable skeleton and pins the interfaces between the parts; the other owners depend on it.
 
 ## Briefs that stand alone
 - Name the real files and interfaces, the decisions already made and the skills to follow (for a browser game:
-  web-game). A builder should not need to ask.
+  web-game). An owner should not need to ask.
 - Acceptance criteria are things someone can check by running or opening the product, in the user's terms.
-- Put the user's look-and-feel words into the brief of the task that owns them; "make it look good" is not a brief.
+- Put the user's look-and-feel words into the brief of the part that owns them; "make it look good" is not a brief.
 
 ## Mid-run messages
 A new constraint on work in progress is an amend_task on the task that owns it, not a new task that re-reads
-everything to confirm it.
+everything to confirm it. "Hurry" or "serve it" changes how you work, not what the product must do.

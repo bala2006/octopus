@@ -4,7 +4,7 @@ import type { TaskOut } from "@/types";
 import { TaskBoard } from "./RunWidgets";
 
 const task = (t: Partial<TaskOut>): TaskOut => ({ id: t.key!, run_id: "r", key: "T1", title: "", description: "", acceptance_criteria: "", assignee_agent_id: null,
-  status: "todo", kind: "build", depends_on: [], result: "", created_by: null, attempts: 0, updated_at: "", requirements: [], files: [], skills: [], ...t });
+  status: "todo", kind: "build", depends_on: [], result: "", created_by: null, attempts: 0, updated_at: "", requirements: [], files: [], skills: [], specialists: [], ...t });
 
 it("shows each task's kind, dependencies and result in its column", () => {
   render(<TaskBoard agents={{}} tasks={[

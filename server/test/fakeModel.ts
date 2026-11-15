@@ -53,7 +53,7 @@ export function turnKind(body: { instructions: string }): "plan" | "work" | "rev
   if (s.includes("A teammate's question")) return "consult";
   if (s.includes("You are reviewing a teammate's work")) return "review";
   if (s.includes("## Acceptance check")) return "acceptance";
-  if (s.includes("You have been given one task")) return "work";
+  if (s.includes("You own this part")) return "work";
   return body.instructions.includes("## How you work") && (body as { tools?: unknown[] }).tools?.length ? "plan" : "report";
 }
 

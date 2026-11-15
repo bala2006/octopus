@@ -54,3 +54,22 @@ it("asks the server for each attached image by the name it was saved under", () 
   render(<RunFeed state={{ ...initialRun(), messages: [sent] }} agents={agents} filter="all" />);
   expect(fetchRaw).toHaveBeenCalledWith("/api/v1/w/w/runs/r/attachments/k7-shot.png");
 });
+
+it("shows one agent's own chat: what it said and was told, and its steps, but not other agents' work", () => {
+  const toRiley = { ...message("4", "ben", "agent", "Which colour is the hero?"), to_agent_id: "riley" } as unknown as MessageOut;
+  const benToTeam = message("5", "ben", "agent", "Posting to everyone.");
+  const steps: Step[] = [thoughtStep(1, "riley", "Reading the brief."), thoughtStep(2, "ben", "Ben is busy.")];
+  render(<RunFeed state={{ ...initialRun(), messages: [toRiley, benToTeam], steps }} agents={agents} filter="all" agentId="riley" />);
+  expect(screen.getByText("Which colour is the hero?")).toBeVisible();
+  expect(screen.queryByText("Posting to everyone.")).toBeNull();
+  expect(screen.getAllByTestId("step-run")).toHaveLength(1);
+  expect(screen.getByTestId("step-narration")).toHaveTextContent("Reading the brief.");
+});
+
+it("opens an agent's chat from its name when the host offers it", async () => {
+  const open = vi.fn();
+  const { AgentChatContext } = await import("./RunFeed");
+  render(<AgentChatContext.Provider value={open}><RunFeed state={{ ...initialRun(), messages: [message("6", "riley", "agent", "Done.")] }} agents={agents} filter="all" /></AgentChatContext.Provider>);
+  screen.getByRole("button", { name: "Riley" }).click();
+  expect(open).toHaveBeenCalledWith("riley");
+});

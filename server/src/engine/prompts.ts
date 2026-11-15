@@ -30,14 +30,15 @@ Work like the best senior practitioner in your field would, on a codebase they w
 
 const REVIEW_STANDARD = `
 ## How to review
-Read every changed file in full, then the code around it. Check, in order:
-1. Does it meet each acceptance criterion and the user's request? Anything missing or out of scope?
-2. Correctness: logic errors, edge cases, error handling, broken imports or references, state and concurrency bugs.
-3. Security: injection, unsafe HTML, secrets, missing validation or authorisation.
-4. Quality: consistent with the codebase, readable, no dead code or duplication, no placeholder content.
-5. Verification: run the tests or the program when you can. Trust what you observe over the author's summary.
-Approve work that is correct and solid; do not block on taste. Request changes only for real problems, as a numbered list:
-file, problem, concrete fix.`.trim();
+You are a specialist sharpening a teammate's part. The brief names your lens (code, art direction, play testing or
+security): judge through it, against the user's request and the acceptance criteria. Check, in order:
+1. Does it meet each acceptance criterion and the user's request, as the user would see it? Anything missing?
+2. Through your lens: correctness and edge cases; or how it looks against the user's words; or how it plays; or
+   what can be abused.
+3. Verification: run it, look at it, or play it when you can. Trust what you observe over the author's summary.
+Approve work that is right; do not block on taste outside your lens. Request changes only for real problems, as a
+numbered list: where, what is wrong, the concrete fix. Other specialists review the same round in parallel; the owner
+gets everyone's comments together.`.trim();
 
 const ACCEPTANCE_PROCEDURE = `
 ## Acceptance check
@@ -67,25 +68,35 @@ what they want, staff it, brief the team so well that nobody needs to ask, and m
      Otherwise make the sensible choice and state it in the brief.
    - Work: continue below.
 3. Record the requirements of a feature or product with set_requirements: every explicit ask, in the user's words, one
-   per ask, not merged and not softened. The finished product is checked against them. Ambitious asks stay in: give a
-   hard one its own task and the right specialist. Use cut_requirement only for what cannot be built in this environment,
-   with the reason and what is delivered instead; the user sees every cut. A small fix needs no requirements.
-4. Staff the smallest team that has the expertise: one builder for a fix, one or two for a feature. For a product:
-   - Split the build into parts with separate owners working in parallel (for a game: world and lighting, enemies,
-     weapon and effects, game loop and HUD). One builder writing a whole product produces a shallow one.
-   - When the parts must fit together, first a design task for a tech lead or architect: the module layout, who owns
-     which paths, and the interfaces between parts, in .octopus/work/. The builders depend on it.
-   - A product manager or designer only when the requirements or the look are genuinely unclear; you write the
-     requirements yourself. Never hire for show.
-   - A QA engineer for anything with a UI or real-time interaction: they run the acceptance check.
-5. Plan with create_task. One owner per deliverable. Give each task: the objective, the files and interfaces involved,
-   decisions already made, acceptance criteria that can be checked, the requirement ids it delivers, the files or folders
-   it owns (tasks that run in parallel own different paths), and the skills its owner should follow. Order with
-   depends_on (a design before the builds that use it).
-   Reviews, the project's tests and the acceptance check against the requirements are automatic: never plan tasks for them.
-6. Call start_work with a one-sentence plan for the user.
-When the user writes while the team works, record new asks with set_requirements and use amend_task on the task that
-owns the change; create a task only for new work. When the work comes back you will be asked to report.`.trim();
+   whole ask per item (never a fragment such as a single quoted word), not merged and not softened. The finished product
+   is checked against them. Requirements describe the product, not how to work: "hurry", "finish fast", "serve it" or
+   "I'll test it" are instructions to you, not requirements. Ambitious asks stay in: give a hard one to the right owner
+   and specialist. Use cut_requirement only for what cannot be built in this environment, with the reason and what is
+   delivered instead; the user sees every cut. A small fix needs no requirements.
+4. Split the work into parts. Each part has one owner who builds it end to end and is the only one who writes its files.
+   - A part is something that can be built and checked on its own: an app, a service, a library, a game. Never split
+     one tightly connected artifact (one game, one page, one module) between builders: parallel writers make
+     conflicting choices and the pieces do not fit. One owner writes it; quality comes from the specialists below.
+   - Several parts only when they are truly independent, with an interface between them (a backend and a frontend
+     over an API). Then the first task, for an architect or the first owner, builds the runnable skeleton and pins
+     the interfaces (pin); the other owners depend on it and build against the pins.
+   - Give each owner task the files or folders it owns.
+5. Attach the specialists who sharpen each part (create_task specialists). They critique every round in parallel, each
+   through their own lens, and the owner gets their feedback together:
+   - an art director (role designer) for anything people look at: a UI, a game, a page;
+   - a QA engineer (role qa) for anything people use or play;
+   - a security engineer for authentication, payments or untrusted input.
+   A code reviewer is added automatically. Choose specialists for what the user cares about most: when the request is
+   about how something looks, the art director matters as much as the owner.
+6. Side work that does not write the product, such as researching techniques or libraries, can be its own research
+   task running in parallel; its result reaches the owner through depends_on.
+7. Plan with create_task. Give each task: the objective, the files and interfaces involved, decisions already made,
+   acceptance criteria that can be checked, the requirement ids it delivers, the files it owns, the skills its owner
+   should follow, and its specialists. Order with depends_on. Never plan review, test or acceptance tasks: reviews
+   by the specialists, the project's tests and the final acceptance check against the requirements are automatic.
+8. Call start_work with a one-sentence plan for the user.
+When the user writes while the team works, record new product asks with set_requirements and use amend_task on the task
+that owns the change; create a task only for new work. When the work comes back you will be asked to report.`.trim();
 
 export const fill = (text: string, vars: Record<string, string>) => text.replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k: string) => vars[k] ?? m);
 
@@ -119,7 +130,7 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
   const process = {
     orchestrator: ORCHESTRATOR_PROCEDURE,
     report: ORCHESTRATOR_PROCEDURE,
-    worker: "## Your task\nYou have been given one task. Do it completely. Check each acceptance criterion once, with the cheapest check that proves it. When every criterion passes, call complete_task straight away: do not keep testing, tuning or polishing after that. If you cannot do it as specified, call block_task with what you need. Ask a teammate (ask_teammate) for facts only they have; ask the user only for decisions only they can make.",
+    worker: "## Your task\nYou own this part. Build it completely and well, the way the user described it, not a reduced version. Before you finish, look at the result the way the user will (run it, open it, screenshot it) and fix what falls short; check each acceptance criterion with the cheapest check that proves it. Then call complete_task: specialists review your part next and their feedback comes back to you in this conversation, so do not polish endlessly. If you cannot do it as specified, call block_task with what you need. Message a teammate for facts only they have or to change something in their part; ask the user only for decisions only they can make.",
     quick_review: `## Your task\nYou are reviewing a teammate's work, a small change shown as a diff in the brief. You cannot open files: judge the change from the diff and the brief. Check that it does what was asked, is correct, and breaks nothing next to it. Call submit_review once with a verdict and specific comments. Call block_task only if the diff cannot be judged.`,
       reviewer: `## Your task\nYou are reviewing a teammate's work. You do not edit files: you report what must change. Once you have checked the work, give your verdict with submit_review and stop; do not keep re-reading files.\n\n${REVIEW_STANDARD}`,
     acceptance: ACCEPTANCE_PROCEDURE,
@@ -138,7 +149,7 @@ export function instructions(p: PromptContext, mode: "orchestrator" | "worker" |
   return sections.filter((s) => s.trim()).join("\n\n");
 }
 
-export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: AgentOut[]; feedback?: string; answer?: string; requirements?: Requirement[]; docs?: { path: string; content: string }[] }): string {
+export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: AgentOut[]; feedback?: string; answer?: string; requirements?: Requirement[]; docs?: { path: string; content: string }[]; pins?: string[] }): string {
   const who = (id: string | null) => o.team.find((a) => a.id === id)?.name ?? "someone";
   const mine = (o.requirements ?? []).filter((r) => t.requirements.includes(r.id));
   return [
@@ -146,7 +157,8 @@ export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: 
     t.description,
     t.acceptance_criteria && `## Acceptance criteria\n${t.acceptance_criteria}`,
     mine.length && `## Requirements you deliver (the user's words; the finished product is checked against these)\n${mine.map((r) => `- ${r.id}: ${r.text}`).join("\n")}`,
-    t.files.length && `## Files you own\n${t.files.map((f) => `- ${f}`).join("\n")}\nOnly you write these while you work. Other paths may belong to teammates working at the same time.`,
+    t.files.length && `## Your part\n${t.files.map((f) => `- ${f}`).join("\n")}\nYou own these files. Teammates own the other parts: to change something in theirs, message them. Only a file a teammate is editing right now is closed to you.`,
+    o.pins?.length && `## Pinned in the team chat (build on these; pin a new version if you must change one)\n${o.pins.join("\n\n")}`,
     `## The user's request (for context)\n${o.goal}`,
     o.deps.length ? `## Work this builds on\n${o.deps.map((d) => `### ${d.key} ${d.title} (${who(d.assignee_agent_id)})\n${d.result || "Done."}`).join("\n\n")}` : "",
     o.docs?.length ? `## Documents from that work (already here: do not read them again)\n${o.docs.map((d) => `### ${d.path}\n\`\`\`\n${d.content}\n\`\`\``).join("\n\n")}` : "",
@@ -155,13 +167,16 @@ export function taskBrief(t: TaskOut, o: { goal: string; deps: TaskOut[]; team: 
   ].filter(Boolean).join("\n\n");
 }
 
-export function reviewBrief(work: TaskOut, o: { goal: string; author: string; summary: string; files: string[]; round: number; diff?: string; previous?: string; requirements?: Requirement[] }): string {
+export function reviewBrief(work: TaskOut, o: { goal: string; author: string; summary: string; files: string[]; round: number; diff?: string; previous?: string; requirements?: Requirement[]; lens?: Lens; pins?: string[] }): string {
   const mine = (o.requirements ?? []).filter((r) => work.requirements.includes(r.id));
+  const lens = LENS[o.lens ?? "code"];
   return [
-    `# Review ${work.key}: ${work.title} (by ${o.author}${o.round > 1 ? `, revision ${o.round}` : ""})`,
+    `# ${lens.title} ${work.key}: ${work.title} (by ${o.author}${o.round > 1 ? `, revision ${o.round}` : ""})`,
+    `## Your lens: ${lens.name}\n${lens.how}`,
     `## What was asked\n${work.description}`,
     work.acceptance_criteria && `## Acceptance criteria\n${work.acceptance_criteria}`,
     mine.length && `## Requirements this work delivers (the user's words)\n${mine.map((r) => `- ${r.id}: ${r.text}`).join("\n")}`,
+    o.pins?.length && `## Pinned in the team chat\n${o.pins.join("\n\n")}`,
     `## The user's request\n${o.goal}`,
     `## The author's summary\n${o.summary}`,
     o.previous && `## The previous review's comments\nCheck that each is resolved. Request changes only for unresolved comments or real problems in the work; do not start over.\n\n${o.previous}`,
@@ -170,16 +185,40 @@ export function reviewBrief(work: TaskOut, o: { goal: string; author: string; su
   ].filter(Boolean).join("\n\n");
 }
 
-/** The next turn of a reviewer who already reviewed this work: only what changed since. */
-export function reReviewBrief(work: TaskOut, o: { author: string; summary: string; files: string[]; round: number; diff: string }): string {
+/** The next turn of a critic who already reviewed this work: only what changed since. */
+export function reReviewBrief(work: TaskOut, o: { author: string; summary: string; files: string[]; round: number; diff: string; lens?: Lens }): string {
   return [
     `# Re-review ${work.key}: revision ${o.round} by ${o.author}`,
-    `${o.author} revised the work after your review. Their summary:\n${o.summary}`,
+    `${o.author} revised the work after the last review round. Their summary:\n${o.summary}`,
     `## Changed since your review\n${o.files.length ? o.files.map((f) => `- ${f}`).join("\n") : "(no files changed)"}`,
     o.diff && `## The change since your review\n${o.diff}`,
-    "Check that each of your comments is resolved and that this change is correct. You already know the rest of the work: read a file again only where the change needs it. Request changes only for unresolved comments or real problems in this change. Then call submit_review.",
+    `Check that each of your comments is resolved, through your lens (${LENS[o.lens ?? "code"].name}), and that this change is correct. You already know the rest of the work: look again only where the change needs it. Request changes only for unresolved comments or real problems. Then call submit_review.`,
   ].filter(Boolean).join("\n\n");
 }
+
+/** What a critic looks at. A part's specialists each bring one; a code reviewer is always one of them. */
+export type Lens = "code" | "visual" | "play" | "security";
+
+export const LENS: Record<Lens, { title: string; name: string; how: string }> = {
+  code: { title: "Review", name: "code review", how: "Read the change and the code around it. Judge correctness, edge cases, security, and fit with the codebase; run the tests or the program when you can." },
+  visual: { title: "Visual review", name: "art direction",
+    how: "Run the product (start_dev_server, then the browser) and screenshot the views that matter, driving it through its test hook where needed. Compare what you see with the user's own words, element by element. Request changes for anything missing, flat, placeholder-looking or wrong, in priority order, each with a concrete direction the owner can act on: the technique, the values, where in the code. Approve only when it looks like what the user described." },
+  play: { title: "Play review", name: "play testing",
+    how: "Use the product as the user would: every flow in the acceptance criteria and the requirements, then the edge cases (restart, pause, resize, wrong input). Drive real-time or pointer-locked apps through their test hook. Request changes with exact reproduction steps, expected and actual results." },
+  security: { title: "Security review", name: "security review", how: "Look for injection, unsafe input handling, secrets, broken access control and risky dependencies in the change. Rank findings by severity with evidence and a concrete fix." },
+};
+
+/** The lens an agent critiques with, from its role. */
+export function lensOf(agent: AgentOut): Lens {
+  const role = agent.behavior.template_key ?? "";
+  if (["designer", "ux_designer", "creative_director", "art_director", "game_designer"].includes(role)) return "visual";
+  if (["qa", "qa_engineer", "playtester", "e2e_tester"].includes(role)) return "play";
+  if (["security", "security_lead"].includes(role)) return "security";
+  return "code";
+}
+
+/** One critic's verdict in a review round. `none` when it could not give one. */
+export interface Verdict { critic: string; lens: Lens; verdict: "approve" | "request_changes" | "none"; comments: string }
 
 /** The next turn of a session: why the work came back, and how to finish. */
 export function revisionNote(t: TaskOut, why: { from: string; text: string }, finish: string): string {
