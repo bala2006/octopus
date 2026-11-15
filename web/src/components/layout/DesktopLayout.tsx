@@ -2,14 +2,14 @@ import * as React from "react";
 import "./navigation.css";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
-  ChevronDown, ChevronRight, CircleAlert, Folder, FolderOpen, Home, Loader2, Moon, Pencil, Plus, Settings,
+  CircleAlert, Folder, FolderOpen, Home, Loader2, Moon, Pencil, Pin, PinOff, Plus, Settings,
   SquarePen, Sun, Trash2, User, UserRound, X,
 } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { qk, useCompanyId, useRuns, useWorkspaceId, useWorkspaces } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
-import { cn, goalTitle, initials } from "@/lib/utils";
+import { cn, goalTitle, initials, parseUtc } from "@/lib/utils";
 import { api, unwrap } from "@/lib/api";
 import {
   ConfirmDialog, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/overlays";
 import { Input } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
-import type { WorkspaceOut } from "@/types";
+import type { RunOut, WorkspaceOut } from "@/types";
 import { useOpenFolder } from "@/features/projects/useOpenFolder";
 import { threadKey, useWorkbenchStore } from "@/features/conversation/workbenchStore";
 import { useOpenConversation } from "@/features/conversation/useOpenConversation";
@@ -148,6 +148,34 @@ function Rail() {
   );
 }
 
+/** Newest first: the order every conversation list in the sidebar uses. */
+const newestFirst = (a: RunOut, b: RunOut) => parseUtc(b.created_at) - parseUtc(a.created_at);
+
+const PIN_KEY = "octopus-pinned-conversations";
+/** Conversations pinned to the top of the sidebar, kept on this computer. */
+function usePinnedRuns(): [string[], (id: string) => void] {
+  const [ids, setIds] = React.useState<string[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(PIN_KEY) ?? "[]");
+      return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  const toggle = React.useCallback((id: string) => {
+    setIds((current) => {
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      try { localStorage.setItem(PIN_KEY, JSON.stringify(next)); } catch { /* Pins still work until the page reloads. */ }
+      return next;
+    });
+  }, []);
+  return [ids, toggle];
+}
+
+/**
+ * The left column: pinned conversations, every project (the open one lists its newest conversations under it) and
+ * recents across all projects.
+ */
 function ProjectSidebar({ mobile, collapsed, onClose, onNewConversation, panelRef }: {
   mobile: boolean;
   collapsed: boolean;
@@ -157,19 +185,62 @@ function ProjectSidebar({ mobile, collapsed, onClose, onNewConversation, panelRe
 }) {
   const w = useWorkspaceId();
   const location = useLocation();
+  const navigate = useNavigate();
   const projects = useWorkspaces();
   const { companyId } = useCompanyId();
-  const target = w || projects.data?.find((project) => project.exists)?.id;
-  const runs = useRuns(w, companyId || undefined, true);
-  const recentRuns = useRuns(target || "", undefined, false);
-  const selected = useWorkbenchStore((s) => s.threads[threadKey(w, companyId)]);
-  const activeRun = selected === undefined ? runs.data?.[0]?.id : selected;
   const openConversation = useOpenConversation();
   const folder = useOpenFolder();
-  const [projectsCollapsed, setProjectsCollapsed] = React.useState(false);
+  const selected = useWorkbenchStore((s) => s.threads[threadKey(w, companyId)]);
   const onConversation = spaceOf(location.pathname)?.to === "agent";
+  const [pinned, togglePin] = usePinnedRuns();
+  const [openState, setOpenState] = React.useState<Record<string, boolean>>({});
   const sorted = [...(projects.data ?? [])].sort((a, b) => String(b.last_opened_at ?? "").localeCompare(String(a.last_opened_at ?? "")));
-  const targetName = projects.data?.find((p) => p.id === target)?.name;
+  const runQueries = useQueries({
+    queries: sorted.map((p) => ({
+      queryKey: qk.runs(p.id),
+      enabled: p.exists,
+      refetchInterval: p.id === w ? 3000 : false,
+      queryFn: () => unwrap(api.GET("/api/v1/w/{workspace_id}/runs", { params: { path: { workspace_id: p.id }, query: {} } })),
+    })),
+  });
+  const byProject = sorted.map((project, i) => ({
+    project,
+    runs: [...((runQueries[i]?.data as RunOut[] | undefined) ?? [])].sort(newestFirst),
+  }));
+  const everything = byProject.flatMap(({ project, runs }) => runs.map((run) => ({ run, project })));
+  const pinnedItems = pinned.flatMap((id) => everything.filter((e) => e.run.id === id));
+  const recents = [...everything].sort((a, b) => newestFirst(a.run, b.run)).slice(0, 8);
+  const current = byProject.find((p) => p.project.id === w)?.runs ?? [];
+  const activeRun = selected === undefined ? current[0]?.id : selected;
+  const isOpen = (id: string) => openState[id] ?? id === w;
+  // One highlight at a time: the open conversation where it is first listed (pinned, then its project, then recents).
+  // While no conversation is highlighted, the current project row carries the highlight.
+  const rendered = [
+    ...pinnedItems.map(({ run, project }) => `pinned:${project.id}:${run.id}`),
+    ...byProject.filter(({ project }) => isOpen(project.id)).flatMap(({ project, runs }) => runs.slice(0, 5).map((run) => `project:${project.id}:${run.id}`)),
+    ...recents.map(({ run, project }) => `recent:${project.id}:${run.id}`),
+  ];
+  const highlighted = onConversation && activeRun ? rendered.find((key) => key.endsWith(`:${w}:${activeRun}`)) : undefined;
+
+  const openProject = (project: WorkspaceOut) => {
+    if (!project.exists) {
+      toast.error(`${project.name}: folder not found`, { description: `${project.path} was moved or deleted. Right-click the project to remove it from Octopus.` });
+      return;
+    }
+    if (project.id === w) {
+      setOpenState((s) => ({ ...s, [project.id]: !isOpen(project.id) }));
+      return;
+    }
+    setOpenState((s) => ({ ...s, [project.id]: true }));
+    navigate(`/w/${project.id}/agent`);
+  };
+
+  const conversation = (section: "pinned" | "project" | "recent", run: RunOut, project: WorkspaceOut, child: boolean) => (
+    <ConversationRow key={`${section}:${project.id}:${run.id}`} run={run} child={child} pinned={pinned.includes(run.id)}
+      active={`${section}:${project.id}:${run.id}` === highlighted}
+      onOpen={() => openConversation(project.id, run)} onTogglePin={() => togglePin(run.id)} />
+  );
+
   return (
     <aside ref={panelRef} className={cn("project-sidebar", collapsed && !mobile && "is-collapsed")} aria-label="Projects and conversations">
       {mobile && (
@@ -181,7 +252,7 @@ function ProjectSidebar({ mobile, collapsed, onClose, onNewConversation, panelRe
       )}
       <div className="sidebar-top">
         <button className="sidebar-new-chat" onClick={onNewConversation}>
-          <SquarePen className="h-4 w-4" />
+          <SquarePen />
           <span>New conversation</span>
         </button>
       </div>
@@ -195,67 +266,83 @@ function ProjectSidebar({ mobile, collapsed, onClose, onNewConversation, panelRe
           ))}
           <Link to={w ? `/w/${w}/settings` : "/settings"} className="sidebar-nav-item"><Settings /><span>Settings</span></Link>
         </nav>
-        <div className="sidebar-section-heading">
-          <button onClick={() => setProjectsCollapsed(!projectsCollapsed)} aria-expanded={!projectsCollapsed} className="sidebar-section-title">
-            Projects{projectsCollapsed ? <ChevronRight /> : <ChevronDown />}
-          </button>
-          <Button variant="ghost" size="icon-sm" aria-label="Open project folder" title="Open project folder" onClick={folder.openPicker}><Plus /></Button>
-        </div>
-        {!projectsCollapsed && (
-          <div className="space-y-0.5">
-            {projects.isLoading && <div className="space-y-2 px-3"><div className="skeleton h-8" /><div className="skeleton h-8" /></div>}
-            {projects.isError && (
-              <p className="px-5 py-2 text-xs text-destructive" role="alert">
-                Projects could not be loaded. <button className="underline" onClick={() => void projects.refetch()}>Retry</button>
-              </p>
-            )}
-            {sorted.map((project) => (
-              <ProjectItem key={project.id} project={project} selected={w === project.id}>
-                <Link
-                  to={project.exists ? `/w/${project.id}/agent` : "/"}
-                  aria-disabled={!project.exists}
-                  aria-current={w === project.id ? "page" : undefined}
-                  onClick={(e) => {
-                    if (project.exists) return;
-                    e.preventDefault();
-                    toast.error(`${project.name}: folder not found`, { description: `${project.path} was moved or deleted. Right-click the project to remove it from Octopus.` });
-                  }}
-                  className={cn("sidebar-project", w === project.id && "is-selected", !project.exists && "opacity-40")}
-                  title={`${project.path}\nRight-click to rename or remove`}
-                >
-                  {w === project.id ? <FolderOpen /> : <Folder />}
-                  <span>{project.name}</span>
-                </Link>
-              </ProjectItem>
-            ))}
-            {!projects.isLoading && !projects.isError && !sorted.length && <p className="px-5 py-3 text-xs text-muted-foreground">Open a folder to get started.</p>}
-          </div>
+
+        {pinnedItems.length > 0 && (
+          <section aria-labelledby="sidebar-pinned">
+            <h2 id="sidebar-pinned" className="side-heading">Pinned</h2>
+            {pinnedItems.map(({ run, project }) => conversation("pinned", run, project, false))}
+          </section>
         )}
-        <div className="sidebar-section-heading sidebar-recents-heading">
-          <span>{w || !targetName ? "Recent conversations" : `Recent in ${targetName}`}</span>
-        </div>
-        <div className="sidebar-conversations">
-          {w && selected === null && onConversation && (
-            <button className="sidebar-conversation is-selected" onClick={onNewConversation}><span>New conversation</span><span className="h-1.5 w-1.5 rounded-full bg-primary" /></button>
+
+        <section aria-labelledby="sidebar-projects">
+          <div className="side-heading-row">
+            <h2 id="sidebar-projects" className="side-heading">Projects</h2>
+            <Button variant="ghost" size="icon-sm" aria-label="Open project folder" title="Open project folder" onClick={folder.openPicker}><Plus /></Button>
+          </div>
+          {projects.isLoading && <div className="space-y-2 px-2"><div className="skeleton h-8" /><div className="skeleton h-8" /></div>}
+          {projects.isError && (
+            <p className="side-empty text-destructive" role="alert">
+              Projects could not be loaded. <button className="underline" onClick={() => void projects.refetch()}>Retry</button>
+            </p>
           )}
-          {recentRuns.data?.slice(0, 20).map((run) => (
-            <button key={run.id} className={cn("sidebar-conversation", w && activeRun === run.id && onConversation && "is-selected")} title={goalTitle(run.goal)}
-              onClick={() => target && openConversation(target, run)}>
-              <span>{goalTitle(run.goal)}</span>
-              {run.status === "awaiting_user" ? <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-label="Waiting on you" />
-                : LIVE.includes(run.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-label="Working" />}
-            </button>
-          ))}
-          {recentRuns.isError && <button className="px-3 py-2 text-xs text-muted-foreground" onClick={() => void recentRuns.refetch()}>Retry</button>}
-          {target && !recentRuns.isLoading && !recentRuns.data?.length && <p className="px-3 py-2 text-xs text-muted-foreground">Your conversations will appear here.</p>}
-          {target && (recentRuns.data?.length ?? 0) > 20 && <Link to={`/w/${target}/runs`} className="block px-3 py-2 text-xs text-muted-foreground hover:text-foreground">See all in History</Link>}
-        </div>
+          {byProject.map(({ project, runs }) => {
+            const open = isOpen(project.id);
+            return (
+              <React.Fragment key={project.id}>
+                <ProjectItem project={project} selected={project.id === w}>
+                  <button type="button" className={cn("side-row", project.id === w && highlighted === undefined && "is-selected", !project.exists && "opacity-40")}
+                    aria-expanded={open} aria-current={project.id === w ? "page" : undefined}
+                    title={`${project.path}\nRight-click to rename or remove`} onClick={() => openProject(project)}>
+                    {open ? <FolderOpen /> : <Folder />}
+                    <span className="side-label">{project.name}</span>
+                  </button>
+                </ProjectItem>
+                {open && (
+                  <>
+                    {runs.slice(0, 5).map((run) => conversation("project", run, project, true))}
+                    {project.exists && runs.length === 0 && <p className="side-empty side-child">No conversations yet.</p>}
+                    {runs.length > 5 && <Link to={`/w/${project.id}/runs`} className="side-row is-child side-more">Show more</Link>}
+                  </>
+                )}
+              </React.Fragment>
+            );
+          })}
+          {!projects.isLoading && !projects.isError && !sorted.length && <p className="side-empty">Open a folder to get started.</p>}
+        </section>
+
+        <section aria-labelledby="sidebar-recents">
+          <h2 id="sidebar-recents" className="side-heading">Recents</h2>
+          {recents.map(({ run, project }) => conversation("recent", run, project, false))}
+          {!recents.length && <p className="side-empty">Your conversations will appear here.</p>}
+        </section>
       </div>
       {folder.element}
     </aside>
   );
 }
 
+function ConversationRow({ run, child, active, pinned, onOpen, onTogglePin }: {
+  run: RunOut;
+  child: boolean;
+  active: boolean;
+  pinned: boolean;
+  onOpen: () => void;
+  onTogglePin: () => void;
+}) {
+  const title = goalTitle(run.goal);
+  return (
+    <div className={cn("side-row side-conversation", child && "is-child", pinned && "is-pinned", active && "is-selected")}>
+      <button type="button" className="side-conversation-open" title={title} aria-current={active ? "true" : undefined} onClick={onOpen}>
+        <span className="side-label">{title}</span>
+      </button>
+      {run.status === "awaiting_user" ? <CircleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-label="Waiting on you" />
+        : LIVE.includes(run.status) && <span className="side-dot" aria-label="Working" />}
+      <button type="button" className="side-pin" title={pinned ? "Unpin" : "Pin"} aria-label={pinned ? "Unpin conversation" : "Pin conversation"} onClick={onTogglePin}>
+        {pinned ? <PinOff /> : <Pin />}
+      </button>
+    </div>
+  );
+}
 /** A project in the sidebar: right-click to rename it or remove it from Octopus (the folder is not touched). */
 function ProjectItem({ project, selected, children }: { project: WorkspaceOut; selected: boolean; children: React.ReactNode }) {
   const qc = useQueryClient();
