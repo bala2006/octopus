@@ -20,6 +20,7 @@ import { SHARED_MEMORY, type RunRow } from "../db/project";
 import type { Registry } from "../db/registry";
 import { effectiveRoles, roleByKey } from "../catalog/roles";
 import { effectiveSkills, skillsFor } from "../catalog/skills";
+import { kindOf, staffingError } from "../catalog/kinds";
 import type { Item } from "../llm/azure";
 import { costParts } from "../llm/pricing";
 import { connection } from "../llm/azure";
@@ -890,12 +891,14 @@ export class Conversation {
         const unknown = spec.skills.filter((s) => !known.has(s));
         if (unknown.length) throw new UserError(`Unknown skills: ${unknown.join(", ")}. Pick from the skill list.`);
         const files = spec.files.map((f) => this.p.fs.rel(f) || f);
-        const specialists = spec.specialists.map((name) => {
+        const specialistAgents = spec.specialists.map((name) => {
           const a = this.findAgent(name);
           if (!a) throw new UserError(`Nobody called ${name} to review this. Hire them first or pick someone on the team.`);
-          if (a.id === assignee.id) throw new UserError(`${a.name} owns this part, so cannot also critique it.`);
-          return a.id;
+          return a;
         });
+        const staffing = staffingError(assignee, specialistAgents);
+        if (staffing) throw new UserError(staffing);
+        const specialists = specialistAgents.map((a) => a.id);
         const t = this.newTask({ title: spec.title, description: spec.description, acceptance_criteria: spec.acceptance_criteria, assignee_agent_id: assignee.id,
           kind: spec.kind, depends_on: deps, created_by: lead.id, requirements, files, skills: spec.skills, specialists });
         this.post({ from: lead.id, to: assignee.id, type: "task", content: `**${t.title}**\n\n${t.description}`, meta: { task_id: t.key } });
@@ -1154,8 +1157,8 @@ export class Conversation {
    */
   private criticsFor(work: TaskOut, author: AgentOut): AgentOut[] {
     const named = work.specialists.map((id) => this.team.find((a) => a.id === id))
-      .filter((a): a is AgentOut => !!a && a.id !== author.id && a.tools.file_read !== false);
-    const code = named.some((a) => lensOf(a) === "code") ? [] : [this.reviewerFor(author)];
+      .filter((a): a is AgentOut => !!a && a.id !== author.id && kindOf(a) === "critic" && a.tools.file_read !== false);
+    const code = named.some((a) => lensOf(a) === "code") ? [] : [this.reviewerFor(author)].filter((a) => kindOf(a) !== "writer");
     return [...new Map([...code, ...named].map((a) => [a.id, a])).values()];
   }
 
@@ -1246,7 +1249,7 @@ export class Conversation {
    */
   private verifierFor(changedTasks: TaskOut[]): AgentOut | null {
     const authors = new Set(changedTasks.map((t) => t.assignee_agent_id));
-    const pool = this.team.filter((a) => a.id !== this.lead.id && a.tools.file_read !== false && (a.tools.terminal || a.tools.browser));
+    const pool = this.team.filter((a) => a.id !== this.lead.id && kindOf(a) === "critic" && a.tools.file_read !== false && (a.tools.terminal || a.tools.browser));
     const found = pool.find((a) => a.behavior.template_key === "qa") ?? pool.find((a) => a.tools.browser && !authors.has(a.id));
     if (found) return found;
     try {

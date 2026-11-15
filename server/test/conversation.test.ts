@@ -333,9 +333,9 @@ test("a small document a task depends on is handed over in its brief, so it is n
     const kind = turnKind(b);
     const n = outputs(b).length;
     if (kind === "plan") return n === 0 ? { calls: [
-      { name: "hire_agent", args: { role_key: "pm", title: "Product Manager", department: "Product", reason: "Writes the spec" } },
+      { name: "hire_agent", args: { role_key: "writer", title: "Technical Writer", department: "Product", reason: "Writes the spec" } },
       { name: "hire_agent", args: { role_key: "frontend", title: "Frontend Developer", department: "Engineering", reason: "Builds the page" } },
-      { name: "create_task", args: { title: "Write the spec", description: "Write .octopus/work/spec.md.", acceptance_criteria: "- exists", assignee: "Priya", kind: "docs", files: [".octopus/work/spec.md"] } },
+      { name: "create_task", args: { title: "Write the spec", description: "Write .octopus/work/spec.md.", acceptance_criteria: "- exists", assignee: "Ruth", kind: "docs", files: [".octopus/work/spec.md"] } },
       { name: "create_task", args: { title: "Build the page", description: "Build index.html from the spec.", acceptance_criteria: "- exists", assignee: "Lena", kind: "build", depends_on: ["T1"], files: ["index.html"] } },
     ] } : { calls: [{ name: "start_work", args: { note: "Spec, then page." } }] };
     if (kind === "work" && JSON.stringify(b.input[0]).includes("# T1: Write the spec")) return n === 0
