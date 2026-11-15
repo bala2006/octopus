@@ -42,6 +42,9 @@ const MIGRATIONS = [
    CREATE INDEX artifacts_path ON artifacts(path, version);
    CREATE INDEX artifacts_run ON artifacts(run_id);
    CREATE TABLE memory (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(agent_id, key));`,
+  `ALTER TABLE tasks ADD COLUMN requirements TEXT NOT NULL DEFAULT '[]';
+   ALTER TABLE tasks ADD COLUMN files TEXT NOT NULL DEFAULT '[]';
+   ALTER TABLE tasks ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';`,
 ];
 
 export type CompanyRow = {
@@ -69,7 +72,7 @@ export function openProject(root: string) {
     sessions: db.table<SessionOut>("sessions"),
     runs: db.table<RunRow>("runs", { json: ["budget", "outcome", "snapshot", "state"] }),
     messages: db.table<MessageOut>("messages", { json: ["meta"] }),
-    tasks: db.table<TaskOut>("tasks", { json: ["depends_on"] }),
+    tasks: db.table<TaskOut>("tasks", { json: ["depends_on", "requirements", "files", "skills"] }),
     events: db.table<EventRow>("run_events", { key: "seq", json: ["data"] }),
     artifacts: db.table<ArtifactRow>("artifacts", { bool: ["deleted", "created"] }),
     memory: db.table<MemoryOut>("memory"),

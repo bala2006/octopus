@@ -60,10 +60,11 @@ export class ChatSession {
     this.send("stream_start", { message_id: messageId, agent_id: agent.id });
     const { tools } = await toolbox(this.reg, this.p.root, agent, "chat");
     const ctx: ToolContext = {
-      agent, task: null, runId: `chat-${s.id}`, fs: this.p.fs, db: this.p.db, reg: this.reg, signal: this.abort.signal, team: () => team, seen: new Map(),
+      agent, task: null, runId: `chat-${s.id}`, fs: this.p.fs, db: this.p.db, reg: this.reg, signal: this.abort.signal, team: () => team, seen: new Map(), shown: new Map(),
       guard: async () => { throw new Denied("not available in direct chat; ask the company in the main conversation"); },
       emit: () => {}, setStatus: (_st, activity) => this.send("status", { message_id: messageId, phase: "tool", detail: activity ?? "" }),
-      recordFile: () => {}, consult: async () => "Teammates cannot be consulted from a direct chat.",
+      recordFile: () => {}, consult: async () => "Teammates cannot be consulted from a direct chat.", ownerOf: () => null,
+      devServer: async () => { throw new Denied("not available in direct chat"); },
     };
     let text = "";
     try {

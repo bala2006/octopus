@@ -1,6 +1,7 @@
 /**
- * The workspace terminal and dev server: one command and one server per project, started only by you, with live
- * output, input, and stop. They run through your shell with your environment minus provider keys.
+ * The workspace terminal and dev server: one command and one server per project, with live output, input, and stop.
+ * You start them; agents can also start the project's own dev script (start_dev_server). They run through your shell
+ * with your environment minus provider keys.
  */
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";

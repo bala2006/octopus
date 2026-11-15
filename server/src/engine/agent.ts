@@ -7,7 +7,7 @@ import type { Effort } from "@octopus/shared";
 import type { Registry } from "../db/registry";
 import { complete, type Item, type LlmResult, type ToolCall } from "../llm/azure";
 import { clip, UserError } from "../lib/util";
-import { Denied, toFunction, type Stop, type Tool, type ToolContext } from "../tools/types";
+import { Denied, MAX_TOOL_OUTPUT, toFunction, type Stop, type Tool, type ToolContext } from "../tools/types";
 
 export interface LoopEvents {
   text(delta: string): void;
@@ -34,6 +34,8 @@ export interface LoopOptions {
   maxRounds: number;
   /** Nudge once when the model stops without calling a finishing tool. */
   requireStop: boolean;
+  /** Messages for the agent from outside its turn (the lead amending its task), delivered before its next step. */
+  inbox?: string[];
 }
 
 /** `exhausted`: the agent used every tool round without finishing. */
@@ -44,16 +46,19 @@ const MAX_CONTEXT_CHARS = 450_000;
 const WRAP_UP_STEPS = 5;
 const WRAP_UP = "You are almost out of steps for this turn. Stop exploring, testing and polishing. Call the tool that ends the turn now (complete_task, submit_review, start_work or reply_to_user), and say what is done and what is not verified. If the work cannot be finished as specified, say so in that tool.";
 
-/** Older tool outputs are shortened when the transcript grows too long; the latest rounds stay intact. */
-function compact(input: Item[]) {
+/** Older tool outputs are shortened when the transcript grows too long; the latest rounds stay intact. Returns whether anything was shortened. */
+function compact(input: Item[]): boolean {
   let size = JSON.stringify(input).length;
+  let changed = false;
   for (const item of input) {
-    if (size <= MAX_CONTEXT_CHARS) return;
+    if (size <= MAX_CONTEXT_CHARS) break;
     if (item.type === "function_call_output" && typeof item.output === "string" && item.output.length > 1500) {
       size -= item.output.length - 1500;
       item.output = `${item.output.slice(0, 1200)}\n… [shortened to save context; run the tool again if you need it]`;
+      changed = true;
     }
   }
+  return changed;
 }
 
 function parseArgs(call: ToolCall): Record<string, unknown> {
@@ -87,7 +92,9 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   for (let round = 1; round <= o.maxRounds; round++) {
     if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: WRAP_UP });
     await o.events.beforeCall();
-    compact(input);
+    while (o.inbox?.length) input.push({ role: "user", content: o.inbox.shift()! });
+    // A shortened read no longer holds the file, so the next read of it must return the content again.
+    if (compact(input)) o.ctx.shown.clear();
     const res = await complete(o.reg, {
       model: o.model, instructions: o.instructions, input, tools: functions, effort: o.effort, signal: o.ctx.signal,
       maxOutputTokens: 48_000,
@@ -111,7 +118,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       if (stop) { input.push({ type: "function_call_output", call_id: call.call_id, output: "Skipped: the turn already ended." }); continue; }
       const r = await runCall(o, call, byName);
       o.events.toolResult(call.call_id, call.name, r.ok, r.output);
-      input.push({ type: "function_call_output", call_id: call.call_id, output: clip(r.output, 30_000) });
+      input.push({ type: "function_call_output", call_id: call.call_id, output: clip(r.output, MAX_TOOL_OUTPUT) });
       if (r.image) images.push(r.image);
       if (r.stop) stop = r.stop;
     }

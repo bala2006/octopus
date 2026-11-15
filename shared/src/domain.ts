@@ -296,6 +296,21 @@ export interface TaskOut {
   id: string; run_id: string; key: string; title: string; description: string; acceptance_criteria: string;
   assignee_agent_id: string | null; status: TaskStatus; kind: TaskKind; depends_on: string[]; result: string;
   created_by: string | null; attempts: number; updated_at: string;
+  /** Ids of the requirements (R1, R2...) this task delivers. */
+  requirements: string[];
+  /** Paths (files or folders) this task owns: no other task writes them while it runs. Empty: it may write anywhere, so it runs alone. */
+  files: string[];
+  /** Playbooks (skill names) the assignee follows for this task. */
+  skills: string[];
+}
+
+/** One thing the user asked for, in their words. A run is accepted against these. */
+export interface Requirement {
+  id: string;
+  text: string;
+  /** open until checked; met or unmet by the acceptance check; cut when the lead decided it cannot be built here (the note says why). */
+  status: "open" | "met" | "unmet" | "cut";
+  note: string;
 }
 
 export type MessageType =

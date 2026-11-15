@@ -47,14 +47,18 @@ export async function fakeModel(script: Script): Promise<FakeModel> {
 }
 
 /** Which kind of turn a request is, from the agent's instructions. */
-export function turnKind(body: { instructions: string }): "plan" | "work" | "review" | "report" | "consult" | "chat" {
+export function turnKind(body: { instructions: string }): "plan" | "work" | "review" | "acceptance" | "report" | "consult" | "chat" {
   const s = body.instructions;
   if (s.includes("## Direct chat")) return "chat";
   if (s.includes("A teammate's question")) return "consult";
   if (s.includes("You are reviewing a teammate's work")) return "review";
+  if (s.includes("## Acceptance check")) return "acceptance";
   if (s.includes("You have been given one task")) return "work";
   return body.instructions.includes("## How you work") && (body as { tools?: unknown[] }).tools?.length ? "plan" : "report";
 }
 
-/** Function outputs already in the transcript (how many tool rounds happened). */
-export const outputs = (body: { input: { type?: string; output?: string }[] }) => body.input.filter((i) => i.type === "function_call_output");
+/** Function outputs in the current turn (since the last user message): how many tool rounds this turn has had. */
+export const outputs = (body: { input: { type?: string; role?: string; output?: string }[] }) => {
+  const start = body.input.findLastIndex((i) => i.role === "user");
+  return body.input.slice(start + 1).filter((i) => i.type === "function_call_output");
+};

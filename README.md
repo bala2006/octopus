@@ -28,11 +28,13 @@ with feedback or the next request, and the same team carries on.
 3. **The team builds.** Each specialist works on their task with real tools: reading and editing files, running builds
    and tests, using a browser, searching the web, your MCP servers. They consult each other and keep notes that
    carry over to the next request.
-4. **Quality is built in.** Every change gets an independent review, and requested changes go back to the author. Your
-   project's tests, type checks and lint run after changes, and failures become fix tasks. The shared engineering
-   standards ask for complete code, existing conventions, real copy and honest reporting.
-5. **You get a report** with what changed, where, how it was verified and what is open. Your next message continues
-   the conversation.
+4. **Quality is built in.** For a feature, your asks become a list of requirements in your words; anything left out is
+   shown with the reason. Every change gets an independent review, and requested changes go back to the author. Your
+   project's tests, type checks and lint run after changes, then a QA engineer runs the product and checks each
+   requirement; failures go back to whoever built that part. The shared engineering standards ask for complete code,
+   existing conventions, real copy and honest reporting.
+5. **You get a report** with what changed, where and how it was verified, followed by each requirement's status and
+   everything still open. Your next message continues the conversation.
 
 Each job has one place in the app: **Conversation** (talk to the team lead and watch the team work), **Team** (design
 the org chart yourself or start from a template such as Software Startup or Web App Studio), **Direct chats** (one-on-one

@@ -287,11 +287,11 @@ const SECTIONS: Section[] = [
       <p>Every message you send goes through the same five steps. You see each one happen, and you can step in at any point.</p>
       <FlowDiagram />
       <Tips items={[
-        <><b>Plan.</b> Octopus reads your request and the project. It answers directly when no work is needed, asks you when a decision is genuinely yours, or hires the specialists the job needs and gives each one a task with acceptance criteria.</>,
-        <><b>Build.</b> Specialists work in parallel where they can, each with real tools: files, commands, a browser, the web and your MCP servers.</>,
-        <><b>Review.</b> Every change is reviewed by someone other than its author. Requested changes go back to the author.</>,
-        <><b>Verify.</b> Your project's own tests, type checks and lint run after changes. Failures become fix tasks.</>,
-        <><b>Report.</b> Octopus tells you what changed, where, how it was verified and what is still open. Reply to continue with the same team.</>,
+        <><b>Plan.</b> Octopus reads your request and the project. It answers directly when no work is needed, asks you when a decision is genuinely yours, or hires the specialists the job needs. For a feature it lists your asks in your words as requirements, and anything it leaves out is shown with the reason. Each task gets acceptance criteria, the requirements it delivers and the files it owns.</>,
+        <><b>Build.</b> Specialists work in parallel on separate files, each with real tools: files, commands, a browser, the web and your MCP servers.</>,
+        <><b>Review.</b> Every change is reviewed by someone other than its author. Requested changes go back to the author, who continues where they left off; the next review looks only at what changed.</>,
+        <><b>Verify.</b> Your project's own tests, type checks and lint run after changes. Then a QA engineer runs the product and checks every requirement. Failures go back to whoever built that part.</>,
+        <><b>Report.</b> Octopus tells you what changed, where and how it was verified, followed by each requirement's status and everything still open. Reply to continue with the same team.</>,
       ]} />
     </>,
   },

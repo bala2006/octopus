@@ -14,7 +14,7 @@ export const commandTools = [
       "Run one command in the project folder, e.g. `npm test`, `python -m pytest -q`, `npx tsc --noEmit`. No shell: no pipes, " +
       "redirects, `&&` or `cd` (use `cwd`). Builds, tests and read-only tools run immediately; installs and Git changes may need " +
       "approval; destructive commands (rm, git reset --hard, sudo, …) are refused, so delete files with delete_file instead. " +
-      "Long-running servers will time out: start them from the workspace instead.",
+      "Long-running servers will time out: use start_dev_server for the project's dev server.",
     args: z.object({
       command: z.string().min(1),
       cwd: z.string().optional().describe("Folder relative to the project root"),
@@ -36,6 +36,19 @@ export const commandTools = [
       const res = await run(argv, { cwd, env, timeoutMs: (a.timeout_s ?? 180) * 1000, maxOutput: 40_000, signal: ctx.signal });
       const status = res.timedOut ? `timed out after ${a.timeout_s ?? 180}s` : `exit code ${res.code}`;
       return { text: `$ ${a.command}\n${clip(res.output.trim(), 16_000) || "(no output)"}\n[${status}${res.truncated ? ", output truncated" : ""}]`, ok: res.code === 0 && !res.timedOut };
+    },
+  }),
+  defineTool({
+    name: "start_dev_server",
+    description: "Start the project's dev server (its dev, start or preview script) in the background and get its URL, or get the URL of the one already running. Use this to open the app in the browser; do not start servers with run_command.",
+    args: z.object({}),
+    async run(ctx) {
+      ctx.setStatus("running", "Starting the dev server");
+      const s = await ctx.devServer();
+      const tail = clip(s.output.trim(), 3000);
+      return s.url
+        ? { text: `\`${s.command}\` is running at ${s.url}` }
+        : { text: `\`${s.command}\` did not print a URL yet.\n${tail || "(no output)"}`, ok: false };
     },
   }),
 ];
