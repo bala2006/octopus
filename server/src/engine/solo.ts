@@ -17,6 +17,7 @@ import { soloToolbox } from "../tools";
 import type { Shown, Tool, ToolContext } from "../tools/types";
 import type { Project } from "../workspace/projects";
 import { projectOverview } from "../workspace/overview";
+import { rulesUpdate, type RulesSent } from "../workspace/instructions";
 import { agentLoop, type LoopEvents } from "./agent";
 import { fill, MAIN_PROMPT, runtimeContext } from "./prompts";
 
@@ -50,6 +51,8 @@ interface Transcript {
   context: string | null;
   /** Whether the skill catalog is in the transcript. It goes in once, at the start of the session. */
   catalog: boolean;
+  /** The project rules files sent so far, by name. A file that changes gets a new message; the sent ones stay as they are. */
+  rules: RulesSent;
   tools: Tool[];
   instructions: string;
   /** File contents the transcript already holds, so an unchanged read is not sent twice. */
@@ -170,6 +173,7 @@ export class SoloRun {
     return {
       items, head: Math.min(stored?.meta.head ?? 0, keep), context: stored?.meta.context ?? null, tools,
       catalog: stored?.meta.catalog ?? false,
+      rules: stored?.meta.rules ?? {},
       instructions: fill(MAIN_PROMPT, { model }), seen: new Map(), shown: new Map(),
     };
   }
@@ -186,6 +190,11 @@ export class SoloRun {
       t.catalog = true;
       const catalog = skillCatalog(effectiveSkills(this.host.reg));
       if (catalog) t.items.push({ role: "user", content: catalog });
+    }
+    const rules = rulesUpdate(this.host.p.root, t.rules);
+    if (rules) {
+      t.items.push({ role: "user", content: rules.message });
+      t.rules = rules.sent;
     }
     const context = this.context();
     const stable = runtimeContext({ ...context, overview: null });
@@ -298,7 +307,7 @@ export class SoloRun {
   }
 
   private save(t: Transcript) {
-    this.log.save({ model: this.host.model(this.host.lead()), head: t.head, context: t.context, catalog: t.catalog }, t.items);
+    this.log.save({ model: this.host.model(this.host.lead()), head: t.head, context: t.context, catalog: t.catalog, rules: t.rules }, t.items);
   }
 
   private hashOf(rel: string): string | null {

@@ -289,6 +289,27 @@ test("a custom skill from Settings is listed in the catalog, with its name and d
   }
 });
 
+test("the project rules reach the first request, and an edit adds one new message after the earlier ones", async () => {
+  writeFileSync(path.join(dir, "AGENTS.md"), "Use pnpm for every package command.");
+  const before = requests().length;
+  script = () => ({ text: "Noted." });
+  const id = await start("Add a dev script");
+  await turnDone(id, before + 1);
+  const rulesIn = (r: Request) => r.input.filter((item) => typeof item.content === "string" && item.content.startsWith("<project-rules>"));
+  expect(rulesIn(requests()[before]!)).toHaveLength(1);
+  expect(rulesIn(requests()[before]!)[0]!.content).toContain("Use pnpm for every package command.");
+  writeFileSync(path.join(dir, "AGENTS.md"), "Use npm for every package command.");
+  script = () => ({ text: "Noted again." });
+  await send(id, "Now the second message");
+  const done = await turnDone(id, before + 2);
+  expect(done.status).toBe("completed");
+  const later = requests()[before + 1]!;
+  expect(rulesIn(later)).toHaveLength(2);
+  expect(rulesIn(later)[0]!.content).toContain("Use pnpm for every package command.");
+  expect(rulesIn(later)[1]!.content).toContain("Use npm for every package command.");
+  expect(startsWith(later, requests()[before]!)).toBe(true);
+});
+
 async function waitFor(check: () => boolean, ms: number): Promise<boolean> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
