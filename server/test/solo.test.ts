@@ -262,6 +262,33 @@ test("each item is in the session file as it completes, so a step's call is save
   expect(done.status).toBe("completed");
 });
 
+test("the skill catalog is sent once, in the first request, and later requests do not repeat it", async () => {
+  const before = requests().length;
+  script = (b) => (outputs(b).length === 0 ? { calls: [{ name: "read_file", args: { path: "index.html" } }] } : { text: "Read it." });
+  const id = await start("Read the page");
+  await turnDone(id, before + 2);
+  script = () => ({ text: "Second reply." });
+  await send(id, "Second message");
+  await turnDone(id, before + 3);
+  const catalogs = (r: Request) => r.input.filter((item) => typeof item.content === "string" && item.content.startsWith("<skills>")).length;
+  expect([0, 1, 2].map((i) => catalogs(requests()[before + i]!))).toEqual([1, 1, 1]);
+  expect(requests()[before]!.input[0].content).toMatch(/^<skills>\n/);
+});
+
+test("a custom skill from Settings is listed in the catalog, with its name and description", async () => {
+  reg.skills.upsert({ name: "house-style", deleted: false, updated_at: "", data: { name: "house-style", description: "Our copy rules for every page.", body: "Use sentence case.", roles: [], phases: [] } });
+  try {
+    const before = requests().length;
+    script = () => ({ text: "Noted." });
+    const id = await start("Write the page copy");
+    await turnDone(id, before + 1);
+    const catalog = requests()[before]!.input.find((item) => typeof item.content === "string" && item.content.startsWith("<skills>"));
+    expect(catalog.content).toContain("- `house-style`: Our copy rules for every page.");
+  } finally {
+    reg.skills.remove("house-style");
+  }
+});
+
 async function waitFor(check: () => boolean, ms: number): Promise<boolean> {
   const end = Date.now() + ms;
   while (Date.now() < end) {

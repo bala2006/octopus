@@ -7,6 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { AgentOut, AgentStatus, Effort, MessageOut, Question, RunEventMap, RunStatus, RunTopic, Usage } from "@octopus/shared";
+import { skillCatalog, effectiveSkills } from "../catalog/skills";
 import { config } from "../config";
 import type { Registry } from "../db/registry";
 import { SessionLog, trimToFinishedStep } from "../db/sessionLog";
@@ -47,6 +48,8 @@ interface Transcript {
   head: number;
   /** The last runtime context written, without the project overview; null before the first one. */
   context: string | null;
+  /** Whether the skill catalog is in the transcript. It goes in once, at the start of the session. */
+  catalog: boolean;
   tools: Tool[];
   instructions: string;
   /** File contents the transcript already holds, so an unchanged read is not sent twice. */
@@ -166,6 +169,7 @@ export class SoloRun {
     items.length = keep;
     return {
       items, head: Math.min(stored?.meta.head ?? 0, keep), context: stored?.meta.context ?? null, tools,
+      catalog: stored?.meta.catalog ?? false,
       instructions: fill(MAIN_PROMPT, { model }), seen: new Map(), shown: new Map(),
     };
   }
@@ -177,6 +181,11 @@ export class SoloRun {
         t.seen.delete(rel);
         t.shown.delete(rel);
       }
+    }
+    if (!t.catalog) {
+      t.catalog = true;
+      const catalog = skillCatalog(effectiveSkills(this.host.reg));
+      if (catalog) t.items.push({ role: "user", content: catalog });
     }
     const context = this.context();
     const stable = runtimeContext({ ...context, overview: null });
@@ -289,7 +298,7 @@ export class SoloRun {
   }
 
   private save(t: Transcript) {
-    this.log.save({ model: this.host.model(this.host.lead()), head: t.head, context: t.context }, t.items);
+    this.log.save({ model: this.host.model(this.host.lead()), head: t.head, context: t.context, catalog: t.catalog }, t.items);
   }
 
   private hashOf(rel: string): string | null {

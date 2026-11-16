@@ -1,7 +1,7 @@
 /**
  * The transcript of one solo conversation, kept at `.octopus/sessions/<conversation>.jsonl`. The first line holds the
- * metadata: the model, the head length and the last runtime context. Each later line is one transcript item. Items are
- * appended as they arrive. The file is rewritten whole only when earlier content changed, such as after a compaction.
+ * metadata: the model, the head length, the last runtime context and whether the skill catalog was sent. Each later line is
+ * one transcript item. Items are appended as they arrive. The file is rewritten whole only when earlier content changed, such as after a compaction.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -13,6 +13,8 @@ export interface SessionMeta {
   head: number;
   /** The runtime context last written, without the project overview; null before the first one. */
   context: string | null;
+  /** Whether the skill catalog is in the transcript. It is sent once per session. */
+  catalog: boolean;
 }
 
 /** Cuts a transcript back to its last finished step, so no tool call is left without its output. Returns the length to keep. */
@@ -27,7 +29,7 @@ export function trimToFinishedStep(items: Item[]): number {
   return keep;
 }
 
-const sameMeta = (a: SessionMeta, b: SessionMeta) => a.model === b.model && a.head === b.head && a.context === b.context;
+const sameMeta = (a: SessionMeta, b: SessionMeta) => a.model === b.model && a.head === b.head && a.context === b.context && a.catalog === b.catalog;
 
 export class SessionLog {
   /** The items the file holds now, so a save appends only what is new. */
@@ -48,7 +50,7 @@ export class SessionLog {
       if (!line.trim()) continue;
       let entry: Item;
       try { entry = JSON.parse(line); } catch { continue; } // a line cut short by a crash
-      if (entry.type === "meta") meta = { model: entry.model, head: entry.head, context: entry.context ?? null };
+      if (entry.type === "meta") meta = { model: entry.model, head: entry.head, context: entry.context ?? null, catalog: entry.catalog ?? false };
       else items.push(entry);
     }
     if (!meta) return null;

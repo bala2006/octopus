@@ -5,6 +5,7 @@ import { canWrite, kindOf } from "../catalog/kinds";
 import { BUILDER_BROWSER_TOOLS, browserTools, serverTools } from "../services/mcp";
 import { commandTools } from "./commands";
 import { fileTools } from "./files";
+import { skillTool } from "./skill";
 import { acceptanceTool, askUser, collabTools, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
 import { todoTools } from "./todo";
 import type { Tool } from "./types";
@@ -66,8 +67,8 @@ export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode
 }
 
 /**
- * The main agent of a solo conversation: the builder's tools, plus ask_user and todo_write. It has no team, planning,
- * hiring or review tools, so the only way its turn ends without a reply is a question to the user.
+ * The main agent of a solo conversation: the builder's tools, plus skill, ask_user and todo_write. It has no team,
+ * planning, hiring or review tools, so the only way its turn ends without a reply is a question to the user.
  */
 export async function soloToolbox(reg: Registry, root: string, agent: AgentOut): Promise<{ tools: Tool[]; warnings: string[] }> {
   const t = agent.tools;
@@ -79,6 +80,6 @@ export async function soloToolbox(reg: Registry, root: string, agent: AgentOut):
     try { tools.push(...await browserTools(root, BUILDER_BROWSER_TOOLS)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
   }
   if (t.mcp_servers?.length) tools.push(...await serverTools(reg, t.mcp_servers));
-  tools.push(...memoryTools, askUser, ...todoTools);
+  tools.push(skillTool, ...memoryTools, askUser, ...todoTools);
   return { tools, warnings };
 }
