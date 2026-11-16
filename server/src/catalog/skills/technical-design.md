@@ -5,7 +5,7 @@ roles: architect, techlead, eng_manager, data_science_lead, security_lead
 ---
 # Technical design
 
-Output: `.octopus/work/design.md`. A builder should be able to implement it without asking you anything.
+Give the design in your reply, or in the file the brief names. It must be concrete enough to build from without asking questions.
 
 ## Steps
 1. Read the spec (and research). List the acceptance criteria; each must map to a module below.
@@ -15,7 +15,7 @@ Output: `.octopus/work/design.md`. A builder should be able to implement it with
    ```markdown
    # Design
    ## Overview (one paragraph + a small diagram if useful)
-   ## Files / modules (path → responsibility → owner)
+   ## Files / modules (path, responsibility)
    ## Interfaces (function signatures, HTTP endpoints with request/response, events, data shapes)
    ## State and data flow (what lives where, lifecycle, persistence)
    ## Error handling and edge cases
@@ -23,9 +23,9 @@ Output: `.octopus/work/design.md`. A builder should be able to implement it with
    ## How to run and test (exact commands / URL)
    ## Risks and how we de-risk them
    ```
-4. Split work only along clean interfaces. If the whole thing is one file or tightly coupled, it has ONE builder.
+4. Split code only along clean interfaces. If the parts are tightly coupled, keep them together.
 5. Call out what must be tested and how (unit tests for logic, a browser check for UI, a load check for performance).
 
 ## Quality bar
 - Every interface is concrete enough to code against (names, types, status codes).
-- No module without an owner; no acceptance criterion without a module.
+- No acceptance criterion without a module.

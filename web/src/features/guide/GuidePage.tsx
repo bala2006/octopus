@@ -388,7 +388,7 @@ const SECTIONS: Section[] = [
         <><b>Role</b> brings the agent's expertise, look and default tools from the role library. <b>Title</b> is how teammates see it.</>,
         <><b>Model</b> and <b>thinking</b>: give the lead a stronger setting and specialists a faster one if you like.</>,
         <><b>Tools</b>: read files, write files, commands, web, browser, ask you, ask teammates, plus any MCP servers you grant.</>,
-        <><b>Skills</b> are playbooks (code review, security review, writing tests…) added to the agent's instructions. Agents get the skills that match their role automatically.</>,
+        <><b>Skills</b> are playbooks (building a web game, debugging a failure, writing tests…) added to the agent's instructions. Agents get the skills that match their role automatically.</>,
         <><b>Prompt</b>: an agent uses its role's prompt unless you give it one of its own. Additional instructions are added for this agent only.</>,
         <><b>Notes</b> (the brain tab) are what the agent remembers between tasks. Agents add their own; you can add or delete them.</>,
         <>Turn an agent <b>inactive</b> to keep it on the canvas without giving it work.</>,

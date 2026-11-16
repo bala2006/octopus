@@ -6,20 +6,18 @@ roles: gameplay_programmer, game_director, game_designer, fullstack_dev, fronten
 # Web game
 
 ## Structure
-- **Structure**: when the brief allows several files, one concern per module (below). When it asks for one file, keep the same sections in that one file. `world/` (level, materials, lights), `actors/` (enemies, player), `weapon/` (view model,
-  firing, effects), `game/` (state machine, waves, rules: pure and unit-tested), `ui/` (HUD, menus). Keep each module under ~400
-  lines, so you can rework one area without rereading the rest and each specialist can review the area they care about.
+- **Structure**: when the brief asks for several files, split them by concern (rules, rendering, input, UI). When it asks for one file, keep the same concerns as sections in that file.
 - **Game states**: title, playing, paused, game over, restart, plus any transition the brief asks for (for example
   travel between levels). Every state has a screen and a key or click path; pausing works in every state.
 - **Loop**: `requestAnimationFrame` with a fixed simulation step (60 Hz accumulator); clamp `dt` after tab switches;
   pause when `document.hidden`.
-- **Input**: keyboard state map, mouse, touch. First-person controls use Pointer Lock behind a "click to play" overlay;
+- **Input**: keyboard state map, mouse, touch. For first-person controls, use Pointer Lock behind a "click to play" overlay;
   losing the lock pauses; menus release the lock and focus their main button.
-- **Test hook**: `window.__app` with `state()` (phase, wave, health, ammo, enemies, player position), `step(ms)`, and
-  actions (`start()`, `fire()`, `aimAt(x, y, z)`, `moveTo(x, z)`, `skipTo(phase)`) so browser automation can play what
-  pointer lock and real-time input prevent. Keep it small and always present.
+- **Test hook**: a small hook the game exposes, so browser automation can play what pointer lock and real-time input prevent.
+  Use the name the brief gives, or `window.__app` when it gives none. It has `state()` (the phase and the values a test checks),
+  `step(ms)`, and one action per control the game has.
 
-## Visual fidelity (Three.js)
+## Visual fidelity (Three.js, when the brief asks for a realistic look)
 Match the brief's words, element by element. Primitives are a starting point, never the finish.
 - **Materials**: `MeshStandardMaterial`/`MeshPhysicalMaterial` with procedural `CanvasTexture` maps (noise, cracks,
   grime, rust, wetness as roughness variation), normal or bump maps, tiling per surface.
@@ -30,15 +28,14 @@ Match the brief's words, element by element. Primitives are a starting point, ne
 - **Reflections**: a reflector or cube camera for wet floors and puddles, or low roughness with an environment map.
 - **Characters**: several parts with silhouettes that read (limbs, torn cloth, decay colours), animated gait and
   hit reactions; instancing for crowds.
-- **Destruction**: break meshes into debris pieces with velocity, gravity and floor collision (or `cannon-es`), decals
+- **Destruction**: break meshes into debris pieces with velocity, gravity and floor collision (or `cannon-es`, if the brief allows a dependency), decals
   for impacts. Pool debris and particles.
 - One renderer, `setPixelRatio(Math.min(devicePixelRatio, 2))`, resize handler, reuse geometries and materials, dispose on
   restart. Load Three.js the way the brief allows: inline or bundled for a one-file deliverable, otherwise the project's bundler or a pinned import map.
 
 ## Verify by playing
 1. `start_dev_server`, open the URL, read the console: it must be clean.
-2. Drive a full loop through `window.__app` with `browser_evaluate`: start, fire at an enemy, take damage, clear a
-   wave, every transition, game over, restart. Check `state()` after each step.
+2. Drive every state and transition through the test hook with `browser_evaluate`, checking `state()` after each step.
 3. Screenshot the key moments and compare them with the brief's description, element by element.
 4. Frame budget: sample 5 s of rAF timings; average frame under 33 ms.
 
