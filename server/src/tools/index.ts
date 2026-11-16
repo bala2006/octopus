@@ -3,7 +3,7 @@ import type { AgentOut } from "@octopus/shared";
 import type { Registry } from "../db/registry";
 import { canWrite, kindOf } from "../catalog/kinds";
 import { BUILDER_BROWSER_TOOLS, browserTools, serverTools } from "../services/mcp";
-import { commandTools } from "./commands";
+import { checkShellTool, commandTools } from "./commands";
 import { fileTools } from "./files";
 import { skillTool } from "./skill";
 import { acceptanceTool, askUser, collabTools, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
@@ -81,5 +81,32 @@ export async function soloToolbox(reg: Registry, root: string, agent: AgentOut):
   }
   if (t.mcp_servers?.length) tools.push(...await serverTools(reg, t.mcp_servers));
   tools.push(skillTool, ...memoryTools, askUser, ...todoTools);
+  return { tools, warnings };
+}
+
+/** The tools a read-only specialist may hold. None of them writes, edits, deletes, remembers or asks the user. */
+export type SpecialistTool = "read_file" | "glob" | "grep" | "shell" | "fetch_url" | "start_dev_server" | "browser" | "submit_review";
+
+const SPECIALIST_TOOLS: Record<Exclude<SpecialistTool, "browser">, Tool> = {
+  read_file: fileTools.find((f) => f.name === "read_file")!,
+  glob: fileTools.find((f) => f.name === "glob")!,
+  grep: fileTools.find((f) => f.name === "grep")!,
+  shell: checkShellTool,
+  fetch_url: webTools.find((w) => w.name === "fetch_url")!,
+  start_dev_server: commandTools.find((c) => c.name === "start_dev_server")!,
+  submit_review: reviewTool,
+};
+
+/** A specialist's toolbox: exactly the names it lists. The browser is the full Playwright list, as a designer needs it. */
+export async function specialistToolbox(names: readonly SpecialistTool[], root: string): Promise<{ tools: Tool[]; warnings: string[] }> {
+  const warnings: string[] = [];
+  const tools: Tool[] = [];
+  for (const name of names) {
+    if (name !== "browser") {
+      tools.push(SPECIALIST_TOOLS[name]);
+      continue;
+    }
+    try { tools.push(...await browserTools(root)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
+  }
   return { tools, warnings };
 }

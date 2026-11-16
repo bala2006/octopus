@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { checkShellTool } from "../src/tools/commands";
+import { specialistToolbox } from "../src/tools";
+import { SPECIALISTS, SPECIALIST_DEFS } from "../src/engine/specialists";
 import { ProjectFs } from "../src/safety/paths";
 import { checkOnly } from "../src/safety/commands";
 import { enterRound, leaveRound, restoreSnapshot, SNAPSHOT_MAX_BYTES, SNAPSHOT_MAX_FILES, takeSnapshot } from "../src/workspace/snapshot";
@@ -125,5 +127,62 @@ describe("project snapshot", () => {
     const report = leaveRound(root);
     expect(report?.restored).toEqual(["a.txt"]);
     expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("original");
+  });
+});
+
+/** Tools that change state, remember things or ask the user. No specialist may hold one. */
+const WRITE_TOOLS = ["write_file", "edit_file", "move_file", "delete_file", "remember", "forget", "ask_user", "todo_write", "message", "reply", "pin", "complete_task", "block_task", "submit_acceptance", "start_work", "hire_agent"];
+
+describe("specialist definitions", () => {
+  test.each(SPECIALISTS)("%s has its prompt and skill, under 4,000 characters together", (name) => {
+    const def = SPECIALIST_DEFS[name];
+    expect(def.instructions.length).toBeLessThan(4_000);
+    expect(def.instructions).toContain("\n\n");
+    expect(def.instructions.startsWith(readFileSync(path.join(process.cwd(), "src", "catalog", "specialists", name, "prompt.md"), "utf8").trim())).toBe(true);
+  });
+
+  test("each specialist has the effort the plan sets", () => {
+    expect(Object.fromEntries(SPECIALISTS.map((n) => [n, SPECIALIST_DEFS[n].effort]))).toEqual({ reviewer: "medium", security: "high", designer: "high", explorer: "low" });
+  });
+
+  test("the explorer ends with a plain text answer, and no prompt names a tool its toolbox lacks", () => {
+    expect(SPECIALIST_DEFS.explorer.ends).toBe("answer");
+    expect(SPECIALIST_DEFS.explorer.tools).not.toContain("submit_review");
+    const outside = ["fetch_url", "start_dev_server", "submit_review", "write_file", "edit_file", "delete_file", "ask_user", "todo_write", "remember"];
+    for (const name of SPECIALISTS) {
+      const def = SPECIALIST_DEFS[name];
+      for (const tool of outside) {
+        if ((def.tools as readonly string[]).includes(tool)) continue;
+        expect(new RegExp(`\\b${tool}\\b`).test(def.instructions), `${name} names ${tool}`).toBe(false);
+      }
+    }
+  });
+});
+
+describe("specialist toolboxes", () => {
+  test.each(SPECIALISTS)("%s gets its listed tools, the check-only shell, and no write tool", async (name) => {
+    const { root } = project();
+    const { tools } = await specialistToolbox(SPECIALIST_DEFS[name].tools, root);
+    const names = tools.map((t) => t.name);
+    for (const forbidden of WRITE_TOOLS) expect(names).not.toContain(forbidden);
+    expect(names).toEqual(expect.arrayContaining(["read_file", "glob", "grep", "shell"]));
+    expect(tools.find((t) => t.name === "shell")).toBe(checkShellTool);
+  });
+
+  test("the reviewer, security and designer end with submit_review, and the explorer has none", async () => {
+    const { root } = project();
+    const named = async (name: (typeof SPECIALISTS)[number]) => (await specialistToolbox(SPECIALIST_DEFS[name].tools, root)).tools.map((t) => t.name);
+    expect(await named("reviewer")).toContain("submit_review");
+    expect(await named("security")).toEqual(expect.arrayContaining(["submit_review", "fetch_url"]));
+    expect(await named("designer")).toEqual(expect.arrayContaining(["submit_review", "start_dev_server"]));
+    expect(await named("explorer")).not.toContain("submit_review");
+    expect(await named("reviewer")).not.toContain("fetch_url");
+  });
+
+  test("the designer's browser is missing when the browser is off, and the toolbox says why", async () => {
+    const { root } = project();
+    const { tools, warnings } = await specialistToolbox(SPECIALIST_DEFS.designer.tools, root);
+    expect(tools.some((t) => t.name.startsWith("browser_"))).toBe(false);
+    expect(warnings.some((w) => w.startsWith("Browser unavailable"))).toBe(true);
   });
 });
