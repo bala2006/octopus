@@ -13,7 +13,7 @@ import { parseArgs } from "node:util";
 import { z } from "zod";
 import { fakeModel, turnKind, type FakeModel, type Reply, type Script } from "../test/fakeModel";
 
-export const TURN_KINDS = ["plan", "work", "review", "acceptance", "report", "consult", "chat"] as const;
+export const TURN_KINDS = ["solo", "plan", "work", "review", "acceptance", "report", "consult", "chat"] as const;
 export type TurnKind = (typeof TURN_KINDS)[number];
 
 const ReplySchema = z.object({

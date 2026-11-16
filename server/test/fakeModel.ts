@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tokensOf } from "../src/engine/agent";
 
-export type Reply = { text?: string; calls?: { name: string; args: Record<string, unknown> }[]; /** Input tokens the response reports; by default the size of the request. */ usage?: number };
+export type Reply = { text?: string; calls?: { name: string; args: Record<string, unknown> }[]; /** Input tokens the response reports; by default the size of the request. */ usage?: number; /** Cached input tokens the response reports; 10 by default. */ cached?: number };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Script = (body: any) => Reply;
 
@@ -38,7 +38,7 @@ export async function fakeModel(script: Script, listenPort = 0): Promise<FakeMod
         send({ type: "response.function_call_arguments.delta", item_id: id, delta: args });
         output.push({ type: "function_call", id, call_id, name: c.name, arguments: args });
       }
-      send({ type: "response.completed", response: { status: "completed", output, usage: { input_tokens: reply.usage ?? tokensOf(body.input), output_tokens: 50, input_tokens_details: { cached_tokens: 10 }, output_tokens_details: { reasoning_tokens: 5 } } } });
+      send({ type: "response.completed", response: { status: "completed", output, usage: { input_tokens: reply.usage ?? tokensOf(body.input), output_tokens: 50, input_tokens_details: { cached_tokens: reply.cached ?? 10 }, output_tokens_details: { reasoning_tokens: 5 } } } });
       res.end();
     });
   });
@@ -48,8 +48,9 @@ export async function fakeModel(script: Script, listenPort = 0): Promise<FakeMod
 }
 
 /** Which kind of turn a request is, from the agent's instructions. */
-export function turnKind(body: { instructions: string }): "plan" | "work" | "review" | "acceptance" | "report" | "consult" | "chat" {
+export function turnKind(body: { instructions: string }): "solo" | "plan" | "work" | "review" | "acceptance" | "report" | "consult" | "chat" {
   const s = body.instructions;
+  if (s.includes("You are Octopus, a coding agent")) return "solo";
   if (s.includes("## Direct chat")) return "chat";
   if (s.includes("A teammate's question")) return "consult";
   if (s.includes("You are reviewing a teammate's work")) return "review";
