@@ -27,6 +27,7 @@ export interface ApiRoutes {
   // Settings and catalog
   "/api/v1/settings": { GET: R<D.SettingsOut> };
   "/api/v1/settings/approval-mode": { PUT: R<{ approval_mode: D.ApprovalMode }, In<typeof D.ApprovalModeInSchema>> };
+  "/api/v1/settings/specialists": { PUT: R<D.SpecialistsSettings, In<typeof D.SpecialistsInSchema>> };
   "/api/v1/settings/providers": { PUT: R<D.ProviderKeyOut, In<typeof D.ProviderKeyInSchema>> };
   "/api/v1/settings/providers/test": { POST: R<D.TestResultOut, In<typeof D.TestProviderInSchema>> };
   "/api/v1/settings/providers/{provider}": { DELETE: R<Ok> };
@@ -57,6 +58,7 @@ export interface ApiRoutes {
   };
   "/api/v1/w/{workspace_id}/companies/{company_id}/canvas": { PUT: R<D.CanvasOut, In<typeof D.CanvasStateSchema>> };
   "/api/v1/w/{workspace_id}/companies/{company_id}/export": { GET: R<D.CanvasExport> };
+  "/api/v1/w/{workspace_id}/companies/{company_id}/specialists/{name}": { POST: R<D.CanvasOut> };
   "/api/v1/w/{workspace_id}/companies/{company_id}/save-template": { POST: R<D.TemplateOut, In<typeof D.UserTemplateInSchema>> };
   "/api/v1/w/{workspace_id}/agents/{agent_id}/memory": { GET: R<D.MemoryOut[]>; PUT: R<D.MemoryOut, In<typeof D.MemoryInSchema>> };
   "/api/v1/w/{workspace_id}/agents/{agent_id}/memory/{key}": { DELETE: R<Ok> };

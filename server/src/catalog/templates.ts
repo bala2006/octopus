@@ -6,7 +6,7 @@ import type { AgentOut, CanvasExport, EdgeOut, TemplateOut } from "@octopus/shar
 import type { Registry } from "../db/registry";
 import { agentFromRole, departmentColor, departmentsOf, departmentSummaries, freshName, layoutTree, wire } from "../engine/org";
 import { UserError } from "../lib/util";
-import { effectiveRoles } from "./roles";
+import { effectiveRoles, MAIN_ROLE } from "./roles";
 
 interface Dept { name: string; lead: string; members?: string[] }
 interface Template { key: string; name: string; description: string; head: string; departments: Dept[] }
@@ -15,6 +15,7 @@ const ENG = "Engineering", PD = "Product & Design", QO = "Quality & Ops";
 
 export const BUILTIN_TEMPLATES: Template[] = [
   { key: "adaptive", name: "Self-organizing", description: "Octopus alone at first; it hires exactly the specialists each request needs.", head: "orchestrator", departments: [] },
+  { key: "solo", name: "Solo with specialists", description: "Octopus works alone on each request, and the specialists you turn on in Settings review each change.", head: MAIN_ROLE, departments: [] },
   { key: "solo_engineer", name: "Solo Engineer", description: "Octopus and one full-stack developer, with automatic review.", head: "orchestrator",
     departments: [{ name: ENG, lead: "developer" }] },
   { key: "small_dev_team", name: "Small Dev Team", description: "A tech lead with frontend and backend developers.", head: "orchestrator",

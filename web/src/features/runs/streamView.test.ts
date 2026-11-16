@@ -36,7 +36,7 @@ describe("humanizeStream", () => {
 
   it("keeps the model's plain words as text and describes tools without bodies", () => {
     expect(humanizeStream("I'll check the tests first.")).toEqual([{ kind: "text", title: "Writing", body: "I'll check the tests first." }]);
-    expect(humanizeStream('{"action":"search_project","query":"jump"')[0].title).toBe("Searching for “jump”");
+    expect(humanizeStream('{"action":"grep","pattern":"jump"')[0].title).toBe("Searching for “jump”");
     expect(humanizeStream('{"action":"mcp__browser__browser_navigate","url":"x"')[0].title).toBe("Using browser / browser_navigate");
     expect(humanizeStream('{"actions": [')).toEqual([]);
   });

@@ -10,12 +10,31 @@ export interface Question { agent_id: string; question: string; options: { label
 export interface Usage {
   tokens: number; cost_usd: number; turns: number;
   active_seconds: number; input_tokens: number; cached_tokens: number; output_tokens: number;
-  reasoning_tokens: number; llm_calls: number; per_agent: Record<string, number>; per_agent_cost: Record<string, number>;
+  reasoning_tokens: number; llm_calls: number;
+  /** Reasoning items the API removed from the input because a changed prefix made them unusable. */
+  reasoning_dropped: number; per_agent: Record<string, number>; per_agent_cost: Record<string, number>;
   cost_breakdown: { input: number; cached_input: number; output: number };
+  /** Execution counters, so the cost of a run can be explained: what it called, changed, searched and re-read. */
+  /** Wall-clock of every model request, retries and their waits included. */
+  model_ms: number; tool_calls: number; tool_failures: number;
+  /** Read operations, and how many of them returned content the transcript already held. */
+  file_reads: number; redundant_reads: number;
+  /** Write operations: each successful write, edit, move or delete. One file can take several. */
+  file_writes: number;
+  /** Distinct project paths the run changed. */
+  files_changed: number;
+  /** Repository search operations, and folder listings. */
+  searches: number; listings: number;
+  verifications: number; agent_runs: number;
 }
 export type PhaseStatus = "pending" | "active" | "done" | "skipped" | "failed";
 export interface WorkflowPhase { key: string; title: string; owner: string | null; status: PhaseStatus; loops?: number; summary?: string }
 export interface WorkflowState { track: string | null; index: number; ended: boolean; reason?: string; phases: WorkflowPhase[] }
+
+/** One finding a review specialist reported, with the id the review round gave it. */
+export interface ReviewFinding { id: string; critic: string; severity: "blocker" | "major" | "minor"; file?: string; lines?: string; problem: string; evidence: string; fix: string }
+/** One specialist of a review round: its verdict, or null when it ended without one, and its findings. */
+export interface ReviewSpecialist { agent_id: string; name: string; verdict: "approve" | "request_changes" | null; findings: ReviewFinding[] }
 
 export interface RunEventMap {
   snapshot: { status: RunStatus; live: boolean; agent_status: Record<string, AgentStatus>; activity: Record<string, string>; pending_approval: PendingApproval | null; awaiting: Question | null; usage: Usage };
@@ -32,8 +51,10 @@ export interface RunEventMap {
   tool_call: { call_id: string; agent_id: string; tool: string; args: Record<string, unknown> };
   tool_result: { call_id: string; agent_id: string; tool: string; ok: boolean; output: string };
   browser_action: { agent_id: string; call_id: string; tool: string; args: Record<string, unknown>; ok: boolean; url: string; title: string; frame: string | null; note?: string };
+  todo_updated: { agent_id: string; todos: { content: string; status: "pending" | "in_progress" | "completed" }[] };
   task_updated: { task: TaskOut };
   requirements_updated: { requirements: Requirement[] };
+  review_round: { round: number; specialists: ReviewSpecialist[] };
   artifact_updated: { artifact: ArtifactOut & { created: boolean; lines: number; previous_lines: number } };
   workflow_updated: { workflow: WorkflowState };
   usage_update: Usage;

@@ -57,8 +57,8 @@ function actionSegment(action: string, src: string): Segment {
     case "finish": return { kind: "message", title: "Wrapping up", body: f("summary") ?? "" };
     case "remember": return { kind: "status", title: `Remembering ${f("key") ?? ""}`.trim(), body: f("value") ?? "" };
     case "read_file": return { kind: "status", title: `Reading ${path || "a file"}`, body: "" };
-    case "list_files": return { kind: "status", title: "Listing files", body: "" };
-    case "search_project": return { kind: "status", title: `Searching for “${f("query") ?? ""}”`, body: "" };
+    case "glob": return { kind: "status", title: "Listing files", body: "" };
+    case "grep": return { kind: "status", title: `Searching for “${f("pattern") ?? ""}”`, body: "" };
     case "update_task_board": return { kind: "status", title: "Updating the task board", body: f("title") ?? "" };
     case "wait": return { kind: "status", title: "Waiting for teammates", body: "" };
     default: return { kind: "status", title: action.startsWith("mcp__") ? `Using ${action.split("__").slice(1).join(" / ")}` : action.replace(/_/g, " "), body: "" };

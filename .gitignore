@@ -13,6 +13,7 @@ coverage/
 .octopus/
 .octopus-worktrees/
 .playwright-mcp/
+eval-results/
 
 # OS and editors
 .DS_Store

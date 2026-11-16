@@ -9,8 +9,10 @@ import type { AgentOut, MessageOut } from "@/types";
 import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/primitives";
-import type { OrgEvent, RunLive } from "./runState";
+import type { OrgEvent, ReviewRound, RunLive } from "./runState";
 import { LiveWriting, ThinkingView } from "./LiveWriting";
+import { ReviewCard } from "./ReviewCard";
+import { TodoList } from "./TodoList";
 import { humanizeStream } from "./streamView";
 import { countLine, type Step } from "./steps";
 
@@ -43,7 +45,7 @@ export function isUserFacing(m: MessageOut): boolean {
   return m.sender === "user" || !m.to_agent_id || m.type === "final_report";
 }
 
-type Item = ({ kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any> } | { kind: "org"; ev: OrgEvent } | { kind: "step"; step: Step } | { kind: "steps"; steps: Step[] }) & { seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Item = ({ kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any> } | { kind: "org"; ev: OrgEvent } | { kind: "step"; step: Step } | { kind: "steps"; steps: Step[] } | { kind: "review"; round: ReviewRound }) & { seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /** The conversation feed. With `agentId` it is that agent's own chat: what it said and was told, and its steps. */
 export function RunFeed({ state, agents, filter, showThoughts = true, agentId }: { state: RunLive; agents: Record<string, AgentOut>; filter: FeedFilter; showThoughts?: boolean; agentId?: string }) {
@@ -60,8 +62,10 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
     });
     if (filter !== "user" && !agentId) for (const r of state.rejected) raw.push({ kind: "rejected", r, seq: r.seq ?? 0 });
     if (!agentId) for (const ev of state.orgEvents) raw.push({ kind: "org", ev, seq: ev.seq });
-    for (const step of state.steps) if ((showThoughts || step.kind !== "thought") && (!agentId || step.agent_id === agentId)) raw.push({ kind: "step", step, seq: step.seq });
-    raw.sort((a, b) => a.seq - b.seq);
+    // A review round's specialist steps show inside its card, so the feed leaves them out.
+    const folded = new Set(agentId ? [] : state.reviews.flatMap((r) => r.specialists.flatMap((s) => s.steps.map((x) => x.id))));
+    if (!agentId) for (const round of state.reviews) raw.push({ kind: "review", round, seq: round.seq });
+    for (const step of state.steps) if ((showThoughts || step.kind !== "thought") && (!agentId || step.agent_id === agentId) && !folded.has(step.id)) raw.push({ kind: "step", step, seq: step.seq });
     const out: Item[] = [];
     for (const it of raw) { // group consecutive file writes by the same agent, and consecutive steps by the same agent
       const last = out[out.length - 1];
@@ -71,7 +75,7 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
       else out.push(it.kind === "files" ? { ...it, ms: [...it.ms] } : it);
     }
     return out;
-  }, [state.messages, state.rejected, state.orgEvents, state.steps, filter, showThoughts, agentId]);
+  }, [state.messages, state.rejected, state.orgEvents, state.steps, state.reviews, filter, showThoughts, agentId]);
   const active = Object.entries(state.agentStatus).filter(([id, st]) => statusMeta(st).live && (!agentId || id === agentId));
 
   React.useEffect(() => { if (stick) bottom.current?.scrollIntoView({ block: "end" }); }, [items.length, stick, state.streaming]);
@@ -81,32 +85,35 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
   };
 
   return (
-    <div className="relative h-full">
-      <div ref={scroller} onScroll={onScroll} className="h-full space-y-1 overflow-y-auto px-3 py-3" role="log" aria-live="polite" aria-label="Team conversation activity">
-        {items.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">Waiting for the first message…</p>}
-        {items.map((it) => it.kind === "msg" ? <FeedMessage key={it.m.id} m={it.m} agents={agents} />
-          : it.kind === "files" ? <FileGroup key={it.ms[0].id} ms={it.ms} agents={agents} />
-          : it.kind === "org" ? <OrgItem key={`o${it.seq}`} ev={it.ev} agents={agents} />
-          : it.kind === "steps" ? <StepRun key={`s${it.seq}`} steps={it.steps} agents={agents} />
-          : it.kind === "rejected" ? <Rejected key={`r${it.seq}`} r={it.r} agents={agents} />
-          : null)}
-        {active.map(([aid, st]) => {
-          const a = agents[aid];
-          if (!a) return null;
-          return (
-            <div key={`live-${aid}`} className="flex gap-2.5 rounded-lg px-2 py-2 animate-fade-up">
-              <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} status={st} size={28} />
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{a.name}</span><StatusPill status={st} activity={state.activity[aid]} />
-                  {state.live && state.turnStart[aid] ? <Elapsed since={state.turnStart[aid]} /> : null}</div>
-                {showThoughts && state.thinking[aid] && <ThinkingView text={state.thinking[aid]} live />}
-                {state.streaming[aid] && humanizeStream(state.streaming[aid]).length ? <LiveWriting raw={state.streaming[aid]} />
-                  : !state.thinking[aid] && <TypingDots color={statusMeta(st).color} />}
+    <div className="relative flex h-full flex-col">
+      {!agentId && state.todos && state.todos.items.length > 0 && <TodoList todos={state.todos} />}
+      <div className="relative min-h-0 flex-1">
+        <div ref={scroller} onScroll={onScroll} className="h-full space-y-1 overflow-y-auto px-3 py-3" role="log" aria-live="polite" aria-label="Team conversation activity">
+          {items.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">Waiting for the first message…</p>}
+          {items.map((it) => it.kind === "msg" ? <FeedMessage key={it.m.id} m={it.m} agents={agents} />
+            : it.kind === "files" ? <FileGroup key={it.ms[0].id} ms={it.ms} agents={agents} />
+            : it.kind === "org" ? <OrgItem key={`o${it.seq}`} ev={it.ev} agents={agents} />
+            : it.kind === "steps" ? <StepRun key={`s${it.seq}`} steps={it.steps} agents={agents} />
+            : it.kind === "review" ? <ReviewCard key={`v${it.seq}`} round={it.round} />
+            : it.kind === "rejected" ? <Rejected key={`r${it.seq}`} r={it.r} agents={agents} />
+            : null)}
+          {active.map(([aid, st]) => {
+            const a = agents[aid];
+            if (!a) return null;
+            return (
+              <div key={`live-${aid}`} className="flex gap-2.5 rounded-lg px-2 py-2 animate-fade-up">
+                <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} status={st} size={28} />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{a.name}</span><StatusPill status={st} activity={state.activity[aid]} />
+                    {state.live && state.turnStart[aid] ? <Elapsed since={state.turnStart[aid]} /> : null}</div>
+                  {showThoughts && state.thinking[aid] && <ThinkingView text={state.thinking[aid]} live />}
+                  {state.streaming[aid] && humanizeStream(state.streaming[aid]).length ? <LiveWriting raw={state.streaming[aid]} />
+                    : !state.thinking[aid] && <TypingDots color={statusMeta(st).color} />}
+                </div>
               </div>
-            </div>
-          );
-        })}
-        <div ref={bottom} />
+            );
+          })}
+          <div ref={bottom} />
       </div>
       {!stick && (
         <button onClick={() => { setStick(true); bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }}
@@ -114,6 +121,7 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
           <ChevronDown className="h-3.5 w-3.5" />Jump to latest
         </button>
       )}
+      </div>
     </div>
   );
 }

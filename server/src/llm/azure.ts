@@ -24,6 +24,8 @@ export interface LlmRequest {
   maxOutputTokens?: number;
   toolChoice?: "auto" | "required" | "none";
   signal?: AbortSignal;
+  /** Groups requests that share a prefix, so the cache can reuse it: conversation, agent and mode. */
+  promptCacheKey?: string;
 }
 export interface StreamHandlers {
   onText?: (delta: string) => void;
@@ -31,9 +33,17 @@ export interface StreamHandlers {
   onToolStart?: (call: { call_id: string; name: string }) => void;
   onToolArgs?: (callId: string, delta: string) => void;
 }
-export interface LlmResult { text: string; thought: string; calls: ToolCall[]; output: Item[]; usage: TokenUsage; costUsd: number; incomplete: string | null }
+export interface LlmResult { text: string; thought: string; calls: ToolCall[]; output: Item[]; usage: TokenUsage; costUsd: number; incomplete: string | null; /** Reasoning items the API removed from the input this call (its input_transformations). */ reasoningDropped: number; /** Wall-clock from the first attempt to the last streamed byte: network wait, streaming, retries and their waits. */ ms: number }
 
 export interface AzureConnection { baseUrl: string; apiKey: string; auth: "key" | "entra"; options: ProviderOptions }
+
+/** The window used when Settings does not set `context_window`. */
+export const DEFAULT_CONTEXT_WINDOW = 272_000;
+
+/** The model's context window in tokens. */
+export function contextWindow(reg: Registry): number {
+  return connection(reg)?.options.context_window ?? DEFAULT_CONTEXT_WINDOW;
+}
 
 /** Turn whatever the portal shows into the v1 base URL: `https://host/openai/v1`. */
 export function normalizeEndpoint(raw: string): { baseUrl: string; deployment?: string } {
@@ -78,13 +88,15 @@ function body(req: LlmRequest, drop: Set<string>): Item {
     max_output_tokens: req.maxOutputTokens ?? 32_000, include: ["reasoning.encrypted_content"],
   };
   if (req.tools?.length) {
-    b.tools = req.tools;
+    // A deployment that rejected strict schemas keeps the normalised parameters but must not be sent strict mode again.
+    b.tools = drop.has("strict") ? req.tools.map((t) => ({ ...t, strict: false })) : req.tools;
     b.tool_choice = req.toolChoice ?? "auto";
     b.parallel_tool_calls = true;
   }
   const effort = req.effort && req.effort !== "default" ? req.effort : config.defaultEffort;
   if (effort !== "none") b.reasoning = { effort, summary: "auto" };
   else b.reasoning = { effort: "none" };
+  if (req.promptCacheKey) Object.assign(b, { prompt_cache_key: req.promptCacheKey, prompt_cache_retention: "24h" });
   for (const key of drop) {
     if (key === "reasoning.summary") delete b.reasoning?.summary;
     else delete b[key];
@@ -95,9 +107,10 @@ function body(req: LlmRequest, drop: Set<string>): Item {
 /** If a 400 names one parameter the deployment does not support, return it so the call can be retried without it. */
 function rejectedParam(message: string, b: Item): string | null {
   const m = message.toLowerCase();
-  if (!/unsupported|not supported|does not support|unrecognized|unknown parameter|invalid value/.test(m)) return null;
+  if (!/unsupported|not supported|does not support|unrecognized|unknown parameter|invalid value|invalid schema/.test(m)) return null;
+  if ((b.tools as FunctionTool[] | undefined)?.some((t) => t.strict) && /strict|additionalproperties|schema|required/.test(m)) return "strict";
   if (m.includes("summary") && b.reasoning?.summary) return "reasoning.summary";
-  for (const key of ["reasoning", "include", "parallel_tool_calls", "max_output_tokens", "tool_choice"]) if (m.includes(key) && key in b) return key;
+  for (const key of ["reasoning", "include", "parallel_tool_calls", "max_output_tokens", "tool_choice", "prompt_cache_key", "prompt_cache_retention"]) if (m.includes(key) && key in b) return key;
   return null;
 }
 
@@ -107,6 +120,7 @@ async function headers(c: AzureConnection): Promise<Record<string, string>> {
 
 /** One model call, streamed. Throws UserError with a readable message on configuration problems. */
 export async function complete(reg: Registry, req: LlmRequest, on: StreamHandlers = {}): Promise<LlmResult> {
+  const started = Date.now();
   const c = connection(reg);
   if (!c) throw new UserError("Azure OpenAI is not connected. Open Settings → Model and add your endpoint and key.", 412);
   const drop = dropped.get(req.model) ?? new Set<string>();
@@ -124,7 +138,10 @@ export async function complete(reg: Registry, req: LlmRequest, on: StreamHandler
       await sleep(1000 * 2 ** attempt);
       continue;
     }
-    if (res.ok && res.body) return await readStream(res.body, c.options, on);
+    if (res.ok && res.body) {
+      const result = await readStream(res.body, c.options, on);
+      return { ...result, ms: Date.now() - started };
+    }
     const text = await res.text();
     const message = (() => { try { return JSON.parse(text).error?.message ?? text; } catch { return text; } })();
     lastError = `Azure OpenAI ${res.status}: ${String(message).slice(0, 500)}`;
@@ -145,7 +162,7 @@ export async function complete(reg: Registry, req: LlmRequest, on: StreamHandler
   throw new UserError(lastError || "Azure OpenAI did not respond");
 }
 
-async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderOptions, on: StreamHandlers): Promise<LlmResult> {
+async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderOptions, on: StreamHandlers): Promise<Omit<LlmResult, "ms">> {
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
@@ -196,6 +213,9 @@ async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderO
   const calls = output.filter((o) => o.type === "function_call").map((o) => ({ call_id: o.call_id, name: o.name, arguments: o.arguments ?? "{}" }));
   if (!text) text = output.filter((o) => o.type === "message").flatMap((o) => o.content ?? []).map((c: Item) => c.text ?? "").join("");
   const u = resp.usage ?? {};
+  // The API lists the reasoning items it removed when a changed prefix made them unusable; reasoning item ids start with rs_.
+  const transformations: Item[] = Array.isArray(resp.input_transformations) ? resp.input_transformations : [];
+  const reasoningDropped = transformations.filter((t) => String(t.id ?? "").startsWith("rs_") || String(t.type ?? "").includes("reasoning")).length;
   const usage: TokenUsage = {
     input: u.input_tokens ?? 0, cached: u.input_tokens_details?.cached_tokens ?? 0,
     output: u.output_tokens ?? 0, reasoning: u.output_tokens_details?.reasoning_tokens ?? 0,
@@ -205,5 +225,6 @@ async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderO
     // replay everything except plain message items without content; reasoning items carry encrypted content
     output: output.map(({ status: _s, ...item }) => item),
     incomplete: resp.status === "incomplete" ? resp.incomplete_details?.reason ?? "incomplete" : null,
+    reasoningDropped,
   };
 }

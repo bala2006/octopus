@@ -32,6 +32,28 @@ export function effectiveSkills(reg: Registry): SkillOut[] {
   return out;
 }
 
+/** The most of a skill's description that the catalog shows. The full instructions load with the `skill` tool. */
+export const CATALOG_SUMMARY_CHARS = 500;
+
+/**
+ * The skill catalog of a solo session, in the format of DeepSeek Harness: one line per skill, then how to load one. The
+ * session sends it once, as a user message. It is empty when there are no skills.
+ */
+export function skillCatalog(skills: SkillOut[]): string {
+  if (!skills.length) return "";
+  const lines = skills.map((s) => {
+    const summary = Array.from(s.description.replace(/\s+/g, " ").trim()).slice(0, CATALOG_SUMMARY_CHARS).join("");
+    return `- \`${s.name}\`: ${summary}`;
+  });
+  return [
+    "<skills>",
+    "A skill is a set of instructions for one kind of task. These skills are available in this session:",
+    ...lines,
+    "If the user names a skill, or the task clearly matches one, call skill with its exact name before you start, then follow it. This list holds summaries only. Do not follow a skill until you have loaded it.",
+    "</skills>",
+  ].join("\n");
+}
+
 /**
  * The skills that apply to an agent's turn, most specific first: the ones its task asks for, the ones switched on for
  * the agent, then the ones its role lists. At most three, to keep prompts focused.

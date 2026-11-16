@@ -20,7 +20,7 @@ it("groups one agent's consecutive steps under one count line, with its latest t
     thoughtStep(1, "riley", "Check the spec first."),
     read,
     thoughtStep(3, "riley", "Now build it."),
-    finishStep(callStep(4, { call_id: "c4", agent_id: "riley", tool: "run_command", args: { command: "npm test" } })!, true, ""),
+    finishStep(callStep(4, { call_id: "c4", agent_id: "riley", tool: "shell", args: { command: "npm test" } })!, true, ""),
   ];
   render(<RunFeed state={{ ...initialRun(), steps }} agents={agents} filter="all" />);
   const runs = screen.getAllByTestId("step-run");

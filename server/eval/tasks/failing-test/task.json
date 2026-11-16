@@ -1,0 +1,6 @@
+{
+  "id": "failing-test",
+  "title": "Fix the date bug behind a failing test",
+  "goal": "npm test fails in this project. Find the bug in src/dates.js that makes daysBetween count whole elapsed days instead of calendar days, fix it, and make npm test pass without changing the test expectations.",
+  "grader": { "run": true }
+}

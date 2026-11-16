@@ -1,0 +1,9 @@
+{
+  "id": "todo-page",
+  "title": "Build a single-page todo app",
+  "goal": "Build the single-page todo app described in README.md as index.html, app.js and style.css. Use the element ids and attributes listed in the README so the grader can drive the page.",
+  "grader": {
+    "run": false,
+    "reason": "Needs a browser. hidden/grade.mjs is a Playwright script that this harness does not run."
+  }
+}

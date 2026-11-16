@@ -1,0 +1,32 @@
+{
+  "description": "A builder reads five files that do not exist, all in one step.",
+  "replies": {
+    "plan": [
+      { "calls": [{ "name": "hire_agent", "args": { "role_key": "frontend", "title": "Frontend Developer", "department": "Engineering", "reason": "Reads the project" } }] },
+      { "calls": [{ "name": "create_task", "args": {
+        "title": "Read the five config files",
+        "description": "Read config files one through five and report what each one sets.",
+        "acceptance_criteria": "- each file is read",
+        "assignee": "Lena",
+        "kind": "build"
+      } }] },
+      { "calls": [{ "name": "start_work", "args": { "note": "Lena reads the config files." } }] }
+    ],
+    "work": [
+      { "calls": [
+        { "name": "read_file", "args": { "path": "config/one.json" } },
+        { "name": "read_file", "args": { "path": "config/two.json" } },
+        { "name": "read_file", "args": { "path": "config/three.json" } },
+        { "name": "read_file", "args": { "path": "config/four.json" } },
+        { "name": "read_file", "args": { "path": "config/five.json" } }
+      ] },
+      { "calls": [{ "name": "complete_task", "args": { "summary": "None of the five config files exist, so nothing was read.", "verification": "Each read returned an error." } }] }
+    ],
+    "review": [
+      { "calls": [{ "name": "submit_review", "args": { "verdict": "approve", "comments": "Nothing was changed, so there is nothing to review." } }] }
+    ],
+    "report": [
+      { "text": "None of the five config files exist, so nothing could be read." }
+    ]
+  }
+}

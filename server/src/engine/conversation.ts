@@ -12,32 +12,35 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  DEFAULT_BUDGET, TERMINAL_STATUSES, type AgentOut, type AgentStatus, type Attachment, type EdgeOut, type MessageOut, type PendingApproval,
-  type Question, type Requirement, type RunCreate, type RunEventMap, type RunStatus, type RunTopic, type TaskOut, type Usage, type WorkflowState,
+  DEFAULT_BUDGET, SPECIALIST_NAMES, TERMINAL_STATUSES, type AgentOut, type AgentStatus, type Attachment, type EdgeOut, type Effort, type MessageOut, type PendingApproval,
+  type Question, type Requirement, type RunCreate, type RunEventMap, type RunStatus, type RunTopic, type SpecialistName, type TaskOut, type Usage, type WorkflowState,
 } from "@octopus/shared";
 import { config } from "../config";
 import { SHARED_MEMORY, type RunRow } from "../db/project";
 import type { Registry } from "../db/registry";
-import { effectiveRoles, roleByKey } from "../catalog/roles";
+import { effectiveRoles, MAIN_ROLE, roleByKey } from "../catalog/roles";
 import { effectiveSkills, skillsFor } from "../catalog/skills";
-import { kindOf, staffingError } from "../catalog/kinds";
-import { addFindings, answerFindings, blockingOpen, renderFindings, settlePrior, type Finding } from "../lib/findings";
+import { canReview, canVerify, canWrite, kindOf, staffingError } from "../catalog/kinds";
+import { addFindings, answerFindings, blockingOpen, renderFindings, settlePrior, type Finding, unresolvedBlocking } from "../lib/findings";
 import type { Item } from "../llm/azure";
 import { costParts } from "../llm/pricing";
-import { connection } from "../llm/azure";
-import { run as runProcess, safeEnv } from "../lib/proc";
+import { connection, contextWindow } from "../llm/azure";
 import { clip, deferred, firstLine, newId, now, sha1, sleep, UserError } from "../lib/util";
 import { changedLines } from "../lib/diff";
-import { parseCommand } from "../safety/commands";
-import { toolbox, type Mode } from "../tools";
+import { endingNames, toolbox, type Mode } from "../tools";
 import { Denied, type GuardRequest, type HireSpec, type Planner, type Stop, type TaskSpec, type ToolContext } from "../tools/types";
 import { recordVersion, artifactOut } from "../workspace/artifacts";
-import { projectOverview, projectTasks, verificationChecks } from "../workspace/overview";
+import { CHECK_LIMIT, projectOverview, projectTasks } from "../workspace/overview";
 import { processes } from "../workspace/processes";
 import type { Project } from "../workspace/projects";
-import { agentLoop, type LoopEvents } from "./agent";
+import { agentLoop, compactable, tokensOf, type LoopEvents } from "./agent";
+import { hashFile, planChecks, runCheckList } from "./checks";
 import { publish } from "./bus";
+import { SoloRun, type SoloHost } from "./solo";
+import { SPECIALIST_DEFS, specialistSettings, type Seat } from "./specialists";
+import { seatSpecialist } from "./specialistSeats";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
+import { tierOf, type Tier } from "./risk";
 import { canRunBeside, owns, writes } from "./ownership";
 import { Collab, formatPin, type Pin, type Session } from "./collab";
 import { acceptanceBrief, instructions, lensOf, LENS, libraryList, outcomeSection, type Verdict, reAcceptanceBrief, reReviewBrief, reviewBrief, revisionNote, skillList, taskBrief } from "./prompts";
@@ -89,34 +92,41 @@ interface RunState {
 }
 interface Inbound { content: string; display: string; to_agent_id: string | null; images: Item[] }
 type Budget = typeof DEFAULT_BUDGET;
-/** Past this size a session costs more to continue than a fresh brief and a few reads (long turns summarize well before it). */
-const SESSION_MAX_CHARS = 600_000;
 /**
  * Steps per turn. Owners get room to build, look and fix in one go; context stays bounded by summarizing, not by
  * cutting the work off. The limit is a backstop against a runaway turn.
  */
 const STEPS: Partial<Record<Mode, number>> = { worker: 150, reviewer: 60, acceptance: 60, quick_review: 3 };
+/**
+ * How much reasoning each kind of turn is worth. Planning and building get depth; a verdict on a diff, a one-paragraph
+ * report and a teammate's factual answer do not. An agent or the conversation budget can still override this.
+ */
+const EFFORT: Record<Mode, Effort> = { orchestrator: "high", worker: "high", acceptance: "medium", reviewer: "medium", quick_review: "low", report: "low", chat: "low", consult: "low" };
 /** Documents from finished dependencies up to this size go inside the brief instead of being read with tools. */
 const DOCS_IN_BRIEF = 20_000;
 /** Longest message between agents; longer material goes in a file and the message names it. */
 const MESSAGE_CHARS = 2000;
 /** How long an agent waits for a teammate's reply before carrying on. */
 const REPLY_WAIT_MS = 10 * 60_000;
-/** Steps an idle agent gets to answer a message. */
-const ANSWER_STEPS = 6;
+/** Steps an idle agent gets to answer a message, and the session size worth loading to answer it. */
+const ANSWER_STEPS = 2;
+const ANSWER_MAX_CHARS = 80_000;
 /** Where a dev server says it listens. */
 const LOCAL_URL = /https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?[^\s"'<>]*/;
 
 class Halt extends Error {}
 /** A change this small is reviewed from its diff in one step, instead of by reading files. */
 const SMALL_CHANGE = { files: 2, lines: 80, chars: 12000 };
+/** The run's report with one more part: the request as its heading, then the reply. Both the pipeline and the solo path write it. */
+const appendRecap = (report: string, request: string, text: string) => `${report ? `${report}\n\n---\n\n` : ""}## ${firstLine(request, 100)}\n\n${text}`;
 const live = new Map<string, Conversation>();
 const PHASES = [["plan", "Plan"], ["build", "Build"], ["review", "Review"], ["verify", "Verify"], ["report", "Report"]] as const;
 
 function emptyUsage(): Usage {
   return { tokens: 0, cost_usd: 0, turns: 0,
-    active_seconds: 0, input_tokens: 0, cached_tokens: 0, output_tokens: 0, reasoning_tokens: 0, llm_calls: 0, per_agent: {}, per_agent_cost: {},
-    cost_breakdown: { input: 0, cached_input: 0, output: 0 } };
+    active_seconds: 0, input_tokens: 0, cached_tokens: 0, output_tokens: 0, reasoning_tokens: 0, reasoning_dropped: 0, llm_calls: 0, per_agent: {}, per_agent_cost: {},
+    cost_breakdown: { input: 0, cached_input: 0, output: 0 },
+    model_ms: 0, tool_calls: 0, tool_failures: 0, file_reads: 0, redundant_reads: 0, file_writes: 0, files_changed: 0, searches: 0, listings: 0, verifications: 0, agent_runs: 0 };
 }
 
 function initialState(): RunState {
@@ -149,6 +159,10 @@ export class Conversation {
   private startedServer = false;
   /** Resolved when a user message arrives while tasks run. */
   private wake: ReturnType<typeof deferred<void>> | null = null;
+  /** Check commands that already passed for exactly the files the team last changed, so they are not run twice. */
+  private checksPassed = new Set<string>();
+  /** The solo path, created when this conversation's company is the solo template. */
+  private soloRun: SoloRun | null = null;
 
   private constructor(readonly p: Project, readonly reg: Registry, row: RunRow) {
     this.row = row;
@@ -177,8 +191,8 @@ export class Conversation {
     return c;
   }
 
-  static isLive(runId: string) { return live.get(runId)?.driving ?? false; }
-  static liveCount() { return [...live.values()].filter((c) => c.driving).length; }
+  static isLive(runId: string) { return live.get(runId)?.turning ?? false; }
+  static liveCount() { return [...live.values()].filter((c) => c.turning).length; }
 
   static create(p: Project, reg: Registry, body: RunCreate): Conversation {
     if (!connection(reg)) throw new UserError("Connect Azure OpenAI first: Settings → Model.", 412);
@@ -196,6 +210,7 @@ export class Conversation {
     p.db.runs.insert(row);
     const c = new Conversation(p, reg, row);
     live.set(row.id, c);
+    if (c.lead.behavior.template_key === MAIN_ROLE) c.seatEnabled();
     c.submit(body.goal, body.attachments ?? [], null);
     return c;
   }
@@ -217,6 +232,35 @@ export class Conversation {
     return this.team.find((a) => a.is_entry) ?? this.team.find((a) => a.is_manager && !a.reports_to) ?? this.team[0]!;
   }
 
+  /** Whether a turn is running now, in either path. */
+  get turning(): boolean { return this.driving || !!this.soloRun?.running; }
+
+  /** The solo path, or null: a conversation whose company is the solo template runs through it. */
+  private get solo(): SoloRun | null {
+    if (this.lead.behavior.template_key !== MAIN_ROLE) return null;
+    this.soloRun ??= new SoloRun(this.soloHost());
+    return this.soloRun;
+  }
+
+  private soloHost(): SoloHost {
+    return {
+      p: this.p, reg: this.reg, runId: this.row.id, state: this.state, lead: () => this.lead, signal: () => this.abort.signal,
+      requirements: () => this.state.requirements, setRequirements: (list) => this.setRequirements(list),
+      emit: (type, data) => this.emit(type, data),
+      post: (m) => this.post({ from: this.lead.id, to: null, ...m }),
+      recap: (title, text) => { this.row.report_md = appendRecap(this.row.report_md, title, text); },
+      setRunStatus: (status, extra) => this.setRunStatus(status, extra),
+      setStatus: (agent, status, activity) => this.setStatus(agent, status, activity),
+      loopEvents: (agent) => this.loopEvents(agent),
+      toolContext: (agent, memory) => this.context(agent, null, undefined, memory),
+      seat: (name) => this.seat(name),
+      notes: () => [...this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]), ...this.p.db.memory.find("agent_id = ?", [this.lead.id])],
+      model: (agent) => this.model(agent),
+      effort: (agent) => this.effort(agent, "worker"),
+      finish: (reason, status) => this.finishHalted(reason, status),
+    };
+  }
+
   private get stopped() { return this.abort.signal.aborted; }
 
   // ── public API ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -234,6 +278,10 @@ export class Conversation {
     const msg = this.post({ from: null, to: pending?.question.agent_id ?? target, sender: "user", type: pending ? "answer" : "task", content: content + files,
       meta: { display_content: content, images: images.map((i) => i.name), attachments: attachments.map((a) => a.filename) } });
     if (this.row.status !== "queued" && TERMINAL_STATUSES.includes(this.row.status)) this.emit("run_continued", { content: firstLine(content, 200) });
+    if (this.solo) {
+      this.solo.submit(content + files, images.map((i) => ({ type: "input_image", image_url: i.url })));
+      return msg.id;
+    }
     // A message to a teammate who is working goes into its own chat before its next step, not into a new plan.
     const mate = !pending && target && target !== this.lead.id && this.driving ? this.team.find((a) => a.id === target) : undefined;
     if (mate && this.busy.has(mate.id)) {
@@ -258,7 +306,7 @@ export class Conversation {
     this.gate = null;
     g?.resolve();
     if (this.row.status === "paused") this.setRunStatus("running");
-    if (!this.driving) void this.drive();
+    if (!this.driving && !this.solo) void this.drive();
   }
 
   resolveApproval(id: string, approved: boolean, scope: "once" | "always", reason = "") {
@@ -284,7 +332,7 @@ export class Conversation {
   }
 
   snapshot(): RunEventMap["snapshot"] {
-    return { status: this.row.status, live: this.driving, agent_status: this.state.agent_status, activity: this.state.activity,
+    return { status: this.row.status, live: this.turning, agent_status: this.state.agent_status, activity: this.state.activity,
       pending_approval: [...this.approvals.values()][0]?.req ?? null, awaiting: this.state.questions[0]?.question ?? null, usage: this.state.usage };
   }
 
@@ -412,12 +460,23 @@ export class Conversation {
         this.emit("token_stream", { agent_id: agent.id, delta: d });
       },
       toolCall: (call_id, tool, args) => this.emit("tool_call", { call_id, agent_id: agent.id, tool, args }),
-      toolResult: (call_id, tool, ok, output) => this.emit("tool_result", { call_id, agent_id: agent.id, tool, ok, output: clip(output, 4000) }),
+      toolResult: (call_id, tool, ok, output, metrics) => {
+        const u = this.state.usage;
+        u.tool_calls++;
+        if (!ok) u.tool_failures++;
+        if (metrics?.read) u.file_reads++;
+        if (metrics?.redundant) u.redundant_reads++;
+        if (metrics?.wrote) u.file_writes++;
+        if (metrics?.searched) u.searches++;
+        if (metrics?.listed) u.listings++;
+        this.emit("tool_result", { call_id, agent_id: agent.id, tool, ok, output: clip(output, 4000) });
+      },
       usage: (r) => {
         const u = this.state.usage;
         const parts = costParts(r.usage, connection(this.reg)?.options);
         u.turns++; u.llm_calls++;
-        u.input_tokens += r.usage.input; u.cached_tokens += r.usage.cached; u.output_tokens += r.usage.output; u.reasoning_tokens += r.usage.reasoning;
+        u.model_ms += r.ms ?? 0;
+        u.input_tokens += r.usage.input; u.cached_tokens += r.usage.cached; u.output_tokens += r.usage.output; u.reasoning_tokens += r.usage.reasoning; u.reasoning_dropped += r.reasoningDropped;
         u.tokens += r.usage.input + r.usage.output;
         u.cost_usd += r.costUsd;
         u.cost_breakdown = { input: u.cost_breakdown.input + parts.input, cached_input: u.cost_breakdown.cached_input + parts.cached_input, output: u.cost_breakdown.output + parts.output };
@@ -450,6 +509,7 @@ export class Conversation {
       recordFile: (rel, before, after, note) => {
         const { row, lines, previous_lines } = recordVersion(this.p.db, { runId: this.row.id, path: rel, before, after, author: agent.id, note });
         if (task) this.state.files_by_task[task.id] = [...new Set([...(this.state.files_by_task[task.id] ?? []), rel])];
+        this.state.usage.files_changed = new Set(Object.values(this.state.files_by_task).flat()).size;
         if (task) this.recordDiff(task.id, rel, before, after);
         this.state.unchecked = true;
         this.state.unaccepted = true;
@@ -469,6 +529,16 @@ export class Conversation {
   }
 
   /** The project's dev server, started in the background when it is not running, and the URL it printed. */
+  /**
+   * A file a live session holds may have changed on disk since the session read it (the user edited it, or a program
+   * wrote it). Dropping the stale entry keeps both the rename guard and the unchanged-read shortcut truthful.
+   */
+  private refreshFileState() {
+    for (const s of this.sessions.values()) {
+      for (const [rel, hash] of s.seen) if (hashFile(this.p.fs, rel) !== hash) { s.seen.delete(rel); s.shown.delete(rel); }
+    }
+  }
+
   private async devServer(): Promise<{ command: string; url: string | null; output: string }> {
     const server = processes(this.p.id).server;
     if (server.status !== "running") {
@@ -485,13 +555,29 @@ export class Conversation {
   }
 
   private model(agent: AgentOut) { return this.budget.model || agent.model || config.defaultModel; }
-  private effort(agent: AgentOut) { return this.budget.reasoning_effort !== "default" ? this.budget.reasoning_effort : agent.behavior.reasoning_effort; }
+  private effort(agent: AgentOut, mode: Mode) {
+    if (this.budget.reasoning_effort !== "default") return this.budget.reasoning_effort;
+    const own = agent.behavior.reasoning_effort;
+    return own && own !== "default" ? own : EFFORT[mode] ?? config.defaultEffort;
+  }
 
-  /** A live session that can take another turn, or undefined. A session grown past its limit is dropped, so the next turn starts from a brief. */
+  /**
+   * A live session that can take another turn, or undefined. A session the next call could not carry is dropped, so the
+   * next turn starts from a brief.
+   */
   private liveSession(key: string): Session | undefined {
     const s = this.sessions.get(key);
-    if (s && JSON.stringify(s.input).length > SESSION_MAX_CHARS) { this.sessions.delete(key); return undefined; }
+    if (s && this.oversized(s)) { this.sessions.delete(key); return undefined; }
     return s;
+  }
+
+  /**
+   * Over the context window with nothing a checkpoint could replace. Compaction runs before every call, so a session
+   * it can still shrink is kept, and only one it cannot shrink is dropped.
+   */
+  private oversized(s: Session): boolean {
+    const window = contextWindow(this.reg);
+    return tokensOf(s.input) > window && !compactable(s.input, s.head, window);
   }
 
   /**
@@ -512,24 +598,27 @@ export class Conversation {
         s.instructions = instructions({
           agent, company: company?.name ?? "the company", goal: this.row.goal, team: this.team, overview: projectOverview(this.p.fs), skills: skillsFor(this.reg, agent, task?.skills),
           memory: { own: this.p.db.memory.find("agent_id = ?", [agent.id]), shared: this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]) },
+          wanted: task?.skills,
         }, mode);
       } catch (e) {
         if (opts.session) this.sessions.delete(opts.session);
         throw e;
       }
       // Documents put in the brief count as read, so the agent is not sent them twice.
-      for (const d of opts.preload ?? []) { const hash = sha1(d.content); s.seen.set(d.path, hash); s.shown.set(d.path, { hash, ranges: [[1, d.content.split("\n").length]] }); }
+      // The brief is the first item of the transcript, so a document in it is at position 0 and is never summarized away.
+      for (const d of opts.preload ?? []) { const hash = sha1(d.content); s.seen.set(d.path, hash); s.shown.set(d.path, { hash, ranges: [[1, d.content.split("\n").length]], at: 0 }); }
     }
     // What arrived while the session was idle comes first, so the new instruction is the last thing the agent reads.
     if (s.inbox.length) s.input.push({ role: "user", content: s.inbox.splice(0).join("\n\n") });
     s.input.push(...input);
     if (!s.head) s.head = s.input.length; // the first brief, and what arrived with it, survive summarizing
     s.used = ++this.turnCount;
+    this.state.usage.agent_runs++;
     this.emit("turn_started", { agent_id: agent.id, task_key: task?.key });
     try {
-      return await agentLoop({ reg: this.reg, model: this.model(agent), effort: this.effort(agent), instructions: s.instructions, input: s.input, tools: s.tools, inbox: s.inbox,
+      return await agentLoop({ reg: this.reg, model: this.model(agent), effort: this.effort(agent, s.mode), instructions: s.instructions, input: s.input, tools: s.tools, inbox: s.inbox,
         ctx: { ...this.context(agent, task, opts.planner, s), answering: opts.answering ?? null }, events: this.loopEvents(agent), maxRounds: opts.maxRounds, keepHead: s.head,
-        requireStop: s.mode !== "consult" && s.mode !== "report" && !opts.answering });
+        requireStop: s.mode !== "consult" && s.mode !== "report" && !opts.answering, stopTools: endingNames(s.tools), cacheKey: `${this.row.id}:${agent.id}:${s.mode}` });
     } catch (e) {
       if (opts.session) this.sessions.delete(opts.session); // its transcript may end mid-round
       throw e;
@@ -582,7 +671,9 @@ export class Conversation {
     this.busy.add(to.id);
     const run = (async () => {
       try {
-        const live = this.collab.latestSession(to.id);
+        const latest = this.collab.latestSession(to.id);
+        // A teammate's session holds what it knows, but a huge one costs more than the question is worth.
+        const live = latest && JSON.stringify(latest.session.input).length <= ANSWER_MAX_CHARS ? latest : undefined;
         const prompt = q.messageId
           ? `Message ${q.messageId} from ${q.from}:\n${q.body}\n\nAnswer from what you already know; read files only if you must, and change nothing. Answer with reply (message_id "${q.messageId}"), or in plain text.`
           : `These messages reached you after your last step:\n\n${q.body}\n\nAnswer each with reply, from what you already know; change nothing.`;
@@ -594,8 +685,7 @@ export class Conversation {
         if (text) {
           this.post({ from: to.id, to: q.askerId, type: "answer", content: clip(text, MESSAGE_CHARS), meta: q.messageId ? { reply_to: q.messageId } : {} });
           if (q.messageId) this.collab.answer(q.messageId, text);
-        }
-        if (q.messageId) this.collab.answer(q.messageId, `(${to.name} gave no answer)`);
+        } else if (q.messageId) this.collab.answer(q.messageId, `(${to.name} gave no answer)`);
       } catch (e) {
         if (q.messageId) this.collab.answer(q.messageId, `(${to.name} could not answer: ${(e as Error).message})`);
       } finally {
@@ -630,7 +720,7 @@ export class Conversation {
     const live = this.collab.latestSession(agent.id);
     const prior = live?.session.mode === "worker" ? /^[^:]+:([^:]+)$/.exec(live.key)?.[1] : undefined; // worker sessions are keyed agent:task
     const t = this.newTask({ title: firstLine(msg.display, 80), description: msg.content, acceptance_criteria: "Do what the user asked; verify it.", assignee_agent_id: agent.id,
-      kind: agent.tools.file_write === false ? "research" : "build", depends_on: [], created_by: null, files: this.tasks.find((x) => x.id === prior)?.files ?? [] });
+      kind: canWrite(agent) ? "build" : "research", depends_on: [], created_by: null, files: this.tasks.find((x) => x.id === prior)?.files ?? [] });
     if (prior) this.state.continues[t.id] = prior;
   }
 
@@ -693,6 +783,36 @@ export class Conversation {
     return agent;
   }
 
+  /** A specialist's seat: its agent, reporting to Octopus, and the two channels between them. The first use adds the agent to the canvas. */
+  private seat(name: SpecialistName): Seat {
+    const lead = this.lead;
+    const made = seatSpecialist(this.p, this.row.company_id, name);
+    const { agent, edges } = made;
+    if (made.added) {
+      this.team.push(agent);
+      this.edges.push(...edges);
+      this.row.snapshot = { ...this.row.snapshot, agents: this.team, edges: this.edges };
+      this.state.agent_status[agent.id] = "idle";
+      this.emit("agent_created", { agent, edges, created_by: lead.id, persisted: true, reason: `${SPECIALIST_DEFS[name].title} checks the work for ${lead.name}`, department: { name: agent.department, color: departmentColor(agent.department) } });
+      this.save();
+    } else if (!this.team.some((a) => a.id === agent.id)) {
+      // Seated by another conversation or by the palette since this one loaded: take the company's current team.
+      this.team = this.p.db.agents.find("company_id = ?", [this.row.company_id]);
+      this.edges = this.p.db.edges.find("company_id = ?", [this.row.company_id]);
+      this.row.snapshot = { ...this.row.snapshot, agents: this.team, edges: this.edges };
+    }
+    const id = agent.id;
+    const delegate = this.edges.find((e) => e.type === "delegate" && e.source_agent_id === lead.id && e.target_agent_id === id);
+    const report = this.edges.find((e) => e.type === "report" && e.source_agent_id === id && e.target_agent_id === lead.id);
+    if (!delegate || !report) throw new Error(`${SPECIALIST_DEFS[name].title} has no channel to ${lead.name}`);
+    return { agent, delegate, report };
+  }
+
+  /** A solo conversation's canvas shows one card per specialist that Settings turns on, so they are seated before the first turn. */
+  private seatEnabled() {
+    const settings = specialistSettings(this.reg);
+    for (const name of SPECIALIST_NAMES) if (settings.specialists[name].enabled) this.seat(name);
+  }
   /** Keeps the changed lines of a task's files since its last review, so a reviewer of a small change can read the diff. */
   private recordDiff(taskId: string, rel: string, before: string | null, after: string | null) {
     const hunk = changedLines(before, after);
@@ -706,6 +826,21 @@ export class Conversation {
     const diff = this.state.diffs_by_task[work.id];
     const fits = !!diff && diff.lines <= SMALL_CHANGE.lines && (diff.files ?? []).length <= SMALL_CHANGE.files && diff.text.length < SMALL_CHANGE.chars;
     return fits ? diff : null;
+  }
+
+  /**
+   * How much checking a part's change gets, decided from what it touched. The choice is shown in the run, so a skipped
+   * review is visible rather than silent.
+   */
+  private riskOf(task: TaskOut, agent: AgentOut): Tier {
+    const files = this.state.files_by_task[task.id] ?? [];
+    const lines = this.state.diffs_by_task[task.id]?.lines ?? 0;
+    const requirements = this.cycleRequirements().filter((r) => r.status === "open" || r.status === "unmet").length;
+    const revised = (this.state.revisions[this.state.continues[task.id] ?? task.id] ?? 0) > 0;
+    const tier = tierOf({ files, lines, specialists: task.specialists.length, requirements, revised });
+    const size = `${files.length} file${files.length === 1 ? "" : "s"}, ${lines} changed line${lines === 1 ? "" : "s"}`;
+    this.emit("thought", { agent_id: agent.id, text: `${task.key} is a ${tier} change (${size})${tier === "trivial" ? ", so it is not reviewed" : ""}.` });
+    return tier;
   }
 
   /** The documents finished dependencies wrote, when they are small enough to hand over inside the brief. */
@@ -727,7 +862,7 @@ export class Conversation {
   /** Who reviews a piece of work: a review channel to the author, their department lead, a reviewer on the team, or a new tech lead. */
   private reviewerFor(author: AgentOut): AgentOut {
     const byChannel = this.edges.find((e) => e.type === "review" && e.target_agent_id === author.id && e.source_agent_id !== author.id);
-    const assigned = byChannel && this.team.find((a) => a.id === byChannel.source_agent_id);
+    const assigned = byChannel && this.team.find((a) => a.id === byChannel.source_agent_id && canReview(a));
     if (assigned) return assigned;
     const lead = this.team.find((a) => a.id === author.reports_to && a.is_manager && a.id !== this.lead.id && a.tools.file_read !== false);
     if (lead && lead.id !== author.id) return lead;
@@ -764,6 +899,7 @@ export class Conversation {
           this.state.history.push({ role: "user", content: msg.display });
           this.requestImages = msg.images;
           this.loadTeam();
+          this.refreshFileState();
           const direct = msg.to_agent_id && msg.to_agent_id !== this.lead.id ? this.team.find((a) => a.id === msg.to_agent_id) : undefined;
           if (direct) this.directTask(msg, direct);
           else if ((await this.plan(msg)) !== "work") continue;
@@ -786,7 +922,7 @@ export class Conversation {
       this.driving = false;
       if (this.row.status === "running" && !this.queue.length) {
         if (this.state.questions.length) this.setRunStatus("awaiting_user", { reason: "Waiting for your answer" });
-        else this.setRunStatus(this.tasks.some((t) => t.status === "blocked") ? "incomplete" : "completed", { reason: "" });
+        else this.setRunStatus(this.cycleStatus(this.tasks.slice(this.state.cycle_from)), { reason: "" });
       }
       this.save();
       if (this.queue.length) {
@@ -803,6 +939,7 @@ export class Conversation {
     for (const a of this.approvals.values()) a.done(false, "The conversation was stopped");
     this.gate?.resolve();
     this.gate = null;
+    if (this.solo) return this.solo.stop(reason, status);
     if (!this.driving) this.finishHalted(reason, status);
     else this.pendingHalt = { reason, status };
   }
@@ -856,6 +993,8 @@ export class Conversation {
 
   /** The orchestrator's planning turn. Returns what happened. */
   private async plan(msg: Inbound, midRun = false): Promise<"work" | "replied" | "asked"> {
+    // The lead keeps one session for the whole conversation: the project it read and the decisions it made stay in
+    // context instead of being rebuilt from a digest on every message.
     const note = midRun ? "The team is already working on the open tasks above. If the message changes or adds to work in progress, add requirements and use amend_task on the task that owns it; create a task only for new work. If it needs no change, answer with reply_to_user." : "";
     const lead = this.lead;
     this.phase("plan", "active", lead.id);
@@ -919,8 +1058,16 @@ export class Conversation {
         return t;
       },
     };
-    const res = await this.turn(lead, "orchestrator", null, this.orchestratorInput(msg, note), { planner, maxRounds: 30 });
+    const res = await this.turn(lead, "orchestrator", null, this.orchestratorInput(msg, note), { planner, maxRounds: 30, session: `${lead.id}:lead` });
     const stop = res.stop;
+    // The turn ended because a tool kept failing: say so plainly instead of reporting work that was never planned.
+    if (stop?.kind === "block") {
+      const text = `I could not plan this request: ${stop.reason}`;
+      this.phase("plan", "failed", lead.id, firstLine(stop.reason, 120));
+      if (midRun) this.post({ from: lead.id, to: null, type: "answer", content: text });
+      else this.finishCycle(text, "incomplete");
+      return "replied";
+    }
     if (stop?.kind === "ask") {
       this.state.questions.push({ question: { agent_id: lead.id, question: stop.question, options: stop.options, allow_other: true }, task_id: null });
       if (this.state.questions.length === 1) this.askNext();
@@ -1113,8 +1260,13 @@ export class Conversation {
       return;
     }
     if (task.kind === "verify") return this.settleAcceptance(task, agent, stop, exhausted);
-    if (stop?.kind === "block" || (!stop && (exhausted || !text || task.kind === "review"))) {
-      const reason = stop?.kind === "block" ? stop.reason : task.kind === "review" ? "The reviewer did not give a verdict." : exhausted ? "Ran out of steps before finishing." : "Stopped without finishing.";
+    // A turn must end with the tool that submits its result. Prose alone is not a finished task, so it is blocked
+    // (and shown to the user) rather than recorded as done.
+    if (stop?.kind === "block" || !stop) {
+      const reason = stop?.kind === "block" ? stop.reason
+        : task.kind === "review" ? "The reviewer did not give a verdict."
+        : exhausted ? "Ran out of steps before finishing."
+        : "Stopped without calling complete_task, so nothing was submitted as finished.";
       this.saveTask({ ...task, status: "blocked", result: reason });
       this.post({ from: agent.id, to: lead.id, type: "status_update", content: `Blocked on ${task.key}: ${reason}`, meta: { task_id: task.key } });
       const work = task.kind === "review" ? this.tasks.find((x) => x.key === task.depends_on[0]) : undefined;
@@ -1139,8 +1291,11 @@ export class Conversation {
       return;
     }
     if (stop?.kind === "complete" && (task.kind === "build" || task.kind === "fix")) {
-      const answered = answerFindings(this.findingsOf(task.id), stop.responses ?? []);
-      this.setFindings(task.id, answered.list);
+      // Findings belong to the work item, and a revision (a fix after review or after a failed acceptance) continues
+      // that same item: it answers the item's findings, not an empty list of its own.
+      const workId = this.state.continues[task.id] ?? task.id;
+      const answered = answerFindings(this.findingsOf(workId), stop.responses ?? []);
+      this.setFindings(workId, answered.list);
       const open = blockingOpen(answered.list);
       if (open.length || answered.unknown.length) {
         const why = [
@@ -1162,11 +1317,12 @@ export class Conversation {
     const summary = stop?.kind === "complete" ? `${stop.summary}${stop.verification ? `\n\nVerified: ${stop.verification}` : ""}` : text;
     const changed = (this.state.files_by_task[task.id] ?? []).length > 0;
     this.post({ from: agent.id, to: agent.reports_to ?? lead.id, type: "status_update", content: summary, meta: { task_id: task.key } });
-    if (this.budget.review && (task.kind === "build" || task.kind === "fix") && changed) {
+    const reviewed = this.budget.review && (task.kind === "build" || task.kind === "fix") && changed && this.riskOf(task, agent) !== "trivial";
+    if (reviewed) {
       this.saveTask({ ...task, status: "review", result: summary });
       // Every specialist on this part critiques the same round in parallel; the owner gets their feedback together.
       const ids: string[] = [];
-      for (const critic of this.criticsFor(task, agent)) {
+      for (const critic of this.reviewersFor(task, agent)) {
         const lens = lensOf(critic);
         const t = this.newTask({ title: `${LENS[lens].title} ${task.key}: ${task.title.replace(/^Revise: /, "")}`, description: `${LENS[lens].title} of ${agent.name}'s work on ${task.key}.`,
           acceptance_criteria: "", assignee_agent_id: critic.id, kind: "review", depends_on: [task.key], created_by: lead.id });
@@ -1183,9 +1339,40 @@ export class Conversation {
    * Who sharpens a part: the specialists the lead attached to it, plus a code reviewer unless one of them already
    * reviews code. Nobody reviews their own work.
    */
+  /**
+   * Who reviews this revision. A critic that already approved this work item keeps its approval: only the critics who
+   * asked for changes read the revision, so a fix costs one review instead of one per lens. A change nobody objected to
+   * still goes to one critic, so no change ships unreviewed.
+   */
+  private reviewersFor(work: TaskOut, author: AgentOut): AgentOut[] {
+    const all = this.criticsFor(work, author);
+    const prior = this.priorVerdicts(this.state.continues[work.id] ?? work.id);
+    if (!prior.size) return all;
+    const wanted = all.filter((a) => prior.get(a.id) !== "approve");
+    return wanted.length ? wanted : all.slice(0, 1);
+  }
+
+  /** The latest verdict of each critic on a work item, across the revisions already completed. */
+  private priorVerdicts(workId: string): Map<string, string> {
+    const keys = new Set(this.tasks.filter((t) => (this.state.continues[t.id] ?? t.id) === workId).map((t) => t.key));
+    const out = new Map<string, string>();
+    for (const t of this.tasks) {
+      if (t.kind !== "review" || !keys.has(t.depends_on[0] ?? "")) continue;
+      const v = this.state.verdicts[t.id];
+      const critic = v && this.team.find((a) => a.name === v.critic);
+      if (v && critic) out.set(critic.id, v.verdict);
+    }
+    return out;
+  }
+
   private criticsFor(work: TaskOut, author: AgentOut): AgentOut[] {
-    const named = work.specialists.map((id) => this.team.find((a) => a.id === id))
-      .filter((a): a is AgentOut => !!a && a.id !== author.id && kindOf(a) === "critic" && a.tools.file_read !== false);
+    const attached = work.specialists.map((id) => this.team.find((a) => a.id === id)).filter((a): a is AgentOut => !!a);
+    const named = attached.filter((a) => a.id !== author.id && canReview(a));
+    // A specialist that cannot critique is never dropped in silence: the plan the user saw must match what happens.
+    for (const a of attached) {
+      if (a.id === author.id || canReview(a)) continue;
+      this.emit("error", { message: `${a.name} cannot review ${work.key} (${kindOf(a) === "writer" ? "writes files" : "cannot read the project"}), so another reviewer covers that lens.`, kind: "warning", agent_id: a.id });
+    }
     const code = named.some((a) => lensOf(a) === "code") ? [] : [this.reviewerFor(author)].filter((a) => kindOf(a) !== "writer");
     return [...new Map([...code, ...named].map((a) => [a.id, a])).values()];
   }
@@ -1220,10 +1407,16 @@ export class Conversation {
     const changes = given.filter((v) => v.verdict === "request_changes");
     const merged = changes.map((v) => `### ${v.critic} (${LENS[v.lens].name})\n${v.comments}${v.findings?.length ? `\n\n${renderFindings(v.findings)}` : ""}`).join("\n\n");
     const rounds = this.state.revisions[work.id] ?? 0;
-    if (!changes.length || rounds >= this.budget.max_revisions) {
-      if (changes.length) this.state.open_comments[work.id] = merged;
-      this.saveTask({ ...current, status: "done", result: changes.length ? `${current.result}\n\nOpen review comments (revision limit reached):\n${merged}` : current.result });
+    if (!changes.length) {
+      this.saveTask({ ...current, status: "done" });
       this.phase("review", "done");
+      return;
+    }
+    if (rounds >= this.budget.max_revisions) {
+      // Comments still open at the limit are not finished work: the part is blocked, and the run cannot be completed.
+      this.state.open_comments[work.id] = merged;
+      this.saveTask({ ...current, status: "blocked", result: `${current.result}\n\nOpen review comments (revision limit reached):\n${merged}` });
+      this.phase("review", "failed", undefined, "Review comments still open at the revision limit");
       return;
     }
     this.state.revisions[work.id] = rounds + 1;
@@ -1250,25 +1443,35 @@ export class Conversation {
 
   /** Run the project's own checks. Returns true when a fix task was created. */
   private async runChecks(changedTasks: TaskOut[]): Promise<boolean> {
-    const checks = verificationChecks(this.p.fs);
-    if (!checks.length) { this.phase("verify", "skipped", null, "The project has no automated checks"); return false; }
+    const changedFiles = [...new Set(changedTasks.flatMap((t) => this.state.files_by_task[t.id] ?? []))];
+    const plan = planChecks(this.p.fs, changedFiles, this.checksPassed);
+    if (plan.kind === "none") { this.phase("verify", "skipped", null, "The project has no automated checks"); return false; }
+    if (plan.kind === "skipped") { this.phase("verify", "skipped", null, plan.reason); return false; }
+    // The same files already passed these checks in this conversation: no new content, no new run.
+    if (plan.kind === "passed") { this.phase("verify", "done", null, "The same changes already passed these checks"); return false; }
     const lead = this.lead;
     this.phase("verify", "active", lead.id);
-    const results: RunState["verification"] = [];
-    for (const c of checks) {
-      if (this.stopped) return false;
-      const callId = newId();
-      this.setStatus(lead, "running", c.command);
-      this.emit("tool_call", { call_id: callId, agent_id: lead.id, tool: "run_code", args: { command: c.command, cwd: c.directory } });
-      const res = await runProcess(parseCommand(c.command), { cwd: this.p.fs.abs(c.directory === "." ? "" : c.directory), env: safeEnv(), timeoutMs: 300_000, maxOutput: 30_000, signal: this.abort.signal });
-      const ok = res.code === 0 && !res.timedOut;
-      results.push({ name: c.name, command: c.command, ok, output: clip(res.output, 6000) });
-      this.emit("tool_result", { call_id: callId, agent_id: lead.id, tool: "run_code", ok, output: clip(res.output, 4000) });
-    }
+    if (plan.left.length) this.emit("error", { message: `Checks left out, over the limit of ${CHECK_LIMIT}: ${plan.left.join(", ")}.`, kind: "warning", agent_id: lead.id });
+    let callId = "";
+    const results = await runCheckList(this.p.fs, plan.checks, this.abort.signal, {
+      stopped: () => this.stopped,
+      started: (c) => {
+        callId = newId();
+        this.setStatus(lead, "running", c.command);
+        this.emit("tool_call", { call_id: callId, agent_id: lead.id, tool: "run_code", args: { command: c.command, cwd: c.directory } });
+      },
+      finished: (_c, ok, output) => this.emit("tool_result", { call_id: callId, agent_id: lead.id, tool: "run_code", ok, output: clip(output, 4000) }),
+    });
+    if (!results) return false;
     this.setStatus(lead, "idle");
     this.state.verification = results;
+    this.state.usage.verifications += results.length;
     const failures = results.filter((r) => !r.ok);
-    if (!failures.length) { this.phase("verify", "done", lead.id, `${results.length} check${results.length > 1 ? "s" : ""} passed`); return false; }
+    if (!failures.length) {
+      this.checksPassed.add(plan.key);
+      this.phase("verify", "done", lead.id, `${results.length} check${results.length > 1 ? "s" : ""} passed`);
+      return false;
+    }
     if (this.state.verify_rounds >= this.budget.max_revisions) { this.phase("verify", "failed", lead.id, "Checks still failing"); return false; }
     this.state.verify_rounds++;
     const last = changedTasks[changedTasks.length - 1]!;
@@ -1287,7 +1490,7 @@ export class Conversation {
    */
   private verifierFor(changedTasks: TaskOut[]): AgentOut | null {
     const authors = new Set(changedTasks.map((t) => t.assignee_agent_id));
-    const pool = this.team.filter((a) => a.id !== this.lead.id && kindOf(a) === "critic" && a.tools.file_read !== false && (a.tools.terminal || a.tools.browser));
+    const pool = this.team.filter((a) => a.id !== this.lead.id && canVerify(a));
     const found = pool.find((a) => a.behavior.template_key === "qa") ?? pool.find((a) => a.tools.browser && !authors.has(a.id));
     if (found) return found;
     try {
@@ -1354,6 +1557,8 @@ export class Conversation {
       this.state.continues[fix.id] = this.state.continues[owner.id] ?? owner.id;
       this.post({ from: this.lead.id, to: owner.assignee_agent_id, type: "task", content: `Not accepted yet: ${ids.join(", ")}. Please fix (${fix.key}).`, meta: { task_id: fix.key } });
     }
+    // A fix for a requirement found unmet has to be checked as well, or the requirement is never accepted.
+    if (groups.size) this.state.unaccepted = true;
   }
 
   private async report() {
@@ -1364,10 +1569,11 @@ export class Conversation {
     const tasks = cycle.map((t) => `- ${t.key} [${t.status}] ${t.title} (${who(t.assignee_agent_id)}): ${clip(t.result, 800)}`).join("\n");
     const files = [...new Set(cycle.flatMap((t) => this.state.files_by_task[t.id] ?? []))];
     const checks = this.state.verification.map((v) => `- ${v.name}: ${v.ok ? "passed" : "failed"}`).join("\n");
+    const unresolved = this.unresolvedIn(cycle);
     const outcome = outcomeSection({
       requirements: this.cycleRequirements(),
       open: [
-        ...cycle.filter((t) => t.status === "blocked").map((t) => `${t.key} ${t.title} (${who(t.assignee_agent_id)}) is blocked: ${firstLine(t.result, 300)}`),
+        ...cycle.filter((t) => t.status === "blocked" && !this.state.open_comments[t.id]).map((t) => `${t.key} ${t.title} (${who(t.assignee_agent_id)}) is blocked: ${firstLine(t.result, 300)}`),
         ...cycle.filter((t) => this.state.open_comments[t.id]).map((t) => `${t.key} ${t.title.replace(/^Revise: /, "")}: review comments still open after ${this.budget.max_revisions} revisions: ${clip(this.state.open_comments[t.id]!.replace(/^### (.+)\n/gm, "$1: ").replace(/\s*\n+\s*/g, " "), 400)}`),
         ...this.state.verification.filter((v) => !v.ok).map((v) => `\`${v.command}\` fails.`),
       ],
@@ -1378,24 +1584,56 @@ export class Conversation {
       outcome && `The section below is added to your reply as it is. Do not repeat it, and do not claim anything it contradicts (a fix it lists as open, a requirement it lists as not met).\n\n${outcome}`,
       `## Tasks\n${tasks}`, files.length ? `## Files changed\n${files.map((f) => `- ${f}`).join("\n")}` : "", checks ? `## Automated checks\n${checks}` : "",
     ].filter(Boolean).join("\n\n");
-    let text = "";
-    try {
+    // A plain cycle needs no narrator: the owner already wrote what it changed and how it verified it, and the engine
+    // appends the requirement table either way. Only a cycle with something to explain gets a model-written report.
+    const plain = !this.cycleRequirements().length && !unresolved.length
+      && !cycle.some((t) => t.status === "blocked" || this.state.open_comments[t.id] || this.state.revisions[t.id])
+      && this.state.verification.every((v) => v.ok);
+    let text = plain ? this.factualReport(cycle, files) : "";
+    if (!plain) try {
       const res = await this.turn(lead, "report", null, [{ role: "user", content: `${this.state.history.findLast((h) => h.role === "user")?.content ?? this.row.goal}` }, { role: "developer", content: prompt }], { maxRounds: 2 });
       text = res.text;
     } catch (e) {
       if (e instanceof Halt || this.stopped) throw e;
       text = `The work is done, but I could not write the summary (${(e as Error).message}).\n\n${tasks}`;
     }
-    const blocked = cycle.some((t) => t.status === "blocked") || this.state.verification.some((v) => !v.ok) || this.cycleRequirements().some((r) => r.status === "unmet");
     this.phase("report", "done", lead.id);
-    this.finishCycle([text || "Done.", outcome].filter(Boolean).join("\n\n"), blocked ? "incomplete" : "completed", files);
+    this.finishCycle([text || "Done.", outcome].filter(Boolean).join("\n\n"), this.cycleStatus(cycle), files);
+  }
+
+  /**
+   * A cycle is completed only when nothing in it is blocked, failed, unmet, unchecked or left open by a reviewer. A
+   * requirement that was never checked is not a met requirement, so open counts as unresolved too.
+   */
+  private cycleStatus(cycle: TaskOut[]): RunStatus {
+    const blocked = cycle.some((t) => t.status === "blocked") || this.state.verification.some((v) => !v.ok);
+    const owed = this.cycleRequirements().some((r) => r.status === "open" || r.status === "unmet");
+    return blocked || owed || this.unresolvedIn(cycle).length ? "incomplete" : "completed";
+  }
+
+  /** Blocking review findings of the parts this cycle touched that no later review round has settled. */
+  private unresolvedIn(cycle: TaskOut[]): Finding[] {
+    const parts = new Set(cycle.map((t) => this.state.continues[t.id] ?? t.id));
+    return [...parts].flatMap((id) => unresolvedBlocking(this.findingsOf(id)));
+  }
+
+  /** The report of a plain, verified cycle: the team's own summaries, the files, the checks. No extra model call. */
+  private factualReport(cycle: TaskOut[], files: string[]): string {
+    const who = (id: string | null) => this.team.find((a) => a.id === id)?.name ?? "the team";
+    const done = cycle.filter((t) => ["build", "fix", "docs", "research"].includes(t.kind) && t.result.trim());
+    return [
+      done.length > 1 ? `Done — ${done.length} parts finished.` : "Done.",
+      done.map((t) => `- ${firstLine(t.title.replace(/^Revise: /, ""), 80)} (${who(t.assignee_agent_id)}): ${clip(t.result.replace(/\s*\n+\s*/g, " "), 400)}`).join("\n"),
+      files.length ? `**Files changed**\n${files.map((f) => `- ${f}`).join("\n")}` : "",
+      this.state.verification.filter((v) => v.ok).length ? `**Checks**\n${this.state.verification.filter((v) => v.ok).map((v) => `- ${v.name}: passed`).join("\n")}` : "",
+    ].filter(Boolean).join("\n\n");
   }
 
   private finishCycle(text: string, status: RunStatus, files: string[] = []) {
     const lead = this.lead;
     this.post({ from: lead.id, to: null, type: "final_report", content: text, meta: { files } });
     this.state.history.push({ role: "assistant", content: text });
-    this.row.report_md = `${this.row.report_md ? `${this.row.report_md}\n\n---\n\n` : ""}## ${firstLine(this.state.history.findLast((h) => h.role === "user")?.content ?? this.row.goal, 100)}\n\n${text}`;
+    this.row.report_md = appendRecap(this.row.report_md, this.state.history.findLast((h) => h.role === "user")?.content ?? this.row.goal, text);
     for (const a of this.team) this.setStatus(a, a.id === lead.id ? "done" : "idle");
     this.state.workflow.ended = true;
     this.setRunStatus(status, { summary: firstLine(text, 300), reason: status === "incomplete" ? "Some tasks could not be finished" : "" });
@@ -1404,7 +1642,9 @@ export class Conversation {
     this.state.acceptance_rounds = 0;
     this.state.cycle_from = this.tasks.length;
     this.state.req_from = this.state.requirements.length;
-    this.sessions.clear();
+    // Sessions survive the cycle: the lead keeps what it learned about the project and the next request starts warmer.
+    // An oversized one is dropped (liveSession already refuses it) so a long conversation stays bounded.
+    for (const [key, s] of this.sessions) if (this.oversized(s)) this.sessions.delete(key);
   }
 
   /** For deleting a conversation: stop it and forget it. */

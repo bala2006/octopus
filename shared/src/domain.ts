@@ -352,6 +352,7 @@ export interface SessionOut { id: string; company_id: string; agent_id: string |
 
 export const ProviderOptionsSchema = z.object({
   auth: z.enum(["key", "entra"]).optional(),
+  context_window: z.number().int().min(40_000).optional(),
   deployments: z.array(z.string()).optional(),
   deployment_type: z.enum(["global", "data_zone", "regional"]).optional(),
   pricing: z.record(z.string(), z.number()).optional(),
@@ -367,9 +368,20 @@ export interface ProviderKeyOut { provider: string; base_url: string; masked_key
 export interface ProviderInfo { provider: string; label: string; configured: boolean; needs_key: boolean; needs_base: boolean; models: string[] }
 export interface SettingsOut {
   approval_mode: ApprovalMode; default_provider: string; default_model: string; single_user_mode: boolean;
-  providers: ProviderInfo[]; keys: ProviderKeyOut[];
+  providers: ProviderInfo[]; keys: ProviderKeyOut[]; specialists: SpecialistsSettings;
 }
 export const ApprovalModeInSchema = z.object({ approval_mode: z.enum(["ask", "auto"]) });
+export const SPECIALIST_NAMES = ["reviewer", "security", "designer", "explorer", "verifier"] as const;
+export type SpecialistName = (typeof SPECIALIST_NAMES)[number];
+/** What one specialist is set to in Settings: whether it runs, and the model and effort its requests use. */
+export const SpecialistSettingInSchema = z.object({ enabled: z.boolean(), model: z.string().trim().min(1).max(120), effort: z.enum(EFFORTS) });
+const RoundCapSchema = z.number().int().min(1).max(5);
+/** The specialist settings. The review floor and its round caps sit beside the specialists they run. */
+export const SpecialistsInSchema = z.object({
+  specialists: z.object({ reviewer: SpecialistSettingInSchema, security: SpecialistSettingInSchema, designer: SpecialistSettingInSchema, explorer: SpecialistSettingInSchema, verifier: SpecialistSettingInSchema }),
+  review: z.object({ floor: z.boolean(), floor_rounds: RoundCapSchema, check_blocks: RoundCapSchema, verify_rounds: RoundCapSchema }),
+});
+export type SpecialistsSettings = z.infer<typeof SpecialistsInSchema>;
 export const TestProviderInSchema = z.object({ provider: z.string(), model: z.string() });
 export interface TestResultOut { ok: boolean; detail: string; latency_ms: number }
 export interface FxRateOut { currency: string; rate: number; base: string; date?: string; source?: string; stale: boolean }

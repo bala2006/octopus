@@ -63,15 +63,15 @@ export function describeCall(tool: string, args: Record<string, unknown>): { kin
   if (IN_CHAT.has(tool)) return null;
   switch (tool) {
     case "read_file": return { kind: "read", title: `Read ${str(args.path) || "a file"}` };
-    case "list_files": return { kind: "read", title: `Listed ${str(args.path) || "the project files"}` };
-    case "search_project": return { kind: "search", title: `Searched the project for "${clip(str(args.query), 60)}"` };
+    case "glob": return { kind: "read", title: `Listed ${str(args.pattern) || "the project files"}` };
+    case "grep": return { kind: "search", title: `Searched the project for "${clip(str(args.pattern), 60)}"` };
     case "web_search": return { kind: "search", title: `Searched the web for "${clip(str(args.query), 60)}"` };
     case "fetch_url": return { kind: "search", title: `Fetched ${clip(str(args.url), 90)}` };
     case "write_file": return { kind: "write", title: `Wrote ${str(args.path) || "a file"}` };
     case "edit_file": return { kind: "write", title: `Edited ${str(args.path) || "a file"}` };
     case "move_file": return { kind: "write", title: `Moved ${str(args.from)} to ${str(args.to)}` };
     case "delete_file": return { kind: "write", title: `Deleted ${str(args.path) || "a file"}` };
-    case "run_command": case "run_code": return { kind: "command", title: `Ran ${clip(str(args.command) || "a command", 90)}` };
+    case "shell": case "run_code": return { kind: "command", title: `Ran ${clip(str(args.command) || "a command", 90)}` };
     case "create_task": return { kind: "task", title: `Created task: ${clip(str(args.title), 90)}` };
     case "complete_task": return { kind: "task", title: `Finished a task: ${clip(str(args.summary), 90)}` };
     case "block_task": return { kind: "task", title: `Blocked a task: ${clip(str(args.reason), 90)}` };

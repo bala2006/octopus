@@ -8,7 +8,8 @@ import { cn, formatTokens } from "@/lib/utils";
 import { deptColor, useCanvas, type AgentNode as AgentNodeT } from "@/stores/canvas";
 import { Tip } from "@/components/ui/overlays";
 import { useEditable, useLive } from "./live";
-import { NodeQuickConfig } from "./NodeQuickConfig";
+import { NodeQuickConfig, SpecialistQuickConfig } from "./NodeQuickConfig";
+import { specialistOf } from "./soloCards";
 import { liveSummary } from "@/features/runs/LiveWriting";
 import { useEffectiveModel } from "./ModelPicker";
 
@@ -16,6 +17,7 @@ const SIDES = [Position.Top, Position.Right, Position.Bottom, Position.Left];
 
 function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
   const live = useLive();
+  const spec = specialistOf(data);
   const editable = useEditable();
   const quickId = useCanvas((s) => s.quickConfigId);
   const setQuick = useCanvas((s) => s.setQuickConfig);
@@ -147,7 +149,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
         // NodeToolbar renders inside the React Flow pane: `nopan` keeps a drag in the panel from panning the canvas (React
         // Flow checks these classes on the event target), `nodrag` from moving the node, `nowheel` from zooming.
         <NodeToolbar isVisible position={Position.Right} offset={14} align="start" className={QUICK_CONFIG_GUARDS}>
-          <NodeQuickConfig id={id} data={data} onClose={() => setQuick(null)} />
+          {spec ? <SpecialistQuickConfig name={spec} data={data} onClose={() => setQuick(null)} /> : <NodeQuickConfig id={id} data={data} onClose={() => setQuick(null)} />}
         </NodeToolbar>
       )}
     </>

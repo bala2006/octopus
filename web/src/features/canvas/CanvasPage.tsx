@@ -15,6 +15,7 @@ import { download, timeAgo } from "@/lib/utils";
 import { qk, useCanvas as useCanvasQuery, useCompanyId, useRoleTemplates, useSettings, useWorkspaceId } from "@/hooks/queries";
 import { useCanvas, type AgentNode as AgentNodeT, type ChannelEdge as ChannelEdgeT } from "@/stores/canvas";
 import type { CanvasOut } from "@/types";
+import type { SpecialistName } from "@octopus/shared";
 import { EmptyState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +34,8 @@ import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import { EdgeEditor } from "./EdgeEditor";
 import { Inspector } from "./Inspector";
 import { DND_MIME, Palette } from "./Palette";
+import { useSeatSpecialist, useSpecialistToggle } from "./specialistActions";
+import { hiddenCardIds, isSoloCanvas, unseatedSpecialists } from "./soloCards";
 import { useAutosave, type SaveState } from "./useAutosave";
 import { useLiveRun } from "@/features/runs/liveRun";
 import { LiveContext } from "./live";
@@ -156,6 +159,27 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   }, [embedded, nodesInitialized, fitCanvas]);
 
   const defaults = React.useMemo(() => ({ provider: settings.data?.default_provider ?? "azure", model: settings.data?.default_model ?? "gpt-6-luna" }), [settings.data]);
+  // A solo canvas shows Octopus and the specialists Settings turns on. Hidden cards stay in the company, so saving the canvas keeps them.
+  const specialists = settings.data?.specialists;
+  const solo = isSoloCanvas(s.nodes.map((n) => n.data));
+  const toggleSpecialist = useSpecialistToggle(workspaceId, companyId);
+  const seatSpecialist = useSeatSpecialist(workspaceId, companyId);
+  const soloView = React.useMemo(() => {
+    const hidden = specialists && solo ? hiddenCardIds(s.nodes.map((n) => ({ id: n.id, behavior: n.data.behavior })), specialists.specialists) : new Set<string>();
+    if (!hidden.size) return { nodes: s.nodes, edges: s.edges };
+    return {
+      nodes: s.nodes.map((n) => (hidden.has(n.id) ? { ...n, hidden: true } : n)),
+      edges: s.edges.map((e) => (hidden.has(e.source) || hidden.has(e.target) ? { ...e, hidden: true } : e)),
+    };
+  }, [s.nodes, s.edges, specialists, solo]);
+  const unseated = specialists && solo ? unseatedSpecialists(s.nodes.map((n) => n.data), specialists.specialists).join(",") : "";
+  React.useEffect(() => {
+    if (!unseated) return;
+    for (const name of unseated.split(",") as SpecialistName[]) {
+      seatSpecialist(name).catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not add the specialist"));
+    }
+  }, [unseated]);
+
   const addRole = React.useCallback((key: string, screen?: { x: number; y: number }) => {
     const t = roles.data?.find((r) => r.key === key);
     if (!t) return;
@@ -213,7 +237,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   return (
     <div className={`flex h-full${embedded ? " conversation-embedded-canvas" : ""}`}
       style={canvasStyle}>
-      {!embedded && <Palette onAdd={(k) => addRole(k)} />}
+      {!embedded && <Palette onAdd={(k) => addRole(k)} solo={solo && specialists ? { settings: specialists, onToggle: (name, on) => void toggleSpecialist(specialists, name, on) } : undefined} />}
       <div className="relative min-w-0 flex-1" ref={wrapper}
         tabIndex={embedded ? 0 : undefined} aria-label={embedded ? "Canvas editor" : undefined}
         onDragOver={(e) => { if (e.dataTransfer.types.includes(DND_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
@@ -224,7 +248,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
               <LiveContext.Provider value={embedded ? overlay : null}>
               <EdgeAnchorsProvider>
               <ReactFlow<AgentNodeT, ChannelEdgeT>
-                nodes={s.nodes} edges={s.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+                nodes={soloView.nodes} edges={soloView.edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
                 onNodesChange={s.onNodesChange} onEdgesChange={s.onEdgesChange}
                 onConnect={(c) => { const r = s.onConnect(c); if (!r.ok && r.reason) toast.error(r.reason); }}
                 isValidConnection={(c) => c.source !== c.target}

@@ -6,6 +6,55 @@ const msg = (id: string, from: string | null, to: string | null, type = "task", 
   type: "message_created", seq: Number(id), data: { message: { id, run_id: "r", session_id: null, sender: from ? "agent" : "user", from_agent_id: from, to_agent_id: to, edge_id: null, type, content, meta: {}, turn_no: 1, created_at: "2026-09-30T10:00:00" } },
 });
 
+describe("todo_updated", () => {
+  it("keeps the main agent's latest todo list", () => {
+    const first = reduceRun(initialRun(), { type: "todo_updated", seq: 1, data: { agent_id: "a", todos: [{ content: "Read the spec", status: "in_progress" }] } } as unknown as RunEvent, {});
+    expect(first.todos).toEqual({ agent_id: "a", items: [{ content: "Read the spec", status: "in_progress" }] });
+    const second = reduceRun(first, { type: "todo_updated", seq: 2, data: { agent_id: "a", todos: [{ content: "Read the spec", status: "completed" }, { content: "Write the test", status: "pending" }] } } as unknown as RunEvent, {});
+    expect(second.todos?.items.map((t) => t.status)).toEqual(["completed", "pending"]);
+    expect(second.timeline).toEqual(first.timeline);
+  });
+});
+
+describe("requirements_updated", () => {
+  it("replaces the run's requirements with the verifier's list", () => {
+    const req = { id: "R1", text: "Log in with a password", status: "met", note: "The login test passed." };
+    const s = reduceRun(initialRun(), { type: "requirements_updated", seq: 1, data: { requirements: [req] } } as unknown as RunEvent, {});
+    expect(s.requirements).toEqual([req]);
+  });
+});
+
+describe("review_round", () => {
+  const ev = (seq: number, type: string, data: Record<string, unknown>) => ({ type, seq, data }) as unknown as RunEvent;
+  const finding = { id: "F1", critic: "security", severity: "major", file: "src/auth.ts", lines: "12-14", problem: "Token is logged", evidence: "line 13", fix: "Drop the log" };
+
+  it("builds one round with each specialist's verdict, findings and its own steps", () => {
+    let s = reduceRun(initialRun(), ev(1, "tool_call", { call_id: "r1", agent_id: "rev", tool: "read_file", args: { path: "src/auth.ts" } }), {});
+    s = reduceRun(s, ev(2, "tool_result", { call_id: "r1", agent_id: "rev", tool: "read_file", ok: true, output: "code" }), {});
+    s = reduceRun(s, ev(3, "tool_call", { call_id: "s1", agent_id: "sec", tool: "grep", args: { pattern: "token" } }), {});
+    s = reduceRun(s, ev(4, "review_round", { round: 1, specialists: [
+      { agent_id: "rev", name: "reviewer", verdict: "approve", findings: [] },
+      { agent_id: "sec", name: "security", verdict: "request_changes", findings: [finding] },
+    ] }), {});
+    expect(s.reviews).toHaveLength(1);
+    const [rev, sec] = s.reviews[0]!.specialists;
+    expect(rev).toMatchObject({ name: "reviewer", verdict: "approve", findings: [] });
+    expect(rev!.steps.map((x) => x.id)).toEqual(["r1"]);
+    expect(sec).toMatchObject({ name: "security", verdict: "request_changes", findings: [finding] });
+    expect(sec!.steps.map((x) => x.id)).toEqual(["s1"]);
+  });
+
+  it("takes each round's steps only after the previous round ended", () => {
+    let s = reduceRun(initialRun(), ev(1, "tool_call", { call_id: "a", agent_id: "rev", tool: "read_file", args: { path: "a.ts" } }), {});
+    s = reduceRun(s, ev(2, "review_round", { round: 1, specialists: [{ agent_id: "rev", name: "reviewer", verdict: "request_changes", findings: [] }] }), {});
+    s = reduceRun(s, ev(3, "tool_call", { call_id: "b", agent_id: "rev", tool: "read_file", args: { path: "b.ts" } }), {});
+    s = reduceRun(s, ev(4, "review_round", { round: 2, specialists: [{ agent_id: "rev", name: "reviewer", verdict: "approve", findings: [] }] }), {});
+    expect(s.reviews.map((r) => r.round)).toEqual([1, 2]);
+    expect(s.reviews[0]!.specialists[0]!.steps.map((x) => x.id)).toEqual(["a"]);
+    expect(s.reviews[1]!.specialists[0]!.steps.map((x) => x.id)).toEqual(["b"]);
+  });
+});
+
 describe("reduceRun", () => {
   it("keeps every thought and tool call as a step, in order, and finishes each call with its result", () => {
     const ev = (seq: number, type: string, data: Record<string, unknown>) => ({ type, seq, data }) as unknown as RunEvent;
@@ -45,7 +94,7 @@ describe("reduceRun", () => {
       { key: "build", title: "Build", owner: "r", status: "active" }, { key: "review", title: "Review", owner: "q", status: "pending" },
     ] };
     let s = reduceRun(initialRun(), ev(1, "workflow_updated", { workflow }), {});
-    s = reduceRun(s, ev(2, "tool_call", { call_id: "c1", agent_id: "a", tool: "run_command", args: { command: "npm test" } }), {});
+    s = reduceRun(s, ev(2, "tool_call", { call_id: "c1", agent_id: "a", tool: "run_code", args: { command: "npm test" } }), {});
     s = reduceRun(s, ev(3, "run_status", { status: "running" }), {});
     expect(s.steps[0]).toMatchObject({ status: "running" });
     s = reduceRun(s, ev(4, "run_status", { status: "incomplete", reason: "Reached the token limit" }), {});

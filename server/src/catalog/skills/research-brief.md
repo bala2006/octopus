@@ -5,7 +5,7 @@ roles: researcher, research_director, ux_researcher, data_analyst, growth_analys
 ---
 # Research brief
 
-Output: `.octopus/work/research.md`. Research exists to unblock a decision, not to collect links.
+Output: your reply, or the file the brief names. Research exists to unblock a decision, not to collect links.
 
 ## Steps
 1. Write the question(s) as decisions: "Which X should we use for Y, given Z?" Max 3 questions.
@@ -13,7 +13,7 @@ Output: `.octopus/work/research.md`. Research exists to unblock a decision, not 
    docs, specifications, peer-reviewed papers, maintained repositories. Note dates and versions.
 3. For each option record: what it is, fit for our constraints, cost/effort, risks, evidence (link).
 4. Compare in a table, then **recommend one** and say what would change your mind.
-5. Add the concrete facts the builder needs: API names, versions, install lines, snippets, limits, gotchas.
+5. Add the concrete facts an implementer needs: API names, versions, install lines, snippets, limits, gotchas.
 
 ## Template
 ```markdown
@@ -21,7 +21,7 @@ Output: `.octopus/work/research.md`. Research exists to unblock a decision, not 
 ## Answer (2-3 sentences, the recommendation)
 ## Options compared
 | Option | Fit | Effort | Risks | Source |
-## Facts for the builder
+## Facts to build from
 ## Open questions / confidence
 ```
 

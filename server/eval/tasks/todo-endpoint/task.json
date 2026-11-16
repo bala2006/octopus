@@ -1,0 +1,6 @@
+{
+  "id": "todo-endpoint",
+  "title": "Add PATCH /todos/:id",
+  "goal": "The todo API in src/app.js has GET /todos, POST /todos and GET /todos/:id. Add PATCH /todos/:id. It takes an optional title (a non-empty string) and an optional done (a boolean), and returns the updated todo. Return 404 for an unknown id, 400 for invalid JSON or invalid fields, and keep the existing tests passing.",
+  "grader": { "run": true }
+}

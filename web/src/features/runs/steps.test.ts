@@ -6,11 +6,11 @@ describe("describeCall", () => {
     expect(describeCall("read_file", { path: "index.html" })).toEqual({ kind: "read", title: "Read index.html" });
     expect(describeCall("write_file", { path: "style.css", content: "" })).toEqual({ kind: "write", title: "Wrote style.css" });
     expect(describeCall("move_file", { from: "a.md", to: "b.md" })).toEqual({ kind: "write", title: "Moved a.md to b.md" });
-    expect(describeCall("list_files", {})).toEqual({ kind: "read", title: "Listed the project files" });
+    expect(describeCall("glob", { pattern: "src/**" })).toEqual({ kind: "read", title: "Listed src/**" });
   });
 
   it("names the command that ran", () => {
-    expect(describeCall("run_command", { command: "npm test" })).toEqual({ kind: "command", title: "Ran npm test" });
+    expect(describeCall("shell", { command: "npm test" })).toEqual({ kind: "command", title: "Ran npm test" });
   });
 
   it("describes browser calls from both recorded forms", () => {
@@ -47,9 +47,9 @@ describe("countLine", () => {
 
   it("counts each kind of tool step, in the order the group ran them", () => {
     const steps = [
-      tool(1, "c1", "run_command", { command: "npm test" }),
+      tool(1, "c1", "shell", { command: "npm test" }),
       tool(2, "c2", "read_file", { path: "a.ts" }),
-      tool(3, "c3", "run_command", { command: "npm run build" }),
+      tool(3, "c3", "shell", { command: "npm run build" }),
       tool(4, "c4", "remember", { key: "style" }),
     ];
     expect(countLine(steps)).toBe("+ 2 commands, 1 read, 1 tool");

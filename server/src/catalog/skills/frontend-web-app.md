@@ -6,8 +6,8 @@ roles: frontend, fullstack_dev, mobile, developer, designer, ux_designer
 # Frontend web app
 
 ## Steps
-1. Start from the UX spec / screenshots. Set up the visual system first: CSS custom properties for colours, spacing,
-   radius and type; a base layout; then components.
+1. Start from the brief and any screenshots it gives. Set up the visual system first: colours, spacing, radius and type as
+   CSS custom properties, unless the brief or the project names another styling method; then a base layout; then components.
 2. Structure: semantic HTML (`header`, `main`, `nav`, `button`, `label` for every input), one responsibility per
    component/module, state in one place, derived values computed, not duplicated.
 3. Every state exists: empty, loading (skeleton or spinner after 300 ms), error with a retry, success feedback.

@@ -40,14 +40,20 @@ export function projectTasks(fs: ProjectFs): ProjectTask[] {
   return tasks;
 }
 
-/** The checks run automatically after the team changes code: tests, type checks and lint, if the project has them. */
-export function verificationChecks(fs: ProjectFs): ProjectTask[] {
+/** The most checks one change runs. The rest are reported as left out, by name. */
+export const CHECK_LIMIT = 8;
+
+/**
+ * The checks run automatically after the agents change code: tests, type checks and lint, if the project has them.
+ * `run` holds the first CHECK_LIMIT of them, and `left` the rest.
+ */
+export function verificationChecks(fs: ProjectFs): { run: ProjectTask[]; left: ProjectTask[] } {
   const tasks = projectTasks(fs).filter((t) => t.kind === "task");
   const pick = (re: RegExp) => tasks.filter((t) => re.test(t.id.split(":").pop() ?? ""));
   const checks = [...pick(/^test$/), ...pick(/^(typecheck|type-check|tsc|check-types)$/), ...pick(/^lint$/)];
   if (tasks.some((t) => t.id === "python:test")) checks.push(tasks.find((t) => t.id === "python:test")!);
   for (const id of ["go:test", "cargo:test"]) if (tasks.some((t) => t.id === id)) checks.push(tasks.find((t) => t.id === id)!);
-  return checks.slice(0, 4);
+  return { run: checks.slice(0, CHECK_LIMIT), left: checks.slice(CHECK_LIMIT) };
 }
 
 /** A compact description of the project for agent prompts. */

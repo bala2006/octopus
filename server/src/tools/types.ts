@@ -31,16 +31,20 @@ export type Stop =
   | { kind: "plan_ready"; note: string }
   | { kind: "reply"; message: string }
   | { kind: "acceptance"; results: { id: string; met: boolean; evidence: string }[] }
+  | { kind: "asks"; asks: { id?: string; ask: string; met: boolean; evidence: string }[] }
   /** The agent answered the message its turn was started for. */
   | { kind: "answered"; text: string };
 
-export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop }
+/** What a tool did, for the run's execution metrics. */
+export interface ToolMetrics { read?: boolean; redundant?: boolean; wrote?: boolean; searched?: boolean; listed?: boolean }
 
-/** The most of one tool result an agent sees. read_file pages within it, so a read is never cut by the loop. */
-export const MAX_TOOL_OUTPUT = 40_000;
+export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop; metrics?: ToolMetrics }
 
-/** File contents already in an agent's transcript: the content hash and the line ranges shown. */
-export type Shown = Map<string, { hash: string; ranges: [number, number][] }>
+/**
+ * File contents already in an agent's transcript: the content hash, the line ranges shown, and the transcript position of
+ * the tool output that carries them. The position is what lets compaction forget a file whose output it removed.
+ */
+export type Shown = Map<string, { hash: string; ranges: [number, number][]; at?: number }>
 
 export interface HireSpec { role_key?: string; title: string; name?: string; department: string; reports_to?: string; manager?: boolean; instructions?: string; reason: string }
 export interface TaskSpec { title: string; description: string; acceptance_criteria: string; assignee: string; kind: TaskOut["kind"]; depends_on: string[]; requirements: string[]; files: string[]; skills: string[]; specialists: string[] }
@@ -92,25 +96,62 @@ export interface ToolContext {
   ownerOf(rel: string): string | null;
   /** Start the project's dev server in the background (or find the running one) and return where it listens. */
   devServer(): Promise<{ command: string; url: string | null; output: string }>;
+  /** The read-only specialists the review and explore tools call. Only the main agent of a solo conversation has them. */
+  specialists?: SpecialistPort;
+}
+
+/** The specialists a review can name. The explorer answers questions instead, through `explore`. */
+export type ReviewerName = "reviewer" | "security" | "designer" | "verifier";
+
+export interface SpecialistPort {
+  /** Runs the named specialists at once, waits for all of them, and returns their findings as one message. */
+  review(names: ReviewerName[], focus: string): Promise<string>;
+  /** Answers one question about the project or the web, in a message under the return limit. */
+  explore(question: string): Promise<string>;
 }
 
 export interface Tool<A = any> { // eslint-disable-line @typescript-eslint/no-explicit-any
   name: string;
   description: string;
   args: z.ZodType<A>;
+  /** Whether a call changes nothing. Read-only calls in one model step run together; the others run one at a time. */
+  readOnly?: boolean;
   /** JSON Schema sent to the model when it cannot be derived from `args` (MCP tools bring their own). */
   parameters?: Record<string, unknown>;
   run(ctx: ToolContext, args: A, callId: string): Promise<ToolResult>;
 }
 
-export const defineTool = <S extends z.ZodType>(t: { name: string; description: string; args: S; run(ctx: ToolContext, args: z.infer<S>, callId: string): Promise<ToolResult> }): Tool<z.infer<S>> =>
+export const defineTool = <S extends z.ZodType>(t: { name: string; description: string; args: S; readOnly?: boolean; run(ctx: ToolContext, args: z.infer<S>, callId: string): Promise<ToolResult> }): Tool<z.infer<S>> =>
   t as unknown as Tool<z.infer<S>>;
 
 export class Denied extends Error {}
 
-export function toFunction(t: Tool): FunctionTool {
-  if (t.parameters) return { type: "function", name: t.name, description: t.description.slice(0, 1000), parameters: t.parameters, strict: false };
-  const schema = z.toJSONSchema(t.args, { target: "draft-7", unrepresentable: "any" }) as Record<string, unknown>;
-  delete schema.$schema;
-  return { type: "function", name: t.name, description: t.description, parameters: schema, strict: false };
+/**
+ * The strict-mode form of a JSON schema: every property required, nothing additional allowed, and a property that was
+ * optional becomes nullable (which is how strict mode expresses "may be absent"). Nulls are stripped before validation.
+ */
+export function strictParameters(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
+  const s = schema as Record<string, unknown>;
+  if (s.type === "object" && s.properties && typeof s.properties === "object") {
+    const props = s.properties as Record<string, unknown>;
+    const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+    return {
+      ...s, additionalProperties: false, required: Object.keys(props),
+      properties: Object.fromEntries(Object.entries(props).map(([k, v]) => [k, required.has(k) ? strictParameters(v) : { anyOf: [strictParameters(v), { type: "null" }] }])),
+    };
+  }
+  if (s.items) return { ...s, items: strictParameters(s.items) };
+  if (Array.isArray(s.anyOf)) return { ...s, anyOf: s.anyOf.map(strictParameters) };
+  return s;
+}
+
+export function toFunction(t: Tool, strict = false): FunctionTool {
+  const schema = t.parameters ?? (() => {
+    const s = z.toJSONSchema(t.args, { target: "draft-7", unrepresentable: "any" }) as Record<string, unknown>;
+    delete s.$schema;
+    return s;
+  })();
+  const parameters = (strict ? strictParameters(schema) : schema) as Record<string, unknown>;
+  return { type: "function", name: t.name, description: t.description.slice(0, 1000), parameters, strict };
 }

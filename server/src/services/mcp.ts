@@ -79,20 +79,32 @@ let frameCounter = 0;
 function saveFrame(ctx: ToolContext, dataUrl: string): string {
   const dir = path.join(ctx.fs.root, ".octopus", "browser", ctx.runId);
   mkdirSync(dir, { recursive: true });
-  const name = `${Date.now().toString(36)}-${frameCounter++}.png`;
+  const ext = dataUrl.startsWith("data:image/jpeg") ? "jpeg" : "png";
+  const name = `${Date.now().toString(36)}-${frameCounter++}.${ext}`;
   writeFileSync(path.join(dir, name), Buffer.from(dataUrl.split(",")[1] ?? "", "base64"));
   return name;
 }
 
-/** Built-in browser tools for an agent (the Playwright MCP tool list, with browser_action events and screenshots). */
-export async function browserTools(root: string): Promise<Tool[]> {
+/** The browser tools a builder gets. Reviewers and acceptance checks keep the whole Playwright list. */
+export const BUILDER_BROWSER_TOOLS = ["browser_navigate", "browser_take_screenshot", "browser_click", "browser_type", "browser_press_key", "browser_evaluate", "browser_console_messages", "browser_snapshot", "browser_resize"];
+
+/** The tools of a browser tool list, or only the named ones, in the list's own order. */
+export function selectBrowserTools(tools: McpToolOut[], names?: readonly string[]): McpToolOut[] {
+  return names ? tools.filter((t) => names.includes(t.name)) : tools;
+}
+
+/** Built-in browser tools for an agent (the Playwright MCP tool list, with browser_action events and screenshots), or only `names`. */
+export async function browserTools(root: string, names?: readonly string[]): Promise<Tool[]> {
   const conn = await browserConnection(root);
-  return conn.tools.map((t): Tool => ({
+  return selectBrowserTools(conn.tools, names).map((t): Tool => ({
     name: safeName(t.name), description: t.description ?? t.name, args: z.record(z.string(), z.unknown()),
     parameters: t.input_schema ?? { type: "object", properties: {} },
     async run(ctx, args, callId) {
       ctx.setStatus("tool", `Browser: ${t.name.replace(/^browser_/, "").replace(/_/g, " ")}`);
-      const res = render(await (await browserConnection(root)).client.callTool({ name: t.name, arguments: args }));
+      // Playwright takes PNG unless told otherwise. A screenshot the model did not type is JPEG, which is far smaller
+      // and is sent again with every later call the transcript holds it in.
+      const shot = t.name === "browser_take_screenshot" && args.type === undefined ? { ...args, type: "jpeg" } : args;
+      const res = render(await (await browserConnection(root)).client.callTool({ name: t.name, arguments: shot }));
       const url = /Page URL: (\S+)/.exec(res.text)?.[1] ?? "";
       const title = /Page Title: (.+)/.exec(res.text)?.[1]?.trim() ?? "";
       ctx.emit("browser_action", { agent_id: ctx.agent.id, call_id: callId, tool: t.name, args, ok: res.ok, url, title, frame: res.image ? saveFrame(ctx, res.image) : null });
