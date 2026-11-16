@@ -296,7 +296,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     }
     if (shots.length) {
       input.push({ role: "user", content: shots.join("\n") });
-      pending = { role: "user", content: [{ type: "input_text", text: "Screenshot from your last tool call:" }, ...images.slice(-2).map((url) => ({ type: "input_image", image_url: url }))] };
+      pending = { role: "user", content: [{ type: "input_text", text: "Screenshot from your last tool call:" }, ...images.map((url) => ({ type: "input_image", image_url: url }))] };
     }
   }
   return { stop: null, text: lastText, rounds: o.maxRounds, exhausted: true };
