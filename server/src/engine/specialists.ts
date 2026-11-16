@@ -18,7 +18,7 @@ import { config } from "../config";
 import type { Registry } from "../db/registry";
 import type { Item } from "../llm/azure";
 import { briefDiff, changedLines, type FileDiff } from "../lib/diff";
-import { numberFindings, renderFindings, reviewReport, type CriticReport, type Finding, type FindingInput } from "../lib/findings";
+import { numberFindings, renderFindings, renderOpenItems, reviewReport, type CriticReport, type Finding, type FindingInput } from "../lib/findings";
 import { enterRound, leaveRound, type Restored } from "../workspace/snapshot";
 import type { Project } from "../workspace/projects";
 import { specialistToolbox, type SpecialistTool } from "../tools";
@@ -210,9 +210,20 @@ export class Specialists {
     if (!on.length) return `${names.join(", ")} ${names.length === 1 ? "is" : "are"} turned off in Settings, so nothing ran.`;
     const parts: string[] = [];
     const reviewers = on.filter((n) => n !== "verifier");
-    if (reviewers.length) parts.push((await this.check(reviewers, focus)).text);
+    if (reviewers.length) parts.push(this.covers() ? this.reviewedMessage() : (await this.check(reviewers, focus)).text);
     if (on.includes("verifier")) parts.push(await this.verifyNow(focus));
     return parts.join("\n\n");
+  }
+
+  /** Whether a review round has run on the request's change, and no file changed since it started. */
+  private covers(): boolean {
+    return this.rounds > 0 && this.covered === this.facts().changes;
+  }
+
+  /** The answer to a manual review of code that a review already covers: its open blockers, and what to do before another review. */
+  private reviewedMessage(): string {
+    if (!this.blocking.length) return "A review already ran for this code and reported no blocker or major finding. Change the code before you ask for another review.";
+    return `A review already ran for this code and reported these blockers or major findings:\n${renderOpenItems(this.blocking)}\n\nFix them, or change the code, before you ask for another review.`;
   }
 
   /** Runs reviewers on the request's change, and keeps their findings for the next round to check. */

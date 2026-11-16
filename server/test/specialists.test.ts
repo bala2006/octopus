@@ -352,7 +352,8 @@ describe("review and explore from a solo conversation", () => {
       if (role) throw new Error(`unexpected specialist ${role}`);
       const n = outputs(b).length;
       if (n === 0) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "First look at the heading." } }] };
-      if (n === 1) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Second look after the fix." } }] };
+      if (n === 1) return { calls: [{ name: "write_file", args: { path: "second.txt", content: "A second file.\n" } }] };
+      if (n === 2) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Second look after the new file." } }] };
       return { text: "Reviewed twice." };
     };
     const before = requests().length;
@@ -364,6 +365,37 @@ describe("review and explore from a solo conversation", () => {
     expect(startsWith(reviewer[1]!, reviewer[0]!)).toBe(true);
     expect(reviewer[1]!.input.length).toBeGreaterThan(reviewer[0]!.input.length);
     expect(lastOutput(fresh.filter((b) => !who(b)).at(-1)!)).toContain("round 2");
+  });
+
+  test("a manual review with no code change since the last round returns its blockers and starts no reviewer", async () => {
+    const verdicts: Reply[] = [
+      { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "The heading is wrong.", findings: [{ severity: "major", file: "index.html", lines: "1", problem: "The heading still says Acme.", evidence: "index.html line 1 reads Acme.", fix: "Change the heading to Globex." }] } }] },
+      { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "The heading is right now.", findings: [] } }] },
+    ];
+    script = (b) => {
+      const role = who(b);
+      if (role === "reviewer") {
+        const next = verdicts.shift();
+        if (!next) throw new Error("a reviewer ran although the code had no change");
+        return next;
+      }
+      if (role) throw new Error(`unexpected specialist ${role}`);
+      const n = outputs(b).length;
+      if (n === 0) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "First look at the heading." } }] };
+      if (n === 1) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Looked again with no change." } }] };
+      if (n === 2) return { calls: [{ name: "write_file", args: { path: "globe.txt", content: "Globex\n" } }] };
+      if (n === 3) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Added globe.txt after the review." } }] };
+      return { text: "Reviewed after the change." };
+    };
+    const before = requests().length;
+    const done = await settle(await start("Make the heading say Globex"));
+    expect(done.status).toBe("completed");
+    const fresh = requests().slice(before);
+    expect(fresh.filter((b) => who(b) === "reviewer")).toHaveLength(2);
+    const outs = fresh.filter((b) => !who(b)).at(-1)!.input.filter((i) => i.type === "function_call_output").map((i) => String(i.output));
+    expect(outs[1]).toContain("A review already ran for this code and reported these blockers or major findings:");
+    expect(outs[1]).toContain("F1 major index.html:1 (reviewer): The heading still says Acme.");
+    expect(outs[3]).toContain("Review of your change, round 2. reviewer: approve.");
   });
 
   test("an explore answer returns under 6,000 characters", async () => {
