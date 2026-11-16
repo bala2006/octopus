@@ -4,16 +4,24 @@
  * the prompt followed by the skill, and they never change, so every round reuses the cached prefix. Each specialist keeps
  * one session per conversation, so a later round continues the earlier one. A call that finds the session busy, such as a
  * second explore in the same step, gets a fresh session for itself.
+ *
+ * A review round briefs its reviewers from the request's facts. The first round of a request sends the user's messages,
+ * the main agent's account, the project checks and the diff since the request started. A later round sends the findings
+ * it answers, the main agent's answer and the diff since the last round.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentOut, AgentStatus, Effort, EdgeOut, RoleTemplateOut, RunEventMap, RunTopic } from "@octopus/shared";
 import type { Registry } from "../db/registry";
 import type { Item } from "../llm/azure";
+import { briefDiff, changedLines, type FileDiff } from "../lib/diff";
+import { safeEnv, run as runProcess } from "../lib/proc";
+import { numberFindings, renderFindings, reviewReport, type CriticReport, type Finding, type FindingInput } from "../lib/findings";
 import { clip } from "../lib/util";
-import { reviewReport, type CriticReport, type FindingInput } from "../lib/findings";
+import { parseCommand } from "../safety/commands";
 import { enterRound, leaveRound, type Restored } from "../workspace/snapshot";
+import { verificationChecks } from "../workspace/overview";
 import type { Project } from "../workspace/projects";
 import { specialistToolbox, type SpecialistTool } from "../tools";
 import { CHECK_REFUSAL } from "../tools/commands";
@@ -61,8 +69,11 @@ export function specialistRole(name: SpecialistName): RoleTemplateOut {
 export const RETURN_LIMIT = 5_900;
 /** Steps one specialist round may take before it is stopped. */
 const ROUND_STEPS = 60;
-/** The request text a review brief carries, in characters. */
-const REQUEST_LIMIT = 20_000;
+/** The most characters of a check's output a review brief keeps for each failing check. */
+const CHECK_OUTPUT_LIMIT = 2_000;
+const CHECK_TIMEOUT_MS = 300_000;
+/** Written to the transcript when a specialist round cannot be undone. */
+const UNDOABLE_WARNING = "This project is over the 64 MB limit for the undo record, so the checks in this round cannot be undone. Files they change stay changed.";
 
 /** A specialist's place in the company: its agent, and the two channels between it and Octopus. */
 export interface Seat { agent: AgentOut; delegate: EdgeOut; report: EdgeOut }
@@ -81,8 +92,20 @@ export interface SpecialistHost {
   model(agent: AgentOut): string;
 }
 
-/** The request a review is about: its text, and the files this turn changed. */
-export interface RequestFacts { goal: string; changed: string[] }
+/** The request a review is about. The solo path keeps these up to date as the turn runs. */
+export interface RequestFacts {
+  /** The user's messages for this request, verbatim, in the order they came. */
+  messages: string[];
+  /** The first line of each earlier request in this conversation. */
+  earlier: string[];
+  /** Each file this request changed, with its content before the request first changed it. */
+  before: Map<string, string | null>;
+  /** How many file changes this request has made. */
+  changes: number;
+}
+
+/** What one review round returns: the message for the main agent, and how many of its findings block the reply. */
+export interface ReviewRound { text: string; blocking: number }
 
 interface Session { items: Item[]; busy: boolean; seen: Map<string, string>; shown: Shown }
 interface Outcome { verdict: CriticReport["verdict"]; findings: FindingInput[]; text: string }
@@ -96,21 +119,70 @@ export class Specialists {
   private sessions = new Map<SpecialistName, Session>();
   private open = 0;
   private group: Group = { ran: [] };
-  private reviews = 0;
+  /** Review rounds this request has run, numbered from one. */
+  private rounds = 0;
+  /** Findings this request has numbered, so ids run on across its review rounds. */
+  private found = 0;
+  /** File contents at the start of the last review round. The diff since the last round is measured from them. */
+  private reviewed = new Map<string, string | null>();
+  /** The file change count when the last review round started. A review covers the diff until a later change. */
+  private covered: number | null = null;
+  /** Blocker and major findings of the last review round. */
+  private blocking: Finding[] = [];
+  /** Minor findings of the last review round. They are listed to the user and never sent back. */
+  private minors: Finding[] = [];
 
   constructor(private readonly host: SpecialistHost, private readonly facts: () => RequestFacts) {}
 
-  /** A new request starts, so its review rounds are numbered from one. */
+  /** A new request starts. Its review rounds are numbered from one, and no earlier review covers its changes. */
   startTurn() {
-    this.reviews = 0;
+    this.rounds = 0;
+    this.found = 0;
+    this.reviewed = new Map();
+    this.covered = null;
+    this.blocking = [];
+    this.minors = [];
+  }
+
+  /** The files this request changed, each with the lines that differ from its content before the request. */
+  requestDiff(): FileDiff[] {
+    return this.diffSince((file) => this.facts().before.get(file) ?? null);
+  }
+
+  /** Whether a review should run: a change came after the last review, or the last review's blockers await an answer. */
+  reviewDue(): boolean {
+    return this.covered !== this.facts().changes || this.blocking.length > 0;
+  }
+
+  blockingFindings(): Finding[] {
+    return this.blocking;
+  }
+
+  minorFindings(): Finding[] {
+    return this.minors;
   }
 
   /** Runs the named reviewers at once, waits for all of them, and returns their findings as one message. */
   async review(names: ReviewerName[], focus: string): Promise<string> {
-    const round = ++this.reviews;
-    const brief = this.reviewBrief(round, focus);
+    return (await this.check(names, focus)).text;
+  }
+
+  /** Runs reviewers on the request's change, and keeps their findings for the next round to check. */
+  async check(names: ReviewerName[], focus: string): Promise<ReviewRound> {
+    const round = ++this.rounds;
+    const first = this.found + 1;
+    const brief = await this.brief(round, focus);
+    this.covered = this.facts().changes;
+    this.reviewed = new Map([...this.facts().before.keys()].map((file) => [file, this.current(file)]));
+    this.blocking = [];
+    this.minors = [];
     const outcomes = await this.inRound(() => Promise.all(names.map((name) => this.round(name, brief))));
-    return reviewReport(round, names.map((critic, i) => ({ critic, verdict: outcomes[i]!.verdict, findings: outcomes[i]!.findings })), RETURN_LIMIT);
+    const reports: CriticReport[] = names.map((critic, i) => ({ critic, verdict: outcomes[i]!.verdict, findings: outcomes[i]!.findings }));
+    const numbered = numberFindings(reports, first);
+    this.found += numbered.length;
+    this.blocking = numbered.filter((f) => f.severity !== "minor");
+    this.minors = numbered.filter((f) => f.severity === "minor");
+    return { text: reviewReport(round, reports, RETURN_LIMIT, first), blocking: this.blocking.length };
   }
 
   /** Answers one question. Several calls in one step run at the same time. */
@@ -120,19 +192,22 @@ export class Specialists {
   }
 
   /**
-   * Runs rounds inside one project snapshot. The first round takes it, and the last round to end restores whatever the
-   * specialists' checks changed. The main agent waits for these rounds, so nothing else writes in the meantime.
+   * Runs rounds inside one project record. The first round takes the record, and the last round to end restores whatever
+   * the specialists' checks changed. Rounds of another conversation wait until these end.
    */
   private async inRound<T>(run: () => Promise<T>): Promise<T> {
-    if (this.open === 0) this.group = { ran: [] };
-    this.open++;
     const root = this.host.p.root;
+    const { undoable } = await enterRound(root, this);
+    if (this.open === 0) {
+      this.group = { ran: [] };
+      if (!undoable) this.host.emit("error", { message: UNDOABLE_WARNING, kind: "warning", agent_id: this.host.lead().id });
+    }
+    this.open++;
     try {
-      enterRound(root);
       return await run();
     } finally {
       this.open--;
-      const undone = leaveRound(root);
+      const undone = leaveRound(root, this);
       if (undone) this.reportRestore(undone);
     }
   }
@@ -190,14 +265,55 @@ export class Specialists {
     return session;
   }
 
-  private reviewBrief(round: number, focus: string): string {
-    const { goal, changed } = this.facts();
+  /** The first round sends the request. A later round sends what changed since the last one and the answers to its findings. */
+  private async brief(round: number, focus: string): Promise<string> {
+    const facts = this.facts();
+    if (round === 1) {
+      const earlier = facts.earlier.length ? facts.earlier.map((line) => `- ${line}`).join("\n") : "None.";
+      return [
+        "Review round 1 of this request.",
+        `The user's messages for this request, verbatim:\n${facts.messages.join("\n\n")}`,
+        `Earlier requests in this conversation, the first line of each:\n${earlier}`,
+        `What the main agent did and how it checked it:\n${focus}`,
+        `Project checks:\n${await this.checks()}`,
+        `Diff since the request started:\n${briefDiff(this.requestDiff())}`,
+      ].join("\n\n");
+    }
+    const since = (file: string) => (this.reviewed.has(file) ? this.reviewed.get(file)! : facts.before.get(file) ?? null);
     return [
-      `Review round ${round} of the change made for this request.`,
-      `The user's request, verbatim:\n${clip(goal, REQUEST_LIMIT)}`,
-      `What the main agent changed and checked:\n${focus}`,
-      `Files changed in this request:\n${changed.length ? changed.map((f) => `- ${f}`).join("\n") : "(none recorded)"}`,
+      `Review round ${round} of this request. The main agent answered your findings from the last round.`,
+      `Findings from the last round:\n${this.blocking.length ? renderFindings(this.blocking) : "None."}`,
+      `The main agent's answer and what it checked:\n${focus}`,
+      `Diff since the last round:\n${briefDiff(this.diffSince(since))}`,
     ].join("\n\n");
+  }
+
+  /** The project's own checks, run now, as the brief reports them. */
+  private async checks(): Promise<string> {
+    const checks = verificationChecks(this.host.p.fs);
+    if (!checks.length) return "The project has no automated checks.";
+    const signal = this.host.toolContext(this.host.lead(), { seen: new Map(), shown: new Map() }).signal;
+    const lines: string[] = [];
+    for (const c of checks) {
+      const res = await runProcess(parseCommand(c.command), {
+        cwd: this.host.p.fs.abs(c.directory === "." ? "" : c.directory), env: safeEnv(), timeoutMs: CHECK_TIMEOUT_MS, maxOutput: 30_000, signal,
+      });
+      const ok = res.code === 0 && !res.timedOut;
+      lines.push(ok ? `${c.name} (\`${c.command}\`) passed.` : `${c.name} (\`${c.command}\`) failed.\n${clip(res.output, CHECK_OUTPUT_LIMIT)}`);
+    }
+    return lines.join("\n");
+  }
+
+  /** The diff of each file the request changed, measured from `since`. Files with no changed line are left out. */
+  private diffSince(since: (file: string) => string | null): FileDiff[] {
+    return [...this.facts().before.keys()]
+      .map((file) => ({ file, ...changedLines(since(file), this.current(file)) }))
+      .filter((d) => d.lines > 0);
+  }
+
+  private current(file: string): string | null {
+    const abs = this.host.p.fs.abs(file);
+    return existsSync(abs) ? readFileSync(abs, "utf8") : null;
   }
 
   /** Tells the main agent which checks changed files, and that Octopus put them back. */

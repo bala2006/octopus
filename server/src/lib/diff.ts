@@ -14,3 +14,23 @@ export function changedLines(before: string | null, after: string | null): { tex
   const added = b.slice(start, endB).map((l) => `+${l}`);
   return { text: [...removed, ...added].join("\n"), lines: removed.length + added.length };
 }
+
+/** A review brief holds the whole diff up to this many characters. Above it, the brief lists each file with its line count. */
+export const BRIEF_DIFF_LIMIT = 60_000;
+
+export interface FileDiff { file: string; text: string; lines: number }
+
+/**
+ * The diff a review brief shows. Each changed file comes with its changed lines while the whole stays within the limit.
+ * Above the limit, the brief lists the changed files with their line counts, and the reviewer reads the files it needs.
+ */
+export function briefDiff(files: FileDiff[], limit = BRIEF_DIFF_LIMIT): string {
+  const changed = files.filter((f) => f.lines > 0);
+  if (!changed.length) return "No file changed.";
+  const whole = changed.map((f) => `### ${f.file} (${f.lines} changed lines)\n${f.text}`).join("\n\n");
+  if (whole.length <= limit) return whole;
+  return [
+    `The diff is over ${limit} characters. Changed files, with their changed lines:`,
+    ...changed.map((f) => `- ${f.file}: ${f.lines} changed lines`),
+  ].join("\n");
+}

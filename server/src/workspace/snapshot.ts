@@ -1,7 +1,10 @@
 /**
  * A record of the project's files taken before read-only specialists run commands, and the way back from it. A check
  * command can still rewrite a file (a snapshot update, a formatter given a write flag), so the record is what undoes it.
- * Rounds that overlap in one project share one record. The main agent waits while they run, so nothing else writes.
+ *
+ * A project has one open record at a time. Rounds of the same owner share it, and a round of another owner waits until
+ * the first owner's rounds end. The wait covers specialist rounds only. A main agent in another conversation can still
+ * write to the project during a round, and the restore can revert that write.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -9,6 +12,8 @@ import path from "node:path";
 
 export const SNAPSHOT_MAX_FILES = 4_000;
 export const SNAPSHOT_MAX_BYTES = 1024 * 1024;
+/** The most file content one record holds in memory. A project over it gets no record, so its rounds are not undone. */
+export const SNAPSHOT_MAX_TOTAL = 64 * 1024 * 1024;
 /** Folders the record never walks: version control, Octopus's own state, and what builds and installs produce. */
 const SKIPPED = new Set([".git", ".octopus", "node_modules", "dist", "build", "coverage", ".next", ".turbo", ".venv", "venv", "__pycache__", "target"]);
 
@@ -45,11 +50,15 @@ function walk(root: string): { paths: string[]; capped: boolean } {
   return { paths, capped: false };
 }
 
-export function takeSnapshot(root: string): Snapshot {
+/** The record of the project's files, or null when they add up to more than the total cap. */
+export function takeSnapshot(root: string): Snapshot | null {
   const { paths, capped } = walk(root);
   const files = new Map<string, SavedFile>();
+  let total = 0;
   for (const rel of paths) {
     const bytes = readFileSync(path.join(root, rel));
+    total += bytes.length;
+    if (total > SNAPSHOT_MAX_TOTAL) return null;
     files.set(rel, { hash: hashOf(bytes), bytes });
   }
   return { files, partial: capped };
@@ -76,22 +85,43 @@ export function restoreSnapshot(root: string, snap: Snapshot): Restored {
   return { restored, deleted, partial: snap.partial };
 }
 
-interface Open { snap: Snapshot; rounds: number }
+interface Open { owner: object; rounds: number; snap: Snapshot | null; waiting: (() => void)[] }
 const open = new Map<string, Open>();
 
-/** A round is starting in this project. The first one in takes the record; the others share it. */
-export function enterRound(root: string): void {
-  const entry = open.get(root);
-  if (entry) entry.rounds++;
-  else open.set(root, { snap: takeSnapshot(root), rounds: 1 });
+/**
+ * Starts a round in a project. The first round takes the record. Later rounds of the same owner share it. A round of
+ * another owner waits until the rounds in progress end. `undoable` is false when the project is over the total cap, and
+ * then the round's changes are not restored.
+ */
+export async function enterRound(root: string, owner: object): Promise<{ undoable: boolean }> {
+  for (;;) {
+    const entry = open.get(root);
+    if (!entry) {
+      const snap = takeSnapshot(root);
+      open.set(root, { owner, rounds: 1, snap, waiting: [] });
+      return { undoable: snap !== null };
+    }
+    if (entry.owner === owner) {
+      entry.rounds++;
+      return { undoable: entry.snap !== null };
+    }
+    await new Promise<void>((wake) => entry.waiting.push(wake));
+  }
 }
 
-/** A round has ended. When the last one ends, the project is restored and the report returned; otherwise null. */
-export function leaveRound(root: string): Restored | null {
+/**
+ * Ends a round. When the owner's last round in the project ends, the project is put back from its record, the waiting
+ * rounds of other owners are let in, and the report is returned. Otherwise the result is null.
+ */
+export function leaveRound(root: string, owner: object): Restored | null {
   const entry = open.get(root);
-  if (!entry) return null;
+  if (!entry || entry.owner !== owner) return null;
   entry.rounds--;
   if (entry.rounds > 0) return null;
   open.delete(root);
-  return restoreSnapshot(root, entry.snap);
+  try {
+    return entry.snap ? restoreSnapshot(root, entry.snap) : null;
+  } finally {
+    for (const wake of entry.waiting) wake();
+  }
 }

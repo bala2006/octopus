@@ -78,5 +78,13 @@ describe("eval run", () => {
     expect(row!.unmatched_replies).toBe(0);
     expect(readFileSync(path.join(row!.workdir, "src", "paginate.ts"), "utf8")).toContain("start + pageSize);");
   }, 120_000);
+
+  test("fix-pagination runs in solo-review mode with the floor on, and the trivial fix runs no specialist", async () => {
+    const [row] = await runEval({ mode: "solo-review", tasks: ["fix-pagination"], repeat: 1 });
+    expect(row).toMatchObject({ mode: "solo-review", template: "solo", run_status: "completed", graded: true, pass: true, checks_passed: 5, checks_total: 5 });
+    expect(row!.model_calls).toBe(3);
+    expect(row!.tool_calls).toBe(2);
+    expect(row!.unmatched_replies).toBe(0);
+  }, 120_000);
 });
 

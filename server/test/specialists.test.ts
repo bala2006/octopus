@@ -4,20 +4,22 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
-import type { CanvasOut, RunDetail, WorkspaceOut } from "@octopus/shared";
+import type { CanvasOut, MessageOut, RunDetail, WorkspaceOut } from "@octopus/shared";
 import { effectiveRoles } from "../src/catalog/roles";
 import { openRegistry, type Registry } from "../src/db/registry";
 import { buildServer } from "../src/http/server";
 import { encrypt } from "../src/lib/secrets";
 import { project as openWorkspace } from "../src/workspace/projects";
-import { fakeModel, outputs, type FakeModel, type Script } from "./fakeModel";
+import { fakeModel, outputs, type FakeModel, type Reply, type Script } from "./fakeModel";
 import { checkShellTool } from "../src/tools/commands";
 import { specialistToolbox } from "../src/tools";
 import { RETURN_LIMIT, SPECIALISTS, SPECIALIST_DEFS } from "../src/engine/specialists";
+import { tierOf, reviewersFor } from "../src/engine/risk";
+import { briefDiff } from "../src/lib/diff";
 import { reviewReport } from "../src/lib/findings";
 import { ProjectFs } from "../src/safety/paths";
 import { checkOnly } from "../src/safety/commands";
-import { enterRound, leaveRound, restoreSnapshot, SNAPSHOT_MAX_BYTES, SNAPSHOT_MAX_FILES, takeSnapshot } from "../src/workspace/snapshot";
+import { enterRound, leaveRound, restoreSnapshot, SNAPSHOT_MAX_BYTES, SNAPSHOT_MAX_FILES, SNAPSHOT_MAX_TOTAL, takeSnapshot } from "../src/workspace/snapshot";
 import type { ToolContext } from "../src/tools/types";
 
 const win = process.platform === "win32";
@@ -95,7 +97,7 @@ describe("project snapshot", () => {
       "src.txt": "before",
       "change.mjs": "import { writeFileSync } from 'node:fs';\nwriteFileSync('src.txt', 'after');\nwriteFileSync('new.txt', 'made by the check');\n",
     });
-    const snap = takeSnapshot(root);
+    const snap = takeSnapshot(root)!;
     const res = await runCheck(ctx, "node change.mjs");
     expect(res.ok).toBe(true);
     expect(readFileSync(path.join(root, "src.txt"), "utf8")).toBe("after");
@@ -108,7 +110,7 @@ describe("project snapshot", () => {
 
   test("files over 1 MB and ignored folders are not recorded", () => {
     const { root } = project({ "small.txt": "a", "big.bin": "x".repeat(SNAPSHOT_MAX_BYTES + 1), "node_modules/pkg/index.js": "module" });
-    const snap = takeSnapshot(root);
+    const snap = takeSnapshot(root)!;
     expect([...snap.files.keys()]).toEqual(["small.txt"]);
     expect(snap.partial).toBe(false);
   });
@@ -117,7 +119,7 @@ describe("project snapshot", () => {
     const files: Record<string, string> = {};
     for (let i = 0; i <= SNAPSHOT_MAX_FILES; i++) files[`f${i}.txt`] = "x";
     const { root } = project(files);
-    const snap = takeSnapshot(root);
+    const snap = takeSnapshot(root)!;
     expect(snap.partial).toBe(true);
     expect(snap.files.size).toBe(SNAPSHOT_MAX_FILES);
     writeFileSync(path.join(root, "extra.txt"), "made later");
@@ -126,15 +128,45 @@ describe("project snapshot", () => {
     expect(existsSync(path.join(root, "extra.txt"))).toBe(true);
   }, 60_000);
 
-  test("overlapping rounds share one record, and the last one to end restores", () => {
+  test("a project over the 64 MB total has no undo record", async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 70; i++) files[`blob${i}.bin`] = "x".repeat(SNAPSHOT_MAX_BYTES - 1);
+    const { root } = project(files);
+    expect(SNAPSHOT_MAX_TOTAL).toBe(64 * 1024 * 1024);
+    expect(takeSnapshot(root)).toBeNull();
+    expect(await enterRound(root, {})).toEqual({ undoable: false });
+    expect(leaveRound(root, {})).toBeNull();
+  }, 60_000);
+
+  test("rounds of one owner share one record, and the last one to end restores", async () => {
     const { root } = project({ "a.txt": "original" });
-    enterRound(root);
-    enterRound(root);
+    const owner = {};
+    await enterRound(root, owner);
+    await enterRound(root, owner);
     writeFileSync(path.join(root, "a.txt"), "changed");
-    expect(leaveRound(root)).toBeNull();
+    expect(leaveRound(root, owner)).toBeNull();
     expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("changed");
-    const report = leaveRound(root);
+    const report = leaveRound(root, owner);
     expect(report?.restored).toEqual(["a.txt"]);
+    expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("original");
+  });
+
+  test("a round of another owner waits until the first owner's rounds end, so the two never interleave", async () => {
+    const { root } = project({ "a.txt": "original" });
+    const first = {};
+    const second = {};
+    await enterRound(root, first);
+    writeFileSync(path.join(root, "a.txt"), "changed by the first round");
+    let entered = false;
+    const waiting = enterRound(root, second).then(() => { entered = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(entered).toBe(false);
+    expect(leaveRound(root, first)?.restored).toEqual(["a.txt"]);
+    await waiting;
+    expect(entered).toBe(true);
+    expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("original");
+    writeFileSync(path.join(root, "a.txt"), "changed by the second round");
+    expect(leaveRound(root, second)?.restored).toEqual(["a.txt"]);
     expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("original");
   });
 });
@@ -206,6 +238,9 @@ const SPECIALIST_PROMPTS: [string, string][] = [
 
 interface Request { instructions: string; input: any[]; tools: { name: string }[] } // eslint-disable-line @typescript-eslint/no-explicit-any
 
+/** A file of `count` numbered lines, so a write changes about that many lines. */
+const lines = (count: number, tag = "line") => `${Array.from({ length: count }, (_, i) => `export const ${tag}${i} = ${i};`).join("\n")}\n`;
+
 describe("review and explore from a solo conversation", () => {
   let app: FastifyInstance;
   let reg: Registry;
@@ -217,7 +252,7 @@ describe("review and explore from a solo conversation", () => {
 
   const call = async <T>(method: string, url: string, payload?: unknown): Promise<T> => {
     const res = await app.inject({ method: method as "GET", url, payload: payload as object, headers: { host: "127.0.0.1" } });
-    if (res.statusCode >= 400) throw new Error(`${method} ${url} → ${res.statusCode}: ${res.body}`);
+    if (res.statusCode >= 400) throw new Error(`${method} ${url}  ${res.statusCode}: ${res.body}`);
     return res.json() as T;
   };
   const W = () => `/api/v1/w/${ws.id}`;
@@ -361,10 +396,148 @@ describe("review and explore from a solo conversation", () => {
     const outs = requests().slice(before).filter((b) => !who(b)).at(-1)!.input.filter((i) => i.type === "function_call_output").map((i) => i.output);
     expect(outs).toEqual(["Answer Q1", "Answer Q2", "Answer Q3"]);
   });
+
+  describe("review floor", () => {
+    const approve: Reply = { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks right.", findings: [] } }] };
+    /** A main agent that writes `write` once, then replies. A review message gets `answer`. */
+    const mainTurn = (write: { path: string; content: string } | null, reply: string, answer = "Checked it again. It stays.") => (b: Request): Reply => {
+      if (lastUser(b).startsWith("Review of your change")) return { text: answer };
+      if (write && outputs(b).length === 0) return { calls: [{ name: "write_file", args: write }] };
+      return { text: reply };
+    };
+    /** One request in which the main agent writes a file and the specialists answer with `specialist`. */
+    const runWrite = async (rel: string, content: string, specialist: (b: Request) => Reply = () => approve) => {
+      const before = requests().length;
+      script = (b) => (who(b) ? specialist(b) : mainTurn({ path: rel, content }, "Wrote it.")(b));
+      const id = await start(`Add ${rel}`);
+      const done = await settle(id);
+      const fresh = requests().slice(before);
+      const roles = fresh.map((b) => who(b)).filter((r): r is string => r !== null);
+      return { id, status: done.status, fresh, roles };
+    };
+
+    test("the floor runs the reviewer at normal and high, and runs nothing at trivial or small", async () => {
+      const normal = await runWrite("src/report.ts", lines(100));
+      expect(normal.roles).toEqual(["reviewer"]);
+      const high = await runWrite("src/auth/login.ts", "export const ok = true;\n");
+      expect(high.roles.sort()).toEqual(["reviewer", "security"]);
+      const trivial = await runWrite("src/one.ts", "export const one = 1;\n");
+      expect(trivial.roles).toEqual([]);
+      const small = await runWrite("src/small.ts", lines(25));
+      expect(small.roles).toEqual([]);
+      expect([normal.status, high.status, trivial.status, small.status]).toEqual(["completed", "completed", "completed", "completed"]);
+    });
+
+    test("a review the main agent already ran covers its change, so the floor does not run again", async () => {
+      const before = requests().length;
+      script = (b) => {
+        if (who(b)) return approve;
+        const n = outputs(b).length;
+        if (n === 0) return { calls: [{ name: "write_file", args: { path: "src/report.ts", content: lines(100) } }] };
+        if (n === 1) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Wrote the report module." } }] };
+        return { text: "Reviewed and done." };
+      };
+      const done = await settle(await start("Add the report module"));
+      expect(done.status).toBe("completed");
+      expect(requests().slice(before).filter((b) => who(b) === "reviewer")).toHaveLength(1);
+    });
+
+    test("two floor rounds at most: the reply goes out incomplete, with the open findings listed", async () => {
+      const blocker: Reply = { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "The filter is ignored.", findings: [{ severity: "major", file: "src/report.ts", lines: "1-100", problem: "The page ignores the filter.", evidence: "report.ts never reads the filter.", fix: "Read the filter in report.ts." }] } }] };
+      const before = requests().length;
+      script = (b) => (who(b) ? blocker : mainTurn({ path: "src/report.ts", content: lines(100) }, "I kept the module as it is.")(b));
+      const id = await start("Add the report module");
+      const done = await settle(id);
+      expect(done.status).toBe("incomplete");
+      expect(done.halt_reason).toBe("Two review rounds ended with 1 blocker or major finding open.");
+      const reviewer = requests().slice(before).filter((b) => who(b) === "reviewer");
+      expect(reviewer).toHaveLength(2);
+      const second = lastUser(reviewer[1]!);
+      expect(second).toContain("Review round 2 of this request.");
+      expect(second).toContain("F1 [major] src/report.ts:1-100: The page ignores the filter.");
+      expect(second).toContain("Checked it again. It stays.");
+      const messages = await call<MessageOut[]>("GET", `${W()}/runs/${id}/messages`);
+      const report = messages.find((m) => m.type === "final_report")!;
+      expect(report.content).toContain("Open items:\n- F2 major src/report.ts:1-100 (reviewer): The page ignores the filter.");
+    });
+
+    test("the second floor round continues the reviewer's first session", async () => {
+      const blocker: Reply = { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "Still wrong.", findings: [{ severity: "major", file: "src/report.ts", lines: "1", problem: "The page is blank.", evidence: "report.ts returns nothing.", fix: "Return the rows." }] } }] };
+      const before = requests().length;
+      script = (b) => (who(b) ? blocker : mainTurn({ path: "src/report.ts", content: lines(100) }, "Kept it.")(b));
+      await settle(await start("Add the report module"));
+      const reviewer = requests().slice(before).filter((b) => who(b) === "reviewer");
+      expect(reviewer).toHaveLength(2);
+      expect(startsWith(reviewer[1]!, reviewer[0]!)).toBe(true);
+    });
+
+    test("minor findings are listed in the reply and never sent back to the main agent", async () => {
+      const minor: Reply = { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Fine, with one naming note.", findings: [{ severity: "minor", file: "src/report.ts", lines: "3", problem: "The name could be clearer.", evidence: "line 3 uses x", fix: "rename x" }] } }] };
+      const run = await runWrite("src/report.ts", lines(100), () => minor);
+      expect(run.status).toBe("completed");
+      expect(run.roles).toEqual(["reviewer"]);
+      const main = run.fresh.filter((b) => !who(b));
+      expect(main).toHaveLength(2);
+      expect(main.some((b) => lastUser(b).startsWith("Review of your change"))).toBe(false);
+      const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
+      expect(messages.find((m) => m.type === "final_report")?.content).toContain("Open items:\n- F1 minor src/report.ts:3 (reviewer): The name could be clearer.");
+    });
+
+    test("the first brief holds the user's words and the whole diff, and a diff over 60,000 characters is a file list", async () => {
+      const short = await runWrite("src/report.ts", lines(100));
+      const brief = String(short.fresh.find((b) => who(b) === "reviewer")!.input[0]!.content);
+      expect(brief).toContain("The user's messages for this request, verbatim:\nAdd src/report.ts");
+      expect(brief).toContain("### src/report.ts (101 changed lines)");
+      expect(brief).toContain("+export const line99 = 99;");
+      const long = await runWrite("src/big.ts", lines(3_000, "entry"));
+      const bigBrief = String(long.fresh.find((b) => who(b) === "reviewer")!.input[0]!.content);
+      expect(bigBrief).toMatch(/- src\/big\.ts: 3001 changed lines/);
+      expect(bigBrief).not.toContain("+export const entry1 = 1;");
+    });
+
+    test("a project over the undo limit runs its round without a record, and warns that its checks are not undone", async () => {
+      for (let i = 0; i < 70; i++) writeFileSync(path.join(dir, `blob${i}.bin`), "x".repeat(SNAPSHOT_MAX_BYTES - 1));
+      writeFileSync(path.join(dir, "change.mjs"), "import { writeFileSync } from 'node:fs';\nwriteFileSync('index.html', 'changed by a check');\n");
+      const run = await runWrite("src/report.ts", lines(100), (b) => (outputs(b).length === 0 ? { calls: [{ name: "shell", args: { command: "node change.mjs" } }] } : approve));
+      expect(run.status).toBe("completed");
+      const warnings = events(run.id, "error").filter((e) => e.kind === "warning").map((e) => String(e.message));
+      expect(warnings.some((m) => m.includes("over the 64 MB limit"))).toBe(true);
+      expect(readFileSync(path.join(dir, "index.html"), "utf8")).toBe("changed by a check");
+    }, 60_000);
+  });
 });
 
-describe("review message", () => {
-  test("a message with many findings stays under the return limit and says how many were cut", () => {
+describe("review floor rules", () => {
+  test.each([
+    [{ files: ["a.ts"], lines: 2 }, "trivial"],
+    [{ files: ["a.ts"], lines: 25 }, "small"],
+    [{ files: ["a.ts", "b.ts"], lines: 10 }, "small"],
+    [{ files: ["a.ts"], lines: 100 }, "normal"],
+    [{ files: ["package.json"], lines: 2 }, "normal"],
+    [{ files: ["src/auth/login.ts"], lines: 2 }, "high"],
+    [{ files: ["src/a.ts"], lines: 500 }, "high"],
+  ])("tierOf %j is %s", (part, tier) => {
+    expect(tierOf({ specialists: 0, requirements: 0, revised: false, ...part })).toBe(tier);
+  });
+
+  test("the reviewer always runs, security runs on a sensitive path, and the designer on a UI file when the browser is on", () => {
+    expect(reviewersFor(["src/report.ts"], false)).toEqual(["reviewer"]);
+    expect(reviewersFor(["src/auth/login.ts"], false)).toEqual(["reviewer", "security"]);
+    expect(reviewersFor(["src/App.tsx"], true)).toEqual(["reviewer", "designer"]);
+    expect(reviewersFor(["src/App.tsx"], false)).toEqual(["reviewer"]);
+  });
+
+  test("a diff under 60,000 characters is whole, and a larger one is a list with line counts", () => {
+    const small = [{ file: "a.ts", text: "+one", lines: 1 }, { file: "b.ts", text: "+two", lines: 1 }, { file: "c.ts", text: "+none", lines: 0 }];
+    expect(briefDiff(small)).toBe("### a.ts (1 changed lines)\n+one\n\n### b.ts (1 changed lines)\n+two");
+    const large = [{ file: "a.ts", text: "+x".repeat(40_000), lines: 40_000 }, { file: "b.ts", text: "+y".repeat(30_000), lines: 30_000 }];
+    const list = briefDiff(large);
+    expect(list).toContain("- a.ts: 40000 changed lines");
+    expect(list).toContain("- b.ts: 30000 changed lines");
+    expect(list).not.toContain("+x+x");
+  });
+
+  test("a review message stays under the return limit and says how many findings it cut", () => {
     const findings = Array.from({ length: 120 }, (_, i) => ({ severity: "major" as const, file: `src/file${i}.ts`, lines: "1-9", problem: "p".repeat(150), evidence: "e".repeat(150), fix: "f".repeat(150) }));
     const message = reviewReport(1, [{ critic: "reviewer", verdict: "request_changes", findings }], RETURN_LIMIT);
     expect(message.length).toBeLessThanOrEqual(6_000);

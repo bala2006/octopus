@@ -3,6 +3,9 @@
  * for the whole conversation and is kept on disk. Its instructions and tools are fixed when it starts. Project facts
  * arrive as runtime-context messages, only when they change. A turn runs until the model replies without a tool call,
  * and that reply is what the user sees. A question to the user, a step or token limit, or a stop ends a turn early.
+ *
+ * The review floor runs when a turn would end with a reply. A diff at normal or high tier gets a reviewer unless a review
+ * already covers it. Blocker and major findings go back to the main agent in the same turn, for at most two floor rounds.
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -12,6 +15,7 @@ import { config } from "../config";
 import type { Registry } from "../db/registry";
 import { SessionLog, trimToFinishedStep } from "../db/sessionLog";
 import type { Item } from "../llm/azure";
+import { renderOpenItems } from "../lib/findings";
 import { clip, firstLine, sha1 } from "../lib/util";
 import { soloToolbox } from "../tools";
 import type { Shown, Tool, ToolContext } from "../tools/types";
@@ -20,7 +24,11 @@ import { projectOverview } from "../workspace/overview";
 import { rulesUpdate, type RulesSent } from "../workspace/instructions";
 import { agentLoop, type LoopEvents } from "./agent";
 import { fill, MAIN_PROMPT, runtimeContext } from "./prompts";
+import { reviewersFor, tierOf } from "./risk";
 import { Specialists, type Seat, type SpecialistName } from "./specialists";
+
+/** Floor rounds one request may run. A reply that still has open findings after them goes out as incomplete. */
+const FLOOR_ROUNDS = 2;
 
 /** What the solo path needs from its conversation. The conversation owns the run row, the events and the messages. */
 export interface SoloHost {
@@ -90,19 +98,31 @@ export class SoloRun {
   private steer: { item: Item; text: string }[] = [];
   /** The request that started the turn in flight: the heading of its part of the report. */
   private turnTitle = "";
+  /** The user's messages for the turn in flight, verbatim. A message sent while the turn runs joins them. */
+  private turnMessages: string[] = [];
+  /** The first line of every request in this conversation, in order. */
+  private requests: string[] = [];
+  /** The first line of each request before the turn in flight. */
+  private earlier: string[] = [];
+  /** Each file the turn changed, with its content before the turn first changed it. */
+  private turnBefore = new Map<string, string | null>();
+  private turnChanges = 0;
+  private floorRounds = 0;
+  /** Why the turn ends incomplete, when the floor ran out of rounds with findings still open. */
+  private incomplete: string | null = null;
   private stopping: { reason: string; status: RunStatus } | null = null;
   private turnSteps = 0;
   private turnTools = 0;
   private turnTokens = 0;
   /** Files this conversation has changed, for the usage counter. */
   private changed = new Set<string>();
-  /** Files this turn changed: the files a review brief lists. */
-  private turnChanged = new Set<string>();
   private specialists: Specialists;
 
   constructor(private readonly host: SoloHost) {
     this.log = new SessionLog(path.join(host.p.root, ".octopus", "sessions", `${host.runId}.jsonl`));
-    this.specialists = new Specialists(host, () => ({ goal: this.turnTitle, changed: [...this.turnChanged] }));
+    this.specialists = new Specialists(host, () => ({
+      messages: this.turnMessages, earlier: this.earlier, before: this.turnBefore, changes: this.turnChanges,
+    }));
   }
 
   /** A user message, verbatim, with its images. It starts a turn, or joins the running one before its next step. */
@@ -110,8 +130,10 @@ export class SoloRun {
     const item: Item = { role: "user", content: images.length ? [{ type: "input_text", text: content }, ...images] : content };
     // A message sent while a question waits is the answer to it.
     this.host.state.questions.splice(0);
-    if (this.running) this.steer.push({ item, text: content });
-    else void this.run([item], content);
+    if (this.running) {
+      this.steer.push({ item, text: content });
+      this.turnMessages.push(content);
+    } else void this.run([item], [content]);
   }
 
   /** Ends the turn in flight, if any. The transcript is trimmed to its last finished step and kept. */
@@ -127,10 +149,16 @@ export class SoloRun {
     if (stop) this.host.finish(stop.reason, stop.status);
   }
 
-  private async run(first: Item[], title: string) {
+  private async run(first: Item[], messages: string[]) {
     this.running = true;
-    this.turnTitle = title;
-    this.turnChanged = new Set();
+    this.turnTitle = messages[0]!;
+    this.turnMessages = [...messages];
+    this.earlier = [...this.requests];
+    this.requests.push(firstLine(messages[0]!, 200));
+    this.turnBefore = new Map();
+    this.turnChanges = 0;
+    this.floorRounds = 0;
+    this.incomplete = null;
     this.specialists.startTurn();
     this.turnSteps = 0;
     this.turnTools = 0;
@@ -146,6 +174,14 @@ export class SoloRun {
         next = [];
         const outcome = await this.segment(t);
         if (this.stopping) break;
+        if (outcome.kind === "reply" && !this.steer.length) {
+          const sent = await this.floor(outcome.text);
+          if (this.stopping) break;
+          if (sent) {
+            next = [sent];
+            continue;
+          }
+        }
         if (this.steer.length) {
           next = this.steer.splice(0).map((s) => s.item);
           continue;
@@ -165,7 +201,7 @@ export class SoloRun {
       if (this.stopping) {
         const queued = this.steer.splice(0);
         this.finishStop();
-        if (queued.length) void this.run(queued.map((s) => s.item), queued[0]!.text);
+        if (queued.length) void this.run(queued.map((s) => s.item), queued.map((s) => s.text));
       }
     }
   }
@@ -276,10 +312,37 @@ export class SoloRun {
       recordFile: (rel, before, after, note) => {
         recordFile(rel, before, after, note);
         this.changed.add(rel);
-        this.turnChanged.add(rel);
+        if (!this.turnBefore.has(rel)) this.turnBefore.set(rel, before);
+        this.turnChanges++;
         this.host.state.usage.files_changed = this.changed.size;
       },
     };
+  }
+
+  /**
+   * The review floor, run when a reply would end the turn. It sends the main agent a message with the blocker and major
+   * findings of a reviewer it ran, and returns that message. Null lets the reply go out. The floor runs for a normal or
+   * high diff that no review covers, and for at most FLOOR_ROUNDS rounds per request. A diff at trivial or small tier
+   * runs nothing.
+   */
+  private async floor(reply: string): Promise<Item | null> {
+    if (!this.host.reg.setting<boolean>("solo_review_floor", true)) return null;
+    const diff = this.specialists.requestDiff();
+    const tier = tierOf({
+      files: diff.map((d) => d.file), lines: diff.reduce((sum, d) => sum + d.lines, 0), specialists: 0, requirements: 0, revised: this.floorRounds > 0,
+    });
+    if (tier === "trivial" || tier === "small" || !this.specialists.reviewDue()) return null;
+    if (this.floorRounds === FLOOR_ROUNDS) {
+      const open = this.specialists.blockingFindings().length;
+      this.incomplete = open
+        ? `Two review rounds ended with ${open} blocker or major finding${open === 1 ? "" : "s"} open.`
+        : "The last change was not reviewed: two review rounds had already run.";
+      return null;
+    }
+    this.floorRounds++;
+    const browser = this.host.lead().tools.browser === true;
+    const round = await this.specialists.check(reviewersFor(diff.map((d) => d.file), browser), reply);
+    return round.blocking ? { role: "user", content: round.text } : null;
   }
 
   private conclude(t: Transcript, outcome: Outcome) {
@@ -291,15 +354,23 @@ export class SoloRun {
       return;
     }
     if (outcome.kind === "reply") {
-      const text = outcome.text || "The model returned no reply.";
+      const body = outcome.text || "The model returned no reply.";
+      const open = this.openItems();
+      const text = open ? `${body}\n\n${open}` : body;
       this.host.post({ type: "final_report", content: text });
       this.host.recap(this.turnTitle, text);
-      this.host.setRunStatus("completed", { summary: firstLine(text, 300), reason: "" });
+      this.host.setRunStatus(this.incomplete ? "incomplete" : "completed", { summary: firstLine(text, 300), reason: this.incomplete ?? "" });
       return;
     }
     const text = this.pauseText(t, outcome.reason);
     this.host.post({ type: "final_report", content: text });
     this.host.setRunStatus("awaiting_user", { reason: "Paused: reply to continue", summary: firstLine(text, 300) });
+  }
+
+  /** The open items a reply lists: the last review's minor notes, and its blockers when the run ends incomplete. */
+  private openItems(): string {
+    const blocking = this.incomplete ? this.specialists.blockingFindings() : [];
+    return renderOpenItems([...blocking, ...this.specialists.minorFindings()]);
   }
 
   private pauseText(t: Transcript, reason: "steps" | "tokens"): string {

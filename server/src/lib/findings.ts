@@ -87,8 +87,18 @@ export function renderFindings(list: Finding[]): string {
 /** A critic's report for one review round: its verdict, or null when it ended without one, and its findings. */
 export interface CriticReport { critic: string; verdict: "approve" | "request_changes" | null; findings: FindingInput[] }
 
-/** Where a finding points, as the message shows it. */
-const where = (f: FindingInput) => (f.file ? (f.lines ? `${f.file}:${f.lines}` : f.file) : "the project");
+/** Where a finding points, as a message shows it. */
+export const locate = (f: { file?: string; lines?: string }) => (f.file ? (f.lines ? `${f.file}:${f.lines}` : f.file) : "the project");
+
+/**
+ * Numbers the findings of one round, across the critics in the order they report, from `first`. The ids of a request
+ * run on across its rounds, so a finding keeps its number when the review is asked again.
+ */
+export function numberFindings(reports: CriticReport[], first: number): Finding[] {
+  const out: Finding[] = [];
+  for (const r of reports) for (const f of r.findings) out.push({ ...f, id: `F${first + out.length}`, critic: r.critic, status: "open" });
+  return out;
+}
 
 /** A message that keeps a head and whole items in order. Items past the limit are dropped, and the message says how many findings were dropped. */
 function fit(head: string, items: { text: string; counted: boolean }[], limit: number): string {
@@ -110,19 +120,25 @@ function fit(head: string, items: { text: string; counted: boolean }[], limit: n
 }
 
 /**
- * The one message a review round returns to the main agent, in the plan's findings format. Findings are numbered across
- * critics in the order they report. Blockers and majors come first, to be answered. Minor findings are listed, not sent back.
+ * The one message a review round returns to the main agent, in the plan's findings format. Findings are numbered from
+ * `first` across critics in the order they report. Blockers and majors come first, to be answered. Minor findings are
+ * listed, not sent back.
  */
-export function reviewReport(round: number, reports: CriticReport[], limit: number): string {
-  let list: Finding[] = [];
-  for (const r of reports) list = addFindings(list, r.critic, r.findings).list;
+export function reviewReport(round: number, reports: CriticReport[], limit: number, first = 1): string {
+  const list = numberFindings(reports, first);
   const verdicts = reports.map((r) => `${r.critic}: ${r.verdict === null ? "no verdict" : r.verdict === "approve" ? "approve" : "request changes"}`);
   const blocking = list.filter((f) => f.severity !== "minor");
   const minor = list.filter((f) => f.severity === "minor");
   const head = `Review of your change, round ${round}. ${verdicts.join(". ")}.\n${blocking.length ? "Answer each blocker and major: fix it, or say in one sentence why it is wrong." : "No blocker or major finding."}`;
   const items = [
-    ...blocking.map((f) => ({ text: `\n\n${f.id} ${f.severity} ${where(f)} (${f.critic})\nProblem: ${f.problem}\nEvidence: ${f.evidence}\nFix: ${f.fix}`, counted: true })),
-    ...minor.map((f, i) => ({ text: `${i === 0 ? "\n\nMinor, not sent back:" : ""}\n${f.id} ${where(f)} (${f.critic}) ${f.problem}`, counted: true })),
+    ...blocking.map((f) => ({ text: `\n\n${f.id} ${f.severity} ${locate(f)} (${f.critic})\nProblem: ${f.problem}\nEvidence: ${f.evidence}\nFix: ${f.fix}`, counted: true })),
+    ...minor.map((f, i) => ({ text: `${i === 0 ? "\n\nMinor, not sent back:" : ""}\n${f.id} ${locate(f)} (${f.critic}) ${f.problem}`, counted: true })),
   ];
   return fit(head, items, limit);
+}
+
+/** The open items a reply lists: one line per finding, with its id, severity, place, critic and problem. */
+export function renderOpenItems(list: Finding[]): string {
+  if (!list.length) return "";
+  return ["Open items:", ...list.map((f) => `- ${f.id} ${f.severity} ${locate(f)} (${f.critic}): ${f.problem}`)].join("\n");
 }

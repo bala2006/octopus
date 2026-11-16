@@ -7,8 +7,11 @@
  *
  *   npm run eval -w server -- --mode pipeline --template solo_engineer --tasks fix-pagination --repeat 1
  *   npm run eval -w server -- --mode solo --tasks fix-pagination --repeat 1
+ *   npm run eval -w server -- --mode solo-review --tasks fix-pagination --repeat 1
  *
- * `--mode solo` runs the company made from the `solo` template, where one main agent works alone. Without --template,
+ * `--mode solo` runs the company made from the `solo` template, where one main agent works alone, with the review floor
+ * off. `--mode solo-review` is the same company with the review floor on. The floor is a registry setting, so it is set
+ * on the in-process server only. Over `--url` the server's own setting applies. Without --template,
  * pipeline runs use `solo_engineer` and solo runs use `solo`.
  */
 import { execFileSync } from "node:child_process";
@@ -51,7 +54,7 @@ export const RowSchema = z.object({
   sha: z.string(),
   at: z.string(),
   task: z.string(),
-  mode: z.enum(["pipeline", "solo"]),
+  mode: z.enum(["pipeline", "solo", "solo-review"]),
   template: z.string(),
   repeat: z.number().int(),
   target: z.enum(["in-process", "url"]),
@@ -81,9 +84,9 @@ export const RowSchema = z.object({
 });
 export type Row = z.infer<typeof RowSchema>;
 
-export type EvalMode = "pipeline" | "solo";
+export type EvalMode = "pipeline" | "solo" | "solo-review";
 /** The company template each mode runs when --template is not given. */
-const DEFAULT_TEMPLATE: Record<EvalMode, string> = { pipeline: "solo_engineer", solo: "solo" };
+const DEFAULT_TEMPLATE: Record<EvalMode, string> = { pipeline: "solo_engineer", solo: "solo", "solo-review": "solo" };
 
 export interface EvalOptions {
   mode: EvalMode;
@@ -123,6 +126,10 @@ async function startInProcess() {
     /** Point the server's Azure connection at a scripted model. */
     useModel(url: string) {
       reg.setSetting("provider.azure", { base_url: url, key_enc: encrypt("eval-key"), options: { auth: "key" }, updated_at: new Date().toISOString() });
+    },
+    /** Turn the solo review floor on or off for this server. */
+    setFloor(on: boolean) {
+      reg.setSetting("solo_review_floor", on);
     },
     close: () => app.close(),
   };
@@ -205,6 +212,8 @@ export async function runEval(opts: EvalOptions): Promise<Row[]> {
     }
   }
   const inProcess = opts.url ? null : await startInProcess();
+  if (opts.url && opts.mode !== "pipeline") console.warn("The review floor is set in-process only. Over --url the server's own setting applies.");
+  inProcess?.setFloor(opts.mode === "solo-review");
   const api = makeApi(opts.url ?? inProcess!.url);
   const sha = currentSha();
   const previous = (await api<{ approval_mode: string }>("GET", "/api/v1/settings")).approval_mode;
@@ -237,7 +246,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     strict: true,
   });
   const opts: EvalOptions = {
-    mode: z.enum(["pipeline", "solo"], { error: () => "Use --mode pipeline or --mode solo." }).parse(values.mode),
+    mode: z.enum(["pipeline", "solo", "solo-review"], { error: () => "Use --mode pipeline, solo or solo-review." }).parse(values.mode),
     template: values.template === undefined ? undefined : z.string().min(1).parse(values.template),
     tasks: values.tasks ? values.tasks.split(",").map((t) => t.trim()).filter(Boolean) : [],
     repeat: z.coerce.number().int().min(1).max(50).parse(values.repeat),
