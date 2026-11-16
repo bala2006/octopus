@@ -135,19 +135,27 @@ test("a message sent mid-turn arrives before the next model step", async () => {
 
 test("step 400 pauses the run as awaiting_user with the pause message, and a reply continues it", async () => {
   const before = requests().length;
-  script = () => ({ calls: [{ name: "read_file", args: { path: "index.html" } }] });
-  const id = await start("Keep reading the page");
-  const paused = await until(id, ["awaiting_user", "completed", "failed"], 120_000);
-  expect(requests().length - before).toBe(config.soloStepLimit);
-  expect(paused.status).toBe("awaiting_user");
-  expect(paused.halt_reason).toBe("Paused: reply to continue");
-  const messages = await call<MessageOut[]>("GET", `${W()}/runs/${id}/messages`);
-  expect(messages.at(-1)!.type).toBe("final_report");
-  expect(messages.at(-1)!.content).toContain(`at the ${config.soloStepLimit}-step limit`);
-  script = () => ({ text: "Done reading." });
-  await send(id, "Carry on.");
-  const done = await turnDone(id, before + config.soloStepLimit + 1, 120_000);
-  expect(done.status).toBe("completed");
+  // The fake model reports each request's whole size as input, so a 400-step turn would reach the token budget first.
+  // This test is about the step limit, so the budget is lifted for it.
+  const savedBudget = config.soloTurnTokens;
+  config.soloTurnTokens = Infinity;
+  try {
+    script = () => ({ calls: [{ name: "read_file", args: { path: "index.html" } }] });
+    const id = await start("Keep reading the page");
+    const paused = await until(id, ["awaiting_user", "completed", "failed"], 120_000);
+    expect(requests().length - before).toBe(config.soloStepLimit);
+    expect(paused.status).toBe("awaiting_user");
+    expect(paused.halt_reason).toBe("Paused: reply to continue");
+    const messages = await call<MessageOut[]>("GET", `${W()}/runs/${id}/messages`);
+    expect(messages.at(-1)!.type).toBe("final_report");
+    expect(messages.at(-1)!.content).toContain(`at the ${config.soloStepLimit}-step limit`);
+    script = () => ({ text: "Done reading." });
+    await send(id, "Carry on.");
+    const done = await turnDone(id, before + config.soloStepLimit + 1, 120_000);
+    expect(done.status).toBe("completed");
+  } finally {
+    config.soloTurnTokens = savedBudget;
+  }
 }, 180_000);
 
 test("a stop keeps the session, and the next message continues it", async () => {
@@ -184,4 +192,40 @@ test("a restart reloads the stored transcript", async () => {
   const done = await turnDone(id, before + 3);
   expect(done.status).toBe("completed");
   expect(startsWith(requests()[before + 2]!, requests()[before + 1]!)).toBe(true);
+});
+
+test("the turn budget counts uncached input and output, not cached input", async () => {
+  const before = requests().length;
+  const saved = config.soloTurnTokens;
+  config.soloTurnTokens = 1_000;
+  try {
+    // Each reply reports 5,000 input tokens, 4,900 of them cached, and 50 output tokens: 150 tokens count per step.
+    script = () => {
+      const usage = { usage: 5_000, cached: 4_900 };
+      return requests().length - before < 5 ? { ...usage, calls: [{ name: "read_file", args: { path: "index.html" } }] } : { ...usage, text: "Done." };
+    };
+    const id = await start("Read the page");
+    const done = await turnDone(id, before + 5);
+    expect(done.status).toBe("completed");
+    expect(requests().length - before).toBe(5);
+  } finally {
+    config.soloTurnTokens = saved;
+  }
+});
+
+test("a turn that spends its token budget pauses with the budget message", async () => {
+  const before = requests().length;
+  const saved = config.soloTurnTokens;
+  config.soloTurnTokens = 1_000;
+  try {
+    script = () => ({ usage: 5_000, calls: [{ name: "read_file", args: { path: "index.html" } }] });
+    const id = await start("Read the page");
+    const paused = await until(id, ["awaiting_user", "completed", "failed"]);
+    expect(requests().length - before).toBe(1);
+    expect(paused.status).toBe("awaiting_user");
+    const messages = await call<MessageOut[]>("GET", `${W()}/runs/${id}/messages`);
+    expect(messages.at(-1)!.content).toContain("at the token budget for this turn");
+  } finally {
+    config.soloTurnTokens = saved;
+  }
 });

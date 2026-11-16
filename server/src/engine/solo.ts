@@ -208,7 +208,8 @@ export class SoloRun {
         base.toolResult(callId, tool, ok, output, metrics);
       },
       usage: (r) => {
-        this.turnTokens += r.usage.input + r.usage.output;
+        // Cached input is reused, not new work, so only the uncached part of the input counts toward the budget.
+        this.turnTokens += r.usage.input - r.usage.cached + r.usage.output;
         base.usage(r);
       },
       beforeCall: async () => {
