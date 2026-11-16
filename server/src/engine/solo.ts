@@ -16,6 +16,7 @@ import { config } from "../config";
 import type { Registry } from "../db/registry";
 import { SessionLog, trimToFinishedStep } from "../db/sessionLog";
 import type { Item } from "../llm/azure";
+import { type TokenUsage } from "../llm/pricing";
 import { renderOpenItems } from "../lib/findings";
 import { clip, firstLine, newId, sha1 } from "../lib/util";
 import { soloToolbox } from "../tools";
@@ -31,6 +32,10 @@ import { reviewersFor, tierOf } from "./risk";
 import { Specialists, specialistSettings, type Seat } from "./specialists";
 
 const WORDS = ["zero", "one", "two", "three", "four", "five"];
+/** The budget weight of a cached input token, against an uncached one. It matches the cached and uncached price ratio in llm/pricing.ts (0.01 to 0.1). */
+const CACHED_INPUT_WEIGHT = 0.1;
+/** The weighted tokens of one model call: uncached input, cached input at its weight, and output. */
+const weighted = (u: TokenUsage) => u.input - u.cached + CACHED_INPUT_WEIGHT * u.cached + u.output;
 /** A count in words with its noun in the plural: "two review rounds". Settings allows one to five. */
 const times = (n: number, noun: string) => `${WORDS[n]} ${noun}${n === 1 ? "" : "s"}`;
 const sentence = (s: string) => `${s[0]!.toUpperCase()}${s.slice(1)}`;
@@ -90,6 +95,9 @@ type Outcome =
 /** Raised from the step hook when the turn has spent its token budget. */
 class TokenBudgetSpent extends Error {}
 
+/** What the review floor returns: a message that sends the reply back, "paused" when the budget stops a specialist, or null to let the reply go. */
+type FloorStep = Item | "paused" | null;
+
 /** The text of the last model message in a transcript, or "" when there is none. */
 function lastReply(items: Item[]): string {
   for (let i = items.length - 1; i >= 0; i--) {
@@ -136,7 +144,7 @@ export class SoloRun {
     this.log = new SessionLog(path.join(host.p.root, ".octopus", "sessions", `${host.runId}.jsonl`));
     this.specialists = new Specialists(host, () => ({
       messages: this.turnMessages, earlier: this.earlier, before: this.turnBefore, changes: this.turnChanges,
-    }), () => this.checkChanges());
+    }), () => this.checkChanges(), { spend: (usage) => this.spend(usage), spent: () => this.budgetSpent() });
   }
 
   /** A user message, verbatim, with its images. It starts a turn, or joins the running one before its next step. */
@@ -192,6 +200,10 @@ export class SoloRun {
         if (outcome.kind === "reply" && !this.steer.length) {
           const sent = await this.floor(outcome.text);
           if (this.stopping) break;
+          if (sent === "paused") {
+            this.conclude(t, { kind: "pause", reason: "tokens" });
+            break;
+          }
           if (sent) {
             next = [sent];
             continue;
@@ -293,12 +305,11 @@ export class SoloRun {
         base.toolResult(callId, tool, ok, output, metrics);
       },
       usage: (r) => {
-        // Cached input is reused, not new work, so only the uncached part of the input counts toward the budget.
-        this.turnTokens += r.usage.input - r.usage.cached + r.usage.output;
+        this.spend(r.usage);
         base.usage(r);
       },
       beforeCall: async () => {
-        if (this.turnTokens >= config.soloTurnTokens) throw new TokenBudgetSpent("tokens");
+        if (this.budgetSpent()) throw new TokenBudgetSpent("tokens");
         this.turnSteps++;
         await base.beforeCall();
       },
@@ -317,6 +328,15 @@ export class SoloRun {
       if (e instanceof TokenBudgetSpent) return { kind: "pause", reason: "tokens" };
       throw e;
     }
+  }
+
+  /** Adds one model call's weighted tokens to the turn's budget. Every call of the turn counts, the main agent's and its specialists'. */
+  private spend(usage: TokenUsage) {
+    this.turnTokens += weighted(usage);
+  }
+
+  private budgetSpent(): boolean {
+    return this.turnTokens >= config.soloTurnTokens;
   }
 
   private toolContext(t: Transcript): ToolContext {
@@ -343,7 +363,7 @@ export class SoloRun {
    * code change it has not checked yet, and an ask it finds unmet goes back the same way, for at most the verify rounds.
    * Null lets the reply go out.
    */
-  private async floor(reply: string): Promise<Item | null> {
+  private async floor(reply: string): Promise<FloorStep> {
     const cap = this.specialists.caps;
     if (!cap.floor) return null;
     const checks = await this.checkChanges();
@@ -374,6 +394,7 @@ export class SoloRun {
           : `The last change was not reviewed: ${times(cap.floor_rounds, "review round")} had already run.`;
         return null;
       }
+      if (this.budgetSpent()) return "paused";
       this.floorRounds++;
       const round = await this.specialists.check(reviewers, reply, checks.text);
       if (round.blocking || round.silent.length) return { role: "user", content: round.text };
@@ -384,6 +405,11 @@ export class SoloRun {
       this.incomplete = this.notMetReason();
       return null;
     }
+    if (this.specialists.verifyRoundCount() === cap.verify_rounds) {
+      this.incomplete = this.notMetReason();
+      return null;
+    }
+    if (this.budgetSpent()) return "paused";
     const verdict = await this.specialists.verify(reply, checks.text);
     if (!verdict.unmet) return null;
     if (this.specialists.verifyRoundCount() === cap.verify_rounds) {

@@ -17,6 +17,7 @@ import { SPECIALIST_NAMES, type AgentOut, type AgentStatus, type Effort, type Ed
 import { config } from "../config";
 import type { Registry } from "../db/registry";
 import type { Item } from "../llm/azure";
+import type { TokenUsage } from "../llm/pricing";
 import { briefDiff, changedLines, type FileDiff } from "../lib/diff";
 import { numberFindings, renderFindings, renderOpenItems, reviewReport, type CriticReport, type Finding, type FindingInput } from "../lib/findings";
 import { enterRound, leaveRound, type Restored } from "../workspace/snapshot";
@@ -80,6 +81,8 @@ export const RETURN_LIMIT = 5_900;
 const ROUND_STEPS = 60;
 /** Written to the transcript when a specialist round cannot be undone. */
 const UNDOABLE_WARNING = "This project is over the 64 MB limit for the undo record, so the checks in this round cannot be undone. Files they change stay changed.";
+/** What a manual review or explore call returns when the turn's token budget is already spent. */
+const BUDGET_SPENT = "The token budget for this turn is spent, so no specialist ran.";
 
 /** A specialist's place in the company: its agent, and the two channels between it and Octopus. */
 export interface Seat { agent: AgentOut; delegate: EdgeOut; report: EdgeOut }
@@ -111,6 +114,8 @@ export interface RequestFacts {
   changes: number;
 }
 
+/** The turn's token budget as the solo path counts it. Each model call's weighted tokens go in, and a round may not start once it is spent. */
+export interface TurnBudget { spend(usage: TokenUsage): void; spent(): boolean }
 /** What one review round returns: the message for the main agent, and how many of its findings block the reply. */
 export interface ReviewRound { text: string; blocking: number; /** The reviewers that ended a round without a verdict. */ silent: ReviewerName[] }
 /** What one verifier round returns: the message for the main agent, and how many asks are not met. */
@@ -154,7 +159,7 @@ export class Specialists {
   private policy: SpecialistsSettings = specialistDefaults();
 
   /** `runChecks` runs the project checks for a review brief, when the caller has not run them already. */
-  constructor(private readonly host: SpecialistHost, private readonly facts: () => RequestFacts, private readonly runChecks: () => Promise<ChecksOutcome>) {}
+  constructor(private readonly host: SpecialistHost, private readonly facts: () => RequestFacts, private readonly runChecks: () => Promise<ChecksOutcome>, private readonly budget: TurnBudget) {}
 
   /** Takes the settings a conversation starts with. Rounds that begin later use them. */
   configure(policy: SpecialistsSettings) {
@@ -215,6 +220,7 @@ export class Specialists {
   async review(names: ReviewerName[], focus: string): Promise<string> {
     const on = names.filter((n) => this.enabled(n));
     if (!on.length) return `${names.join(", ")} ${names.length === 1 ? "is" : "are"} turned off in Settings, so nothing ran.`;
+    if (this.budget.spent()) return BUDGET_SPENT;
     const parts: string[] = [];
     const reviewers = on.filter((n) => n !== "verifier");
     if (reviewers.length) parts.push(this.covers() ? this.reviewedMessage() : (await this.check(reviewers, focus)).text);
@@ -342,6 +348,7 @@ export class Specialists {
   /** Answers one question. Several calls in one step run at the same time. */
   async explore(question: string): Promise<string> {
     if (!this.enabled("explorer")) return "The explorer is turned off in Settings.";
+    if (this.budget.spent()) return BUDGET_SPENT;
     const outcome = await this.inRound(() => this.round("explorer", `Question: ${question}`));
     return outcome.text ? clampAnswer(outcome.text) : "The explorer gave no answer.";
   }
@@ -382,6 +389,10 @@ export class Specialists {
       const asked = new Map<string, string>();
       const events: LoopEvents = {
         ...base,
+        usage: (r) => {
+          this.budget.spend(r.usage);
+          base.usage(r);
+        },
         toolCall: (callId, tool, args) => {
           if (tool === "shell" && typeof args.command === "string") asked.set(callId, args.command);
           base.toolCall(callId, tool, args);

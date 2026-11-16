@@ -194,20 +194,20 @@ test("a restart reloads the stored transcript", async () => {
   expect(startsWith(requests()[before + 2]!, requests()[before + 1]!)).toBe(true);
 });
 
-test("the turn budget counts uncached input and output, not cached input", async () => {
+test("the turn budget counts cached input at a tenth of its weight", async () => {
   const before = requests().length;
   const saved = config.soloTurnTokens;
   config.soloTurnTokens = 1_000;
   try {
-    // Each reply reports 5,000 input tokens, 4,900 of them cached, and 50 output tokens: 150 tokens count per step.
-    script = () => {
-      const usage = { usage: 5_000, cached: 4_900 };
-      return requests().length - before < 5 ? { ...usage, calls: [{ name: "read_file", args: { path: "index.html" } }] } : { ...usage, text: "Done." };
-    };
+    // Each reply reports 5,000 input tokens, 4,900 of them cached, and 50 output tokens: 640 weighted per step
+    // (100 uncached, 490 cached at a tenth, 50 output). Two steps reach 1,280, so the third never starts.
+    script = () => ({ usage: 5_000, cached: 4_900, calls: [{ name: "read_file", args: { path: "index.html" } }] });
     const id = await start("Read the page");
-    const done = await turnDone(id, before + 5);
-    expect(done.status).toBe("completed");
-    expect(requests().length - before).toBe(5);
+    const paused = await until(id, ["awaiting_user", "completed", "failed"]);
+    expect(requests().length - before).toBe(2);
+    expect(paused.status).toBe("awaiting_user");
+    const messages = await call<MessageOut[]>("GET", `${W()}/runs/${id}/messages`);
+    expect(messages.at(-1)!.content).toContain("at the token budget for this turn");
   } finally {
     config.soloTurnTokens = saved;
   }

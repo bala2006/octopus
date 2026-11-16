@@ -37,8 +37,8 @@ export const config = {
   defaultEffort: env("DEFAULT_REASONING_EFFORT", "high"),
   /** Model steps a solo turn may take before it pauses for a reply. */
   soloStepLimit: Number(env("SOLO_STEP_LIMIT", "400")),
-  /** Uncached input tokens (input minus cached input) plus output tokens a solo turn may use before it pauses for a reply. */
-  soloTurnTokens: Number(env("SOLO_TURN_TOKENS", "3000000")),
+  /** Weighted tokens a solo turn may spend before it pauses for a reply: uncached input, cached input at a tenth, and output, over every model call of the turn. */
+  soloTurnTokens: Number(env("SOLO_TURN_TOKENS", "8000000")),
   /** Tool schemas in the provider's strict mode. Off until the deployment is known to accept the normalised schemas. */
   strictTools: flag("AZURE_STRICT_TOOLS", false),
   nativeDialogs: flag("NATIVE_DIALOGS", true),

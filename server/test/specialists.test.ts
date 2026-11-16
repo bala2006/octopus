@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { SPECIALIST_NAMES } from "@octopus/shared";
 import type { CanvasOut, MessageOut, RunDetail, WorkspaceOut } from "@octopus/shared";
 import { effectiveRoles } from "../src/catalog/roles";
+import { config } from "../src/config";
 import { openRegistry, type Registry } from "../src/db/registry";
 import { buildServer } from "../src/http/server";
 import { encrypt } from "../src/lib/secrets";
@@ -432,6 +433,69 @@ describe("review and explore from a solo conversation", () => {
     expect(explorer.tools.map((t) => t.name)).not.toContain("submit_review");
     const outs = requests().slice(before).filter((b) => !who(b)).at(-1)!.input.filter((i) => i.type === "function_call_output").map((i) => i.output);
     expect(outs).toEqual(["Answer Q1", "Answer Q2", "Answer Q3"]);
+  });
+
+  test("specialist calls count toward the turn budget, and the turn pauses once they spend it", async () => {
+    const saved = config.soloTurnTokens;
+    config.soloTurnTokens = 3_000;
+    try {
+      const before = requests().length;
+      script = (b) => {
+        const role = who(b);
+        if (role === "reviewer") return { usage: 3_000, cached: 0, calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks right.", findings: [] } }] };
+        if (role) throw new Error(`unexpected specialist ${role}`);
+        return outputs(b).length === 0
+          ? { usage: 200, cached: 0, calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Checked the heading." } }] }
+          : { usage: 200, cached: 0, text: "Reviewed." };
+      };
+      const paused = await settle(await start("Check the heading"));
+      expect(paused.status).toBe("awaiting_user");
+      const fresh = requests().slice(before);
+      expect(fresh.filter((b) => who(b) === "reviewer")).toHaveLength(1);
+      expect(fresh.filter((b) => !who(b))).toHaveLength(1);
+      const messages = await call<MessageOut[]>("GET", `${W()}/runs/${paused.id}/messages`);
+      expect(messages.at(-1)!.content).toContain("at the token budget for this turn");
+    } finally {
+      config.soloTurnTokens = saved;
+    }
+  });
+
+  test("a manual review does not start a specialist once the turn budget is spent", async () => {
+    const saved = config.soloTurnTokens;
+    config.soloTurnTokens = 300;
+    try {
+      const before = requests().length;
+      script = (b) => {
+        if (who(b)) throw new Error(`unexpected specialist ${who(b)}`);
+        return { usage: 400, cached: 0, calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Checked the heading." } }] };
+      };
+      const paused = await settle(await start("Check the heading"));
+      expect(paused.status).toBe("awaiting_user");
+      expect(requests().slice(before)).toHaveLength(1);
+    } finally {
+      config.soloTurnTokens = saved;
+    }
+  });
+
+  test("the review floor does not start a reviewer once the turn budget is spent, and the reply pauses", async () => {
+    const saved = config.soloTurnTokens;
+    config.soloTurnTokens = 300;
+    try {
+      const before = requests().length;
+      script = (b) => {
+        if (who(b)) throw new Error(`unexpected specialist ${who(b)}`);
+        return outputs(b).length === 0
+          ? { usage: 50, cached: 0, calls: [{ name: "write_file", args: { path: "src/report.ts", content: lines(100) } }] }
+          : { usage: 400, cached: 0, text: "Wrote the report module." };
+      };
+      const paused = await settle(await start("Add the report module"));
+      expect(paused.status).toBe("awaiting_user");
+      expect(requests().slice(before).filter((b) => who(b) === "reviewer")).toHaveLength(0);
+      const messages = await call<MessageOut[]>("GET", `${W()}/runs/${paused.id}/messages`);
+      expect(messages.at(-1)!.content).toContain("at the token budget for this turn");
+    } finally {
+      config.soloTurnTokens = saved;
+    }
   });
 
   describe("review floor", () => {
