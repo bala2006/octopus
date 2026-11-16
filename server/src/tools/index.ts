@@ -64,3 +64,21 @@ export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode
   if (mode === "orchestrator") tools.push(...plannerTools, askUser);
   return { tools, warnings };
 }
+
+/**
+ * The main agent of a solo conversation: the builder's tools, plus ask_user and todo_write. It has no team, planning,
+ * hiring or review tools, so the only way its turn ends without a reply is a question to the user.
+ */
+export async function soloToolbox(reg: Registry, root: string, agent: AgentOut): Promise<{ tools: Tool[]; warnings: string[] }> {
+  const t = agent.tools;
+  const warnings: string[] = [];
+  const tools: Tool[] = fileTools.filter((f) => (t.file_read !== false || !READ.includes(f.name)) && (t.file_write !== false || READ.includes(f.name)));
+  if (t.terminal) tools.push(...commandTools);
+  if (t.web_search) tools.push(...webTools);
+  if (t.browser) {
+    try { tools.push(...await browserTools(root, BUILDER_BROWSER_TOOLS)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
+  }
+  if (t.mcp_servers?.length) tools.push(...await serverTools(reg, t.mcp_servers));
+  tools.push(...memoryTools, askUser, ...todoTools);
+  return { tools, warnings };
+}

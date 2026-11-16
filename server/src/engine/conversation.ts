@@ -18,7 +18,7 @@ import {
 import { config } from "../config";
 import { SHARED_MEMORY, type RunRow } from "../db/project";
 import type { Registry } from "../db/registry";
-import { effectiveRoles, roleByKey } from "../catalog/roles";
+import { effectiveRoles, MAIN_ROLE, roleByKey } from "../catalog/roles";
 import { effectiveSkills, skillsFor } from "../catalog/skills";
 import { canReview, canVerify, canWrite, kindOf, staffingError } from "../catalog/kinds";
 import { addFindings, answerFindings, blockingOpen, renderFindings, settlePrior, type Finding, unresolvedBlocking } from "../lib/findings";
@@ -39,6 +39,7 @@ import type { Project } from "../workspace/projects";
 import { agentLoop, compactable, tokensOf, type LoopEvents } from "./agent";
 import { checksCanBeSkipped, DOC_OR_ASSET, type SourceFile } from "./checkScope";
 import { publish } from "./bus";
+import { SoloRun, type SoloHost } from "./solo";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
 import { tierOf, type Tier } from "./risk";
 import { canRunBeside, owns, writes } from "./ownership";
@@ -159,6 +160,8 @@ export class Conversation {
   private wake: ReturnType<typeof deferred<void>> | null = null;
   /** Check commands that already passed for exactly the files the team last changed, so they are not run twice. */
   private checksPassed = new Set<string>();
+  /** The solo path, created when this conversation's company is the solo template. */
+  private soloRun: SoloRun | null = null;
 
   private constructor(readonly p: Project, readonly reg: Registry, row: RunRow) {
     this.row = row;
@@ -187,8 +190,8 @@ export class Conversation {
     return c;
   }
 
-  static isLive(runId: string) { return live.get(runId)?.driving ?? false; }
-  static liveCount() { return [...live.values()].filter((c) => c.driving).length; }
+  static isLive(runId: string) { return live.get(runId)?.turning ?? false; }
+  static liveCount() { return [...live.values()].filter((c) => c.turning).length; }
 
   static create(p: Project, reg: Registry, body: RunCreate): Conversation {
     if (!connection(reg)) throw new UserError("Connect Azure OpenAI first: Settings → Model.", 412);
@@ -227,6 +230,32 @@ export class Conversation {
     return this.team.find((a) => a.is_entry) ?? this.team.find((a) => a.is_manager && !a.reports_to) ?? this.team[0]!;
   }
 
+  /** Whether a turn is running now, in either path. */
+  get turning(): boolean { return this.driving || !!this.soloRun?.running; }
+
+  /** The solo path, or null: a conversation whose company is the solo template runs through it. */
+  private get solo(): SoloRun | null {
+    if (this.lead.behavior.template_key !== MAIN_ROLE) return null;
+    this.soloRun ??= new SoloRun(this.soloHost());
+    return this.soloRun;
+  }
+
+  private soloHost(): SoloHost {
+    return {
+      p: this.p, reg: this.reg, runId: this.row.id, state: this.state, lead: () => this.lead,
+      emit: (type, data) => this.emit(type, data),
+      post: (m) => this.post({ from: this.lead.id, to: null, ...m }),
+      setRunStatus: (status, extra) => this.setRunStatus(status, extra),
+      setStatus: (agent, status, activity) => this.setStatus(agent, status, activity),
+      loopEvents: (agent) => this.loopEvents(agent),
+      toolContext: (memory) => this.context(this.lead, null, undefined, memory),
+      notes: () => [...this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]), ...this.p.db.memory.find("agent_id = ?", [this.lead.id])],
+      model: (agent) => this.model(agent),
+      effort: (agent) => this.effort(agent, "worker"),
+      finish: (reason, status) => this.finishHalted(reason, status),
+    };
+  }
+
   private get stopped() { return this.abort.signal.aborted; }
 
   // ── public API ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -244,6 +273,10 @@ export class Conversation {
     const msg = this.post({ from: null, to: pending?.question.agent_id ?? target, sender: "user", type: pending ? "answer" : "task", content: content + files,
       meta: { display_content: content, images: images.map((i) => i.name), attachments: attachments.map((a) => a.filename) } });
     if (this.row.status !== "queued" && TERMINAL_STATUSES.includes(this.row.status)) this.emit("run_continued", { content: firstLine(content, 200) });
+    if (this.solo) {
+      this.solo.submit(content + files, images.map((i) => ({ type: "input_image", image_url: i.url })));
+      return msg.id;
+    }
     // A message to a teammate who is working goes into its own chat before its next step, not into a new plan.
     const mate = !pending && target && target !== this.lead.id && this.driving ? this.team.find((a) => a.id === target) : undefined;
     if (mate && this.busy.has(mate.id)) {
@@ -268,7 +301,7 @@ export class Conversation {
     this.gate = null;
     g?.resolve();
     if (this.row.status === "paused") this.setRunStatus("running");
-    if (!this.driving) void this.drive();
+    if (!this.driving && !this.solo) void this.drive();
   }
 
   resolveApproval(id: string, approved: boolean, scope: "once" | "always", reason = "") {
@@ -294,7 +327,7 @@ export class Conversation {
   }
 
   snapshot(): RunEventMap["snapshot"] {
-    return { status: this.row.status, live: this.driving, agent_status: this.state.agent_status, activity: this.state.activity,
+    return { status: this.row.status, live: this.turning, agent_status: this.state.agent_status, activity: this.state.activity,
       pending_approval: [...this.approvals.values()][0]?.req ?? null, awaiting: this.state.questions[0]?.question ?? null, usage: this.state.usage };
   }
 
@@ -885,6 +918,7 @@ export class Conversation {
     for (const a of this.approvals.values()) a.done(false, "The conversation was stopped");
     this.gate?.resolve();
     this.gate = null;
+    if (this.solo) return this.solo.stop(reason, status);
     if (!this.driving) this.finishHalted(reason, status);
     else this.pendingHalt = { reason, status };
   }

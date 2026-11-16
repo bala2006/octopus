@@ -16,7 +16,15 @@ const RESEARCH: AgentTools = { ...PLAN, browser: true };
 
 const role = (key: string, r: Omit<Role, "key" | "system_prompt">, prompt: string): Role => ({ key, ...r, system_prompt: prompt.trim() });
 
+/** The role of the one agent in a solo conversation, which does the work itself. */
+export const MAIN_ROLE = "main";
+
 export const BUILTIN_ROLES: Role[] = [
+  role(MAIN_ROLE, { role: "Main Agent", default_name: "Octopus", category: "Leadership", color: "#D97756", avatar: "sparkles",
+    description: "Works alone on the request: reads, changes, runs and checks the project itself.",
+    tools: { ...BUILD, browser: true, send_message: false } }, `
+You work alone on the user's request in their project folder. You read, change, run and check the code yourself, and you
+reply to the user when the work is done.`),
   role("orchestrator", { role: "Chief Orchestrator", default_name: "Octopus", category: "Leadership", color: "#D97756", avatar: "sparkles",
     description: "Understands the request, staffs the team, plans the work, checks the results and reports back.",
     tools: { ...PLAN, file_write: false, manage_team: true } }, `

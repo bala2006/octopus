@@ -35,6 +35,10 @@ export const config = {
   },
   defaultModel: env("DEFAULT_MODEL", "gpt-6-luna"),
   defaultEffort: env("DEFAULT_REASONING_EFFORT", "high"),
+  /** Model steps a solo turn may take before it pauses for a reply. */
+  soloStepLimit: Number(env("SOLO_STEP_LIMIT", "400")),
+  /** Input and output tokens a solo turn may use before it pauses for a reply. */
+  soloTurnTokens: Number(env("SOLO_TURN_TOKENS", "20000000")),
   /** Tool schemas in the provider's strict mode. Off until the deployment is known to accept the normalised schemas. */
   strictTools: flag("AZURE_STRICT_TOOLS", false),
   nativeDialogs: flag("NATIVE_DIALOGS", true),

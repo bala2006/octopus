@@ -38,6 +38,8 @@ export interface LoopOptions {
   requireStop: boolean;
   /** Messages for the agent from outside its turn (the lead amending its task), delivered before its next step. */
   inbox?: string[];
+  /** User messages sent during the turn, each appended as its own item, with its images, before the next step. */
+  steer?: () => Item[];
   /** Leading transcript items that summarizing must keep word for word: the brief and anything sent with it. */
   keepHead?: number;
   /** The tools in this turn's toolbox that end it (complete_task, submit_review, ...); the wrap-up and nudge name only these. */
@@ -259,6 +261,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: wrapUp(o.stopTools) });
     await o.events.beforeCall();
     if (o.inbox?.length) input.push({ role: "user", content: o.inbox.splice(0).join("\n\n") });
+    if (o.steer) input.push(...o.steer());
     if (!compactionRefused && contextTokens(input, measured) > compactAt(window)) {
       let compacted = false;
       try { compacted = await summarize(o, functions, window); } catch (e) { if (o.ctx.signal.aborted) throw e; }
