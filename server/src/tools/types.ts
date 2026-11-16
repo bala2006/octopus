@@ -39,7 +39,7 @@ export interface ToolMetrics { read?: boolean; redundant?: boolean; wrote?: bool
 
 export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop; metrics?: ToolMetrics }
 
-/** The most of one tool result an agent sees. read_file pages within it, so a read is never cut by the loop. */
+/** The most one explicit read_file range returns. Longer tool output is spilled to a file by the agent loop. */
 export const MAX_TOOL_OUTPUT = 40_000;
 
 /**

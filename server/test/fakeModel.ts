@@ -4,8 +4,9 @@
  */
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tokensOf } from "../src/engine/agent";
 
-export type Reply = { text?: string; calls?: { name: string; args: Record<string, unknown> }[] };
+export type Reply = { text?: string; calls?: { name: string; args: Record<string, unknown> }[]; /** Input tokens the response reports; by default the size of the request. */ usage?: number };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Script = (body: any) => Reply;
 
@@ -37,7 +38,7 @@ export async function fakeModel(script: Script, listenPort = 0): Promise<FakeMod
         send({ type: "response.function_call_arguments.delta", item_id: id, delta: args });
         output.push({ type: "function_call", id, call_id, name: c.name, arguments: args });
       }
-      send({ type: "response.completed", response: { status: "completed", output, usage: { input_tokens: 100, output_tokens: 50, input_tokens_details: { cached_tokens: 10 }, output_tokens_details: { reasoning_tokens: 5 } } } });
+      send({ type: "response.completed", response: { status: "completed", output, usage: { input_tokens: reply.usage ?? tokensOf(body.input), output_tokens: 50, input_tokens_details: { cached_tokens: 10 }, output_tokens_details: { reasoning_tokens: 5 } } } });
       res.end();
     });
   });

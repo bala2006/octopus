@@ -292,7 +292,7 @@ describe("execution benchmark", () => {
     expect(r.status).toBe("incomplete");
   }, 60_000);
 
-  test("six screenshots fill the transcript past its summary limit, so one checkpoint call runs", async () => {
+  test("six screenshots fit the window, so no checkpoint call runs", async () => {
     const shots = await screenshotServer();
     reg.mcp.upsert({ id: "mcp-shots", name: "shots", transport: "http", command: "", args: [], url: shots.url, env_enc: "", enabled: true, tools: [], last_error: "", updated_at: new Date().toISOString() });
     const frontend = effectiveRoles(reg).find((x) => x.key === "frontend")!;
@@ -303,8 +303,8 @@ describe("execution benchmark", () => {
       const r = await measure("screenshots", {}, "adaptive", "Check the page after each change", scenario.script);
       expect(scenario.stats.unmatched).toBe(0);
       expect(r.images).toBeGreaterThan(5 * 60_903);
-      // Trunk baseline: the six screenshots pass the summary limit, and one checkpoint call runs.
-      expect(r.checkpoints).toBe(1);
+      // P1 made one checkpoint call here. Each image counts as a fixed token cost, so the window is not reached.
+      expect(r.checkpoints).toBe(0);
       expect(r.status).toBe("completed");
     } finally {
       reg.roles.remove("frontend");

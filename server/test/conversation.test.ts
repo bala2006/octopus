@@ -27,6 +27,12 @@ const call = async <T>(method: string, url: string, payload?: unknown): Promise<
   return res.json() as T;
 };
 const W = () => `/api/v1/w/${ws.id}`;
+/** Sets the provider's context window for one test and returns the saved setting, to restore it afterwards. */
+function setContextWindow(window: number) {
+  const saved = reg.setting<{ base_url: string; key_enc: string; options: Record<string, unknown>; updated_at: string } | null>("provider.azure", null)!;
+  reg.setSetting("provider.azure", { ...saved, options: { ...saved.options, context_window: window } });
+  return saved;
+}
 /** A writer that answers every blocker or major finding that the brief shows as fixed. */
 const answers = (input: unknown) => [...new Set([...JSON.stringify(input).matchAll(/F\d+(?= \[(?:blocker|major)\])/g)].map((m) => m[0]))].map((id) => ({ id, status: "fixed" as const, response: "Done as asked." }));
 /** A critic's request for a change, with one major finding. */
@@ -684,9 +690,8 @@ test("specialists sharpen a part in parallel, and the owner gets all their feedb
 }, 30_000);
 
 test("a long turn summarizes its earlier work and keeps going, and repeating the same call gets a reminder", async () => {
-  const { contextLimits, CHECKPOINT_REQUEST } = await import("../src/engine/agent");
-  const saved = { ...contextLimits };
-  Object.assign(contextLimits, { summarizeAt: 30_000, keepTail: 8_000 });
+  const { CHECKPOINT_REQUEST } = await import("../src/engine/agent");
+  const saved = setContextWindow(40_000);
   writeFileSync(path.join(dir, "big.js"), Array.from({ length: 1000 }, (_, i) => `const v${i} = "${"y".repeat(40)}";`).join("\n"));
   let step = 0;
   let checkpointAsked = 0;
@@ -712,7 +717,7 @@ test("a long turn summarizes its earlier work and keeps going, and repeating the
     const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
     expect((await until(run.id, ["completed", "incomplete"])).status).toBe("completed");
   } finally {
-    Object.assign(contextLimits, saved);
+    reg.setSetting("provider.azure", saved);
   }
   expect(reminder).toContain("same run_command call 3 times in a row");
   expect(checkpointAsked).toBeGreaterThan(0);

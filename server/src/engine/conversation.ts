@@ -24,7 +24,7 @@ import { canReview, canVerify, canWrite, kindOf, staffingError } from "../catalo
 import { addFindings, answerFindings, blockingOpen, renderFindings, settlePrior, type Finding, unresolvedBlocking } from "../lib/findings";
 import type { Item } from "../llm/azure";
 import { costParts } from "../llm/pricing";
-import { connection } from "../llm/azure";
+import { connection, contextWindow } from "../llm/azure";
 import { run as runProcess, safeEnv } from "../lib/proc";
 import { clip, deferred, firstLine, newId, now, sha1, sleep, UserError } from "../lib/util";
 import { changedLines } from "../lib/diff";
@@ -36,7 +36,7 @@ import { recordVersion, artifactOut } from "../workspace/artifacts";
 import { projectOverview, projectTasks, verificationChecks } from "../workspace/overview";
 import { processes } from "../workspace/processes";
 import type { Project } from "../workspace/projects";
-import { agentLoop, type LoopEvents } from "./agent";
+import { agentLoop, compactable, tokensOf, type LoopEvents } from "./agent";
 import { checksCanBeSkipped, DOC_OR_ASSET, type SourceFile } from "./checkScope";
 import { publish } from "./bus";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
@@ -92,8 +92,6 @@ interface RunState {
 }
 interface Inbound { content: string; display: string; to_agent_id: string | null; images: Item[] }
 type Budget = typeof DEFAULT_BUDGET;
-/** Past this size a session costs more to continue than a fresh brief and a few reads (long turns summarize well before it). */
-const SESSION_MAX_CHARS = 600_000;
 /**
  * Steps per turn. Owners get room to build, look and fix in one go; context stays bounded by summarizing, not by
  * cutting the work off. The limit is a backstop against a runaway turn.
@@ -539,11 +537,23 @@ export class Conversation {
     return own && own !== "default" ? own : EFFORT[mode] ?? config.defaultEffort;
   }
 
-  /** A live session that can take another turn, or undefined. A session grown past its limit is dropped, so the next turn starts from a brief. */
+  /**
+   * A live session that can take another turn, or undefined. A session the next call could not carry is dropped, so the
+   * next turn starts from a brief.
+   */
   private liveSession(key: string): Session | undefined {
     const s = this.sessions.get(key);
-    if (s && JSON.stringify(s.input).length > SESSION_MAX_CHARS) { this.sessions.delete(key); return undefined; }
+    if (s && this.oversized(s)) { this.sessions.delete(key); return undefined; }
     return s;
+  }
+
+  /**
+   * Over the context window with nothing a checkpoint could replace. Compaction runs before every call, so a session
+   * it can still shrink is kept, and only one it cannot shrink is dropped.
+   */
+  private oversized(s: Session): boolean {
+    const window = contextWindow(this.reg);
+    return tokensOf(s.input) > window && !compactable(s.input, s.head, window);
   }
 
   /**
@@ -1587,7 +1597,7 @@ export class Conversation {
     this.state.req_from = this.state.requirements.length;
     // Sessions survive the cycle: the lead keeps what it learned about the project and the next request starts warmer.
     // An oversized one is dropped (liveSession already refuses it) so a long conversation stays bounded.
-    for (const [key, s] of this.sessions) if (JSON.stringify(s.input).length > SESSION_MAX_CHARS) this.sessions.delete(key);
+    for (const [key, s] of this.sessions) if (this.oversized(s)) this.sessions.delete(key);
   }
 
   /** For deleting a conversation: stop it and forget it. */

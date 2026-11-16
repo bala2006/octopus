@@ -1,13 +1,16 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { agentLoop, contextLimits, keptFrom } from "../src/engine/agent";
-import { openRegistry } from "../src/db/registry";
+import type { ProviderOptions } from "@octopus/shared";
+import { agentLoop, CHECKPOINT_REQUEST, keptFrom, tokensOf } from "../src/engine/agent";
+import { openRegistry, type Registry } from "../src/db/registry";
 import { encrypt } from "../src/lib/secrets";
 import type { Item } from "../src/llm/azure";
-import { defineTool, type Shown, type ToolContext } from "../src/tools/types";
-import { fakeModel } from "./fakeModel";
+import { ProjectFs, WORK_DIR } from "../src/safety/paths";
+import { defineTool, type Shown, type Tool, type ToolContext } from "../src/tools/types";
+import { fakeModel, type Script } from "./fakeModel";
+
 /** A transcript shaped like the model's: steps of reasoning plus parallel calls, then their outputs, and a user note. */
 function transcript(): Item[] {
   const items: Item[] = [{ role: "user", content: "# T1: brief" }];
@@ -43,75 +46,137 @@ test("the head is never summarized away", () => {
   expect(start).toBeGreaterThan(2);
 });
 
-/**
- * Drive the real loop against the scripted model: one file read per round, each output large, so the transcript
- * crosses the compaction or truncation limit. Returns the ledger the loop ends with and the transcript the model
- * received last.
- */
-async function ledgerRun(limits: { summarizeAt: number; keepTail: number; truncateAt: number }, outputChars: number, rounds: number) {
-  let calls = 0;
-  const model = await fakeModel((b) => {
-    const last = b.input.at(-1);
-    if (last?.role === "user" && String(last.content).startsWith("Write a checkpoint")) return { text: "## Done\nRead the first files." };
-    if (++calls <= rounds) return { calls: [{ name: "touch", args: { file: `f${calls}.ts` } }] };
-    return { text: "done" };
-  });
-  const reg = openRegistry(path.join(mkdtempSync(path.join(tmpdir(), "ledger-")), "registry.db"));
-  reg.setSetting("provider.azure", { base_url: model.url, key_enc: encrypt("test-key"), options: { auth: "key" }, updated_at: "" });
-  const touch = defineTool({
+/** A registry whose Azure connection points at the fake model, with the given provider options. */
+function registryFor(url: string, options: ProviderOptions = {}): Registry {
+  const reg = openRegistry(path.join(mkdtempSync(path.join(tmpdir(), "agent-")), "registry.db"));
+  reg.setSetting("provider.azure", { base_url: url, key_enc: encrypt("test-key"), options: { auth: "key", ...options }, updated_at: "" });
+  return reg;
+}
+
+const noEvents = {
+  text() {}, thinking() {}, thought() {}, toolStart() {}, toolArgs() {}, toolCall() {}, toolResult() {}, usage() {},
+  async beforeCall() {},
+};
+
+/** Drive the real loop against the scripted model, and return what it sent and what it ended with. */
+async function runLoop(script: Script, tools: Tool[], options: ProviderOptions = {}, rounds = 12) {
+  const model = await fakeModel(script);
+  const reg = registryFor(model.url, options);
+  const root = mkdtempSync(path.join(tmpdir(), "agent-fs-"));
+  const shown: Shown = new Map();
+  const ctx = { agent: {}, task: null, runId: "run", signal: new AbortController().signal, shown, seen: new Map(), answering: null, fs: new ProjectFs(root) } as unknown as ToolContext;
+  const input: Item[] = [{ role: "user", content: "# T1: brief" }];
+  try {
+    const result = await agentLoop({ reg, model: "test-model", effort: undefined, instructions: "test", input, tools, ctx, events: noEvents, maxRounds: rounds, requireStop: false, keepHead: 1 });
+    const requests = model.requests as { input: Item[] }[];
+    return { result, input, shown, requests, root };
+  } finally {
+    await model.close();
+  }
+}
+
+const isCheckpointRequest = (r: { input: Item[] }) => String(r.input.at(-1)?.content ?? "").startsWith(CHECKPOINT_REQUEST.slice(0, 40));
+
+/** A tool that reads one file per call and returns `outputChars` characters of it. */
+function touchTool(outputChars: number): Tool {
+  return defineTool({
     name: "touch", description: "Read a file.", args: z.object({ file: z.string() }),
     async run(ctx, a) {
       ctx.shown.set(a.file, { hash: `hash-${a.file}`, ranges: [[1, 1]] });
       return { text: `touched ${a.file}\n${"x".repeat(outputChars)}` };
     },
   });
-  const shown: Shown = new Map();
-  const ctx = { agent: {}, task: null, runId: "run", signal: new AbortController().signal, shown, seen: new Map(), answering: null } as unknown as ToolContext;
-  const events = {
-    text() {}, thinking() {}, thought() {}, toolStart() {}, toolArgs() {}, toolCall() {}, toolResult() {}, usage() {},
-    async beforeCall() {},
-  };
-  const input: Item[] = [{ role: "user", content: "# T1: brief" }];
-  const saved = { ...contextLimits };
-  Object.assign(contextLimits, limits);
-  try {
-    await agentLoop({ reg, model: "test-model", effort: undefined, instructions: "test", input, tools: [touch], ctx, events, maxRounds: rounds + 3, requireStop: false, keepHead: 1 });
-  } finally {
-    Object.assign(contextLimits, saved);
-  }
-  const sent = model.requests.at(-1).input as Item[];
-  await model.close();
-  return { shown, sent, input };
 }
 
-/** The files whose full output is in a transcript: a shortened output no longer holds its file. */
+/** Read `rounds` files, one per step, then finish with text. */
+function touchScript(rounds: number): Script {
+  let calls = 0;
+  return (b) => {
+    const last = b.input.at(-1);
+    if (last?.role === "user" && String(last.content).startsWith("Write a checkpoint")) return { text: "## Goal\nRead the first files." };
+    if (++calls <= rounds) return { calls: [{ name: "touch", args: { file: `f${calls}.ts` } }] };
+    return { text: "done" };
+  };
+}
+
+/** The files whose full output is in a transcript: a spilled or pruned output no longer holds its file. */
 const filesIn = (sent: Item[]) => [...new Set(sent
-  .filter((i) => i.type === "function_call_output" && !String(i.output).includes("shortened to save context"))
+  .filter((i) => i.type === "function_call_output" && !String(i.output).includes("characters not shown"))
   .map((i) => /^touched (\S+)/.exec(String(i.output))?.[1])
   .filter((f): f is string => !!f))].sort();
 
+// Window 40,000 compacts at 8,000 tokens and keeps about 1,280 tokens of recent steps.
+const SMALL_WINDOW: ProviderOptions = { context_window: 40_000 };
+
 test("after summarizing, the file-read ledger keeps the files still in the transcript and drops the rest", async () => {
-  const { shown, sent } = await ledgerRun({ summarizeAt: 3_000, keepTail: 1_200, truncateAt: 10_000_000 }, 600, 8);
+  const { shown, requests } = await runLoop(touchScript(14), [touchTool(3_000)], SMALL_WINDOW, 18);
+  const sent = requests.at(-1)!.input;
   expect(sent.some((i) => String(i.content ?? "").includes("<checkpoint>"))).toBe(true);
   // A file read before the checkpoint and still in the kept tail must stay in the ledger, or the next read of it is sent again for nothing.
   expect([...shown.keys()].sort()).toEqual(filesIn(sent));
 });
 
-test("when older tool outputs are shortened, the ledger drops exactly the files whose content was shortened", async () => {
-  const { shown, sent } = await ledgerRun({ summarizeAt: 10_000_000, keepTail: 1_000, truncateAt: 7_100 }, 1_800, 4); // a budget that shortens the three oldest outputs and keeps the newest whole
-  expect(sent.some((i) => i.type === "function_call_output" && String(i.output).includes("shortened to save context"))).toBe(true);
-  expect(filesIn(sent).length).toBeGreaterThan(0); // some full outputs must survive, or the check proves nothing
-  expect([...shown.keys()].sort()).toEqual(filesIn(sent));
-});
-
 test("summarizing never edits the kept part of the transcript: the brief and the tail come through unchanged", async () => {
-  const { input } = await ledgerRun({ summarizeAt: 3_000, keepTail: 1_200, truncateAt: 10_000_000 }, 600, 8);
+  const { input } = await runLoop(touchScript(14), [touchTool(3_000)], SMALL_WINDOW, 18);
   expect(input[0]).toEqual({ role: "user", content: "# T1: brief" });
   const lastOutput = [...input].reverse().find((i) => i.type === "function_call_output");
-  expect(lastOutput?.output).toContain("touched f8.ts");
+  expect(lastOutput?.output).toContain("touched f14.ts");
 });
 
+test("a tool result above 40,000 characters is saved in full, and the model sees its head, its tail and the path", async () => {
+  const full = `HEAD-MARK${"m".repeat(100_000)}TAIL-MARK`;
+  const shout = defineTool({ name: "shout", description: "Print a lot.", args: z.object({}), async run() { return { text: full }; } });
+  let calls = 0;
+  const { requests, root } = await runLoop(() => (++calls === 1 ? { calls: [{ name: "shout", args: {} }] } : { text: "done" }), [shout]);
+  const output = String(requests[1]!.input.find((i) => i.type === "function_call_output")!.output);
+  expect(output).toContain("HEAD-MARK");
+  expect(output).toContain("TAIL-MARK");
+  expect(output.length).toBeLessThan(42_000);
+  const rel = /\.octopus\/work\/spill\/[\w-]+\.txt/.exec(output)?.[0];
+  expect(rel?.startsWith(`${WORK_DIR}/spill/`)).toBe(true);
+  expect(readFileSync(path.join(root, rel!), "utf8")).toBe(full);
+});
 
+test("six 60,903-character screenshots trigger no checkpoint, because an image counts as a fixed token cost", async () => {
+  const image = `data:image/jpeg;base64,${"A".repeat(60_903 - "data:image/jpeg;base64,".length)}`;
+  const shot = defineTool({ name: "shot", description: "Take a screenshot.", args: z.object({}), async run() { return { text: "shot", image }; } });
+  let calls = 0;
+  const { requests } = await runLoop(() => (++calls <= 6 ? { calls: [{ name: "shot", args: {} }] } : { text: "done" }), [shot]);
+  expect(requests.some(isCheckpointRequest)).toBe(false);
+  expect(JSON.stringify(requests.at(-1)!.input).length).toBeGreaterThan(6 * 60_000);
+});
 
+test("the compaction trigger reads the input tokens the last response reported", async () => {
+  // Five 3,000-character reads are about 2,000 tokens. Only a report of 9,000 tokens crosses the 8,000-token trigger.
+  const reported = (spike: number): Script => {
+    const script = touchScript(8);
+    let call = 0;
+    return (b) => {
+      const reply = script(b);
+      return isCheckpointRequestBody(b) || !reply.calls ? reply : { ...reply, usage: ++call === 6 ? spike : tokensOf(b.input) };
+    };
+  };
+  const spiked = await runLoop(reported(9_000), [touchTool(3_000)], SMALL_WINDOW, 12);
+  expect(spiked.requests.some(isCheckpointRequest)).toBe(true);
+  const quiet = await runLoop(reported(100), [touchTool(3_000)], SMALL_WINDOW, 12);
+  expect(quiet.requests.some(isCheckpointRequest)).toBe(false);
+});
 
+function isCheckpointRequestBody(b: { input: Item[] }) {
+  return isCheckpointRequest({ input: b.input });
+}
 
+test("each request's input starts with the previous request's input while nothing is compacted", async () => {
+  const { requests } = await runLoop(touchScript(4), [touchTool(3_000)]);
+  expect(requests.length).toBeGreaterThan(3);
+  for (let i = 1; i < requests.length; i++) {
+    const before = requests[i - 1]!.input;
+    expect(JSON.stringify(requests[i]!.input.slice(0, before.length))).toBe(JSON.stringify(before));
+  }
+});
+
+test("a spilled output drops its file from the ledger, since the transcript holds only its head and tail", async () => {
+  const { shown, requests } = await runLoop(touchScript(2), [touchTool(45_000)]);
+  expect(shown.size).toBe(0);
+  expect(String(requests.at(-1)!.input.find((i) => i.type === "function_call_output")!.output)).toContain("characters not shown");
+});

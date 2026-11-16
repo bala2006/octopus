@@ -352,6 +352,7 @@ export interface SessionOut { id: string; company_id: string; agent_id: string |
 
 export const ProviderOptionsSchema = z.object({
   auth: z.enum(["key", "entra"]).optional(),
+  context_window: z.number().int().min(40_000).optional(),
   deployments: z.array(z.string()).optional(),
   deployment_type: z.enum(["global", "data_zone", "regional"]).optional(),
   pricing: z.record(z.string(), z.number()).optional(),

@@ -35,6 +35,14 @@ export interface LlmResult { text: string; thought: string; calls: ToolCall[]; o
 
 export interface AzureConnection { baseUrl: string; apiKey: string; auth: "key" | "entra"; options: ProviderOptions }
 
+/** The window used when Settings does not set `context_window`. */
+export const DEFAULT_CONTEXT_WINDOW = 272_000;
+
+/** The model's context window in tokens. */
+export function contextWindow(reg: Registry): number {
+  return connection(reg)?.options.context_window ?? DEFAULT_CONTEXT_WINDOW;
+}
+
 /** Turn whatever the portal shows into the v1 base URL: `https://host/openai/v1`. */
 export function normalizeEndpoint(raw: string): { baseUrl: string; deployment?: string } {
   const u = raw.trim().split(/[?#]/)[0]!.replace(/\/+$/, "");

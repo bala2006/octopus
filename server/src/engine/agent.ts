@@ -6,9 +6,10 @@
 import type { Effort } from "@octopus/shared";
 import { config } from "../config";
 import type { Registry } from "../db/registry";
-import { complete, type FunctionTool, type Item, type LlmResult, type ToolCall } from "../llm/azure";
+import { complete, contextWindow, type FunctionTool, type Item, type LlmResult, type ToolCall } from "../llm/azure";
+import { spill } from "../lib/spill";
 import { clip, UserError } from "../lib/util";
-import { Denied, MAX_TOOL_OUTPUT, toFunction, type Shown, type Stop, type Tool, type ToolContext } from "../tools/types";
+import { Denied, toFunction, type Shown, type Stop, type Tool, type ToolContext } from "../tools/types";
 
 export interface LoopEvents {
   text(delta: string): void;
@@ -44,12 +45,19 @@ export interface LoopOptions {
 /** `exhausted`: the agent used every tool round without finishing. */
 export interface LoopResult { stop: Stop | null; text: string; rounds: number; exhausted?: boolean }
 
-/**
- * How big a transcript may grow. Past `summarizeAt` characters the older part is replaced by a checkpoint the model
- * writes itself, keeping the brief and the latest `keepTail` characters word for word; the work goes on without a cut.
- * `truncateAt` is the last resort if summarizing fails. Mutable so tests can make them small.
- */
-export const contextLimits = { summarizeAt: 300_000, keepTail: 60_000, truncateAt: 450_000 };
+/** Tokens the context window keeps free for the reply and the tool definitions. */
+const REPLY_RESERVE = 32_000;
+/** The transcript is compacted at this share of the window, when that is smaller than the reserve allows. */
+const COMPACT_SHARE = 0.8;
+/** The newest share of the compaction budget that stays word for word after a checkpoint. */
+const KEEP_SHARE = 0.16;
+const CHARS_PER_TOKEN = 4;
+/** An image costs about this many tokens, whatever its size in characters. */
+const IMAGE_TOKENS = 1_000;
+/** In the transcript a checkpoint is written from, tool results longer than PRUNE_OVER keep only their head and tail. */
+const PRUNE_OVER = 8_192;
+const PRUNE_HEAD = 4_096;
+const PRUNE_TAIL = 1_024;
 /** A turn that has not finished is told to wrap up this many steps before its step limit (the last one counts as 1). */
 const WRAP_UP_STEPS = 5;
 const WRAP_UP = "You are almost out of steps for this turn. Stop exploring, testing and polishing. Call the tool that ends the turn now (complete_task, submit_review, start_work or reply_to_user), and say what is done and what is not verified. If the work cannot be finished as specified, say so in that tool.";
@@ -64,30 +72,51 @@ const FAILURE_STOP = 3;
 /** Different tools failing in a row before the turn ends: more calls will not help an agent that can do nothing right. */
 const MAX_CONSECUTIVE_FAILURES = 5;
 export const CHECKPOINT_REQUEST = `Write a checkpoint of your work so far. It replaces the earlier part of this conversation, so include everything you need to carry on without it:
-## Goal: the task and its acceptance criteria, in a few lines
-## Done: what you built or changed, file by file, with the decisions behind it
-## Facts: interfaces, names, commands, URLs and values you rely on
-## Problems: errors met and how they were resolved, or what is still failing
-## Next: the exact next steps
+## Primary request and intent: what the user asked for and what you were asked to do
+## Key technical concepts: the stack, conventions and decisions that matter
+## Files and code: each file you touched or relied on, with its exact path and what it holds
+## Errors and fixes: each error met, its cause and how it was resolved
+## Pending work: what is still to do, in order
+## Current work: what you were doing when this checkpoint was written
+## Next step: the single next action
+## Critical context: values, names, commands and URLs you will need again
 Be specific and complete; do not call any tool.`;
 
-/**
- * Older tool outputs are shortened when the transcript grows too long; the latest rounds stay intact. Returns the transcript
- * positions of the outputs it shortened, so their file-read entries can be dropped.
- */
-function truncate(input: Item[]): Set<number> {
-  let size = JSON.stringify(input).length;
-  const shortened = new Set<number>();
-  for (let at = 0; at < input.length && size > contextLimits.truncateAt; at++) {
-    const item = input[at]!;
-    if (item.type === "function_call_output" && typeof item.output === "string" && item.output.length > 1500) {
-      const before = item.output.length;
-      item.output = `${item.output.slice(0, 1200)}\n… [shortened to save context; run the tool again if you need it]`;
-      size -= before - item.output.length;
-      shortened.add(at);
-    }
+/** The transcript size, in tokens, at which the window is compacted for a given context window. */
+export function compactAt(window: number): number {
+  return Math.min(COMPACT_SHARE * window, window - REPLY_RESERVE);
+}
+
+function keepChars(window: number): number {
+  return Math.round(KEEP_SHARE * compactAt(window) * CHARS_PER_TOKEN);
+}
+
+/** Estimated tokens of transcript items: characters over four, with each image counted as IMAGE_TOKENS. */
+export function tokensOf(items: Item[]): number {
+  let chars = 0;
+  let images = 0;
+  for (const item of items) {
+    chars += JSON.stringify(item, (key, value) => {
+      if (key !== "image_url") return value;
+      images++;
+      return undefined;
+    }).length;
   }
-  return shortened;
+  return Math.ceil(chars / CHARS_PER_TOKEN) + images * IMAGE_TOKENS;
+}
+
+/**
+ * The transcript size: the input tokens the last response reported, plus an estimate for the items added since. Null
+ * before the first response, and after a checkpoint has replaced part of the transcript.
+ */
+interface Measure { tokens: number; at: number }
+function contextTokens(input: Item[], measured: Measure | null): number {
+  return measured ? measured.tokens + tokensOf(input.slice(measured.at)) : tokensOf(input);
+}
+
+/** Whether a checkpoint could replace anything: whole steps lie between the head and the kept tail. */
+export function compactable(input: Item[], head: number, window: number): boolean {
+  return keptFrom(input, Math.max(1, head), keepChars(window)) !== null;
 }
 
 /** Drop the file-read entries whose output is gone. An entry with no position cannot be placed, so it goes too. */
@@ -109,41 +138,51 @@ function tagShown(shown: Shown, before: Shown, position: number) {
 }
 
 /**
- * Replace the middle of a long transcript with a checkpoint the model writes. The request is the transcript plus one
- * question, so the cached prefix is reused. Keeps the brief (item 0) and a recent tail that starts on a whole step.
- * Returns whether it compacted.
- */
-/**
- * Where the kept part of a transcript begins when summarizing: about `keepTail` characters from the end, moved forward
- * to the start of a whole step (right after a finished one, never on a tool output), so no call loses its output or
- * the reasoning that produced it. Null when nothing worth summarizing lies between the head and that point.
+ * Where the kept part of a transcript begins when summarizing: about `keepTail` characters from the end, moved back to
+ * the start of a whole step (right after a finished one, never on a tool output), so no call loses its output or the
+ * reasoning that produced it, and the newest step is always kept whole. Null when nothing worth summarizing lies
+ * between the head and that point.
  */
 export function keptFrom(input: Item[], head: number, keepTail: number): number | null {
   let start = input.length;
   for (let size = 0; start > head && size < keepTail; ) size += JSON.stringify(input[--start]).length;
   const begins = (i: number) => input[i]!.type !== "function_call_output" && (input[i - 1]!.type === "function_call_output" || input[i - 1]!.role === "user" || input[i]!.role === "user");
-  while (start < input.length && !begins(start)) start++;
+  while (start > head + 1 && start < input.length && !begins(start)) start--;
   return start <= head + 1 || start >= input.length ? null : start;
 }
 
-async function summarize(o: LoopOptions, functions: FunctionTool[]): Promise<void> {
+/** A long tool result in the transcript a checkpoint is written from: its head and tail, with a note in between. */
+function prune(item: Item): Item {
+  if (item.type !== "function_call_output" || typeof item.output !== "string" || item.output.length <= PRUNE_OVER) return item;
+  return { ...item, output: `${item.output.slice(0, PRUNE_HEAD)}\n… [pruned to save context]\n${item.output.slice(-PRUNE_TAIL)}` };
+}
+
+/**
+ * Replace the middle of a long transcript with a checkpoint the model writes. The request is the transcript, with the
+ * middle's long tool results pruned, plus one question. Keeps the brief and the newest whole steps. Returns false when
+ * there is nothing to replace, or when the checkpoint is not smaller than what it replaces.
+ */
+async function summarize(o: LoopOptions, functions: FunctionTool[], window: number): Promise<boolean> {
   const input = o.input;
   const head = Math.max(1, o.keepHead ?? 1);
-  const start = keptFrom(input, head, contextLimits.keepTail);
-  if (start === null) return;
+  const start = keptFrom(input, head, keepChars(window));
+  if (start === null) return false;
   const res = await complete(o.reg, {
-    model: o.model, instructions: o.instructions, input: [...input, { role: "user", content: CHECKPOINT_REQUEST }], tools: functions, toolChoice: "none",
-    effort: o.effort, signal: o.ctx.signal, maxOutputTokens: 8_000,
+    model: o.model, instructions: o.instructions,
+    input: [...input.slice(0, head), ...input.slice(head, start).map(prune), ...input.slice(start), { role: "user", content: CHECKPOINT_REQUEST }],
+    tools: functions, toolChoice: "none", effort: o.effort, signal: o.ctx.signal, maxOutputTokens: 8_000,
   });
   o.events.usage(res);
   const summary = res.text.trim();
-  if (!summary) return;
-  const before = JSON.stringify(input).length;
+  const checkpoint: Item = { role: "user", content: `<checkpoint>\n${summary}\n</checkpoint>\nThis checkpoint replaces your earlier work in this conversation. Continue from it. Files you read in the replaced part must be read again if you need their content; the rest of the transcript is unchanged.` };
+  if (!summary || tokensOf([checkpoint]) >= tokensOf(input.slice(head, start))) return false;
+  const before = tokensOf(input);
   // The checkpoint replaces the items from `head` to `start`. Their outputs are gone, and the entries after them move up.
   dropShown(o.ctx.shown, (at) => at >= head && at < start);
   for (const entry of o.ctx.shown.values()) if (entry.at !== undefined && entry.at >= start) entry.at -= start - head - 1;
-  input.splice(head, start - head, { role: "user", content: `<checkpoint>\n${summary}\n</checkpoint>\nThis checkpoint replaces your earlier work in this conversation. Continue from it. Files you read in the replaced part must be read again if you need their content; the rest of the transcript is unchanged.` });
-  o.events.thought(`Summarized earlier work to keep the context focused (${Math.round(before / 1000)}k → ${Math.round(JSON.stringify(input).length / 1000)}k characters).`);
+  input.splice(head, start - head, checkpoint);
+  o.events.thought(`Summarized earlier work to keep the context focused (${Math.round(before / 1000)}k → ${Math.round(tokensOf(input) / 1000)}k tokens).`);
+  return true;
 }
 
 /** The model's arguments, or the parse failure that has to be reported back to it. */
@@ -187,6 +226,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   const byName = new Map(o.tools.map((t) => [t.name, t]));
   const functions = o.tools.map((t) => toFunction(t, config.strictTools));
   const input = o.input;
+  const window = contextWindow(o.reg);
   let nudged = false;
   let lastText = "";
   let lastCall = "";
@@ -196,22 +236,26 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   const recovered = new Set<string>();
   let consecutiveFailures = 0;
   let lastFailure: { name: string; output: string } | null = null;
+  let measured: Measure | null = null;
+  /** Once a checkpoint is refused or fails in this turn, the turn does not try again: each try is a model call. */
+  let compactionRefused = false;
   for (let round = 1; round <= o.maxRounds; round++) {
     if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: WRAP_UP });
     await o.events.beforeCall();
     if (o.inbox?.length) input.push({ role: "user", content: o.inbox.splice(0).join("\n\n") });
-    if (JSON.stringify(input).length > contextLimits.summarizeAt) {
-      try { await summarize(o, functions); } catch (e) { if (o.ctx.signal.aborted) throw e; }
+    if (!compactionRefused && contextTokens(input, measured) > compactAt(window)) {
+      let compacted = false;
+      try { compacted = await summarize(o, functions, window); } catch (e) { if (o.ctx.signal.aborted) throw e; }
+      if (compacted) measured = null;
+      else compactionRefused = true;
     }
-    // A shortened output no longer holds its file, so its entry goes. The other entries still hold their content.
-    const shortened = truncate(input);
-    dropShown(o.ctx.shown, (at) => shortened.has(at));
     const res = await complete(o.reg, {
       model: o.model, instructions: o.instructions, input, tools: functions, effort: o.effort, signal: o.ctx.signal,
       maxOutputTokens: 48_000,
     }, {
       onText: o.events.text, onThinking: o.events.thinking, onToolStart: o.events.toolStart, onToolArgs: o.events.toolArgs,
     });
+    measured = { tokens: res.usage.input, at: input.length };
     o.events.usage(res);
     if (res.thought) o.events.thought(res.thought);
     input.push(...res.output);
@@ -232,7 +276,10 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       const r = await runCall(o, call, byName);
       tagShown(o.ctx.shown, shownBefore, position);
       o.events.toolResult(call.call_id, call.name, r.ok, r.output, r.metrics);
-      input.push({ type: "function_call_output", call_id: call.call_id, output: clip(r.output, MAX_TOOL_OUTPUT) });
+      const kept = spill(o.ctx.fs, call.call_id, r.output);
+      // A spilled output holds only its head and tail, so the file it came from is not in the transcript.
+      if (kept.path) dropShown(o.ctx.shown, (at) => at === position);
+      input.push({ type: "function_call_output", call_id: call.call_id, output: kept.text });
       if (r.image) images.push(r.image);
       if (r.stop) stop = r.stop;
       if (r.ok) consecutiveFailures = 0;
