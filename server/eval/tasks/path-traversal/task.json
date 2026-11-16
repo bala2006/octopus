@@ -1,0 +1,6 @@
+{
+  "id": "path-traversal",
+  "title": "Stop the static server serving files outside public/",
+  "goal": "src/server.js serves files from public/, but a request with an encoded ../ reads files outside that folder. Fix createStaticServer so a request can only read files inside public/. Keep serving public/index.html and return 404 for missing files.",
+  "grader": { "run": true }
+}

@@ -1,0 +1,28 @@
+{
+  "description": "A builder takes six screenshots with the shots MCP server, one per step, then completes the task.",
+  "replies": {
+    "plan": [
+      { "calls": [{ "name": "hire_agent", "args": { "role_key": "frontend", "title": "Frontend Developer", "department": "Engineering", "reason": "Checks the page visually" } }] },
+      { "calls": [{ "name": "create_task", "args": {
+        "title": "Check the page visually",
+        "description": "Take a screenshot of the page after each change, six times in all.",
+        "acceptance_criteria": "- six screenshots are taken",
+        "assignee": "Lena",
+        "kind": "build"
+      } }] },
+      { "calls": [{ "name": "start_work", "args": { "note": "Lena takes the screenshots." } }] }
+    ],
+    "work": [
+      { "calls": [{ "name": "mcp__shots__take_screenshot", "args": {} }] },
+      { "calls": [{ "name": "mcp__shots__take_screenshot", "args": {} }] },
+      { "calls": [{ "name": "mcp__shots__take_screenshot", "args": {} }] },
+      { "calls": [{ "name": "mcp__shots__take_screenshot", "args": {} }] },
+      { "calls": [{ "name": "mcp__shots__take_screenshot", "args": {} }] },
+      { "calls": [{ "name": "mcp__shots__take_screenshot", "args": {} }] },
+      { "calls": [{ "name": "complete_task", "args": { "summary": "Took six screenshots.", "verification": "Each screenshot was returned." } }] }
+    ],
+    "review": [
+      { "calls": [{ "name": "submit_review", "args": { "verdict": "approve", "comments": "Looks fine." } }] }
+    ]
+  }
+}

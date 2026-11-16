@@ -1,0 +1,9 @@
+{
+  "id": "breakout",
+  "title": "Build a breakout game on a canvas",
+  "goal": "Build the breakout game described in README.md in index.html and game.js. It needs start, pause, game over and restart, and it must expose window.game.state() as the README describes.",
+  "grader": {
+    "run": false,
+    "reason": "Needs a browser. hidden/grade.mjs is a Playwright script that this harness does not run."
+  }
+}

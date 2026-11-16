@@ -1,0 +1,9 @@
+{
+  "id": "todo-followup",
+  "title": "Add editing and a filter in the URL hash",
+  "goal": "Add editing to the todo page: double-click a todo's text to edit it, Enter saves the change, Escape cancels it. Keep the filter in the URL hash (#/all, #/active, #/done) so a reload or a shared link opens the same filter.",
+  "grader": {
+    "run": false,
+    "reason": "Needs a browser. hidden/grade.mjs is a Playwright script that this harness does not run."
+  }
+}

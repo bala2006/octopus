@@ -13,7 +13,7 @@ export interface FakeModel { url: string; requests: any[]; close(): Promise<void
 
 let counter = 0;
 
-export async function fakeModel(script: Script): Promise<FakeModel> {
+export async function fakeModel(script: Script, listenPort = 0): Promise<FakeModel> {
   const requests: unknown[] = [];
   const server: Server = createServer((req, res) => {
     let raw = "";
@@ -41,7 +41,7 @@ export async function fakeModel(script: Script): Promise<FakeModel> {
       res.end();
     });
   });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  await new Promise<void>((r) => server.listen(listenPort, "127.0.0.1", r));
   const { port } = server.address() as AddressInfo;
   return { url: `http://127.0.0.1:${port}`, requests: requests as never[], close: () => new Promise((r) => server.close(() => r())) };
 }

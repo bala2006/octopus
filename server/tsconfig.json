@@ -5,5 +5,5 @@
     "types": ["node", "vitest/globals"],
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "eval"],
 }

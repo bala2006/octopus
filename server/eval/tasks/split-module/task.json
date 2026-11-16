@@ -1,0 +1,1 @@
+{ "id": "split-module", "title": "Split the 600-line ledger module", "goal": "src/ledger.js is 600 lines in one file. Split it into three modules of about 200 lines each, keep ledger.js as the entry point that exports every function it exports today, and make no change in behavior.", "grader": { "run": true } }

@@ -1,0 +1,20 @@
+{
+  "description": "One builder writes one file: a landing page with a hero section, then completes the task.",
+  "replies": {
+    "plan": [
+      { "calls": [{ "name": "create_task", "args": {
+        "title": "Build the landing page",
+        "description": "Create index.html with a hero section that names the product.",
+        "acceptance_criteria": "- index.html exists\n- it has a hero section",
+        "assignee": "Alex",
+        "kind": "build",
+        "files": ["index.html"]
+      } }] },
+      { "calls": [{ "name": "start_work", "args": { "note": "Alex builds the landing page." } }] }
+    ],
+    "work": [
+      { "calls": [{ "name": "write_file", "args": { "path": "index.html", "content": "<!doctype html>\n<html lang=\"en\">\n  <head><meta charset=\"utf-8\" /><title>Acme</title></head>\n  <body>\n    <section class=\"hero\"><h1>Acme</h1><p>Plans that fit.</p></section>\n  </body>\n</html>\n", "note": "Landing page with a hero section" } }] },
+      { "calls": [{ "name": "complete_task", "args": { "summary": "Built index.html with a hero section.", "verification": "Read the file back." } }] }
+    ]
+  }
+}

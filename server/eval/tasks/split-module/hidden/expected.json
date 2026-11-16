@@ -1,0 +1,1678 @@
+{
+ "calls": {
+  "formatLine0": {
+   "args": [
+    [
+     "2024-01-03",
+     "food",
+     "12.5",
+     "lunch"
+    ]
+   ],
+   "result": "row 0: 2024-01-03|food  |12.5  |lunch"
+  },
+  "formatLine1": {
+   "args": [
+    [
+     "2024-01-04",
+     "travel",
+     "40",
+     "train"
+    ]
+   ],
+   "result": "row 1: 2024-01-04|travel |40     |train"
+  },
+  "formatLine10": {
+   "args": [
+    [
+     "2024-01-03",
+     "food",
+     "12.5",
+     "lunch"
+    ]
+   ],
+   "result": "row 10: 2024-01-03|food     |12.5     |lunch"
+  },
+  "formatLine11": {
+   "args": [
+    [
+     "2024-01-04",
+     "travel",
+     "40",
+     "train"
+    ]
+   ],
+   "result": "row 11: 2024-01-04|travel    |40        |train"
+  },
+  "formatLine12": {
+   "args": [
+    [
+     "2024-01-09",
+     "tools",
+     "7.25",
+     "pens"
+    ]
+   ],
+   "result": "row 12: 2024-01-09 |tools      |7.25       |pens"
+  },
+  "formatLine13": {
+   "args": [
+    [
+     "2024-02-11",
+     "rent",
+     "950",
+     "march rent"
+    ]
+   ],
+   "result": "row 13: 2024-02-11  |rent        |950         |march rent"
+  },
+  "formatLine14": {
+   "args": [
+    [
+     "2024-02-14",
+     "food",
+     "18.75",
+     "dinner"
+    ]
+   ],
+   "result": "row 14: 2024-02-14|food  |18.75 |dinner"
+  },
+  "formatLine15": {
+   "args": [
+    [
+     "2024-01-03",
+     "food",
+     "12.5",
+     "lunch"
+    ]
+   ],
+   "result": "row 15: 2024-01-03|food   |12.5   |lunch"
+  },
+  "formatLine16": {
+   "args": [
+    [
+     "2024-01-04",
+     "travel",
+     "40",
+     "train"
+    ]
+   ],
+   "result": "row 16: 2024-01-04|travel  |40      |train"
+  },
+  "formatLine17": {
+   "args": [
+    [
+     "2024-01-09",
+     "tools",
+     "7.25",
+     "pens"
+    ]
+   ],
+   "result": "row 17: 2024-01-09|tools    |7.25     |pens"
+  },
+  "formatLine18": {
+   "args": [
+    [
+     "2024-02-11",
+     "rent",
+     "950",
+     "march rent"
+    ]
+   ],
+   "result": "row 18: 2024-02-11|rent      |950       |march rent"
+  },
+  "formatLine19": {
+   "args": [
+    [
+     "2024-02-14",
+     "food",
+     "18.75",
+     "dinner"
+    ]
+   ],
+   "result": "row 19: 2024-02-14 |food       |18.75      |dinner"
+  },
+  "formatLine2": {
+   "args": [
+    [
+     "2024-01-09",
+     "tools",
+     "7.25",
+     "pens"
+    ]
+   ],
+   "result": "row 2: 2024-01-09|tools   |7.25    |pens"
+  },
+  "formatLine20": {
+   "args": [
+    [
+     "2024-01-03",
+     "food",
+     "12.5",
+     "lunch"
+    ]
+   ],
+   "result": "row 20: 2024-01-03  |food        |12.5        |lunch"
+  },
+  "formatLine21": {
+   "args": [
+    [
+     "2024-01-04",
+     "travel",
+     "40",
+     "train"
+    ]
+   ],
+   "result": "row 21: 2024-01-04|travel|40    |train"
+  },
+  "formatLine22": {
+   "args": [
+    [
+     "2024-01-09",
+     "tools",
+     "7.25",
+     "pens"
+    ]
+   ],
+   "result": "row 22: 2024-01-09|tools  |7.25   |pens"
+  },
+  "formatLine23": {
+   "args": [
+    [
+     "2024-02-11",
+     "rent",
+     "950",
+     "march rent"
+    ]
+   ],
+   "result": "row 23: 2024-02-11|rent    |950     |march rent"
+  },
+  "formatLine24": {
+   "args": [
+    [
+     "2024-02-14",
+     "food",
+     "18.75",
+     "dinner"
+    ]
+   ],
+   "result": "row 24: 2024-02-14|food     |18.75    |dinner"
+  },
+  "formatLine25": {
+   "args": [
+    [
+     "2024-01-03",
+     "food",
+     "12.5",
+     "lunch"
+    ]
+   ],
+   "result": "row 25: 2024-01-03|food      |12.5      |lunch"
+  },
+  "formatLine26": {
+   "args": [
+    [
+     "2024-01-04",
+     "travel",
+     "40",
+     "train"
+    ]
+   ],
+   "result": "row 26: 2024-01-04 |travel     |40         |train"
+  },
+  "formatLine27": {
+   "args": [
+    [
+     "2024-01-09",
+     "tools",
+     "7.25",
+     "pens"
+    ]
+   ],
+   "result": "row 27: 2024-01-09  |tools       |7.25        |pens"
+  },
+  "formatLine28": {
+   "args": [
+    [
+     "2024-02-11",
+     "rent",
+     "950",
+     "march rent"
+    ]
+   ],
+   "result": "row 28: 2024-02-11|rent  |950   |march rent"
+  },
+  "formatLine29": {
+   "args": [
+    [
+     "2024-02-14",
+     "food",
+     "18.75",
+     "dinner"
+    ]
+   ],
+   "result": "row 29: 2024-02-14|food   |18.75  |dinner"
+  },
+  "formatLine3": {
+   "args": [
+    [
+     "2024-02-11",
+     "rent",
+     "950",
+     "march rent"
+    ]
+   ],
+   "result": "row 3: 2024-02-11|rent     |950      |march rent"
+  },
+  "formatLine30": {
+   "args": [
+    [
+     "2024-01-03",
+     "food",
+     "12.5",
+     "lunch"
+    ]
+   ],
+   "result": "row 30: 2024-01-03|food    |12.5    |lunch"
+  },
+  "formatLine4": {
+   "args": [
+    [
+     "2024-02-14",
+     "food",
+     "18.75",
+     "dinner"
+    ]
+   ],
+   "result": "row 4: 2024-02-14|food      |18.75     |dinner"
+  },
+  "formatLine5": {
+   "args": [
+    [
+     "2024-01-03",
+     "food",
+     "12.5",
+     "lunch"
+    ]
+   ],
+   "result": "row 5: 2024-01-03 |food       |12.5       |lunch"
+  },
+  "formatLine6": {
+   "args": [
+    [
+     "2024-01-04",
+     "travel",
+     "40",
+     "train"
+    ]
+   ],
+   "result": "row 6: 2024-01-04  |travel      |40          |train"
+  },
+  "formatLine7": {
+   "args": [
+    [
+     "2024-01-09",
+     "tools",
+     "7.25",
+     "pens"
+    ]
+   ],
+   "result": "row 7: 2024-01-09|tools |7.25  |pens"
+  },
+  "formatLine8": {
+   "args": [
+    [
+     "2024-02-11",
+     "rent",
+     "950",
+     "march rent"
+    ]
+   ],
+   "result": "row 8: 2024-02-11|rent   |950    |march rent"
+  },
+  "formatLine9": {
+   "args": [
+    [
+     "2024-02-14",
+     "food",
+     "18.75",
+     "dinner"
+    ]
+   ],
+   "result": "row 9: 2024-02-14|food    |18.75   |dinner"
+  },
+  "readCell0": {
+   "args": [
+    "2024-01-03;food;12.5;lunch"
+   ],
+   "result": "2024-01-03"
+  },
+  "readCell1": {
+   "args": [
+    "2024-01-04;travel;40;train"
+   ],
+   "result": "travel"
+  },
+  "readCell10": {
+   "args": [
+    "2024-01-03;food;12.5;lunch"
+   ],
+   "result": 12.5
+  },
+  "readCell11": {
+   "args": [
+    "2024-01-04;travel;40;train"
+   ],
+   "result": "train"
+  },
+  "readCell12": {
+   "args": [
+    "2024-01-09;tools;7.25;pens"
+   ],
+   "result": "2024-01-09"
+  },
+  "readCell13": {
+   "args": [
+    "2024-02-11;rent;950;march rent"
+   ],
+   "result": "rent"
+  },
+  "readCell14": {
+   "args": [
+    "2024-02-14;food;18.75;dinner"
+   ],
+   "result": 18.75
+  },
+  "readCell15": {
+   "args": [
+    "2024-01-03;food;12.5;lunch"
+   ],
+   "result": "lunch"
+  },
+  "readCell16": {
+   "args": [
+    "2024-01-04;travel;40;train"
+   ],
+   "result": "2024-01-04"
+  },
+  "readCell17": {
+   "args": [
+    "2024-01-09;tools;7.25;pens"
+   ],
+   "result": "tools"
+  },
+  "readCell18": {
+   "args": [
+    "2024-02-11;rent;950;march rent"
+   ],
+   "result": 950
+  },
+  "readCell19": {
+   "args": [
+    "2024-02-14;food;18.75;dinner"
+   ],
+   "result": "dinner"
+  },
+  "readCell2": {
+   "args": [
+    "2024-01-09;tools;7.25;pens"
+   ],
+   "result": 7.25
+  },
+  "readCell20": {
+   "args": [
+    "2024-01-03;food;12.5;lunch"
+   ],
+   "result": "2024-01-03"
+  },
+  "readCell21": {
+   "args": [
+    "2024-01-04;travel;40;train"
+   ],
+   "result": "travel"
+  },
+  "readCell22": {
+   "args": [
+    "2024-01-09;tools;7.25;pens"
+   ],
+   "result": 7.25
+  },
+  "readCell23": {
+   "args": [
+    "2024-02-11;rent;950;march rent"
+   ],
+   "result": "march rent"
+  },
+  "readCell24": {
+   "args": [
+    "2024-02-14;food;18.75;dinner"
+   ],
+   "result": "2024-02-14"
+  },
+  "readCell25": {
+   "args": [
+    "2024-01-03;food;12.5;lunch"
+   ],
+   "result": "food"
+  },
+  "readCell26": {
+   "args": [
+    "2024-01-04;travel;40;train"
+   ],
+   "result": 40
+  },
+  "readCell27": {
+   "args": [
+    "2024-01-09;tools;7.25;pens"
+   ],
+   "result": "pens"
+  },
+  "readCell28": {
+   "args": [
+    "2024-02-11;rent;950;march rent"
+   ],
+   "result": "2024-02-11"
+  },
+  "readCell29": {
+   "args": [
+    "2024-02-14;food;18.75;dinner"
+   ],
+   "result": "food"
+  },
+  "readCell3": {
+   "args": [
+    "2024-02-11;rent;950;march rent"
+   ],
+   "result": "march rent"
+  },
+  "readCell30": {
+   "args": [
+    "2024-01-03;food;12.5;lunch"
+   ],
+   "result": 12.5
+  },
+  "readCell4": {
+   "args": [
+    "2024-02-14;food;18.75;dinner"
+   ],
+   "result": "2024-02-14"
+  },
+  "readCell5": {
+   "args": [
+    "2024-01-03;food;12.5;lunch"
+   ],
+   "result": "food"
+  },
+  "readCell6": {
+   "args": [
+    "2024-01-04;travel;40;train"
+   ],
+   "result": 40
+  },
+  "readCell7": {
+   "args": [
+    "2024-01-09;tools;7.25;pens"
+   ],
+   "result": "pens"
+  },
+  "readCell8": {
+   "args": [
+    "2024-02-11;rent;950;march rent"
+   ],
+   "result": "2024-02-11"
+  },
+  "readCell9": {
+   "args": [
+    "2024-02-14;food;18.75;dinner"
+   ],
+   "result": "food"
+  },
+  "sumColumn0": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn1": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn10": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn11": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn12": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 1028.5
+  },
+  "sumColumn13": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn14": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn15": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn16": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn17": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 1028.5042735042734
+  },
+  "sumColumn18": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn19": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn2": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 1028.5
+  },
+  "sumColumn20": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn21": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn22": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 1028.5
+  },
+  "sumColumn23": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn24": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn25": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn26": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn27": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 1028.5039370078741
+  },
+  "sumColumn28": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn29": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn3": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn30": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn4": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn5": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn6": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn7": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 1028.5046728971963
+  },
+  "sumColumn8": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  },
+  "sumColumn9": {
+   "args": [
+    [
+     [
+      "2024-01-03",
+      "food",
+      "12.5",
+      "lunch"
+     ],
+     [
+      "2024-01-04",
+      "travel",
+      "40",
+      "train"
+     ],
+     [
+      "2024-01-09",
+      "tools",
+      "7.25",
+      "pens"
+     ],
+     [
+      "2024-02-11",
+      "rent",
+      "950",
+      "march rent"
+     ],
+     [
+      "2024-02-14",
+      "food",
+      "18.75",
+      "dinner"
+     ]
+    ]
+   ],
+   "result": 0
+  }
+ }
+}

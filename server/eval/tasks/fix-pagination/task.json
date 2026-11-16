@@ -1,0 +1,6 @@
+{
+  "id": "fix-pagination",
+  "title": "Fix the off-by-one in paginate",
+  "goal": "paginate returns one item too few on every full page. Fix src/paginate.ts so each page returns pageSize items, and keep the existing tests passing.",
+  "grader": { "run": true }
+}

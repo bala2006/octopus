@@ -8,7 +8,10 @@
     "start": "node --disable-warning=ExperimentalWarning --import tsx src/main.ts",
     "dev": "node --disable-warning=ExperimentalWarning --watch-path=src --watch-path=../shared/src --import tsx src/main.ts",
     "typecheck": "tsc --noEmit -p .",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "eval": "node --disable-warning=ExperimentalWarning --import tsx eval/run.ts",
+    "eval:report": "node --import tsx eval/report.ts",
+    "model:scripted": "node --disable-warning=ExperimentalWarning --import tsx eval/scriptedModel.ts"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.8",

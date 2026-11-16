@@ -1,0 +1,9 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 32rem;
+  margin: 2rem auto;
+}
+
+.selected {
+  font-weight: bold;
+}

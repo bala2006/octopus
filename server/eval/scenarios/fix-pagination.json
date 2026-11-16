@@ -1,0 +1,29 @@
+{
+  "description": "The lead gives the fix to the developer, who reads the file, changes the slice bound and completes the task.",
+  "replies": {
+    "plan": [
+      { "calls": [{ "name": "create_task", "args": {
+        "title": "Fix the off-by-one in paginate",
+        "description": "paginate in src/paginate.ts slices one item short. Read the function and make each page return pageSize items.",
+        "acceptance_criteria": "- A full page returns pageSize items\n- npm test still passes",
+        "assignee": "Alex",
+        "kind": "build",
+        "files": ["src/paginate.ts"]
+      } }] },
+      { "calls": [{ "name": "start_work", "args": { "note": "Alex fixes the slice bound in paginate." } }] }
+    ],
+    "work": [
+      { "calls": [{ "name": "read_file", "args": { "path": "src/paginate.ts" } }] },
+      { "calls": [{ "name": "edit_file", "args": {
+        "path": "src/paginate.ts",
+        "old_string": "return items.slice(start, start + pageSize - 1);",
+        "new_string": "return items.slice(start, start + pageSize);",
+        "note": "A page ends pageSize items after its start."
+      } }] },
+      { "calls": [{ "name": "complete_task", "args": {
+        "summary": "paginate now slices pageSize items from the start of each page.",
+        "verification": "Read the function after the edit, and npm test runs in the project checks."
+      } }] }
+    ]
+  }
+}

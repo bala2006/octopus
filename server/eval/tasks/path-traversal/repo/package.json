@@ -1,0 +1,9 @@
+{
+  "name": "static-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/static.test.js"
+  }
+}
