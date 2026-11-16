@@ -17,6 +17,8 @@ export function safeEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
 export interface ProcResult { code: number | null; output: string; timedOut: boolean; truncated: boolean }
 export interface ProcOptions {
   cwd: string; timeoutMs?: number; maxOutput?: number; env?: NodeJS.ProcessEnv; input?: string;
+  /** Start argv[0] itself. Without it, Windows runs the command through cmd.exe, which mangles quoted arguments. */
+  direct?: boolean;
   onOutput?: (chunk: string) => void; signal?: AbortSignal;
 }
 
@@ -36,6 +38,7 @@ const winQuote = (a: string) => (/^[\w\-./:=@\\]+$/.test(a) ? a : `"${a.replace(
 export function start(argv: string[], opts: Omit<ProcOptions, "timeoutMs" | "maxOutput" | "input">): ChildProcess {
   const [cmd, ...args] = argv;
   const win = process.platform === "win32";
+  if (opts.direct) return spawn(cmd!, args, { cwd: opts.cwd, env: opts.env ?? safeEnv(), detached: !win, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   return spawn(win ? argv.map(winQuote).join(" ") : cmd!, win ? [] : args, {
     cwd: opts.cwd, env: opts.env ?? safeEnv(), shell: win, detached: !win, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
   });

@@ -14,7 +14,7 @@ roles: backend, fullstack_dev, developer, data, security
    per resource, rate limits on auth endpoints. Enable CORS only for supported cross-origin clients, with exact origins.
 5. Data: explicit schema/migrations, transactions for multi-step writes, indexes for lookups you query by.
 6. Tests: one happy path and the main failure paths per endpoint (pytest + test client, or the framework's equivalent).
-   Run them with `run_command` and fix until green.
+   Run them with `shell` and fix until green.
 7. Document how to run it (README section): install, env vars, start command, example requests (curl).
 
 ## Done when

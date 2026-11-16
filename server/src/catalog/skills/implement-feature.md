@@ -15,7 +15,7 @@ You own the deliverable end-to-end. Quality comes from small steps that are each
    - Small files/edits; `edit_file` for changes to existing files, `write_file` for new ones.
    - Handle errors and edge cases as you go (empty input, network failure, resize, invalid data).
    - No placeholders, TODO stubs or fake data where real behaviour is required.
-4. **Verify each step for real.** Fix every automatic check failure immediately. Run it: tests (`run_command`), the
+4. **Verify each step for real.** Fix every automatic check failure immediately. Run it: tests (`shell`), the
    script, or open the page in your browser (preview URL), read `browser_console_messages`, click through the flow.
 5. **Fix what you find, then re-verify.** Repeat until the acceptance criteria hold.
 6. **Report**: what you built (files), how you verified it (commands and what you saw), assumptions, known limits.

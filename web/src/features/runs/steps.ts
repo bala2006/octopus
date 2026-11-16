@@ -71,7 +71,7 @@ export function describeCall(tool: string, args: Record<string, unknown>): { kin
     case "edit_file": return { kind: "write", title: `Edited ${str(args.path) || "a file"}` };
     case "move_file": return { kind: "write", title: `Moved ${str(args.from)} to ${str(args.to)}` };
     case "delete_file": return { kind: "write", title: `Deleted ${str(args.path) || "a file"}` };
-    case "run_command": case "run_code": return { kind: "command", title: `Ran ${clip(str(args.command) || "a command", 90)}` };
+    case "shell": case "run_code": return { kind: "command", title: `Ran ${clip(str(args.command) || "a command", 90)}` };
     case "create_task": return { kind: "task", title: `Created task: ${clip(str(args.title), 90)}` };
     case "complete_task": return { kind: "task", title: `Finished a task: ${clip(str(args.summary), 90)}` };
     case "block_task": return { kind: "task", title: `Blocked a task: ${clip(str(args.reason), 90)}` };

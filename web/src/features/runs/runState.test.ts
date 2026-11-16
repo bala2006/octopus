@@ -54,7 +54,7 @@ describe("reduceRun", () => {
       { key: "build", title: "Build", owner: "r", status: "active" }, { key: "review", title: "Review", owner: "q", status: "pending" },
     ] };
     let s = reduceRun(initialRun(), ev(1, "workflow_updated", { workflow }), {});
-    s = reduceRun(s, ev(2, "tool_call", { call_id: "c1", agent_id: "a", tool: "run_command", args: { command: "npm test" } }), {});
+    s = reduceRun(s, ev(2, "tool_call", { call_id: "c1", agent_id: "a", tool: "shell", args: { command: "npm test" } }), {});
     s = reduceRun(s, ev(3, "run_status", { status: "running" }), {});
     expect(s.steps[0]).toMatchObject({ status: "running" });
     s = reduceRun(s, ev(4, "run_status", { status: "incomplete", reason: "Reached the token limit" }), {});

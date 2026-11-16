@@ -13,7 +13,7 @@ function member(key: string, tools: Partial<AgentTools> = {}, over: Partial<Agen
   return { id: `id-${key}`, name: key, role: key, behavior: { template_key: key }, is_manager: false, tools: { ...TOOLS, ...tools }, ...over } as unknown as AgentOut;
 }
 
-const WRITE_AND_RUN = ["write_file", "edit_file", "delete_file", "run_command"];
+const WRITE_AND_RUN = ["write_file", "edit_file", "delete_file", "shell"];
 
 describe("kindOf", () => {
   test("built-in roles keep one kind whatever their switches say", () => {
@@ -83,13 +83,13 @@ describe("toolbox names", () => {
     const { tools } = await toolbox({} as Registry, ".", member("qa", { browser: false }), "acceptance");
     const names = tools.map((t) => t.name);
     expect(names).toContain("start_dev_server");
-    expect(names).not.toContain("run_command");
+    expect(names).not.toContain("shell");
     expect(names).not.toContain("write_file");
   });
 
   test("the writer in a build turn gets the write and command tools", async () => {
     const { tools } = await toolbox({} as Registry, ".", member("developer", { browser: false }), "worker");
     const names = tools.map((t) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["write_file", "edit_file", "run_command"]));
+    expect(names).toEqual(expect.arrayContaining(["write_file", "edit_file", "shell"]));
   });
 });

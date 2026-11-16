@@ -201,7 +201,7 @@ test("in ask mode, editing your files waits for approval; destructive commands n
       ? { calls: [{ name: "hire_agent", args: { role_key: "developer", title: "Developer", department: "Engineering", reason: "Tidies files" } },
         { name: "create_task", args: { title: "Tidy notes", description: "Rewrite notes.txt and clean up.", acceptance_criteria: "- done", assignee: "Alex", kind: "docs" } }] }
       : { calls: [{ name: "start_work", args: { note: "go" } }] };
-    if (kind === "work") return n === 0 ? { calls: [{ name: "run_command", args: { command: "rm -rf ." } }] }
+    if (kind === "work") return n === 0 ? { calls: [{ name: "shell", args: { command: "rm -rf ." } }] }
       : n === 1 ? { calls: [{ name: "read_file", args: { path: "notes.txt" } }] }
       : n === 2 ? { calls: [{ name: "write_file", args: { path: "notes.txt", content: "tidy\n" } }] }
       : { calls: [{ name: "complete_task", args: { summary: "Tidied notes.txt.", verification: "read it" } }] };
@@ -495,7 +495,7 @@ test("a message sent while a task runs is planned at once, and amend_task reache
     if (kind === "work") {
       if (n === 0) {
         if (!posted) { posted = true; setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Use three.js" }), 100); }
-        return { calls: [{ name: "run_command", args: { command: "node wait.js" } }] };
+        return { calls: [{ name: "shell", args: { command: "node wait.js" } }] };
       }
       if (n === 1) { builderSaw = JSON.stringify(b.input); return { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] }; }
       return { calls: [{ name: "complete_task", args: { summary: "Built the page with three.js.", verification: "Opened it" } }] };
@@ -627,12 +627,12 @@ test("a teammate's edit reaches the agent that read the file, and its re-read re
     if (kind !== "work") return buildScript(b);
     const who = JSON.stringify(b.input[0]).includes("part A") ? "lena" : "diego";
     const step = (steps[who] = (steps[who] ?? 0) + 1);
-    if (who === "diego") return step === 1 ? { calls: [{ name: "run_command", args: { command: "node wait.js 600" } }] }
+    if (who === "diego") return step === 1 ? { calls: [{ name: "shell", args: { command: "node wait.js 600" } }] }
       : step === 2 ? { calls: [{ name: "read_file", args: { path: "shared.txt" } }] }
       : step === 3 ? { calls: [{ name: "write_file", args: { path: "shared.txt", content: "version two\n" } }, { name: "write_file", args: { path: "src/b/x.txt", content: "b\n" } }] }
       : { calls: [{ name: "complete_task", args: { summary: "Built part B.", verification: "Read it" } }] };
     if (step === 1) return { calls: [{ name: "read_file", args: { path: "shared.txt" } }] };
-    if (step === 2) return { calls: [{ name: "run_command", args: { command: "node wait.js 2500" } }] };
+    if (step === 2) return { calls: [{ name: "shell", args: { command: "node wait.js 2500" } }] };
     if (step === 3) { notice = JSON.stringify(b.input.slice(-1)); return { calls: [{ name: "read_file", args: { path: "shared.txt" } }] }; }
     if (step === 4) { reread = String(outputs(b).at(-1)?.output); return { calls: [{ name: "write_file", args: { path: "src/a/y.txt", content: "a\n" } }] }; }
     return { calls: [{ name: "complete_task", args: { summary: "Built part A.", verification: "Read it" } }] };
@@ -708,7 +708,7 @@ test("a long turn summarizes its earlier work and keeps going, and repeating the
       if (JSON.stringify(b.input).includes("<checkpoint>") && !afterSummary) afterSummary = JSON.stringify(b.input);
       if (step <= 3) {
         if (step === 3) reminder = "";
-        return { calls: [{ name: "run_command", args: { command: "node --version" } }] };
+        return { calls: [{ name: "shell", args: { command: "node --version" } }] };
       }
       if (step === 4) reminder = JSON.stringify(b.input.at(-1));
       if (step < 12) return { calls: [{ name: "read_file", args: { path: "big.js", offset: (step - 4) * 100 + 1, limit: 100 } }] };
@@ -721,7 +721,7 @@ test("a long turn summarizes its earlier work and keeps going, and repeating the
   } finally {
     reg.setSetting("provider.azure", saved);
   }
-  expect(reminder).toContain("same run_command call 3 times in a row");
+  expect(reminder).toContain("same shell call 3 times in a row");
   expect(checkpointAsked).toBeGreaterThan(0);
   expect(afterSummary).toContain("Write index.html.");
   expect(afterSummary).toContain("# T1: Build the landing page"); // the brief stays
@@ -782,7 +782,7 @@ test("a message to one agent while the team works lands in that agent's own chat
       if (!posted) {
         posted = true;
         setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Make the heading say Hello", to_agent_id: lenaId }), 200);
-        return { calls: [{ name: "run_command", args: { command: "node wait.js" } }] };
+        return { calls: [{ name: "shell", args: { command: "node wait.js" } }] };
       }
       if (msg && !saw) { saw = all; return { calls: [{ name: "reply", args: { message_id: msg[1], text: "Will do: the heading now says Hello." } }, { name: "write_file", args: { path: "index.html", content: "<h1>Hello</h1>\n" } }] }; }
       return { calls: [{ name: "complete_task", args: { summary: "Built the page saying Hello.", verification: "Read it" } }] };
@@ -825,7 +825,7 @@ test("a message that reaches an agent as it finishes is still answered, and aski
     ] } : { calls: [{ name: "start_work", args: { note: "Both at once." } }] };
     if (kind === "work" && first.includes("Build the API")) {
       const n = outputs(b).length;
-      if (n === 0) return { calls: [{ name: "run_command", args: { command: "node wait.js 4000" } }] };
+      if (n === 0) return { calls: [{ name: "shell", args: { command: "node wait.js 4000" } }] };
       if (n === 1) return { calls: [{ name: "write_file", args: { path: "api.js", content: "export {};\n" } }] };
       return { calls: [{ name: "complete_task", args: { summary: "Built the API.", verification: "Read it" } }] };
     }
@@ -844,7 +844,7 @@ test("a message that reaches an agent as it finishes is still answered, and aski
           sentLate = true;
           setTimeout(() => void call("POST", `${W()}/runs/${runId}/continue`, { content: "Is the heading final?", to_agent_id: ids.Lena }), 100);
           // The message lands while this last step runs, after the inbox was read for it.
-          return { calls: [{ name: "run_command", args: { command: "node wait.js 600" } }, { name: "complete_task", args: { summary: "Built the page.", verification: "Read it" } }] };
+          return { calls: [{ name: "shell", args: { command: "node wait.js 600" } }, { name: "complete_task", args: { summary: "Built the page.", verification: "Read it" } }] };
         }
         return { calls: [{ name: "complete_task", args: { summary: "Built the page.", verification: "Read it" } }] };
       }
@@ -898,7 +898,7 @@ test("an approval left open by a restart is closed when the run loads again", as
   const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Hi" });
   await until(run.id, ["completed"]);
   // A request that was waiting for an answer when the previous process stopped.
-  const orphan: PendingApproval = { id: "orphan1", agent_id: team.agents[0]!.id, kind: "run_command", summary: "Run `npm test`",
+  const orphan: PendingApproval = { id: "orphan1", agent_id: team.agents[0]!.id, kind: "run_code", summary: "Run `npm test`",
     preview: "", details: { key: "npm" }, risk: "medium", level: "ask" };
   const current = project(reg, ws.id);
   publish(current.db, run.id, "approval_requested", orphan);

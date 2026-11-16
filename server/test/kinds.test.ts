@@ -81,7 +81,7 @@ describe("built-in roles with customized tool permissions", () => {
     const { tools } = await toolbox({} as Registry, ".", lena, "worker");
     const names = tools.map((t) => t.name);
     expect(names).not.toContain("write_file");
-    expect(names).not.toContain("run_command");
+    expect(names).not.toContain("shell");
   });
 
   test("a built-in reviewer given write permission is still not handed a build", () => {

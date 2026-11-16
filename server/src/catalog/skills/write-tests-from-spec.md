@@ -13,7 +13,7 @@ user's goal; read the code only to learn how to call it.
    and the error path. Name tests after the criterion (`test_ac3_rejects_duplicate_email`).
 2. Pick the right level: unit tests for logic, API tests with a client for services, browser checks for UI (see the
    `browser-qa` skill), a smoke test that the app starts.
-3. Run everything (`run_command`). Record exact commands and outputs.
+3. Run everything (`shell`). Record exact commands and outputs.
 4. For each failure write a bug: criterion, steps to reproduce, expected, actual (copy the error), severity.
    Send it to the builder; re-test after the fix. Max 3 rounds, then escalate with the open bugs.
 5. Write `.octopus/work/test-report.md`: criteria × result table, commands run, bugs open/fixed.
