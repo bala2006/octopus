@@ -1,7 +1,7 @@
 /** The rules that keep agents inside the project and away from destructive commands. */
 import { mkdirSync, symlinkSync } from "node:fs";
 import path from "node:path";
-import { classify, parseCommand } from "../src/safety/commands";
+import { classify, classifyShell, parseCommand, splitShell } from "../src/safety/commands";
 import { ProjectFs } from "../src/safety/paths";
 
 const root = path.join(process.env.TEST_BASE_DIR!, "safety");
@@ -56,3 +56,65 @@ test("a database from Octopus 1.x is kept aside instead of breaking the project"
   expect(p.companies.find()).toEqual([]);
   expect(readdirSync(path.join(dir, ".octopus")).some((f) => f.startsWith("octopus.v1-"))).toBe(true);
 });
+
+const shellRisk = (cmd: string) => classifyShell(cmd, root).risk;
+
+test("a shell line splits on operators and keeps redirect targets apart", () => {
+  expect(splitShell("npm test 2>&1 | Select-Object -Last 40 && a; b\nc").segments).toEqual([["npm", "test"], ["Select-Object", "-Last", "40"], ["a"], ["b"], ["c"]]);
+  expect(splitShell("npm test > out.txt").targets).toEqual(["out.txt"]);
+  expect(splitShell("npm test 2>&1").targets).toEqual([]);
+  expect(splitShell("echo '|;' \"&&\"").segments).toEqual([["echo", "|;", "&&"]]);
+  expect(splitShell("echo $(npm test)").unreadable[0]).toMatch(/\$\(/);
+});
+
+test.each([
+  // pipes, chains and redirects: the riskiest segment decides
+  ["npm test | Select-Object -First 5", "low"],
+  ["npm test 2>&1 | Select-Object -Last 40", "low"],
+  ["Write-Output hi | Select-Object -First 1", "low"],
+  ["Get-ChildItem src | Where-Object { $_.Length -gt 1 } | Sort-Object Length | Format-Table", "low"],
+  ["Get-Content src/a.ts | Select-String -Pattern x | Measure-Object", "low"],
+  ["npm test && npm run build", "low"],
+  ["npm test > out.txt", "low"],
+  ["npm test > src/out.txt", "low"],
+  ["npm test 2> errors.txt", "low"],
+  ["npm test > ../out.txt", "deny"],
+  ["npm test > C:/Windows/out.txt", "deny"],
+  ["npm test < ../secret", "deny"],
+  ["npm test && rm -rf src", "deny"],
+  ["npm test; Remove-Item -Recurse src", "deny"],
+  ["npm test || git reset --hard", "deny"],
+  ["npm test | sh", "deny"],
+  ["npm test && ls | cat .env", "high"],
+  // constructs the classifier cannot read ask
+  ["Invoke-Expression 'npm test'", "medium"],
+  ["iex 'npm test'", "medium"],
+  ["Get-ChildItem | iex", "medium"],
+  ["echo $(npm test)", "medium"],
+  ["echo `whoami`", "medium"],
+  ["cat <(npm test)", "medium"],
+  ["pwsh -EncodedCommand ZQBjAGgAbwA=", "medium"],
+  ["& npm test", "medium"],
+  ["[System.IO.File]::Delete('a.txt')", "medium"],
+  ["Get-ChildItem | ForEach-Object { $_.Delete() }", "medium"],
+  // PowerShell destructive cmdlets and aliases, any case
+  ["Remove-Item -Recurse src", "deny"],
+  ["remove-item src", "deny"],
+  ["RI src", "deny"],
+  ["ForEach-Object { Remove-Item $_ }", "deny"],
+  ["Get-ChildItem | ForEach-Object { $_.Name }", "low"],
+  ["pwsh -NoProfile -Command 'Remove-Item -Recurse src'", "deny"],
+  ["pwsh -NoProfile -Command 'npm test'", "low"],
+  // PowerShell writing cmdlets ask
+  ["Move-Item a b", "medium"],
+  ["mi a b", "medium"],
+  ["Rename-Item a b", "medium"],
+  ["Set-Content a.txt x", "medium"],
+  ["Out-File a.txt", "medium"],
+  ["Start-Process notepad", "medium"],
+  ["Invoke-WebRequest -Uri https://example.com -OutFile y", "medium"],
+  ["Invoke-RestMethod https://example.com -OutFile y", "medium"],
+  ["Tee-Object -FilePath x", "medium"],
+  // anything the classifier does not know asks
+  ["mystery-tool --run", "medium"],
+])("shell line %s is %s", (cmd, expected) => expect(shellRisk(cmd)).toBe(expected));
