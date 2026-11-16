@@ -69,5 +69,14 @@ describe("eval run", () => {
     expect(existsSync(path.join(row!.workdir, "hidden"))).toBe(false);
     expect(readFileSync(path.join(row!.workdir, "src", "paginate.ts"), "utf8")).toContain("start + pageSize);");
   }, 120_000);
+
+  test("fix-pagination runs in solo mode against the scripted model, and the fix is made with tool calls", async () => {
+    const [row] = await runEval({ mode: "solo", tasks: ["fix-pagination"], repeat: 1 });
+    expect(row).toMatchObject({ mode: "solo", template: "solo", run_status: "completed", graded: true, pass: true, checks_passed: 5, checks_total: 5 });
+    expect(row!.model_calls).toBe(3);
+    expect(row!.tool_calls).toBe(2);
+    expect(row!.unmatched_replies).toBe(0);
+    expect(readFileSync(path.join(row!.workdir, "src", "paginate.ts"), "utf8")).toContain("start + pageSize);");
+  }, 120_000);
 });
 

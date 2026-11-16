@@ -6,6 +6,10 @@
  * server that is already running, and that server uses its own model.
  *
  *   npm run eval -w server -- --mode pipeline --template solo_engineer --tasks fix-pagination --repeat 1
+ *   npm run eval -w server -- --mode solo --tasks fix-pagination --repeat 1
+ *
+ * `--mode solo` runs the company made from the `solo` template, where one main agent works alone. Without --template,
+ * pipeline runs use `solo_engineer` and solo runs use `solo`.
  */
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync } from "node:fs";
@@ -47,7 +51,7 @@ export const RowSchema = z.object({
   sha: z.string(),
   at: z.string(),
   task: z.string(),
-  mode: z.literal("pipeline"),
+  mode: z.enum(["pipeline", "solo"]),
   template: z.string(),
   repeat: z.number().int(),
   target: z.enum(["in-process", "url"]),
@@ -77,9 +81,13 @@ export const RowSchema = z.object({
 });
 export type Row = z.infer<typeof RowSchema>;
 
+export type EvalMode = "pipeline" | "solo";
+/** The company template each mode runs when --template is not given. */
+const DEFAULT_TEMPLATE: Record<EvalMode, string> = { pipeline: "solo_engineer", solo: "solo" };
+
 export interface EvalOptions {
-  mode: "pipeline";
-  template: string;
+  mode: EvalMode;
+  template?: string;
   tasks: string[];
   repeat: number;
   url?: string;
@@ -151,6 +159,7 @@ interface Target {
 
 async function runOnce(target: Target, opts: EvalOptions, sha: string, id: string, repeat: number): Promise<Row> {
   const task = loadTask(id);
+  const template = opts.template ?? DEFAULT_TEMPLATE[opts.mode];
   const workdir = path.join(WORK_DIR, `${id}-r${repeat}-${Date.now()}`);
   mkdirSync(WORK_DIR, { recursive: true });
   cpSync(path.join(TASKS_DIR, id, "repo"), workdir, { recursive: true });
@@ -162,7 +171,7 @@ async function runOnce(target: Target, opts: EvalOptions, sha: string, id: strin
     const started = Date.now();
     const ws = await target.api<{ id: string }>("POST", "/api/v1/workspaces", { path: workdir });
     const W = `/api/v1/w/${ws.id}`;
-    const team = await target.api<{ company: { id: string } }>("POST", `${W}/companies/from-template`, { template_key: opts.template, name: "Octopus" });
+    const team = await target.api<{ company: { id: string } }>("POST", `${W}/companies/from-template`, { template_key: template, name: "Octopus" });
     const created = await target.api<{ id: string }>("POST", `${W}/runs`, { company_id: team.company.id, goal: task.goal });
     const run = await waitForRun(target.api, W, created.id);
     const wallS = (Date.now() - started) / 1000;
@@ -170,7 +179,7 @@ async function runOnce(target: Target, opts: EvalOptions, sha: string, id: strin
     const usage = run.state?.usage ?? {};
     const modelS = (usage.model_ms ?? 0) / 1000;
     return RowSchema.parse({
-      sha, at: new Date().toISOString(), task: id, mode: opts.mode, template: opts.template, repeat,
+      sha, at: new Date().toISOString(), task: id, mode: opts.mode, template, repeat,
       target: target.inProcess ? "in-process" : "url", run_id: created.id, run_status: run.status, halt_reason: run.halt_reason ?? "",
       graded: grade.graded, pass: grade.pass, checks_passed: grade.checks.filter((c) => c.pass).length, checks_total: grade.checks.length,
       model_calls: usage.llm_calls ?? 0, input_tokens: usage.input_tokens ?? 0, cached_tokens: usage.cached_tokens ?? 0,
@@ -220,7 +229,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const { values } = parseArgs({
     options: {
       mode: { type: "string", default: "pipeline" },
-      template: { type: "string", default: "solo_engineer" },
+      template: { type: "string" },
       tasks: { type: "string", default: "" },
       repeat: { type: "string", default: "1" },
       url: { type: "string" },
@@ -228,8 +237,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     strict: true,
   });
   const opts: EvalOptions = {
-    mode: z.literal("pipeline", { error: () => "Only --mode pipeline exists in this harness." }).parse(values.mode),
-    template: z.string().min(1).parse(values.template),
+    mode: z.enum(["pipeline", "solo"], { error: () => "Use --mode pipeline or --mode solo." }).parse(values.mode),
+    template: values.template === undefined ? undefined : z.string().min(1).parse(values.template),
     tasks: values.tasks ? values.tasks.split(",").map((t) => t.trim()).filter(Boolean) : [],
     repeat: z.coerce.number().int().min(1).max(50).parse(values.repeat),
     url: values.url ? z.url().parse(values.url) : undefined,
