@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/primitives";
 import type { OrgEvent, ReviewRound, RunLive } from "./runState";
 import { LiveWriting, ThinkingView } from "./LiveWriting";
 import { ReviewCard } from "./ReviewCard";
-import { TodoList } from "./TodoList";
 import { humanizeStream } from "./streamView";
 import { countLine, type Step } from "./steps";
 
@@ -54,11 +53,11 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
   const [stick, setStick] = React.useState(true);
   const items = React.useMemo(() => {
     const raw: Item[] = [];
-    state.messages.forEach((m, i) => {
+    state.messages.forEach((m) => {
       if (agentId) { if (!inAgentChat(m, agentId)) return; }
       else if (filter === "user" && !isUserFacing(m)) return;
       if (filter === "internal" && (m.sender === "user" || !m.to_agent_id) && m.type !== "artifact_created") return;
-      raw.push(m.type === "artifact_created" ? { kind: "files", ms: [m], seq: m._seq ?? i } : { kind: "msg", m, seq: m._seq ?? i });
+      raw.push(m.type === "artifact_created" ? { kind: "files", ms: [m], seq: m._seq ?? 0 } : { kind: "msg", m, seq: m._seq ?? 0 });
     });
     if (filter !== "user" && !agentId) for (const r of state.rejected) raw.push({ kind: "rejected", r, seq: r.seq ?? 0 });
     if (!agentId) for (const ev of state.orgEvents) raw.push({ kind: "org", ev, seq: ev.seq });
@@ -66,6 +65,7 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
     const folded = new Set(agentId ? [] : state.reviews.flatMap((r) => r.specialists.flatMap((s) => s.steps.map((x) => x.id))));
     if (!agentId) for (const round of state.reviews) raw.push({ kind: "review", round, seq: round.seq });
     for (const step of state.steps) if ((showThoughts || step.kind !== "thought") && (!agentId || step.agent_id === agentId) && !folded.has(step.id)) raw.push({ kind: "step", step, seq: step.seq });
+    raw.sort((a, b) => a.seq - b.seq); // every item carries its event's seq, so the feed reads in the order things happened
     const out: Item[] = [];
     for (const it of raw) { // group consecutive file writes by the same agent, and consecutive steps by the same agent
       const last = out[out.length - 1];
@@ -85,8 +85,7 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
   };
 
   return (
-    <div className="relative flex h-full flex-col">
-      {!agentId && state.todos && state.todos.items.length > 0 && <TodoList todos={state.todos} />}
+    <div className="relative flex h-full min-h-0 flex-col">
       <div className="relative min-h-0 flex-1">
         <div ref={scroller} onScroll={onScroll} className="h-full space-y-1 overflow-y-auto px-3 py-3" role="log" aria-live="polite" aria-label="Team conversation activity">
           {items.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">Waiting for the first message…</p>}

@@ -49,6 +49,17 @@ it("puts the user's messages on the right and each agent's messages on the left,
   expect(userRow.firstElementChild).toHaveClass("flex-row-reverse");
 });
 
+it("keeps messages and steps in the order they happened, so a message sent mid-run lands after the steps before it", () => {
+  const messages = [{ ...message("1", null, "user", "Build the store."), _seq: 1 }, { ...message("2", null, "user", "Add checkout too."), _seq: 4 }];
+  const steps: Step[] = [thoughtStep(2, "riley", "Reading the brief."), thoughtStep(3, "riley", "Writing the page.")];
+  render(<RunFeed state={{ ...initialRun(), messages, steps }} agents={agents} filter="all" />);
+  const first = screen.getByText("Build the store.");
+  const run = screen.getByTestId("step-run");
+  const second = screen.getByText("Add checkout too.");
+  expect(first.compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(run.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
 it("asks the server for each attached image by the name it was saved under", () => {
   const sent = { ...message("3", null, "user", "see the screenshot"), meta: { images: ["k7-shot.png"] } } as unknown as MessageOut;
   render(<RunFeed state={{ ...initialRun(), messages: [sent] }} agents={agents} filter="all" />);

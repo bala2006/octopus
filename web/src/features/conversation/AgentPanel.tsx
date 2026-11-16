@@ -75,6 +75,7 @@ import {
 import { RunDialog } from "@/features/runs/RunDialog";
 import { defaultRunBudget } from "@/features/runs/runDefaults";
 import { AgentChatContext, RunFeed, ToolLog } from "@/features/runs/RunFeed";
+import { TodoList } from "@/features/runs/TodoList";
 import { BrowserView } from "@/features/runs/BrowserView";
 import { isBrowsing } from "@/features/runs/browserSteps";
 import { RunStrip, conversationStatus } from "./RunStrip";
@@ -233,6 +234,7 @@ function CompanyAgentPanel({
     state.replayDone || state.live ? state.status : run.data?.status;
   const active = !!runId && !!status && !TERMINAL.has(status);
   const browsing = Object.values(state.activity).some(isBrowsing);
+  const checklist = state.todos && state.todos.items.length > 0 ? <TodoList todos={state.todos} /> : null;
   const [now, setNow] = React.useState(Date.now);
   React.useEffect(() => {
     if (!active || !floatingWindow) return;
@@ -264,7 +266,7 @@ function CompanyAgentPanel({
   const [browsingFiles, setBrowsingFiles] = React.useState(false);
   const [fileSearch, setFileSearch] = React.useState("");
   const [conversationTab, setConversationTab] = React.useState<
-    "chat" | "tasks" | "browser" | "tools" | "report"
+    "chat" | "todo" | "browser" | "tools" | "report"
   >("chat");
   React.useEffect(() => setConversationTab("chat"), [runId]);
   /** The agent whose own chat the panel shows instead of the team chat; null for the team chat. */
@@ -602,12 +604,12 @@ function CompanyAgentPanel({
               Chat
             </button>
             <button
-              aria-pressed={conversationTab === "tasks"}
+              aria-pressed={conversationTab === "todo"}
               disabled={!runId}
-              onClick={() => setConversationTab("tasks")}
+              onClick={() => setConversationTab("todo")}
             >
               <ListTodo />
-              Tasks{" "}
+              To do{" "}
               {!!Object.keys(state.tasks).length && (
                 <span>{Object.keys(state.tasks).length}</span>
               )}
@@ -685,8 +687,11 @@ function CompanyAgentPanel({
             {conversationTab === "browser" && runId && (
               <div className="flex h-full flex-col"><BrowserView state={state} agents={agents} w={w} runId={runId} live={active} /></div>
             )}
-            {conversationTab === "tasks" && (
-              <TaskBoard tasks={Object.values(state.tasks)} agents={agents} compact />
+            {conversationTab === "todo" && (
+              <>
+                {checklist}
+                <TaskBoard tasks={Object.values(state.tasks)} agents={agents} compact />
+              </>
             )}
             {conversationTab === "tools" && (
               <ToolLog state={state} agents={agents} />
@@ -724,6 +729,7 @@ function CompanyAgentPanel({
               </div>
             )}
             <div className="flex min-h-0 flex-1 flex-col">
+              {!conversation && !agentChat && checklist && <div className="max-h-40 shrink-0 overflow-y-auto">{checklist}</div>}
               <AgentChatContext.Provider value={openAgentChat}>
                 <RunFeed
                   state={state}

@@ -71,7 +71,7 @@ const COLS = [["todo", "To do"], ["in_progress", "In progress"], ["review", "In 
 const KIND: Record<string, string> = { build: "Build", fix: "Revision", review: "Review", docs: "Document", research: "Research", verify: "Checks", answer: "Answer" };
 
 export function TaskBoard({ tasks, agents, compact = false }: { tasks: TaskOut[]; agents: Record<string, AgentOut>; compact?: boolean }) {
-  if (!tasks.length) return <p className="py-10 text-center text-sm text-muted-foreground">No tasks yet. Octopus creates them when a request needs work.</p>;
+  if (!tasks.length) return null;
   return (
     <div className={cn("grid gap-2 p-3", compact ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-3")}>
       {COLS.map(([k, label]) => {
