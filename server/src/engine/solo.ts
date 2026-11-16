@@ -4,8 +4,9 @@
  * arrive as runtime-context messages, only when they change. A turn runs until the model replies without a tool call,
  * and that reply is what the user sees. A question to the user, a step or token limit, or a stop ends a turn early.
  *
- * The review floor runs when a turn would end with a reply. A diff at normal or high tier gets a reviewer unless a review
- * already covers it. Blocker and major findings go back to the main agent in the same turn, for at most two floor rounds.
+ * The review floor runs when a turn would end with a reply. The project checks run first, and a failure goes back to the main
+ * agent, at most three times a request. A diff at normal or high tier then gets a reviewer unless a review already covers it.
+ * Blocker and major findings go back to the main agent in the same turn, for at most two floor rounds.
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -16,19 +17,22 @@ import type { Registry } from "../db/registry";
 import { SessionLog, trimToFinishedStep } from "../db/sessionLog";
 import type { Item } from "../llm/azure";
 import { renderOpenItems } from "../lib/findings";
-import { clip, firstLine, sha1 } from "../lib/util";
+import { clip, firstLine, newId, sha1 } from "../lib/util";
 import { soloToolbox } from "../tools";
 import type { Shown, Tool, ToolContext } from "../tools/types";
 import type { Project } from "../workspace/projects";
-import { projectOverview } from "../workspace/overview";
+import { CHECK_LIMIT, projectOverview } from "../workspace/overview";
 import { rulesUpdate, type RulesSent } from "../workspace/instructions";
 import { agentLoop, type LoopEvents } from "./agent";
+import { checkBlockMessage, describeChecks, planChecks, runCheckList, type ChecksOutcome } from "./checks";
 import { fill, MAIN_PROMPT, runtimeContext } from "./prompts";
 import { reviewersFor, tierOf } from "./risk";
 import { Specialists, type Seat, type SpecialistName } from "./specialists";
 
 /** Floor rounds one request may run. A reply that still has open findings after them goes out as incomplete. */
 const FLOOR_ROUNDS = 2;
+/** Failing-check messages one request may send. A reply that still fails after them goes out as incomplete. */
+const CHECK_BLOCKS = 3;
 
 /** What the solo path needs from its conversation. The conversation owns the run row, the events and the messages. */
 export interface SoloHost {
@@ -42,6 +46,8 @@ export interface SoloHost {
   /** Adds a turn's reply to the run's report, under the request that started the turn. */
   recap(title: string, text: string): void;
   setRunStatus(status: RunStatus, extra?: { reason?: string; summary?: string }): void;
+  /** Aborts when the user stops the conversation. */
+  signal(): AbortSignal;
   setStatus(agent: AgentOut, status: AgentStatus, activity?: string): void;
   loopEvents(agent: AgentOut): LoopEvents;
   toolContext(agent: AgentOut, memory: { seen: Map<string, string>; shown: Shown }): ToolContext;
@@ -108,6 +114,10 @@ export class SoloRun {
   private turnBefore = new Map<string, string | null>();
   private turnChanges = 0;
   private floorRounds = 0;
+  /** Failing-check messages sent in the turn in flight. */
+  private checkBlocks = 0;
+  /** Keys of the file contents that passed the project checks in this conversation. */
+  private checksPassed = new Set<string>();
   /** Why the turn ends incomplete, when the floor ran out of rounds with findings still open. */
   private incomplete: string | null = null;
   private stopping: { reason: string; status: RunStatus } | null = null;
@@ -122,7 +132,7 @@ export class SoloRun {
     this.log = new SessionLog(path.join(host.p.root, ".octopus", "sessions", `${host.runId}.jsonl`));
     this.specialists = new Specialists(host, () => ({
       messages: this.turnMessages, earlier: this.earlier, before: this.turnBefore, changes: this.turnChanges,
-    }));
+    }), () => this.checkChanges());
   }
 
   /** A user message, verbatim, with its images. It starts a turn, or joins the running one before its next step. */
@@ -158,6 +168,7 @@ export class SoloRun {
     this.turnBefore = new Map();
     this.turnChanges = 0;
     this.floorRounds = 0;
+    this.checkBlocks = 0;
     this.incomplete = null;
     this.specialists.startTurn();
     this.turnSteps = 0;
@@ -320,13 +331,23 @@ export class SoloRun {
   }
 
   /**
-   * The review floor, run when a reply would end the turn. It sends the main agent a message with the blocker and major
-   * findings of a reviewer it ran, and returns that message. Null lets the reply go out. The floor runs for a normal or
-   * high diff that no review covers, and for at most FLOOR_ROUNDS rounds per request. A diff at trivial or small tier
-   * runs nothing.
+   * The review floor, run when a reply would end the turn. The project checks run first, because they cost no model call:
+   * a failure goes back to the main agent as one message, for at most CHECK_BLOCKS messages a request. Then the reviewers
+   * run for a normal or high diff that no review covers, and their blocker and major findings go back the same way, for at
+   * most FLOOR_ROUNDS rounds. A diff at trivial or small tier runs no reviewer. Null lets the reply go out.
    */
   private async floor(reply: string): Promise<Item | null> {
     if (!this.host.reg.setting<boolean>("solo_review_floor", true)) return null;
+    const checks = await this.checkChanges();
+    if (checks.stopped) return null;
+    if (checks.failing.length) {
+      if (this.checkBlocks === CHECK_BLOCKS) {
+        this.incomplete = `Checks still fail after ${CHECK_BLOCKS} check blocks: ${checks.failing.map((f) => f.name).join(", ")}.`;
+        return null;
+      }
+      this.checkBlocks++;
+      return { role: "user", content: checkBlockMessage(checks.failing) };
+    }
     const diff = this.specialists.requestDiff();
     const tier = tierOf({
       files: diff.map((d) => d.file), lines: diff.reduce((sum, d) => sum + d.lines, 0), specialists: 0, requirements: 0, revised: this.floorRounds > 0,
@@ -341,8 +362,40 @@ export class SoloRun {
     }
     this.floorRounds++;
     const browser = this.host.lead().tools.browser === true;
-    const round = await this.specialists.check(reviewersFor(diff.map((d) => d.file), browser), reply);
+    const round = await this.specialists.check(reviewersFor(diff.map((d) => d.file), browser), reply, checks.text);
     return round.blocking ? { role: "user", content: round.text } : null;
+  }
+
+  /**
+   * Runs the project checks for the files this request changed. No model call is made. The run is announced in a status
+   * message that names each check and the checks left out, and each check's events go to the feed.
+   */
+  private async checkChanges(): Promise<ChecksOutcome> {
+    const changed = [...this.turnBefore.keys()];
+    if (!changed.length) return { text: "No project file changed.", failing: [], stopped: false };
+    const plan = planChecks(this.host.p.fs, changed, this.checksPassed);
+    if (plan.kind === "none") return { text: "The project has no automated checks.", failing: [], stopped: false };
+    if (plan.kind === "skipped") return { text: `Not run: ${plan.reason}.`, failing: [], stopped: false };
+    if (plan.kind === "passed") return { text: "Passed earlier in this conversation, with the same files.", failing: [], stopped: false };
+    const lead = this.host.lead();
+    const left = plan.left.length ? `Left out, over the limit of ${CHECK_LIMIT}: ${plan.left.join(", ")}.` : "Left out: none.";
+    this.host.post({ type: "status_update", content: `Running the project checks: ${plan.checks.map((c) => c.name).join(", ")}. ${left}` });
+    let callId = "";
+    const results = await runCheckList(this.host.p.fs, plan.checks, this.host.signal(), {
+      stopped: () => this.stopping !== null,
+      started: (c) => {
+        callId = newId();
+        this.host.setStatus(lead, "running", c.command);
+        this.host.emit("tool_call", { call_id: callId, agent_id: lead.id, tool: "run_code", args: { command: c.command, cwd: c.directory } });
+      },
+      finished: (_c, ok, output) => this.host.emit("tool_result", { call_id: callId, agent_id: lead.id, tool: "run_code", ok, output: clip(output, 4000) }),
+    });
+    this.host.setStatus(lead, "idle");
+    if (!results) return { text: "", failing: [], stopped: true };
+    this.host.state.usage.verifications += results.length;
+    const failing = results.filter((r) => !r.ok);
+    if (!failing.length) this.checksPassed.add(plan.key);
+    return { text: describeChecks(results), failing, stopped: false };
   }
 
   private conclude(t: Transcript, outcome: Outcome) {

@@ -30,7 +30,7 @@ import { changedLines } from "../lib/diff";
 import { endingNames, toolbox, type Mode } from "../tools";
 import { Denied, type GuardRequest, type HireSpec, type Planner, type Stop, type TaskSpec, type ToolContext } from "../tools/types";
 import { recordVersion, artifactOut } from "../workspace/artifacts";
-import { projectOverview, projectTasks } from "../workspace/overview";
+import { CHECK_LIMIT, projectOverview, projectTasks } from "../workspace/overview";
 import { processes } from "../workspace/processes";
 import type { Project } from "../workspace/projects";
 import { agentLoop, compactable, tokensOf, type LoopEvents } from "./agent";
@@ -242,7 +242,7 @@ export class Conversation {
 
   private soloHost(): SoloHost {
     return {
-      p: this.p, reg: this.reg, runId: this.row.id, state: this.state, lead: () => this.lead,
+      p: this.p, reg: this.reg, runId: this.row.id, state: this.state, lead: () => this.lead, signal: () => this.abort.signal,
       emit: (type, data) => this.emit(type, data),
       post: (m) => this.post({ from: this.lead.id, to: null, ...m }),
       recap: (title, text) => { this.row.report_md = appendRecap(this.row.report_md, title, text); },
@@ -1447,6 +1447,7 @@ export class Conversation {
     if (plan.kind === "passed") { this.phase("verify", "done", null, "The same changes already passed these checks"); return false; }
     const lead = this.lead;
     this.phase("verify", "active", lead.id);
+    if (plan.left.length) this.emit("error", { message: `Checks left out, over the limit of ${CHECK_LIMIT}: ${plan.left.join(", ")}.`, kind: "warning", agent_id: lead.id });
     let callId = "";
     const results = await runCheckList(this.p.fs, plan.checks, this.abort.signal, {
       stopped: () => this.stopped,
