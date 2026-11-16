@@ -8,6 +8,7 @@ import { fileTools } from "./files";
 import { skillTool } from "./skill";
 import { acceptanceTool, askUser, collabTools, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
 import { todoTools } from "./todo";
+import { exploreTool, reviewCallTool } from "./review";
 import type { Tool } from "./types";
 import { webTools } from "./web";
 
@@ -80,7 +81,7 @@ export async function soloToolbox(reg: Registry, root: string, agent: AgentOut):
     try { tools.push(...await browserTools(root, BUILDER_BROWSER_TOOLS)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
   }
   if (t.mcp_servers?.length) tools.push(...await serverTools(reg, t.mcp_servers));
-  tools.push(skillTool, ...memoryTools, askUser, ...todoTools);
+  tools.push(skillTool, ...memoryTools, askUser, ...todoTools, reviewCallTool, exploreTool);
   return { tools, warnings };
 }
 

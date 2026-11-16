@@ -3,9 +3,18 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { FastifyInstance } from "fastify";
+import type { CanvasOut, RunDetail, WorkspaceOut } from "@octopus/shared";
+import { effectiveRoles } from "../src/catalog/roles";
+import { openRegistry, type Registry } from "../src/db/registry";
+import { buildServer } from "../src/http/server";
+import { encrypt } from "../src/lib/secrets";
+import { project as openWorkspace } from "../src/workspace/projects";
+import { fakeModel, outputs, type FakeModel, type Script } from "./fakeModel";
 import { checkShellTool } from "../src/tools/commands";
 import { specialistToolbox } from "../src/tools";
-import { SPECIALISTS, SPECIALIST_DEFS } from "../src/engine/specialists";
+import { RETURN_LIMIT, SPECIALISTS, SPECIALIST_DEFS } from "../src/engine/specialists";
+import { reviewReport } from "../src/lib/findings";
 import { ProjectFs } from "../src/safety/paths";
 import { checkOnly } from "../src/safety/commands";
 import { enterRound, leaveRound, restoreSnapshot, SNAPSHOT_MAX_BYTES, SNAPSHOT_MAX_FILES, takeSnapshot } from "../src/workspace/snapshot";
@@ -184,5 +193,190 @@ describe("specialist toolboxes", () => {
     const { tools, warnings } = await specialistToolbox(SPECIALIST_DEFS.designer.tools, root);
     expect(tools.some((t) => t.name.startsWith("browser_"))).toBe(false);
     expect(warnings.some((w) => w.startsWith("Browser unavailable"))).toBe(true);
+  });
+});
+
+/** Specialist types the scripted model can tell apart by the prompt each one runs with. */
+const SPECIALIST_PROMPTS: [string, string][] = [
+  ["You are the reviewer on a coding team", "reviewer"],
+  ["You are the security reviewer on a coding team", "security"],
+  ["You are the designer on a coding team", "designer"],
+  ["You answer one question for Octopus", "explorer"],
+];
+
+interface Request { instructions: string; input: any[]; tools: { name: string }[] } // eslint-disable-line @typescript-eslint/no-explicit-any
+
+describe("review and explore from a solo conversation", () => {
+  let app: FastifyInstance;
+  let reg: Registry;
+  let model: FakeModel;
+  let script: Script = () => ({ text: "ok" });
+  let ws: WorkspaceOut;
+  let companyId = "";
+  let dir = "";
+
+  const call = async <T>(method: string, url: string, payload?: unknown): Promise<T> => {
+    const res = await app.inject({ method: method as "GET", url, payload: payload as object, headers: { host: "127.0.0.1" } });
+    if (res.statusCode >= 400) throw new Error(`${method} ${url} → ${res.statusCode}: ${res.body}`);
+    return res.json() as T;
+  };
+  const W = () => `/api/v1/w/${ws.id}`;
+  const requests = () => model.requests as unknown as Request[];
+  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+  /** The specialist a request runs for, or null for the main agent. */
+  const who = (b: Request) => SPECIALIST_PROMPTS.find(([text]) => b.instructions.includes(text))?.[1] ?? null;
+  const lastUser = (b: Request) => String([...b.input].reverse().find((i) => i.role === "user" && typeof i.content === "string")?.content ?? "");
+  const startsWith = (later: Request, earlier: Request) => JSON.stringify(later.input.slice(0, earlier.input.length)) === JSON.stringify(earlier.input);
+  const settle = async (runId: string): Promise<RunDetail> => {
+    const end = Date.now() + 60_000;
+    for (;;) {
+      const r = await call<RunDetail>("GET", `${W()}/runs/${runId}`);
+      if (["completed", "awaiting_user", "incomplete", "failed", "cancelled"].includes(r.status)) return r;
+      if (Date.now() > end) throw new Error(`run stayed ${r.status}`);
+      await sleep(25);
+    }
+  };
+  const start = async (goal: string) => (await call<RunDetail>("POST", `${W()}/runs`, { company_id: companyId, goal })).id;
+  /** The events of one type a run wrote to its project log. */
+  const events = (runId: string, type: string) => openWorkspace(reg, ws.id).db.events.find("run_id = ? AND type = ?", [runId, type], "seq").map((e) => e.data as Record<string, any>); // eslint-disable-line @typescript-eslint/no-explicit-any
+  /** The output of the last tool call a request holds. */
+  const lastOutput = (b: Request) => String(b.input.filter((i) => i.type === "function_call_output").at(-1)?.output ?? "");
+
+  beforeAll(async () => {
+    model = await fakeModel((b) => script(b));
+    reg = openRegistry(path.join(process.env.TEST_BASE_DIR!, "home", "registry.db"));
+    reg.setSetting("provider.azure", { base_url: model.url, key_enc: encrypt("test-key"), options: { auth: "key" }, updated_at: "" });
+    app = await buildServer(reg);
+  });
+  afterAll(async () => { await app.close(); await model.close(); });
+
+  beforeEach(async () => {
+    dir = path.join(process.env.TEST_BASE_DIR!, `r${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, "index.html"), "<h1>Acme</h1>\n");
+    ws = await call<WorkspaceOut>("POST", "/api/v1/workspaces", { path: dir });
+    reg.setSetting("approval_mode", "auto");
+    const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "solo", name: "Octopus" });
+    companyId = team.company.id;
+  });
+
+  test("a review runs reviewer and security at once, refuses a write, undoes a check's edit, and returns one message", async () => {
+    writeFileSync(path.join(dir, "change.mjs"), "import { writeFileSync } from 'node:fs';\nwriteFileSync('index.html', 'changed by a check');\n");
+    script = (b) => {
+      const role = who(b);
+      const n = outputs(b).length;
+      if (role === "reviewer") {
+        if (n === 0) return { calls: [{ name: "shell", args: { command: "npx prettier --write ." } }] };
+        if (n === 1) return { calls: [{ name: "shell", args: { command: "node change.mjs" } }] };
+        return { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "The heading does not match the request.", findings: [{ severity: "major", file: "index.html", lines: "1", problem: "The heading still says Acme.", evidence: "index.html line 1 reads Acme.", fix: "Change the heading to Globex." }] } }] };
+      }
+      if (role === "security") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "No input or secret is involved.", findings: [] } }] };
+      if (role) throw new Error(`unexpected specialist ${role}`);
+      return n === 0 ? { calls: [{ name: "review", args: { specialists: ["reviewer", "security"], focus: "Changed the heading in index.html to Globex." } }] } : { text: "Reviewed the change." };
+    };
+    const before = requests().length;
+    const id = await start("Rename the heading to Globex");
+    const done = await settle(id);
+    expect(done.status).toBe("completed");
+    const fresh = requests().slice(before);
+    const reviewer = fresh.filter((b) => who(b) === "reviewer");
+    expect(reviewer).toHaveLength(3);
+    const names = reviewer[0]!.tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(["read_file", "glob", "grep", "shell", "submit_review"]));
+    for (const forbidden of WRITE_TOOLS) expect(names).not.toContain(forbidden);
+    expect(JSON.stringify(reviewer[1]!.input)).toContain("Refused by the check-only policy (rule write-flag)");
+    expect(readFileSync(path.join(dir, "index.html"), "utf8")).toBe("<h1>Acme</h1>\n");
+    const warnings = events(id, "error").filter((e) => e.kind === "warning").map((e) => String(e.message));
+    expect(warnings.find((m) => m.includes("reviewer ran"))).toContain("`node change.mjs`");
+    expect(warnings.find((m) => m.includes("reviewer ran"))).not.toContain("prettier");
+    const message = lastOutput(fresh.filter((b) => !who(b)).at(-1)!);
+    expect(message).toContain("Review of your change, round 1. reviewer: request changes. security: approve.");
+    expect(message).toContain("F1 major index.html:1 (reviewer)");
+    expect(message.length).toBeLessThan(6_000);
+    const agents = openWorkspace(reg, ws.id).db.agents.find("company_id = ?", [companyId]);
+    const lead = agents.find((a) => a.is_entry)!;
+    for (const key of ["specialist-reviewer", "specialist-security"]) {
+      const agent = agents.find((a) => a.behavior.template_key === key);
+      expect(agent?.reports_to).toBe(lead.id);
+    }
+    expect(effectiveRoles(reg).some((r) => r.key.startsWith("specialist-"))).toBe(false);
+    expect(events(id, "agent_created").length).toBe(2);
+    expect(events(id, "agent_status").some((e) => agents.some((a) => a.id === e.agent_id && a.behavior.template_key === "specialist-reviewer"))).toBe(true);
+    expect(events(id, "edge_activity").length).toBeGreaterThanOrEqual(4);
+  });
+
+  test("a second review continues the reviewer's first session and numbers the round", async () => {
+    script = (b) => {
+      const role = who(b);
+      if (role === "reviewer") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks right.", findings: [] } }] };
+      if (role) throw new Error(`unexpected specialist ${role}`);
+      const n = outputs(b).length;
+      if (n === 0) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "First look at the heading." } }] };
+      if (n === 1) return { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Second look after the fix." } }] };
+      return { text: "Reviewed twice." };
+    };
+    const before = requests().length;
+    const done = await settle(await start("Check the heading"));
+    expect(done.status).toBe("completed");
+    const fresh = requests().slice(before);
+    const reviewer = fresh.filter((b) => who(b) === "reviewer");
+    expect(reviewer).toHaveLength(2);
+    expect(startsWith(reviewer[1]!, reviewer[0]!)).toBe(true);
+    expect(reviewer[1]!.input.length).toBeGreaterThan(reviewer[0]!.input.length);
+    expect(lastOutput(fresh.filter((b) => !who(b)).at(-1)!)).toContain("round 2");
+  });
+
+  test("an explore answer returns under 6,000 characters", async () => {
+    script = (b) => {
+      const role = who(b);
+      if (role === "explorer") return { text: "A".repeat(12_000) };
+      if (role) throw new Error(`unexpected specialist ${role}`);
+      return outputs(b).length === 0 ? { calls: [{ name: "explore", args: { question: "How is the heading built? Q1" } }] } : { text: "Explored." };
+    };
+    const before = requests().length;
+    const done = await settle(await start("Find the heading"));
+    expect(done.status).toBe("completed");
+    const answer = lastOutput(requests().slice(before).filter((b) => !who(b)).at(-1)!);
+    expect(answer.length).toBeGreaterThan(5_000);
+    expect(answer.length).toBeLessThan(6_000);
+  });
+
+  test("explore calls in one step run together and return in call order", async () => {
+    script = (b) => {
+      const role = who(b);
+      if (role === "explorer") {
+        return { text: `Answer ${/Q\d/.exec(lastUser(b))?.[0]}` };
+      }
+      if (role) throw new Error(`unexpected specialist ${role}`);
+      return outputs(b).length === 0
+        ? { calls: [{ name: "explore", args: { question: "Where is the heading? Q1" } }, { name: "explore", args: { question: "Which file holds the menu? Q2" } }, { name: "explore", args: { question: "What runs the tests? Q3" } }] }
+        : { text: "Explored three." };
+    };
+    const before = requests().length;
+    const done = await settle(await start("Answer three questions"));
+    expect(done.status).toBe("completed");
+    const explorer = requests().slice(before).find((b) => who(b) === "explorer")!;
+    expect(explorer.tools.map((t) => t.name)).toEqual(expect.arrayContaining(["fetch_url", "read_file"]));
+    expect(explorer.tools.map((t) => t.name)).not.toContain("submit_review");
+    const outs = requests().slice(before).filter((b) => !who(b)).at(-1)!.input.filter((i) => i.type === "function_call_output").map((i) => i.output);
+    expect(outs).toEqual(["Answer Q1", "Answer Q2", "Answer Q3"]);
+  });
+});
+
+describe("review message", () => {
+  test("a message with many findings stays under the return limit and says how many were cut", () => {
+    const findings = Array.from({ length: 120 }, (_, i) => ({ severity: "major" as const, file: `src/file${i}.ts`, lines: "1-9", problem: "p".repeat(150), evidence: "e".repeat(150), fix: "f".repeat(150) }));
+    const message = reviewReport(1, [{ critic: "reviewer", verdict: "request_changes", findings }], RETURN_LIMIT);
+    expect(message.length).toBeLessThanOrEqual(6_000);
+    expect(message).toMatch(/\d+ more findings did not fit/);
+  });
+
+  test("minor findings are listed for the user and never asked to be fixed", () => {
+    const message = reviewReport(2, [
+      { critic: "security", verdict: "approve", findings: [{ severity: "minor", file: "src/a.ts", lines: "3", problem: "Header could be stricter.", evidence: "line 3", fix: "add a header" }] },
+    ], RETURN_LIMIT);
+    expect(message.split("\n")[0]).toBe("Review of your change, round 2. security: approve.");
+    expect(message).toContain("No blocker or major finding.");
+    expect(message).toContain("Minor, not sent back:\nF1 src/a.ts:3 (security) Header could be stricter.");
   });
 });

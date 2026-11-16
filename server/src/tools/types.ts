@@ -95,6 +95,18 @@ export interface ToolContext {
   ownerOf(rel: string): string | null;
   /** Start the project's dev server in the background (or find the running one) and return where it listens. */
   devServer(): Promise<{ command: string; url: string | null; output: string }>;
+  /** The read-only specialists the review and explore tools call. Only the main agent of a solo conversation has them. */
+  specialists?: SpecialistPort;
+}
+
+/** The specialists a review can name. The explorer answers questions instead, through `explore`. */
+export type ReviewerName = "reviewer" | "security" | "designer";
+
+export interface SpecialistPort {
+  /** Runs the named specialists at once, waits for all of them, and returns their findings as one message. */
+  review(names: ReviewerName[], focus: string): Promise<string>;
+  /** Answers one question about the project or the web, in a message under the return limit. */
+  explore(question: string): Promise<string>;
 }
 
 export interface Tool<A = any> { // eslint-disable-line @typescript-eslint/no-explicit-any

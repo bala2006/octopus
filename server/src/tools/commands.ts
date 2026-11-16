@@ -9,6 +9,8 @@ import { environmentPath } from "../workspace/environment";
 import { defineTool, type ToolContext, type ToolResult } from "./types";
 
 const DEFAULT_TIMEOUT_S = 180;
+/** The start of a check-only result that refused a command. Such a command never ran. */
+export const CHECK_REFUSAL = "Refused by the check-only policy";
 /** Output is kept whole up to this size, so the spill file holds everything the command printed. */
 const CAPTURE_LIMIT = 10_000_000;
 
@@ -44,7 +46,7 @@ export const checkShellTool = defineTool({
   args: shellArgs,
   async run(ctx, a, callId) {
     const verdict: CheckVerdict = checkOnly(a.command, ctx.fs.root);
-    if (!verdict.allowed) return { text: `Refused by the check-only policy (rule ${verdict.rule}): ${verdict.reason}.`, ok: false };
+    if (!verdict.allowed) return { text: `${CHECK_REFUSAL} (rule ${verdict.rule}): ${verdict.reason}.`, ok: false };
     return execute(ctx, a, callId);
   },
 });

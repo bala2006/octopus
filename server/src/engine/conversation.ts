@@ -40,6 +40,7 @@ import { agentLoop, compactable, tokensOf, type LoopEvents } from "./agent";
 import { checksCanBeSkipped, DOC_OR_ASSET, type SourceFile } from "./checkScope";
 import { publish } from "./bus";
 import { SoloRun, type SoloHost } from "./solo";
+import { SPECIALIST_DEFS, specialistRole, type Seat, type SpecialistName } from "./specialists";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
 import { tierOf, type Tier } from "./risk";
 import { canRunBeside, owns, writes } from "./ownership";
@@ -251,7 +252,8 @@ export class Conversation {
       setRunStatus: (status, extra) => this.setRunStatus(status, extra),
       setStatus: (agent, status, activity) => this.setStatus(agent, status, activity),
       loopEvents: (agent) => this.loopEvents(agent),
-      toolContext: (memory) => this.context(this.lead, null, undefined, memory),
+      toolContext: (agent, memory) => this.context(agent, null, undefined, memory),
+      seat: (name) => this.seat(name),
       notes: () => [...this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]), ...this.p.db.memory.find("agent_id = ?", [this.lead.id])],
       model: (agent) => this.model(agent),
       effort: (agent) => this.effort(agent, "worker"),
@@ -795,6 +797,35 @@ export class Conversation {
     return agent;
   }
 
+  /** A specialist's seat: its agent, reporting to Octopus, and the two channels between them. The first use adds the agent to the canvas. */
+  private seat(name: SpecialistName): Seat {
+    const lead = this.lead;
+    const title = SPECIALIST_DEFS[name].title;
+    let agent = this.team.find((a) => a.behavior.template_key === specialistRole(name).key);
+    if (!agent) {
+      const added = agentFromRole(this.row.company_id, specialistRole(name), { name: freshName(this.team.map((a) => a.name), title), department: "Specialists", reports_to: lead.id, created_by: lead.id });
+      placeHire(this.team, added);
+      const edges = wire([...this.team, added], this.edges);
+      const company = this.p.db.companies.get(this.row.company_id)!;
+      this.p.db.tx(() => {
+        this.p.db.agents.insert(added);
+        for (const e of edges) this.p.db.edges.insert(e);
+        this.p.db.companies.update(company.id, { departments: departmentsOf([added], company.departments), revision: company.revision + 1, updated_at: now() });
+      });
+      this.team.push(added);
+      this.edges.push(...edges);
+      this.row.snapshot = { ...this.row.snapshot, agents: this.team, edges: this.edges };
+      this.state.agent_status[added.id] = "idle";
+      this.emit("agent_created", { agent: added, edges, created_by: lead.id, persisted: true, reason: `${title} checks the work for ${lead.name}`, department: { name: added.department, color: departmentColor(added.department) } });
+      this.save();
+      agent = added;
+    }
+    const id = agent.id;
+    const delegate = this.edges.find((e) => e.type === "delegate" && e.source_agent_id === lead.id && e.target_agent_id === id);
+    const report = this.edges.find((e) => e.type === "report" && e.source_agent_id === id && e.target_agent_id === lead.id);
+    if (!delegate || !report) throw new Error(`${title} has no channel to ${lead.name}`);
+    return { agent, delegate, report };
+  }
   /** Keeps the changed lines of a task's files since its last review, so a reviewer of a small change can read the diff. */
   private recordDiff(taskId: string, rel: string, before: string | null, after: string | null) {
     const hunk = changedLines(before, after);

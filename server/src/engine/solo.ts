@@ -20,6 +20,7 @@ import { projectOverview } from "../workspace/overview";
 import { rulesUpdate, type RulesSent } from "../workspace/instructions";
 import { agentLoop, type LoopEvents } from "./agent";
 import { fill, MAIN_PROMPT, runtimeContext } from "./prompts";
+import { Specialists, type Seat, type SpecialistName } from "./specialists";
 
 /** What the solo path needs from its conversation. The conversation owns the run row, the events and the messages. */
 export interface SoloHost {
@@ -35,7 +36,9 @@ export interface SoloHost {
   setRunStatus(status: RunStatus, extra?: { reason?: string; summary?: string }): void;
   setStatus(agent: AgentOut, status: AgentStatus, activity?: string): void;
   loopEvents(agent: AgentOut): LoopEvents;
-  toolContext(memory: { seen: Map<string, string>; shown: Shown }): ToolContext;
+  toolContext(agent: AgentOut, memory: { seen: Map<string, string>; shown: Shown }): ToolContext;
+  /** A specialist's seat in this company. The first use of each one adds its agent to the canvas. */
+  seat(name: SpecialistName): Seat;
   notes(): { key: string; value: string }[];
   model(agent: AgentOut): string;
   effort(agent: AgentOut): Effort | undefined;
@@ -93,9 +96,13 @@ export class SoloRun {
   private turnTokens = 0;
   /** Files this conversation has changed, for the usage counter. */
   private changed = new Set<string>();
+  /** Files this turn changed: the files a review brief lists. */
+  private turnChanged = new Set<string>();
+  private specialists: Specialists;
 
   constructor(private readonly host: SoloHost) {
     this.log = new SessionLog(path.join(host.p.root, ".octopus", "sessions", `${host.runId}.jsonl`));
+    this.specialists = new Specialists(host, () => ({ goal: this.turnTitle, changed: [...this.turnChanged] }));
   }
 
   /** A user message, verbatim, with its images. It starts a turn, or joins the running one before its next step. */
@@ -123,6 +130,8 @@ export class SoloRun {
   private async run(first: Item[], title: string) {
     this.running = true;
     this.turnTitle = title;
+    this.turnChanged = new Set();
+    this.specialists.startTurn();
     this.turnSteps = 0;
     this.turnTools = 0;
     this.turnTokens = 0;
@@ -259,13 +268,15 @@ export class SoloRun {
   }
 
   private toolContext(t: Transcript): ToolContext {
-    const ctx = this.host.toolContext({ seen: t.seen, shown: t.shown });
+    const ctx = this.host.toolContext(this.host.lead(), { seen: t.seen, shown: t.shown });
     const recordFile = ctx.recordFile;
     return {
       ...ctx,
+      specialists: this.specialists,
       recordFile: (rel, before, after, note) => {
         recordFile(rel, before, after, note);
         this.changed.add(rel);
+        this.turnChanged.add(rel);
         this.host.state.usage.files_changed = this.changed.size;
       },
     };
