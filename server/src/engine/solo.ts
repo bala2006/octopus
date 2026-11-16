@@ -188,6 +188,7 @@ export class SoloRun {
     }
     t.items.push(...items);
     if (!t.head) t.head = t.items.length;
+    this.save(t);
   }
 
   private context() {
@@ -220,7 +221,6 @@ export class SoloRun {
       beforeCall: async () => {
         if (this.turnTokens >= config.soloTurnTokens) throw new TokenBudgetSpent("tokens");
         this.turnSteps++;
-        this.save(t);
         await base.beforeCall();
       },
     };
@@ -228,7 +228,8 @@ export class SoloRun {
       const res = await agentLoop({
         reg: this.host.reg, model: this.host.model(lead), effort: this.host.effort(lead), instructions: t.instructions, input: t.items, tools: t.tools,
         ctx: this.toolContext(t), events, maxRounds: Math.max(0, config.soloStepLimit - this.turnSteps), requireStop: false, stopTools: [],
-        keepHead: t.head, steer: () => this.steer.splice(0).map((s) => s.item), cacheKey: `${this.host.runId}:${lead.id}`,
+        keepHead: t.head, steer: () => this.steer.splice(0).map((s) => s.item), persist: () => this.save(t),
+        cacheKey: `${this.host.runId}:${lead.id}:solo`,
       });
       if (res.stop?.kind === "ask") return { kind: "ask", question: res.stop.question, options: res.stop.options };
       if (res.exhausted) return { kind: "pause", reason: "steps" };

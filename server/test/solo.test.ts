@@ -1,5 +1,5 @@
 /** The solo path end to end through the HTTP API with a scripted model: one transcript per conversation, steering, limits, stops and restarts. */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { CanvasOut, MessageOut, RunDetail, WorkspaceOut } from "@octopus/shared";
@@ -243,3 +243,30 @@ test("each turn that ends with a reply is added to the run's report, under the r
     "## What does the page say?\n\nThe page says Acme.\n\n---\n\n## What kind of element is it?\n\nIt is a heading.",
   );
 });
+
+test("each item is in the session file as it completes, so a step's call is saved before its tool finishes", async () => {
+  const before = requests().length;
+  script = (b) => (outputs(b).length === 0
+    ? { calls: [{ name: "shell", args: { command: "node -e \"setTimeout(() => console.log('slept'), 1500)\"" } }] }
+    : { text: "The command finished." });
+  const id = await start("Run a short command");
+  const file = path.join(project(reg, ws.id).root, ".octopus", "sessions", `${id}.jsonl`);
+  // While the command sleeps, the file holds the call and not yet its output. Old code wrote the two together, after the output.
+  const callInFlight = () => {
+    if (!existsSync(file)) return false;
+    const text = readFileSync(file, "utf8");
+    return text.includes('"type":"function_call"') && !text.includes('"type":"function_call_output"');
+  };
+  expect(await waitFor(callInFlight, 10_000)).toBe(true);
+  const done = await turnDone(id, before + 2);
+  expect(done.status).toBe("completed");
+});
+
+async function waitFor(check: () => boolean, ms: number): Promise<boolean> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (check()) return true;
+    await sleep(10);
+  }
+  return false;
+}

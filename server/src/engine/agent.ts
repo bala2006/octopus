@@ -40,6 +40,8 @@ export interface LoopOptions {
   inbox?: string[];
   /** User messages sent during the turn, each appended as its own item, with its images, before the next step. */
   steer?: () => Item[];
+  /** Called after each item joins the transcript, so the caller can save the transcript as its items complete. */
+  persist?: () => void;
   /** Leading transcript items that summarizing must keep word for word: the brief and anything sent with it. */
   keepHead?: number;
   /** The tools in this turn's toolbox that end it (complete_task, submit_review, ...); the wrap-up and nudge name only these. */
@@ -262,10 +264,14 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     await o.events.beforeCall();
     if (o.inbox?.length) input.push({ role: "user", content: o.inbox.splice(0).join("\n\n") });
     if (o.steer) input.push(...o.steer());
+    o.persist?.();
     if (!compactionRefused && contextTokens(input, measured) > compactAt(window)) {
       let compacted = false;
       try { compacted = await summarize(o, functions, window); } catch (e) { if (o.ctx.signal.aborted) throw e; }
-      if (compacted) measured = null;
+      if (compacted) {
+        measured = null;
+        o.persist?.();
+      }
       else compactionRefused = true;
     }
     const res = await complete(o.reg, {
@@ -279,6 +285,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     o.events.usage(res);
     if (res.thought) o.events.thought(res.thought);
     input.push(...res.output);
+    o.persist?.();
     if (res.text.trim()) lastText = res.text.trim();
     if (!res.calls.length) {
       if (res.incomplete === "max_output_tokens") { input.push({ role: "user", content: "Your reply was cut off. Continue, in smaller steps." }); continue; }
@@ -295,6 +302,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       i += batch.length;
       if (stop) {
         for (const call of batch) input.push({ type: "function_call_output", call_id: call.call_id, output: "Skipped: the turn already ended." });
+        o.persist?.();
         continue;
       }
       // Each call in a batch starts from the same file-read ledger and works on its own copy. The copies are merged back in call order.
@@ -313,6 +321,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
         // A spilled output holds only its head and tail, so the file it came from is not in the transcript.
         if (kept.path) dropShown(o.ctx.shown, (at) => at === position);
         input.push({ type: "function_call_output", call_id: call.call_id, output: kept.text });
+        o.persist?.();
         if (r.image) {
           images.push(r.image);
           shots.push(`Screenshot taken: ${r.output}. The image was shown once to the model when it was taken.`);
@@ -326,9 +335,11 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     if (stop) return { stop, text: lastText, rounds: round };
     if (REPEAT_REMINDERS.includes(repeats)) {
       input.push({ role: "user", content: `You have made the same ${lastCall.split(":")[0]} call ${repeats} times in a row with identical arguments, and it keeps giving the same result. Change your approach: try something different, ask a teammate, or finish with what you have.` });
+      o.persist?.();
     }
     if (shots.length) {
       input.push({ role: "user", content: shots.join("\n") });
+      o.persist?.();
       pending = { role: "user", content: [{ type: "input_text", text: "Screenshot from your last tool call:" }, ...images.map((url) => ({ type: "input_image", image_url: url }))] };
     }
   }
