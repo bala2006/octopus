@@ -57,6 +57,20 @@ describe("read_file", () => {
     expect(tail.text.split("\n").slice(-2)).toEqual(["3000: line 3000", "(End of file - total 3000 lines)"]);
   });
 
+  test("a 2,000-line file of long lines stops at the character budget and names the offset to continue", async () => {
+    const { ctx } = project({ "long.txt": Array.from({ length: 2000 }, (_, i) => `${i}`.padEnd(100, "x")).join("\n") });
+    const { text } = await run(ctx, "read_file", { path: "long.txt" });
+    const lines = text.split("\n");
+    const footer = lines.at(-1)!;
+    const last = Number(footer.match(/^\(Output capped\. Showing lines 1-(\d+)\./)?.[1]);
+    expect(text.length).toBeLessThan(30_000);
+    expect(footer).toBe(`(Output capped. Showing lines 1-${last}. Use offset=${last + 1} to continue.)`);
+    expect(lines).toHaveLength(last + 1);
+    expect(lines[last - 1]!.startsWith(`${last}: `)).toBe(true);
+    const next = await run(ctx, "read_file", { path: "long.txt", offset: last + 1 });
+    expect(next.text.startsWith(`${last + 1}: `)).toBe(true);
+  });
+
   test("a limit above 2000 lines is refused by the schema", () => {
     const tool = fileTools.find((t) => t.name === "read_file")!;
     expect(() => tool.args.parse({ path: "big.txt", limit: 2001 })).toThrow();
@@ -118,6 +132,16 @@ describe("grep", () => {
     const lines = (await run(ctx, "grep", { pattern: "hit" })).text.split("\n");
     expect(lines.filter((l) => l.startsWith("  ")).length).toBe(250);
     expect(lines.at(-1)).toBe("(Stopped at 250 matches. Narrow the pattern or set include to see the rest.)");
+  });
+
+  test("many long matches stop at the character budget, say how many were shown, and suggest narrowing", async () => {
+    const { ctx } = project({ "wide.txt": Array.from({ length: 300 }, () => `hit ${"y".repeat(300)}`).join("\n") });
+    const { text } = await run(ctx, "grep", { pattern: "hit" });
+    const shown = text.split("\n").filter((l) => l.startsWith("  ")).length;
+    expect(text.length).toBeLessThanOrEqual(30_000);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(250);
+    expect(text.split("\n").at(-1)).toBe(`(Output capped at 30000 characters. Showing ${shown} matches. Narrow the pattern or set include to see the rest.)`);
   });
 
   test("a matched line longer than 2000 characters is cut", async () => {

@@ -18,6 +18,8 @@ const GENERATED = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnp
 /** Most lines one read returns, and most characters one line keeps. A longer result is spilled to a file by the agent loop. */
 const READ_LIMIT = 2_000;
 const LINE_LIMIT = 2_000;
+/** Characters one read or grep may return. It stays under the 40,000 the agent loop spills, so a capped result still pages. */
+const OUTPUT_BUDGET = 30_000;
 /** Files walked by one glob or grep call, and the largest file grep searches. */
 const WALK_LIMIT = 5_000;
 const GREP_FILE_LIMIT = 1_000_000;
@@ -35,6 +37,11 @@ const clipLine = (line: string): string =>
 
 const readFooter = (from: number, to: number, total: number): string =>
   to < total ? `(Showing lines ${from}-${to} of ${total}. Use offset=${to + 1} to continue.)` : `(End of file - total ${total} lines)`;
+
+const capFooter = (from: number, to: number): string => `(Output capped. Showing lines ${from}-${to}. Use offset=${to + 1} to continue.)`;
+
+const capNote = (shown: number): string =>
+  `(Output capped at ${OUTPUT_BUDGET} characters. Showing ${shown} matches. Narrow the pattern or set include to see the rest.)`;
 
 const read = (ctx: ToolContext, rel: string): string | null => {
   const abs = ctx.fs.abs(rel);
@@ -104,13 +111,22 @@ export const fileTools = [
       ctx.seen.set(rel, hash);
       const from = a.offset ?? 1;
       if (lines.length && from > lines.length) return { text: `offset ${from} is out of range for ${rel} (${lines.length} lines).`, ok: false };
-      const to = Math.min(lines.length, from - 1 + (a.limit ?? READ_LIMIT));
+      const wanted = Math.min(lines.length, from - 1 + (a.limit ?? READ_LIMIT));
+      const footerAt = (to: number) => (to < wanted ? capFooter(from, to) : readFooter(from, to, lines.length));
+      const body: string[] = [];
+      let chars = 0;
+      for (let n = from; n <= wanted; n++) {
+        const row = `${n}: ${clipLine(lines[n - 1]!)}`;
+        if (chars + row.length + 1 + footerAt(n).length > OUTPUT_BUDGET) break;
+        body.push(row);
+        chars += row.length + 1;
+      }
+      const to = from - 1 + body.length;
       const prior = ctx.shown.get(rel);
       if (prior?.hash === hash && prior.ranges.some(([f, t]) => f <= from && t >= to))
         return { text: `${rel} lines ${from}-${to} have not changed since you read them; they are earlier in this conversation.`, metrics: { read: true, redundant: true } };
       ctx.shown.set(rel, { hash, ranges: [...(prior?.hash === hash ? prior.ranges : []), [from, to]] });
-      const body = lines.slice(from - 1, to).map((line, i) => `${from + i}: ${clipLine(line)}`);
-      return { text: [...body, readFooter(from, to, lines.length)].join("\n"), metrics: { read: true } };
+      return { text: [...body, footerAt(to)].join("\n"), metrics: { read: true } };
     },
   }),
   defineTool({
@@ -127,21 +143,28 @@ export const fileTools = [
       try { re = new RegExp(a.pattern); }
       catch (e) { return { text: `Invalid regular expression: ${(e as Error).message}`, ok: false, metrics: { searched: true } }; }
       const out: string[] = [];
+      let chars = 0;
       let matches = 0;
+      let capped = false;
       for (const f of ctx.fs.walk({ max: WALK_LIMIT, actor: "agent" }).files) {
-        if (matches >= GREP_MATCHES) break;
+        if (matches >= GREP_MATCHES || capped) break;
         if ((a.include && !path.matchesGlob(f, a.include)) || isBinaryPath(f) || isSecretPath(f) || ctx.fs.size(f) > GREP_FILE_LIMIT) continue;
         const lines = splitLines(read(ctx, f) ?? "");
-        const hits: string[] = [];
+        let named = false;
         for (let i = 0; i < lines.length && matches < GREP_MATCHES; i++) {
           if (!re.test(lines[i]!)) continue;
+          const row = `  ${i + 1}: ${clipLine(lines[i]!.replace(/\r$/, ""))}`;
+          const block = named ? [row] : [f, row];
+          const size = block.reduce((n, line) => n + line.length + 1, 0);
+          if (chars + size + capNote(matches + 1).length + 1 > OUTPUT_BUDGET) { capped = true; break; }
+          out.push(...block);
+          chars += size;
+          named = true;
           matches++;
-          hits.push(`  ${i + 1}: ${clipLine(lines[i]!.replace(/\r$/, ""))}`);
         }
-        if (hits.length) out.push(f, ...hits);
       }
       if (!matches) return { text: "No matches.", metrics: { searched: true } };
-      const note = matches >= GREP_MATCHES ? [`(Stopped at ${GREP_MATCHES} matches. Narrow the pattern or set include to see the rest.)`] : [];
+      const note = capped ? [capNote(matches)] : matches >= GREP_MATCHES ? [`(Stopped at ${GREP_MATCHES} matches. Narrow the pattern or set include to see the rest.)`] : [];
       return { text: [...out, ...note].join("\n"), metrics: { searched: true } };
     },
   }),
