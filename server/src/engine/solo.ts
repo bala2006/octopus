@@ -10,7 +10,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { AgentOut, AgentStatus, Effort, MessageOut, Question, RunEventMap, RunStatus, RunTopic, Usage } from "@octopus/shared";
+import type { AgentOut, AgentStatus, Effort, MessageOut, Question, Requirement, RunEventMap, RunStatus, RunTopic, Usage } from "@octopus/shared";
 import { skillCatalog, effectiveSkills } from "../catalog/skills";
 import { config } from "../config";
 import type { Registry } from "../db/registry";
@@ -25,9 +25,10 @@ import { CHECK_LIMIT, projectOverview } from "../workspace/overview";
 import { rulesUpdate, type RulesSent } from "../workspace/instructions";
 import { agentLoop, type LoopEvents } from "./agent";
 import { checkBlockMessage, describeChecks, planChecks, runCheckList, type ChecksOutcome } from "./checks";
+import { DOC_OR_ASSET } from "./checkScope";
 import { fill, MAIN_PROMPT, runtimeContext } from "./prompts";
 import { reviewersFor, tierOf } from "./risk";
-import { Specialists, type Seat, type SpecialistName } from "./specialists";
+import { Specialists, VERIFY_ROUNDS, type Seat, type SpecialistName } from "./specialists";
 
 /** Floor rounds one request may run. A reply that still has open findings after them goes out as incomplete. */
 const FLOOR_ROUNDS = 2;
@@ -48,6 +49,9 @@ export interface SoloHost {
   setRunStatus(status: RunStatus, extra?: { reason?: string; summary?: string }): void;
   /** Aborts when the user stops the conversation. */
   signal(): AbortSignal;
+  /** The run's requirements list, which shows the verifier's asks. */
+  requirements(): Requirement[];
+  setRequirements(list: Requirement[]): void;
   setStatus(agent: AgentOut, status: AgentStatus, activity?: string): void;
   loopEvents(agent: AgentOut): LoopEvents;
   toolContext(agent: AgentOut, memory: { seen: Map<string, string>; shown: Shown }): ToolContext;
@@ -334,7 +338,8 @@ export class SoloRun {
    * The review floor, run when a reply would end the turn. The project checks run first, because they cost no model call:
    * a failure goes back to the main agent as one message, for at most CHECK_BLOCKS messages a request. Then the reviewers
    * run for a normal or high diff that no review covers, and their blocker and major findings go back the same way, for at
-   * most FLOOR_ROUNDS rounds. A diff at trivial or small tier runs no reviewer. Null lets the reply go out.
+   * most FLOOR_ROUNDS rounds. Last, the verifier checks the request's asks for a normal or high code change it has not
+   * checked yet, and an ask it finds unmet goes back the same way, for at most VERIFY_ROUNDS rounds. Null lets the reply go out.
    */
   private async floor(reply: string): Promise<Item | null> {
     if (!this.host.reg.setting<boolean>("solo_review_floor", true)) return null;
@@ -352,18 +357,51 @@ export class SoloRun {
     const tier = tierOf({
       files: diff.map((d) => d.file), lines: diff.reduce((sum, d) => sum + d.lines, 0), specialists: 0, requirements: 0, revised: this.floorRounds > 0,
     });
-    if (tier === "trivial" || tier === "small" || !this.specialists.reviewDue()) return null;
-    if (this.floorRounds === FLOOR_ROUNDS) {
-      const open = this.specialists.blockingFindings().length;
-      this.incomplete = open
-        ? `Two review rounds ended with ${open} blocker or major finding${open === 1 ? "" : "s"} open.`
-        : "The last change was not reviewed: two review rounds had already run.";
+    const deep = tier === "normal" || tier === "high";
+    // A fix to a change a reviewer sent back is checked again at any tier, because its findings are answered only by a check.
+    if ((deep || this.specialists.blockingFindings().length > 0) && this.specialists.reviewDue()) {
+      if (this.floorRounds === FLOOR_ROUNDS) {
+        const open = this.specialists.blockingFindings().length;
+        this.incomplete = open
+          ? `Two review rounds ended with ${open} blocker or major finding${open === 1 ? "" : "s"} open.`
+          : "The last change was not reviewed: two review rounds had already run.";
+        return null;
+      }
+      this.floorRounds++;
+      const browser = this.host.lead().tools.browser === true;
+      const round = await this.specialists.check(reviewersFor(diff.map((d) => d.file), browser), reply, checks.text);
+      if (round.blocking) return { role: "user", content: round.text };
+    }
+    const codeChanged = [...this.turnBefore.keys()].some((f) => !DOC_OR_ASSET.test(f));
+    if (!deep || !codeChanged || !this.specialists.verifyDue()) return null;
+    if (this.specialists.verifyRoundCount() === VERIFY_ROUNDS) {
+      this.incomplete = this.notMetReason();
       return null;
     }
-    this.floorRounds++;
-    const browser = this.host.lead().tools.browser === true;
-    const round = await this.specialists.check(reviewersFor(diff.map((d) => d.file), browser), reply, checks.text);
-    return round.blocking ? { role: "user", content: round.text } : null;
+    const verdict = await this.specialists.verify(reply, checks.text);
+    if (!verdict.unmet) return null;
+    if (this.specialists.verifyRoundCount() === VERIFY_ROUNDS) {
+      this.incomplete = this.notMetReason();
+      return null;
+    }
+    return { role: "user", content: verdict.text };
+  }
+
+  /** Why the verifier's last round leaves the request incomplete: the asks it did not meet, or that it submitted none. */
+  private notMetReason(): string {
+    const ids = this.specialists.unmetAsks().map((a) => a.id);
+    return ids.length
+      ? `Two acceptance checks left ${ids.join(", ")} not met.`
+      : "Two acceptance checks did not submit their asks.";
+  }
+
+  /** Why a reply cannot count as completed, or null when it can: a floor that ran out, an open blocker, or an ask not met. */
+  private unfinished(): string | null {
+    if (this.incomplete) return this.incomplete;
+    const open = this.specialists.blockingFindings().length;
+    if (open) return `${open} blocker or major finding${open === 1 ? "" : "s"} open.`;
+    const unmet = this.specialists.unmetAsks();
+    return unmet.length ? `Not met: ${unmet.map((a) => a.id).join(", ")}.` : null;
   }
 
   /**
@@ -412,7 +450,8 @@ export class SoloRun {
       const text = open ? `${body}\n\n${open}` : body;
       this.host.post({ type: "final_report", content: text });
       this.host.recap(this.turnTitle, text);
-      this.host.setRunStatus(this.incomplete ? "incomplete" : "completed", { summary: firstLine(text, 300), reason: this.incomplete ?? "" });
+      const reason = this.unfinished();
+      this.host.setRunStatus(reason ? "incomplete" : "completed", { summary: firstLine(text, 300), reason: reason ?? "" });
       return;
     }
     const text = this.pauseText(t, outcome.reason);
@@ -422,7 +461,7 @@ export class SoloRun {
 
   /** The open items a reply lists: the last review's minor notes, and its blockers when the run ends incomplete. */
   private openItems(): string {
-    const blocking = this.incomplete ? this.specialists.blockingFindings() : [];
+    const blocking = this.unfinished() ? this.specialists.blockingFindings() : [];
     return renderOpenItems([...blocking, ...this.specialists.minorFindings()]);
   }
 

@@ -172,7 +172,7 @@ describe("project snapshot", () => {
 });
 
 /** Tools that change state, remember things or ask the user. No specialist may hold one. */
-const WRITE_TOOLS = ["write_file", "edit_file", "move_file", "delete_file", "remember", "forget", "ask_user", "todo_write", "message", "reply", "pin", "complete_task", "block_task", "submit_acceptance", "start_work", "hire_agent"];
+const WRITE_TOOLS = ["write_file", "edit_file", "move_file", "delete_file", "remember", "forget", "ask_user", "todo_write", "message", "reply", "pin", "complete_task", "block_task", "start_work", "hire_agent"];
 
 describe("specialist definitions", () => {
   test.each(SPECIALISTS)("%s has its prompt and skill, under 4,000 characters together", (name) => {
@@ -183,7 +183,7 @@ describe("specialist definitions", () => {
   });
 
   test("each specialist has the effort the plan sets", () => {
-    expect(Object.fromEntries(SPECIALISTS.map((n) => [n, SPECIALIST_DEFS[n].effort]))).toEqual({ reviewer: "medium", security: "high", designer: "high", explorer: "low" });
+    expect(Object.fromEntries(SPECIALISTS.map((n) => [n, SPECIALIST_DEFS[n].effort]))).toEqual({ reviewer: "medium", security: "high", designer: "high", explorer: "low", verifier: "high" });
   });
 
   test("the explorer ends with a plain text answer, and no prompt names a tool its toolbox lacks", () => {
@@ -234,6 +234,7 @@ const SPECIALIST_PROMPTS: [string, string][] = [
   ["You are the security reviewer on a coding team", "security"],
   ["You are the designer on a coding team", "designer"],
   ["You answer one question for Octopus", "explorer"],
+  ["You are the verifier on a coding team", "verifier"],
 ];
 
 interface Request { instructions: string; input: any[]; tools: { name: string }[] } // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -307,15 +308,18 @@ describe("review and explore from a solo conversation", () => {
       }
       if (role === "security") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "No input or secret is involved.", findings: [] } }] };
       if (role) throw new Error(`unexpected specialist ${role}`);
-      return n === 0 ? { calls: [{ name: "review", args: { specialists: ["reviewer", "security"], focus: "Changed the heading in index.html to Globex." } }] } : { text: "Reviewed the change." };
+      const asked = lastUser(b).startsWith("Rename the heading");
+      return n === 0 && asked ? { calls: [{ name: "review", args: { specialists: ["reviewer", "security"], focus: "Changed the heading in index.html to Globex." } }] } : { text: "Reviewed the change." };
     };
     const before = requests().length;
     const id = await start("Rename the heading to Globex");
     const done = await settle(id);
-    expect(done.status).toBe("completed");
+    // The main agent never answers the major finding, so every fix round finds it still open.
+    expect(done.status).toBe("incomplete");
+    expect(done.halt_reason).toBe("Two review rounds ended with 1 blocker or major finding open.");
     const fresh = requests().slice(before);
     const reviewer = fresh.filter((b) => who(b) === "reviewer");
-    expect(reviewer).toHaveLength(3);
+    expect(reviewer).toHaveLength(9);
     const names = reviewer[0]!.tools.map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining(["read_file", "glob", "grep", "shell", "submit_review"]));
     for (const forbidden of WRITE_TOOLS) expect(names).not.toContain(forbidden);
@@ -399,6 +403,8 @@ describe("review and explore from a solo conversation", () => {
 
   describe("review floor", () => {
     const approve: Reply = { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks right.", findings: [] } }] };
+    /** The verifier finds the one ask met. */
+    const verified: Reply = { calls: [{ name: "submit_acceptance", args: { asks: [{ ask: "Add the report module", met: true, evidence: "Ran the page and saw the report." }] } }] };
     /** A main agent that writes `write` once, then replies. A review message gets `answer`. */
     const mainTurn = (write: { path: string; content: string } | null, reply: string, answer = "Checked it again. It stays.") => (b: Request): Reply => {
       if (lastUser(b).startsWith("Review of your change")) return { text: answer };
@@ -408,7 +414,7 @@ describe("review and explore from a solo conversation", () => {
     /** One request in which the main agent writes a file and the specialists answer with `specialist`. */
     const runWrite = async (rel: string, content: string, specialist: (b: Request) => Reply = () => approve) => {
       const before = requests().length;
-      script = (b) => (who(b) ? specialist(b) : mainTurn({ path: rel, content }, "Wrote it.")(b));
+      script = (b) => (who(b) === "verifier" ? verified : who(b) ? specialist(b) : mainTurn({ path: rel, content }, "Wrote it.")(b));
       const id = await start(`Add ${rel}`);
       const done = await settle(id);
       const fresh = requests().slice(before);
@@ -418,9 +424,9 @@ describe("review and explore from a solo conversation", () => {
 
     test("the floor runs the reviewer at normal and high, and runs nothing at trivial or small", async () => {
       const normal = await runWrite("src/report.ts", lines(100));
-      expect(normal.roles).toEqual(["reviewer"]);
+      expect(normal.roles).toEqual(["reviewer", "verifier"]);
       const high = await runWrite("src/auth/login.ts", "export const ok = true;\n");
-      expect(high.roles.sort()).toEqual(["reviewer", "security"]);
+      expect(high.roles.sort()).toEqual(["reviewer", "security", "verifier"]);
       const trivial = await runWrite("src/one.ts", "export const one = 1;\n");
       expect(trivial.roles).toEqual([]);
       const small = await runWrite("src/small.ts", lines(25));
@@ -431,6 +437,7 @@ describe("review and explore from a solo conversation", () => {
     test("a review the main agent already ran covers its change, so the floor does not run again", async () => {
       const before = requests().length;
       script = (b) => {
+        if (who(b) === "verifier") return verified;
         if (who(b)) return approve;
         const n = outputs(b).length;
         if (n === 0) return { calls: [{ name: "write_file", args: { path: "src/report.ts", content: lines(100) } }] };
@@ -445,7 +452,7 @@ describe("review and explore from a solo conversation", () => {
     test("two floor rounds at most: the reply goes out incomplete, with the open findings listed", async () => {
       const blocker: Reply = { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "The filter is ignored.", findings: [{ severity: "major", file: "src/report.ts", lines: "1-100", problem: "The page ignores the filter.", evidence: "report.ts never reads the filter.", fix: "Read the filter in report.ts." }] } }] };
       const before = requests().length;
-      script = (b) => (who(b) ? blocker : mainTurn({ path: "src/report.ts", content: lines(100) }, "I kept the module as it is.")(b));
+      script = (b) => (who(b) === "verifier" ? verified : who(b) ? blocker : mainTurn({ path: "src/report.ts", content: lines(100) }, "I kept the module as it is.")(b));
       const id = await start("Add the report module");
       const done = await settle(id);
       expect(done.status).toBe("incomplete");
@@ -464,7 +471,7 @@ describe("review and explore from a solo conversation", () => {
     test("the second floor round continues the reviewer's first session", async () => {
       const blocker: Reply = { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "Still wrong.", findings: [{ severity: "major", file: "src/report.ts", lines: "1", problem: "The page is blank.", evidence: "report.ts returns nothing.", fix: "Return the rows." }] } }] };
       const before = requests().length;
-      script = (b) => (who(b) ? blocker : mainTurn({ path: "src/report.ts", content: lines(100) }, "Kept it.")(b));
+      script = (b) => (who(b) === "verifier" ? verified : who(b) ? blocker : mainTurn({ path: "src/report.ts", content: lines(100) }, "Kept it.")(b));
       await settle(await start("Add the report module"));
       const reviewer = requests().slice(before).filter((b) => who(b) === "reviewer");
       expect(reviewer).toHaveLength(2);
@@ -475,7 +482,7 @@ describe("review and explore from a solo conversation", () => {
       const minor: Reply = { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Fine, with one naming note.", findings: [{ severity: "minor", file: "src/report.ts", lines: "3", problem: "The name could be clearer.", evidence: "line 3 uses x", fix: "rename x" }] } }] };
       const run = await runWrite("src/report.ts", lines(100), () => minor);
       expect(run.status).toBe("completed");
-      expect(run.roles).toEqual(["reviewer"]);
+      expect(run.roles).toEqual(["reviewer", "verifier"]);
       const main = run.fresh.filter((b) => !who(b));
       expect(main).toHaveLength(2);
       expect(main.some((b) => lastUser(b).startsWith("Review of your change"))).toBe(false);

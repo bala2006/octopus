@@ -243,6 +243,7 @@ export class Conversation {
   private soloHost(): SoloHost {
     return {
       p: this.p, reg: this.reg, runId: this.row.id, state: this.state, lead: () => this.lead, signal: () => this.abort.signal,
+      requirements: () => this.state.requirements, setRequirements: (list) => this.setRequirements(list),
       emit: (type, data) => this.emit(type, data),
       post: (m) => this.post({ from: this.lead.id, to: null, ...m }),
       recap: (title, text) => { this.row.report_md = appendRecap(this.row.report_md, title, text); },

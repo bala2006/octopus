@@ -31,6 +31,7 @@ export type Stop =
   | { kind: "plan_ready"; note: string }
   | { kind: "reply"; message: string }
   | { kind: "acceptance"; results: { id: string; met: boolean; evidence: string }[] }
+  | { kind: "asks"; asks: { id?: string; ask: string; met: boolean; evidence: string }[] }
   /** The agent answered the message its turn was started for. */
   | { kind: "answered"; text: string };
 
@@ -100,7 +101,7 @@ export interface ToolContext {
 }
 
 /** The specialists a review can name. The explorer answers questions instead, through `explore`. */
-export type ReviewerName = "reviewer" | "security" | "designer";
+export type ReviewerName = "reviewer" | "security" | "designer" | "verifier";
 
 export interface SpecialistPort {
   /** Runs the named specialists at once, waits for all of them, and returns their findings as one message. */

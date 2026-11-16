@@ -8,7 +8,7 @@ import { fileTools } from "./files";
 import { skillTool } from "./skill";
 import { acceptanceTool, askUser, collabTools, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
 import { todoTools } from "./todo";
-import { exploreTool, reviewCallTool } from "./review";
+import { askVerdictTool, exploreTool, reviewCallTool } from "./review";
 import type { Tool } from "./types";
 import { webTools } from "./web";
 
@@ -86,7 +86,7 @@ export async function soloToolbox(reg: Registry, root: string, agent: AgentOut):
 }
 
 /** The tools a read-only specialist may hold. None of them writes, edits, deletes, remembers or asks the user. */
-export type SpecialistTool = "read_file" | "glob" | "grep" | "shell" | "fetch_url" | "start_dev_server" | "browser" | "submit_review";
+export type SpecialistTool = "read_file" | "glob" | "grep" | "shell" | "fetch_url" | "start_dev_server" | "browser" | "submit_review" | "submit_acceptance";
 
 const SPECIALIST_TOOLS: Record<Exclude<SpecialistTool, "browser">, Tool> = {
   read_file: fileTools.find((f) => f.name === "read_file")!,
@@ -96,6 +96,7 @@ const SPECIALIST_TOOLS: Record<Exclude<SpecialistTool, "browser">, Tool> = {
   fetch_url: webTools.find((w) => w.name === "fetch_url")!,
   start_dev_server: commandTools.find((c) => c.name === "start_dev_server")!,
   submit_review: reviewTool,
+  submit_acceptance: askVerdictTool,
 };
 
 /** A specialist's toolbox: exactly the names it lists. The browser is the full Playwright list, as a designer needs it. */

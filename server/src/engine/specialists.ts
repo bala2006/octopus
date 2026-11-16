@@ -1,7 +1,8 @@
 /**
- * The read-only specialists: reviewer (correctness), security, designer (how the UI looks) and explorer (answers one
- * question). Each has one prompt and one skill under catalog/specialists, a toolbox and an effort. Its instructions are
- * the prompt followed by the skill, and they never change, so every round reuses the cached prefix. Each specialist keeps
+ * The read-only specialists: reviewer (correctness), security, designer (how the UI looks), explorer (answers one
+ * question) and verifier (checks each ask of the user's messages by running the product). Each has one prompt and one
+ * skill under catalog/specialists, a toolbox and an effort. Its instructions are the prompt followed by the skill, and they
+ * never change, so every round reuses the cached prefix. Each specialist keeps
  * one session per conversation, so a later round continues the earlier one. A call that finds the session busy, such as a
  * second explore in the same step, gets a fresh session for itself.
  *
@@ -12,7 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentOut, AgentStatus, Effort, EdgeOut, RoleTemplateOut, RunEventMap, RunTopic } from "@octopus/shared";
+import type { AgentOut, AgentStatus, Effort, EdgeOut, Requirement, RoleTemplateOut, RunEventMap, RunTopic } from "@octopus/shared";
 import type { Registry } from "../db/registry";
 import type { Item } from "../llm/azure";
 import { briefDiff, changedLines, type FileDiff } from "../lib/diff";
@@ -24,8 +25,9 @@ import { CHECK_REFUSAL } from "../tools/commands";
 import type { ReviewerName, Shown, ToolContext } from "../tools/types";
 import { agentLoop, type LoopEvents } from "./agent";
 import type { ChecksOutcome } from "./checks";
+import { foldVerdicts, toRequirement, verdictMessage, type Ask, type Verdict } from "./acceptance";
 
-export const SPECIALISTS = ["reviewer", "security", "designer", "explorer"] as const;
+export const SPECIALISTS = ["reviewer", "security", "designer", "explorer", "verifier"] as const;
 export type SpecialistName = (typeof SPECIALISTS)[number];
 
 export interface SpecialistDef {
@@ -33,8 +35,8 @@ export interface SpecialistDef {
   title: string;
   effort: Effort;
   tools: readonly SpecialistTool[];
-  /** How a round ends: a submit_review call with a verdict, or a plain text answer. */
-  ends: "review" | "answer";
+  /** How a round ends: a submit_review call with a verdict, a plain text answer, or a submit_acceptance call with an entry per ask. */
+  ends: "review" | "answer" | "verdict";
   instructions: string;
 }
 
@@ -49,6 +51,7 @@ export const SPECIALIST_DEFS: Record<SpecialistName, SpecialistDef> = {
   security: { name: "security", title: "Security reviewer", effort: "high", tools: [...CHECKS, "fetch_url", "submit_review"], ends: "review", instructions: instructionsOf("security") },
   designer: { name: "designer", title: "Designer", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_review"], ends: "review", instructions: instructionsOf("designer") },
   explorer: { name: "explorer", title: "Explorer", effort: "low", tools: [...CHECKS, "fetch_url"], ends: "answer", instructions: instructionsOf("explorer") },
+  verifier: { name: "verifier", title: "Verifier", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_acceptance"], ends: "verdict", instructions: instructionsOf("verifier") },
 };
 
 /** The company role of a specialist. It is not in the role library, so it never appears in the hire list. */
@@ -64,6 +67,8 @@ export function specialistRole(name: SpecialistName): RoleTemplateOut {
 
 /** The most one round returns to the main agent, in characters. A message is kept under 6,000 characters with room to spare. */
 export const RETURN_LIMIT = 5_900;
+/** Verifier rounds one request may run. The second round is the last: an ask still not met after it stays unmet. */
+export const VERIFY_ROUNDS = 2;
 /** Steps one specialist round may take before it is stopped. */
 const ROUND_STEPS = 60;
 /** Written to the transcript when a specialist round cannot be undone. */
@@ -84,6 +89,9 @@ export interface SpecialistHost {
   loopEvents(agent: AgentOut): LoopEvents;
   toolContext(agent: AgentOut, memory: { seen: Map<string, string>; shown: Shown }): ToolContext;
   model(agent: AgentOut): string;
+  /** The run's requirements list, which shows the verifier's asks. */
+  requirements(): Requirement[];
+  setRequirements(list: Requirement[]): void;
 }
 
 /** The request a review is about. The solo path keeps these up to date as the turn runs. */
@@ -100,9 +108,11 @@ export interface RequestFacts {
 
 /** What one review round returns: the message for the main agent, and how many of its findings block the reply. */
 export interface ReviewRound { text: string; blocking: number }
+/** What one verifier round returns: the message for the main agent, and how many asks are not met. */
+export interface VerifyRound { text: string; unmet: number }
 
 interface Session { items: Item[]; busy: boolean; seen: Map<string, string>; shown: Shown }
-interface Outcome { verdict: CriticReport["verdict"]; findings: FindingInput[]; text: string }
+interface Outcome { verdict: CriticReport["verdict"]; findings: FindingInput[]; text: string; asks?: Verdict[] }
 /** The commands that ran in the rounds that share one project snapshot, with the specialist that ran each. */
 interface Group { ran: { name: SpecialistName; command: string }[] }
 
@@ -125,6 +135,14 @@ export class Specialists {
   private blocking: Finding[] = [];
   /** Minor findings of the last review round. They are listed to the user and never sent back. */
   private minors: Finding[] = [];
+  /** The verifier's asks for this request, with the verdict on each. */
+  private asks: Ask[] = [];
+  /** Verifier rounds this request has run. */
+  private verifyCount = 0;
+  /** The file change count when the last verifier round started. A later change makes the verifier due again. */
+  private verifiedAt: number | null = null;
+  /** File contents when the last verifier round started. The next verifier brief shows the change since then. */
+  private verifiedFrom = new Map<string, string | null>();
 
   /** `runChecks` runs the project checks for a review brief, when the caller has not run them already. */
   constructor(private readonly host: SpecialistHost, private readonly facts: () => RequestFacts, private readonly runChecks: () => Promise<ChecksOutcome>) {}
@@ -137,6 +155,10 @@ export class Specialists {
     this.covered = null;
     this.blocking = [];
     this.minors = [];
+    this.asks = [];
+    this.verifyCount = 0;
+    this.verifiedAt = null;
+    this.verifiedFrom = new Map();
   }
 
   /** The files this request changed, each with the lines that differ from its content before the request. */
@@ -157,9 +179,16 @@ export class Specialists {
     return this.minors;
   }
 
-  /** Runs the named reviewers at once, waits for all of them, and returns their findings as one message. */
+  /**
+   * The main agent's review call. The reviewers run at once. The verifier runs after them, and only once the project checks
+   * pass. Their findings and verdicts come back as one message.
+   */
   async review(names: ReviewerName[], focus: string): Promise<string> {
-    return (await this.check(names, focus)).text;
+    const parts: string[] = [];
+    const reviewers = names.filter((n) => n !== "verifier");
+    if (reviewers.length) parts.push((await this.check(reviewers, focus)).text);
+    if (names.includes("verifier")) parts.push(await this.verifyNow(focus));
+    return parts.join("\n\n");
   }
 
   /** Runs reviewers on the request's change, and keeps their findings for the next round to check. */
@@ -178,6 +207,84 @@ export class Specialists {
     this.blocking = numbered.filter((f) => f.severity !== "minor");
     this.minors = numbered.filter((f) => f.severity === "minor");
     return { text: reviewReport(round, reports, RETURN_LIMIT, first), blocking: this.blocking.length };
+  }
+
+  /** Asks the verifier to check the request: a round lists its asks, checks each one in the running product, and submits them. */
+  async verify(focus: string, checks: string): Promise<VerifyRound> {
+    const round = ++this.verifyCount;
+    const brief = this.verifyBrief(round, focus, checks);
+    const changesAtStart = this.facts().changes;
+    this.verifiedFrom = new Map([...this.facts().before.keys()].map((file) => [file, this.current(file)]));
+    const outcome = await this.inRound(() => this.round("verifier", brief));
+    let next = this.host.requirements().length;
+    this.asks = foldVerdicts(this.asks, outcome.asks ?? [], () => `R${++next}`);
+    this.publishAsks();
+    // A round that submitted no asks checked nothing, so the change stays due for another round.
+    if (!this.asks.length) return { text: "The acceptance check submitted no asks.", unmet: 1 };
+    this.verifiedAt = changesAtStart;
+    return { text: verdictMessage(round, this.asks, RETURN_LIMIT), unmet: this.asks.filter((a) => !a.met).length };
+  }
+
+  /** The asks of this request that the verifier has not found met. */
+  unmetAsks(): Ask[] {
+    return this.asks.filter((a) => !a.met);
+  }
+
+  /** Whether the verifier should check the request again: a change came after its last round. */
+  verifyDue(): boolean {
+    return this.verifiedAt !== this.facts().changes;
+  }
+
+  /** The verifier rounds this request has run. */
+  verifyRoundCount(): number {
+    return this.verifyCount;
+  }
+
+  /** The verifier, when the main agent asks for it. It runs after the project checks, and only when the change is not yet verified. */
+  private async verifyNow(focus: string): Promise<string> {
+    const checks = await this.runChecks();
+    if (checks.stopped) return "The turn was stopped.";
+    if (checks.failing.length) return `The project's checks fail, so the acceptance check did not run.\n\n${checks.text}`;
+    if (!this.verifyDue()) return verdictMessage(this.verifyCount, this.asks, RETURN_LIMIT);
+    if (this.verifyCount === VERIFY_ROUNDS) return `The acceptance check already ran ${VERIFY_ROUNDS} times for this request.\n\n${verdictMessage(this.verifyCount, this.asks, RETURN_LIMIT)}`;
+    return (await this.verify(focus, checks.text)).text;
+  }
+
+  /** The verifier's brief. Round one lists the user's messages; a later round lists the asks so far and the change since the last round. */
+  private verifyBrief(round: number, focus: string, checks: string): string {
+    const facts = this.facts();
+    const messages = `The user's messages for this request, verbatim:\n${facts.messages.join("\n\n")}`;
+    if (round === 1) {
+      return [
+        "Verify round 1 of this request. Every ask in the user's messages below is yours to check.",
+        messages,
+        `What the main agent says it did and how it checked it:\n${focus}`,
+        `Project checks:\n${checks}`,
+        `Diff since the request started:\n${briefDiff(this.requestDiff())}`,
+      ].join("\n\n");
+    }
+    const since = (file: string) => (this.verifiedFrom.has(file) ? this.verifiedFrom.get(file)! : facts.before.get(file) ?? null);
+    const asks = this.asks.map((a) => `${a.id} [${a.met ? "met" : "not met"}] ${a.ask}\n  Evidence: ${a.evidence}`).join("\n");
+    return [
+      `Verify round ${round} of this request. Check each ask below again in the running product, and submit every one with its id. Add an ask only for a request in the user's messages that is not listed.`,
+      `Asks so far:\n${asks}`,
+      messages,
+      `What the main agent says it did and how it checked it:\n${focus}`,
+      `Project checks:\n${checks}`,
+      `Diff since the last verify round:\n${briefDiff(this.diffSince(since))}`,
+    ].join("\n\n");
+  }
+
+  /** Shows the request's asks in the run's requirements list, each as met or not met with its evidence. */
+  private publishAsks() {
+    const current = this.host.requirements();
+    const known = new Set(current.map((r) => r.id));
+    const updated = current.map((r) => {
+      const a = this.asks.find((x) => x.id === r.id);
+      return a ? toRequirement(a) : r;
+    });
+    const added = this.asks.filter((a) => !known.has(a.id)).map(toRequirement);
+    this.host.setRequirements([...updated, ...added]);
   }
 
   /** Answers one question. Several calls in one step run at the same time. */
@@ -239,6 +346,7 @@ export class Specialists {
       });
       this.host.setStatus(agent, "done", "Reported");
       if (res.stop?.kind === "review") return { verdict: res.stop.verdict, findings: res.stop.findings, text: res.stop.comments };
+      if (res.stop?.kind === "asks") return { verdict: null, findings: [], text: "", asks: res.stop.asks };
       return { verdict: null, findings: [], text: res.exhausted ? "The specialist ran out of steps before it finished." : res.text };
     } catch (e) {
       this.host.setStatus(agent, "error", (e as Error).message);
