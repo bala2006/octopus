@@ -206,6 +206,13 @@ export class Specialists {
     this.found += numbered.length;
     this.blocking = numbered.filter((f) => f.severity !== "minor");
     this.minors = numbered.filter((f) => f.severity === "minor");
+    this.host.emit("review_round", {
+      round,
+      specialists: names.map((name, i) => ({
+        agent_id: this.host.seat(name).agent.id, name, verdict: outcomes[i]!.verdict,
+        findings: numbered.filter((f) => f.critic === name).map(({ id, critic, severity, file, lines, problem, evidence, fix }) => ({ id, critic, severity, file, lines, problem, evidence, fix })),
+      })),
+    });
     return { text: reviewReport(round, reports, RETURN_LIMIT, first), blocking: this.blocking.length };
   }
 

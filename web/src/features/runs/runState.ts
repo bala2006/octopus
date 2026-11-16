@@ -1,6 +1,7 @@
 import type { AwaitingQuestion } from "./QuestionCard";
 /** Pure reducer turning run events (live or replayed) into view state. Used for live runs and timeline scrubbing. */
 import type { AgentOut, EdgeOut, MessageOut, PendingApproval, RunEvent, TaskOut } from "@/types";
+import type { Requirement, ReviewSpecialist } from "@octopus/shared";
 import type { LiveOverlay } from "@/features/canvas/live";
 import { appendStream } from "./streamView";
 import { callStep, finishStep, thoughtStep, type Step } from "./steps";
@@ -33,6 +34,12 @@ export interface BrowserAction {
 export interface WorkflowPhase { key: string; title: string; owner: string | null; status: "pending" | "active" | "done" | "skipped" | "failed"; loops?: number; summary?: string }
 export interface WorkflowState { track: string | null; index: number; ended: boolean; reason?: string; phases: WorkflowPhase[] }
 export interface ProtocolState { kind: "debate" | "review"; result: string; edge_id: string; state: Record<string, any>; seq?: number } // eslint-disable-line @typescript-eslint/no-explicit-any
+/** The main agent's todo list, as its latest `todo_updated` event sent it. */
+export interface TodoState { agent_id: string; items: { content: string; status: "pending" | "in_progress" | "completed" }[] }
+/** One specialist's row in a review round: its verdict, its findings, and the tool steps it took in that round. */
+export interface ReviewRow { agent_id: string; name: string; verdict: "approve" | "request_changes" | null; findings: ReviewSpecialist["findings"]; steps: Step[] }
+/** One review round, as one card in the feed. `seq` places it in the feed. */
+export interface ReviewRound { seq: number; round: number; specialists: ReviewRow[] }
 
 export interface RunLive {
   status: string;
@@ -74,6 +81,9 @@ export interface RunLive {
   lastSeq: number;
   live: boolean;
   replayDone: boolean;
+  todos: TodoState | null;
+  requirements: Requirement[];
+  reviews: ReviewRound[];
 }
 
 export const initialRun = (): RunLive => ({
@@ -81,6 +91,7 @@ export const initialRun = (): RunLive => ({
   extraAgents: [], extraEdges: [], agentPatches: {}, orgEvents: [], fresh: {}, departments: {},
   toolCalls: {}, steps: [], browser: [], workflow: null, tasks: {}, artifacts: {}, usage: { tokens: 0, cost_usd: 0, turns: 0 }, activeEdges: {}, lastMessage: {}, protocols: {},
   pendingApproval: null, awaiting: null, errors: [], timeline: [], approvals: [], lastSeq: 0, live: false, replayDone: false,
+  todos: null, requirements: [], reviews: [],
 });
 
 /** "browser_navigate" → "opened", for labels like "Ann opened Snake". */
@@ -219,8 +230,19 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
         orgEvents: [...s.orgEvents, { seq, kind: "updated", by: d.by, agent_id: d.agent_id, name: ch.name ?? d.old_name, summary: d.summary, reason: d.reason, self: d.self, persisted: d.persisted, ts: e.ts }],
         timeline: push({ type: e.type, agent_id: d.by, tone: "org", label: d.self ? `${nm(d.by)} edited own config` : `${nm(d.by)} reconfigured ${d.old_name}` }) };
     }
-    // The run view does not show the todo list yet, so the event leaves the state as it is.
     case "todo_updated":
+      return { ...next, todos: { agent_id: d.agent_id, items: d.todos } };
+    case "requirements_updated":
+      return { ...next, requirements: d.requirements };
+    case "review_round": {
+      // A round's steps are the ones its specialists took since the previous round ended.
+      const from = s.reviews.at(-1)?.seq ?? 0;
+      const specialists: ReviewRow[] = (d.specialists as ReviewSpecialist[]).map((sp) => ({
+        agent_id: sp.agent_id, name: sp.name, verdict: sp.verdict, findings: sp.findings,
+        steps: s.steps.filter((x) => x.agent_id === sp.agent_id && x.seq > from && x.seq <= seq),
+      }));
+      return { ...next, reviews: [...s.reviews, { seq, round: d.round, specialists }] };
+    }
     case "agent_finished":
       return next;
     default:

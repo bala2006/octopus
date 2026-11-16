@@ -31,6 +31,11 @@ export type PhaseStatus = "pending" | "active" | "done" | "skipped" | "failed";
 export interface WorkflowPhase { key: string; title: string; owner: string | null; status: PhaseStatus; loops?: number; summary?: string }
 export interface WorkflowState { track: string | null; index: number; ended: boolean; reason?: string; phases: WorkflowPhase[] }
 
+/** One finding a review specialist reported, with the id the review round gave it. */
+export interface ReviewFinding { id: string; critic: string; severity: "blocker" | "major" | "minor"; file?: string; lines?: string; problem: string; evidence: string; fix: string }
+/** One specialist of a review round: its verdict, or null when it ended without one, and its findings. */
+export interface ReviewSpecialist { agent_id: string; name: string; verdict: "approve" | "request_changes" | null; findings: ReviewFinding[] }
+
 export interface RunEventMap {
   snapshot: { status: RunStatus; live: boolean; agent_status: Record<string, AgentStatus>; activity: Record<string, string>; pending_approval: PendingApproval | null; awaiting: Question | null; usage: Usage };
   replay_done: { last_seq: number };
@@ -49,6 +54,7 @@ export interface RunEventMap {
   todo_updated: { agent_id: string; todos: { content: string; status: "pending" | "in_progress" | "completed" }[] };
   task_updated: { task: TaskOut };
   requirements_updated: { requirements: Requirement[] };
+  review_round: { round: number; specialists: ReviewSpecialist[] };
   artifact_updated: { artifact: ArtifactOut & { created: boolean; lines: number; previous_lines: number } };
   workflow_updated: { workflow: WorkflowState };
   usage_update: Usage;
