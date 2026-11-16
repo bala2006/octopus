@@ -10,7 +10,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { AgentOut, AgentStatus, Effort, MessageOut, Question, Requirement, RunEventMap, RunStatus, RunTopic, Usage } from "@octopus/shared";
+import type { AgentOut, AgentStatus, Effort, MessageOut, Question, Requirement, RunEventMap, RunStatus, RunTopic, SpecialistName, Usage } from "@octopus/shared";
 import { skillCatalog, effectiveSkills } from "../catalog/skills";
 import { config } from "../config";
 import type { Registry } from "../db/registry";
@@ -28,12 +28,12 @@ import { checkBlockMessage, describeChecks, planChecks, runCheckList, type Check
 import { DOC_OR_ASSET } from "./checkScope";
 import { fill, MAIN_PROMPT, runtimeContext } from "./prompts";
 import { reviewersFor, tierOf } from "./risk";
-import { Specialists, VERIFY_ROUNDS, type Seat, type SpecialistName } from "./specialists";
+import { Specialists, specialistSettings, type Seat } from "./specialists";
 
-/** Floor rounds one request may run. A reply that still has open findings after them goes out as incomplete. */
-const FLOOR_ROUNDS = 2;
-/** Failing-check messages one request may send. A reply that still fails after them goes out as incomplete. */
-const CHECK_BLOCKS = 3;
+const WORDS = ["zero", "one", "two", "three", "four", "five"];
+/** A count in words with its noun in the plural: "two review rounds". Settings allows one to five. */
+const times = (n: number, noun: string) => `${WORDS[n]} ${noun}${n === 1 ? "" : "s"}`;
+const sentence = (s: string) => `${s[0]!.toUpperCase()}${s.slice(1)}`;
 
 /** What the solo path needs from its conversation. The conversation owns the run row, the events and the messages. */
 export interface SoloHost {
@@ -223,6 +223,7 @@ export class SoloRun {
 
   private async open(): Promise<Transcript> {
     const lead = this.host.lead();
+    this.specialists.configure(specialistSettings(this.host.reg));
     const { tools, warnings } = await soloToolbox(this.host.reg, this.host.p.root, lead);
     for (const message of warnings) this.host.emit("error", { message, kind: "warning", agent_id: lead.id });
     const model = this.host.model(lead);
@@ -336,18 +337,20 @@ export class SoloRun {
 
   /**
    * The review floor, run when a reply would end the turn. The project checks run first, because they cost no model call:
-   * a failure goes back to the main agent as one message, for at most CHECK_BLOCKS messages a request. Then the reviewers
-   * run for a normal or high diff that no review covers, and their blocker and major findings go back the same way, for at
-   * most FLOOR_ROUNDS rounds. Last, the verifier checks the request's asks for a normal or high code change it has not
-   * checked yet, and an ask it finds unmet goes back the same way, for at most VERIFY_ROUNDS rounds. Null lets the reply go out.
+   * a failure goes back to the main agent as one message, for at most the check blocks Settings allows a request. Then the
+   * enabled reviewers run for a normal or high diff that no review covers, and their blocker and major findings go back the
+   * same way, for at most the review rounds Settings allows. Last, the verifier checks the request's asks for a normal or high
+   * code change it has not checked yet, and an ask it finds unmet goes back the same way, for at most the verify rounds.
+   * Null lets the reply go out.
    */
   private async floor(reply: string): Promise<Item | null> {
-    if (!this.host.reg.setting<boolean>("solo_review_floor", true)) return null;
+    const cap = this.specialists.caps;
+    if (!cap.floor) return null;
     const checks = await this.checkChanges();
     if (checks.stopped) return null;
     if (checks.failing.length) {
-      if (this.checkBlocks === CHECK_BLOCKS) {
-        this.incomplete = `Checks still fail after ${CHECK_BLOCKS} check blocks: ${checks.failing.map((f) => f.name).join(", ")}.`;
+      if (this.checkBlocks === cap.check_blocks) {
+        this.incomplete = `Checks still fail after ${cap.check_blocks} check block${cap.check_blocks === 1 ? "" : "s"}: ${checks.failing.map((f) => f.name).join(", ")}.`;
         return null;
       }
       this.checkBlocks++;
@@ -358,29 +361,30 @@ export class SoloRun {
       files: diff.map((d) => d.file), lines: diff.reduce((sum, d) => sum + d.lines, 0), specialists: 0, requirements: 0, revised: this.floorRounds > 0,
     });
     const deep = tier === "normal" || tier === "high";
+    const browser = this.host.lead().tools.browser === true;
+    const reviewers = reviewersFor(diff.map((d) => d.file), browser).filter((n) => this.specialists.enabled(n));
     // A fix to a change a reviewer sent back is checked again at any tier, because its findings are answered only by a check.
-    if ((deep || this.specialists.blockingFindings().length > 0) && this.specialists.reviewDue()) {
-      if (this.floorRounds === FLOOR_ROUNDS) {
+    if (reviewers.length && (deep || this.specialists.blockingFindings().length > 0) && this.specialists.reviewDue()) {
+      if (this.floorRounds === cap.floor_rounds) {
         const open = this.specialists.blockingFindings().length;
         this.incomplete = open
-          ? `Two review rounds ended with ${open} blocker or major finding${open === 1 ? "" : "s"} open.`
-          : "The last change was not reviewed: two review rounds had already run.";
+          ? `${sentence(times(cap.floor_rounds, "review round"))} ended with ${open} blocker or major finding${open === 1 ? "" : "s"} open.`
+          : `The last change was not reviewed: ${times(cap.floor_rounds, "review round")} had already run.`;
         return null;
       }
       this.floorRounds++;
-      const browser = this.host.lead().tools.browser === true;
-      const round = await this.specialists.check(reviewersFor(diff.map((d) => d.file), browser), reply, checks.text);
+      const round = await this.specialists.check(reviewers, reply, checks.text);
       if (round.blocking) return { role: "user", content: round.text };
     }
     const codeChanged = [...this.turnBefore.keys()].some((f) => !DOC_OR_ASSET.test(f));
-    if (!deep || !codeChanged || !this.specialists.verifyDue()) return null;
-    if (this.specialists.verifyRoundCount() === VERIFY_ROUNDS) {
+    if (!deep || !codeChanged || !this.specialists.enabled("verifier") || !this.specialists.verifyDue()) return null;
+    if (this.specialists.verifyRoundCount() === cap.verify_rounds) {
       this.incomplete = this.notMetReason();
       return null;
     }
     const verdict = await this.specialists.verify(reply, checks.text);
     if (!verdict.unmet) return null;
-    if (this.specialists.verifyRoundCount() === VERIFY_ROUNDS) {
+    if (this.specialists.verifyRoundCount() === cap.verify_rounds) {
       this.incomplete = this.notMetReason();
       return null;
     }
@@ -390,11 +394,9 @@ export class SoloRun {
   /** Why the verifier's last round leaves the request incomplete: the asks it did not meet, or that it submitted none. */
   private notMetReason(): string {
     const ids = this.specialists.unmetAsks().map((a) => a.id);
-    return ids.length
-      ? `Two acceptance checks left ${ids.join(", ")} not met.`
-      : "Two acceptance checks did not submit their asks.";
+    const rounds = sentence(times(this.specialists.caps.verify_rounds, "acceptance check"));
+    return ids.length ? `${rounds} left ${ids.join(", ")} not met.` : `${rounds} did not submit their asks.`;
   }
-
   /** Why a reply cannot count as completed, or null when it can: a floor that ran out, an open blocker, or an ask not met. */
   private unfinished(): string | null {
     if (this.incomplete) return this.incomplete;

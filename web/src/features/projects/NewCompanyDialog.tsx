@@ -61,14 +61,15 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
   const w = useWorkspaceId();
   const { data: templates, isLoading } = useTemplates();
   const [tab, setTab] = React.useState<"templates" | "generate">("templates");
-  const [key, setKey] = React.useState("software_startup");
+  const [key, setKey] = React.useState("solo");
   const [name, setName] = React.useState("");
   const [prompt, setPrompt] = React.useState("");
   const [maxAgents, setMaxAgents] = React.useState(12);
   const [gen, setGen] = React.useState<Generated | null>(null);
   const qc = useQueryClient();
   const setCompany = useApp((s) => s.setCompany);
-  const builtin = templates?.filter((t) => t.source === "builtin") ?? [];
+  // Solo with specialists comes first. Every other built-in template is a team the older pipeline runs.
+  const builtin = [...(templates?.filter((t) => t.source === "builtin") ?? [])].sort((a, b) => Number(b.key === "solo") - Number(a.key === "solo"));
   const mine = templates?.filter((t) => t.source === "user") ?? [];
   const tpl = templates?.find((t) => t.key === key);
   React.useEffect(() => { if (open) { setTab("templates"); setGen(null); } }, [open]);
@@ -110,7 +111,8 @@ export function NewCompanyDialog({ open, onOpenChange, onCreated }: { open: bool
           active ? "border-primary bg-primary/5 shadow-md shadow-primary/10" : "border-border")}>
         {active && <Check className="absolute right-2.5 top-2.5 h-4 w-4 text-primary animate-in zoom-in-50" />}
         <div className="mb-1.5 flex items-center gap-2"><I className="h-4 w-4 text-primary" /><span className="text-sm font-semibold">{t.name}</span>
-          {t.source === "user" && <Badge variant="secondary">Mine</Badge>}</div>
+          {t.source === "user" && <Badge variant="secondary">Mine</Badge>}
+          {t.source === "builtin" && t.key !== "solo" && <Badge variant="outline">Team (legacy)</Badge>}</div>
         <div className="line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">{t.description || "Custom template"}</div>
         <div className="mt-2"><DepartmentChips departments={t.departments ?? []} max={6} /></div>
         <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">{t.agent_count} {t.agent_count === 1 ? "agent" : "agents"} · {t.edge_count} {t.edge_count === 1 ? "channel" : "channels"}</div>

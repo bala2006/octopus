@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
+import { SPECIALIST_NAMES } from "@octopus/shared";
 import type { CanvasOut, MessageOut, RunDetail, WorkspaceOut } from "@octopus/shared";
 import { effectiveRoles } from "../src/catalog/roles";
 import { openRegistry, type Registry } from "../src/db/registry";
@@ -13,7 +14,7 @@ import { project as openWorkspace } from "../src/workspace/projects";
 import { fakeModel, outputs, type FakeModel, type Reply, type Script } from "./fakeModel";
 import { checkShellTool } from "../src/tools/commands";
 import { specialistToolbox } from "../src/tools";
-import { RETURN_LIMIT, SPECIALISTS, SPECIALIST_DEFS } from "../src/engine/specialists";
+import { RETURN_LIMIT, SPECIALIST_DEFS, specialistDefaults } from "../src/engine/specialists";
 import { tierOf, reviewersFor } from "../src/engine/risk";
 import { briefDiff } from "../src/lib/diff";
 import { reviewReport } from "../src/lib/findings";
@@ -175,7 +176,7 @@ describe("project snapshot", () => {
 const WRITE_TOOLS = ["write_file", "edit_file", "move_file", "delete_file", "remember", "forget", "ask_user", "todo_write", "message", "reply", "pin", "complete_task", "block_task", "start_work", "hire_agent"];
 
 describe("specialist definitions", () => {
-  test.each(SPECIALISTS)("%s has its prompt and skill, under 4,000 characters together", (name) => {
+  test.each(SPECIALIST_NAMES)("%s has its prompt and skill, under 4,000 characters together", (name) => {
     const def = SPECIALIST_DEFS[name];
     expect(def.instructions.length).toBeLessThan(4_000);
     expect(def.instructions).toContain("\n\n");
@@ -183,14 +184,14 @@ describe("specialist definitions", () => {
   });
 
   test("each specialist has the effort the plan sets", () => {
-    expect(Object.fromEntries(SPECIALISTS.map((n) => [n, SPECIALIST_DEFS[n].effort]))).toEqual({ reviewer: "medium", security: "high", designer: "high", explorer: "low", verifier: "high" });
+    expect(Object.fromEntries(SPECIALIST_NAMES.map((n) => [n, SPECIALIST_DEFS[n].effort]))).toEqual({ reviewer: "medium", security: "high", designer: "high", explorer: "low", verifier: "high" });
   });
 
   test("the explorer ends with a plain text answer, and no prompt names a tool its toolbox lacks", () => {
     expect(SPECIALIST_DEFS.explorer.ends).toBe("answer");
     expect(SPECIALIST_DEFS.explorer.tools).not.toContain("submit_review");
     const outside = ["fetch_url", "start_dev_server", "submit_review", "write_file", "edit_file", "delete_file", "ask_user", "todo_write", "remember"];
-    for (const name of SPECIALISTS) {
+    for (const name of SPECIALIST_NAMES) {
       const def = SPECIALIST_DEFS[name];
       for (const tool of outside) {
         if ((def.tools as readonly string[]).includes(tool)) continue;
@@ -201,7 +202,7 @@ describe("specialist definitions", () => {
 });
 
 describe("specialist toolboxes", () => {
-  test.each(SPECIALISTS)("%s gets its listed tools, the check-only shell, and no write tool", async (name) => {
+  test.each(SPECIALIST_NAMES)("%s gets its listed tools, the check-only shell, and no write tool", async (name) => {
     const { root } = project();
     const { tools } = await specialistToolbox(SPECIALIST_DEFS[name].tools, root);
     const names = tools.map((t) => t.name);
@@ -212,7 +213,7 @@ describe("specialist toolboxes", () => {
 
   test("the reviewer, security and designer end with submit_review, and the explorer has none", async () => {
     const { root } = project();
-    const named = async (name: (typeof SPECIALISTS)[number]) => (await specialistToolbox(SPECIALIST_DEFS[name].tools, root)).tools.map((t) => t.name);
+    const named = async (name: (typeof SPECIALIST_NAMES)[number]) => (await specialistToolbox(SPECIALIST_DEFS[name].tools, root)).tools.map((t) => t.name);
     expect(await named("reviewer")).toContain("submit_review");
     expect(await named("security")).toEqual(expect.arrayContaining(["submit_review", "fetch_url"]));
     expect(await named("designer")).toEqual(expect.arrayContaining(["submit_review", "start_dev_server"]));
@@ -237,7 +238,7 @@ const SPECIALIST_PROMPTS: [string, string][] = [
   ["You are the verifier on a coding team", "verifier"],
 ];
 
-interface Request { instructions: string; input: any[]; tools: { name: string }[] } // eslint-disable-line @typescript-eslint/no-explicit-any
+interface Request { instructions: string; input: any[]; tools: { name: string }[]; model: string; reasoning?: { effort: string } } // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /** A file of `count` numbered lines, so a write changes about that many lines. */
 const lines = (count: number, tag = "line") => `${Array.from({ length: count }, (_, i) => `export const ${tag}${i} = ${i};`).join("\n")}\n`;
@@ -422,6 +423,32 @@ describe("review and explore from a solo conversation", () => {
       return { id, status: done.status, fresh, roles };
     };
 
+    /** The settings Settings would hold: every specialist on, with `changes` applied over them. */
+    const withSettings = (changes: Record<string, { enabled: boolean; model: string; effort: string }>) => {
+      const base = specialistDefaults();
+      return { ...base, specialists: { ...base.specialists, ...changes } };
+    };
+    afterEach(() => reg.deleteSetting("specialists"));
+
+    test("a specialist turned off in Settings does not run, and the floor skips it", async () => {
+      reg.setSetting("specialists", withSettings({ security: { enabled: false, model: "gpt-6-luna", effort: "high" }, verifier: { enabled: false, model: "gpt-6-luna", effort: "high" } }));
+      const high = await runWrite("src/auth/login.ts", "export const ok = true;\n");
+      expect(high.roles).toEqual(["reviewer"]);
+      expect(high.status).toBe("completed");
+    });
+
+    test("each specialist's requests name the model and effort Settings holds", async () => {
+      reg.setSetting("specialists", withSettings({ reviewer: { enabled: true, model: "gpt-6-mini", effort: "low" } }));
+      const normal = await runWrite("src/report.ts", lines(100));
+      const reviewer = normal.fresh.filter((b) => who(b) === "reviewer");
+      expect(reviewer.length).toBeGreaterThan(0);
+      for (const b of reviewer) {
+        expect(b.model).toBe("gpt-6-mini");
+        expect(b.reasoning?.effort).toBe("low");
+      }
+      const verifier = normal.fresh.filter((b) => who(b) === "verifier");
+      expect(verifier.every((b) => b.model === "gpt-6-luna")).toBe(true);
+    });
     test("the floor runs the reviewer at normal and high, and runs nothing at trivial or small", async () => {
       const normal = await runWrite("src/report.ts", lines(100));
       expect(normal.roles).toEqual(["reviewer", "verifier"]);

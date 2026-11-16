@@ -13,7 +13,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentOut, AgentStatus, Effort, EdgeOut, Requirement, RoleTemplateOut, RunEventMap, RunTopic } from "@octopus/shared";
+import { SPECIALIST_NAMES, type AgentOut, type AgentStatus, type Effort, type EdgeOut, type Requirement, type RoleTemplateOut, type RunEventMap, type RunTopic, type SpecialistName, type SpecialistsSettings } from "@octopus/shared";
+import { config } from "../config";
 import type { Registry } from "../db/registry";
 import type { Item } from "../llm/azure";
 import { briefDiff, changedLines, type FileDiff } from "../lib/diff";
@@ -26,9 +27,6 @@ import type { ReviewerName, Shown, ToolContext } from "../tools/types";
 import { agentLoop, type LoopEvents } from "./agent";
 import type { ChecksOutcome } from "./checks";
 import { foldVerdicts, toRequirement, verdictMessage, type Ask, type Verdict } from "./acceptance";
-
-export const SPECIALISTS = ["reviewer", "security", "designer", "explorer", "verifier"] as const;
-export type SpecialistName = (typeof SPECIALISTS)[number];
 
 export interface SpecialistDef {
   name: SpecialistName;
@@ -54,6 +52,17 @@ export const SPECIALIST_DEFS: Record<SpecialistName, SpecialistDef> = {
   verifier: { name: "verifier", title: "Verifier", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_acceptance"], ends: "verdict", instructions: instructionsOf("verifier") },
 };
 
+/** The settings a new conversation uses until Settings saves its own: every specialist on, at its default effort and the configured model. */
+export function specialistDefaults(): SpecialistsSettings {
+  const specialists = Object.fromEntries(SPECIALIST_NAMES.map((n) => [n, { enabled: true, model: config.defaultModel, effort: SPECIALIST_DEFS[n].effort }])) as SpecialistsSettings["specialists"];
+  return { specialists, review: { floor: true, floor_rounds: 2, check_blocks: 3, verify_rounds: 2 } };
+}
+
+/** The specialist settings Settings holds now. A conversation reads them once, when it starts. */
+export function specialistSettings(reg: Registry): SpecialistsSettings {
+  return reg.setting<SpecialistsSettings | null>("specialists", null) ?? specialistDefaults();
+}
+
 /** The company role of a specialist. It is not in the role library, so it never appears in the hire list. */
 export function specialistRole(name: SpecialistName): RoleTemplateOut {
   const def = SPECIALIST_DEFS[name];
@@ -67,8 +76,6 @@ export function specialistRole(name: SpecialistName): RoleTemplateOut {
 
 /** The most one round returns to the main agent, in characters. A message is kept under 6,000 characters with room to spare. */
 export const RETURN_LIMIT = 5_900;
-/** Verifier rounds one request may run. The second round is the last: an ask still not met after it stays unmet. */
-export const VERIFY_ROUNDS = 2;
 /** Steps one specialist round may take before it is stopped. */
 const ROUND_STEPS = 60;
 /** Written to the transcript when a specialist round cannot be undone. */
@@ -88,8 +95,6 @@ export interface SpecialistHost {
   setStatus(agent: AgentOut, status: AgentStatus, activity?: string): void;
   loopEvents(agent: AgentOut): LoopEvents;
   toolContext(agent: AgentOut, memory: { seen: Map<string, string>; shown: Shown }): ToolContext;
-  model(agent: AgentOut): string;
-  /** The run's requirements list, which shows the verifier's asks. */
   requirements(): Requirement[];
   setRequirements(list: Requirement[]): void;
 }
@@ -143,9 +148,26 @@ export class Specialists {
   private verifiedAt: number | null = null;
   /** File contents when the last verifier round started. The next verifier brief shows the change since then. */
   private verifiedFrom = new Map<string, string | null>();
+  /** The settings this conversation runs its specialists with, read when it starts. */
+  private policy: SpecialistsSettings = specialistDefaults();
 
   /** `runChecks` runs the project checks for a review brief, when the caller has not run them already. */
   constructor(private readonly host: SpecialistHost, private readonly facts: () => RequestFacts, private readonly runChecks: () => Promise<ChecksOutcome>) {}
+
+  /** Takes the settings a conversation starts with. Rounds that begin later use them. */
+  configure(policy: SpecialistsSettings) {
+    this.policy = policy;
+  }
+
+  /** Whether Settings turns this specialist on. */
+  enabled(name: SpecialistName): boolean {
+    return this.policy.specialists[name].enabled;
+  }
+
+  /** The review floor and its round caps, as this conversation runs them. */
+  get caps(): SpecialistsSettings["review"] {
+    return this.policy.review;
+  }
 
   /** A new request starts. Its review rounds are numbered from one, and no earlier review covers its changes. */
   startTurn() {
@@ -184,10 +206,12 @@ export class Specialists {
    * pass. Their findings and verdicts come back as one message.
    */
   async review(names: ReviewerName[], focus: string): Promise<string> {
+    const on = names.filter((n) => this.enabled(n));
+    if (!on.length) return `${names.join(", ")} ${names.length === 1 ? "is" : "are"} turned off in Settings, so nothing ran.`;
     const parts: string[] = [];
-    const reviewers = names.filter((n) => n !== "verifier");
+    const reviewers = on.filter((n) => n !== "verifier");
     if (reviewers.length) parts.push((await this.check(reviewers, focus)).text);
-    if (names.includes("verifier")) parts.push(await this.verifyNow(focus));
+    if (on.includes("verifier")) parts.push(await this.verifyNow(focus));
     return parts.join("\n\n");
   }
 
@@ -253,7 +277,7 @@ export class Specialists {
     if (checks.stopped) return "The turn was stopped.";
     if (checks.failing.length) return `The project's checks fail, so the acceptance check did not run.\n\n${checks.text}`;
     if (!this.verifyDue()) return verdictMessage(this.verifyCount, this.asks, RETURN_LIMIT);
-    if (this.verifyCount === VERIFY_ROUNDS) return `The acceptance check already ran ${VERIFY_ROUNDS} times for this request.\n\n${verdictMessage(this.verifyCount, this.asks, RETURN_LIMIT)}`;
+    if (this.verifyCount === this.caps.verify_rounds) return `The acceptance check already ran ${this.caps.verify_rounds} times for this request.\n\n${verdictMessage(this.verifyCount, this.asks, RETURN_LIMIT)}`;
     return (await this.verify(focus, checks.text)).text;
   }
 
@@ -296,6 +320,7 @@ export class Specialists {
 
   /** Answers one question. Several calls in one step run at the same time. */
   async explore(question: string): Promise<string> {
+    if (!this.enabled("explorer")) return "The explorer is turned off in Settings.";
     const outcome = await this.inRound(() => this.round("explorer", `Question: ${question}`));
     return outcome.text ? clampAnswer(outcome.text) : "The explorer gave no answer.";
   }
@@ -346,8 +371,9 @@ export class Specialists {
           base.toolResult(callId, tool, ok, output, metrics);
         },
       };
+      const setting = this.policy.specialists[name];
       const res = await agentLoop({
-        reg: this.host.reg, model: this.host.model(agent), effort: def.effort, instructions: def.instructions, input: session.items, tools,
+        reg: this.host.reg, model: setting.model, effort: setting.effort, instructions: def.instructions, input: session.items, tools,
         ctx: this.host.toolContext(agent, session), events, maxRounds: ROUND_STEPS, requireStop: false, stopTools: [], keepHead: 1,
         cacheKey: `${this.host.runId}:${agent.id}:specialist`,
       });

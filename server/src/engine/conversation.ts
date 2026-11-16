@@ -13,7 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   DEFAULT_BUDGET, TERMINAL_STATUSES, type AgentOut, type AgentStatus, type Attachment, type EdgeOut, type Effort, type MessageOut, type PendingApproval,
-  type Question, type Requirement, type RunCreate, type RunEventMap, type RunStatus, type RunTopic, type TaskOut, type Usage, type WorkflowState,
+  type Question, type Requirement, type RunCreate, type RunEventMap, type RunStatus, type RunTopic, type SpecialistName, type TaskOut, type Usage, type WorkflowState,
 } from "@octopus/shared";
 import { config } from "../config";
 import { SHARED_MEMORY, type RunRow } from "../db/project";
@@ -37,7 +37,7 @@ import { agentLoop, compactable, tokensOf, type LoopEvents } from "./agent";
 import { hashFile, planChecks, runCheckList } from "./checks";
 import { publish } from "./bus";
 import { SoloRun, type SoloHost } from "./solo";
-import { SPECIALIST_DEFS, specialistRole, type Seat, type SpecialistName } from "./specialists";
+import { SPECIALIST_DEFS, specialistRole, type Seat } from "./specialists";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
 import { tierOf, type Tier } from "./risk";
 import { canRunBeside, owns, writes } from "./ownership";

@@ -15,7 +15,7 @@ const ENG = "Engineering", PD = "Product & Design", QO = "Quality & Ops";
 
 export const BUILTIN_TEMPLATES: Template[] = [
   { key: "adaptive", name: "Self-organizing", description: "Octopus alone at first; it hires exactly the specialists each request needs.", head: "orchestrator", departments: [] },
-  { key: "solo", name: "Solo", description: "Octopus works alone on each request: it reads, changes, runs and checks the project itself.", head: MAIN_ROLE, departments: [] },
+  { key: "solo", name: "Solo with specialists", description: "Octopus works alone on each request, and the specialists you turn on in Settings review each change.", head: MAIN_ROLE, departments: [] },
   { key: "solo_engineer", name: "Solo Engineer", description: "Octopus and one full-stack developer, with automatic review.", head: "orchestrator",
     departments: [{ name: ENG, lead: "developer" }] },
   { key: "small_dev_team", name: "Small Dev Team", description: "A tech lead with frontend and backend developers.", head: "orchestrator",

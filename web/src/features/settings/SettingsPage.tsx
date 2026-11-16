@@ -4,10 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   CheckCircle2, ChevronDown, Cloud, FolderOpen, KeyRound, Moon, Palette, Plug, Plus, RefreshCw, Server, Sparkles, Sun, Trash2, Wifi, XCircle, Zap,
-  LayoutTemplate, Download, Upload, Pencil, Globe, UserCog, BookOpenCheck,
+  LayoutTemplate, Download, Upload, Pencil, Globe, UserCog, BookOpenCheck, Bot,
 } from "lucide-react";
 import { RolesSection } from "./RolesSection";
 import { SkillsSection } from "./SkillsSection";
+import { SpecialistsSection } from "./SpecialistsSection";
 import { download } from "@/lib/utils";
 import { CURRENCIES, formatMoney, useFxRate } from "@/lib/money";
 import { useTemplates } from "@/hooks/queries";
@@ -23,7 +24,7 @@ import { Badge, Field, Input, Switch, Textarea } from "@/components/ui/primitive
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Select, Tip } from "@/components/ui/overlays";
 
 // The key is the URL hash (settings#appearance deep links must keep working); the label is what the nav and the panel show.
-export const SECTIONS = [["providers", "Model", Cloud], ["mcp", "MCP servers", Plug], ["roles", "Roles", UserCog], ["skills", "Skills", BookOpenCheck], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Preferences", Palette]] as const;
+export const SECTIONS = [["providers", "Model", Cloud], ["specialists", "Specialists", Bot], ["mcp", "MCP servers", Plug], ["roles", "Roles", UserCog], ["skills", "Skills", BookOpenCheck], ["templates", "Templates", LayoutTemplate], ["project", "Project", FolderOpen], ["appearance", "Preferences", Palette]] as const;
 /** The section for a URL hash; unknown or empty hashes fall back to the first section instead of rendering nothing. */
 export const sectionFromHash = (hash: string): string => { const h = hash.replace(/^#/, ""); return SECTIONS.some(([k]) => k === h) ? h : SECTIONS[0][0]; };
 
@@ -49,6 +50,7 @@ export default function SettingsPage() {
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="settings-content animate-fade-up" key={section}>
           {section === "providers" && <Providers />}
+          {section === "specialists" && <SpecialistsSection />}
           {section === "mcp" && <McpServers />}
           {section === "roles" && <RolesSection />}
           {section === "skills" && <SkillsSection />}

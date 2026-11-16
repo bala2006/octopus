@@ -2,11 +2,12 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import {
-  ApprovalModeInSchema, McpServerInSchema, ProviderKeyInSchema, TestProviderInSchema,
+  ApprovalModeInSchema, McpServerInSchema, ProviderKeyInSchema, SpecialistsInSchema, TestProviderInSchema,
   type McpServerOut, type ProviderKeyOut, type ProviderOptions, type SettingsOut,
 } from "@octopus/shared";
 import { config } from "../../config";
 import type { McpRow, Registry } from "../../db/registry";
+import { specialistSettings } from "../../engine/specialists";
 import { complete, connection, deployments, normalizeEndpoint } from "../../llm/azure";
 import { decrypt, encrypt, mask } from "../../lib/secrets";
 import { newId, notFound, now, parseJson, UserError } from "../../lib/util";
@@ -26,7 +27,7 @@ function settings(reg: Registry): SettingsOut {
   return {
     approval_mode: reg.setting("approval_mode", "ask"), default_provider: "azure", default_model: config.defaultModel, single_user_mode: true,
     providers: [{ provider: "azure", label: "Azure OpenAI", configured: !!connection(reg), needs_key: true, needs_base: true, models: deployments(reg) }],
-    keys: keyOut(reg),
+    keys: keyOut(reg), specialists: specialistSettings(reg),
   };
 }
 
@@ -40,6 +41,10 @@ export function settingsRoutes(route: RouteFn, reg: Registry) {
   route("PUT", "/api/v1/settings/approval-mode", ApprovalModeInSchema, ({ body }) => {
     reg.setSetting("approval_mode", body.approval_mode);
     return { approval_mode: body.approval_mode };
+  });
+  route("PUT", "/api/v1/settings/specialists", SpecialistsInSchema, ({ body }) => {
+    reg.setSetting("specialists", body);
+    return body;
   });
   route("PUT", "/api/v1/settings/providers", ProviderKeyInSchema, ({ body }) => {
     const prev = reg.setting<SavedProvider | null>("provider.azure", null);

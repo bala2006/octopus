@@ -24,6 +24,7 @@ import { parseArgs } from "node:util";
 import { z } from "zod";
 import { gradeProject, listTasks, loadTask, TASKS_DIR, type Grade } from "./grade";
 import { loadScenario, startScriptedModel, type ScriptedModel } from "./scriptedModel";
+import { specialistSettings } from "../src/engine/specialists";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const RESULTS_DIR = path.join(here, "..", "eval-results");
@@ -129,7 +130,8 @@ async function startInProcess() {
     },
     /** Turn the solo review floor on or off for this server. */
     setFloor(on: boolean) {
-      reg.setSetting("solo_review_floor", on);
+      const current = specialistSettings(reg);
+      reg.setSetting("specialists", { ...current, review: { ...current.review, floor: on } });
     },
     close: () => app.close(),
   };

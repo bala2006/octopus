@@ -27,6 +27,7 @@ export interface ApiRoutes {
   // Settings and catalog
   "/api/v1/settings": { GET: R<D.SettingsOut> };
   "/api/v1/settings/approval-mode": { PUT: R<{ approval_mode: D.ApprovalMode }, In<typeof D.ApprovalModeInSchema>> };
+  "/api/v1/settings/specialists": { PUT: R<D.SpecialistsSettings, In<typeof D.SpecialistsInSchema>> };
   "/api/v1/settings/providers": { PUT: R<D.ProviderKeyOut, In<typeof D.ProviderKeyInSchema>> };
   "/api/v1/settings/providers/test": { POST: R<D.TestResultOut, In<typeof D.TestProviderInSchema>> };
   "/api/v1/settings/providers/{provider}": { DELETE: R<Ok> };
