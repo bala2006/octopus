@@ -20,11 +20,10 @@ import type { Item } from "../llm/azure";
 import type { TokenUsage } from "../llm/pricing";
 import { briefDiff, changedLines, type FileDiff } from "../lib/diff";
 import { numberFindings, renderFindings, renderOpenItems, reviewReport, type CriticReport, type Finding, type FindingInput } from "../lib/findings";
-import { enterRound, leaveRound, type Restored } from "../workspace/snapshot";
+import { keepBrowserOutput, inProjectLock, undoableCommand, type Restored } from "../workspace/snapshot";
 import type { Project } from "../workspace/projects";
 import { specialistToolbox, type SpecialistTool } from "../tools";
-import { CHECK_REFUSAL } from "../tools/commands";
-import type { ReviewerName, Shown, ToolContext } from "../tools/types";
+import type { ReviewerName, Shown, Tool, ToolContext } from "../tools/types";
 import { agentLoop, type LoopEvents } from "./agent";
 import type { ChecksOutcome } from "./checks";
 import { foldVerdicts, toRequirement, verdictMessage, type Ask, type Verdict } from "./acceptance";
@@ -123,16 +122,12 @@ export interface VerifyRound { text: string; unmet: number }
 
 interface Session { items: Item[]; busy: boolean; seen: Map<string, string>; shown: Shown }
 interface Outcome { verdict: CriticReport["verdict"]; findings: FindingInput[]; text: string; asks?: Verdict[] }
-/** The commands that ran in the rounds that share one project snapshot, with the specialist that ran each. */
-interface Group { ran: { name: SpecialistName; command: string }[] }
 
 const fresh = (): Session => ({ items: [], busy: false, seen: new Map(), shown: new Map() });
 
 /** Each conversation holds one of these. It runs specialist rounds and answers the main agent's review and explore calls. */
 export class Specialists {
   private sessions = new Map<SpecialistName, Session>();
-  private open = 0;
-  private group: Group = { ran: [] };
   /** Review rounds this request has run, numbered from one. */
   private rounds = 0;
   /** Findings this request has numbered, so ids run on across its review rounds. */
@@ -246,7 +241,7 @@ export class Specialists {
     const brief = await this.brief(round, focus, checks ?? (await this.runChecks()).text);
     const changes = this.facts().changes;
     this.reviewed = new Map([...this.facts().before.keys()].map((file) => [file, this.current(file)]));
-    const outcomes = await this.inRound(() => Promise.all(names.map((name) => this.round(name, brief))));
+    const outcomes = await Promise.all(names.map((name) => this.round(name, brief)));
     const reports: CriticReport[] = names.map((critic, i) => ({ critic, verdict: outcomes[i]!.verdict, findings: outcomes[i]!.findings }));
     const numbered = numberFindings(reports, first);
     this.found += numbered.length;
@@ -273,7 +268,7 @@ export class Specialists {
     const brief = this.verifyBrief(round, focus, checks);
     const changesAtStart = this.facts().changes;
     this.verifiedFrom = new Map([...this.facts().before.keys()].map((file) => [file, this.current(file)]));
-    const outcome = await this.inRound(() => this.round("verifier", brief));
+    const outcome = await this.round("verifier", brief);
     let next = this.host.requirements().length;
     this.asks = foldVerdicts(this.asks, outcome.asks ?? [], () => `R${++next}`);
     this.publishAsks();
@@ -349,29 +344,37 @@ export class Specialists {
   async explore(question: string): Promise<string> {
     if (!this.enabled("explorer")) return "The explorer is turned off in Settings.";
     if (this.budget.spent()) return BUDGET_SPENT;
-    const outcome = await this.inRound(() => this.round("explorer", `Question: ${question}`));
+    const outcome = await this.round("explorer", `Question: ${question}`);
     return outcome.text ? clampAnswer(outcome.text) : "The explorer gave no answer.";
   }
 
   /**
-   * Runs rounds inside one project record. The first round takes the record, and the last round to end restores whatever
-   * the specialists' checks changed. Rounds of another conversation wait until these end.
+   * Wraps the tools that can write. A shell command runs with a record of the project taken just before it, and the record
+   * puts back what that command changed. A browser call runs under the project lock, and the file it is asked to write is kept.
    */
-  private async inRound<T>(run: () => Promise<T>): Promise<T> {
+  private guarded(name: SpecialistName, tool: Tool, warn: () => void): Tool {
     const root = this.host.p.root;
-    const { undoable } = await enterRound(root, this);
-    if (this.open === 0) {
-      this.group = { ran: [] };
-      if (!undoable) this.host.emit("error", { message: UNDOABLE_WARNING, kind: "warning", agent_id: this.host.lead().id });
+    if (tool.name === "shell") {
+      return {
+        ...tool,
+        run: async (ctx, args, callId) => {
+          const { value, undoable, undone } = await undoableCommand(root, () => tool.run(ctx, args, callId));
+          if (!undoable) warn();
+          if (undone) this.reportRestore(name, args.command, undone);
+          return value;
+        },
+      };
     }
-    this.open++;
-    try {
-      return await run();
-    } finally {
-      this.open--;
-      const undone = leaveRound(root, this);
-      if (undone) this.reportRestore(undone);
+    if (tool.name.startsWith("browser_")) {
+      return {
+        ...tool,
+        run: (ctx, args, callId) => {
+          if (typeof args.filename === "string") keepBrowserOutput(root, args.filename);
+          return inProjectLock(root, () => tool.run(ctx, args, callId));
+        },
+      };
     }
+    return tool;
   }
 
   private async round(name: SpecialistName, brief: string): Promise<Outcome> {
@@ -379,28 +382,24 @@ export class Specialists {
     const seat = this.host.seat(name);
     const agent = seat.agent;
     const session = this.take(name);
-    const commands: string[] = [];
+    let warned = false;
+    const warn = () => {
+      if (warned) return;
+      warned = true;
+      this.host.emit("error", { message: UNDOABLE_WARNING, kind: "warning", agent_id: this.host.lead().id });
+    };
     this.host.emit("edge_activity", { edge_id: seat.delegate.id, from_agent_id: this.host.lead().id, type: seat.delegate.type });
     try {
-      const { tools, warnings } = await specialistToolbox(def.tools, this.host.p.root);
-      for (const message of warnings) this.host.emit("error", { message, kind: "warning", agent_id: agent.id });
+      const toolbox = await specialistToolbox(def.tools, this.host.p.root);
+      for (const message of toolbox.warnings) this.host.emit("error", { message, kind: "warning", agent_id: agent.id });
+      const tools = toolbox.tools.map((tool) => this.guarded(name, tool, warn));
       session.items.push({ role: "user", content: brief });
       const base = this.host.loopEvents(agent);
-      const asked = new Map<string, string>();
       const events: LoopEvents = {
         ...base,
         usage: (r) => {
           this.budget.spend(r.usage);
           base.usage(r);
-        },
-        toolCall: (callId, tool, args) => {
-          if (tool === "shell" && typeof args.command === "string") asked.set(callId, args.command);
-          base.toolCall(callId, tool, args);
-        },
-        toolResult: (callId, tool, ok, output, metrics) => {
-          const command = asked.get(callId);
-          if (command !== undefined && !output.startsWith(CHECK_REFUSAL)) commands.push(command);
-          base.toolResult(callId, tool, ok, output, metrics);
         },
       };
       const setting = this.policy.specialists[name];
@@ -418,7 +417,6 @@ export class Specialists {
       throw e;
     } finally {
       session.busy = false;
-      this.group.ran.push(...commands.map((command) => ({ name, command })));
       this.host.emit("edge_activity", { edge_id: seat.report.id, from_agent_id: agent.id, type: seat.report.type });
     }
   }
@@ -468,13 +466,12 @@ export class Specialists {
     return existsSync(abs) ? readFileSync(abs, "utf8") : null;
   }
 
-  /** Tells the main agent which checks changed files, and that Octopus put them back. */
-  private reportRestore(undone: Restored) {
+  /** Tells the main agent which command changed project files, and that Octopus put them back. */
+  private reportRestore(name: SpecialistName, command: string, undone: Restored) {
     if (!undone.restored.length && !undone.deleted.length) return;
-    const ran = this.group.ran.map((r) => `${r.name} ran \`${r.command}\``).join("; ") || "A specialist ran a command";
     const files = [...undone.restored.map((f) => `restored ${f}`), ...undone.deleted.map((f) => `deleted ${f}`)].join(", ");
     const note = undone.partial ? " The project has more files than the record holds, so new files were kept." : "";
-    this.host.emit("error", { message: `${ran}, and it changed project files. Octopus put them back: ${files}.${note}`, kind: "warning", agent_id: this.host.lead().id });
+    this.host.emit("error", { message: `${name} ran \`${command}\`, and it changed project files. Octopus put them back: ${files}.${note}`, kind: "warning", agent_id: this.host.lead().id });
   }
 }
 

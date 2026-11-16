@@ -21,7 +21,7 @@ import { briefDiff } from "../src/lib/diff";
 import { reviewReport } from "../src/lib/findings";
 import { ProjectFs } from "../src/safety/paths";
 import { checkOnly } from "../src/safety/commands";
-import { enterRound, leaveRound, restoreSnapshot, SNAPSHOT_MAX_BYTES, SNAPSHOT_MAX_FILES, SNAPSHOT_MAX_TOTAL, takeSnapshot } from "../src/workspace/snapshot";
+import { inProjectLock, keepBrowserOutput, restoreSnapshot, SNAPSHOT_MAX_BYTES, SNAPSHOT_MAX_FILES, SNAPSHOT_MAX_TOTAL, takeSnapshot, undoableCommand } from "../src/workspace/snapshot";
 import type { ToolContext } from "../src/tools/types";
 
 const win = process.platform === "win32";
@@ -94,20 +94,60 @@ describe("check-only shell", () => {
 });
 
 describe("project snapshot", () => {
-  shellTest("a check that rewrites a file and adds one is undone", async () => {
+  shellTest("a shell command that rewrites a tracked file and adds one is undone", async () => {
     const { root, ctx } = project({
       "src.txt": "before",
       "change.mjs": "import { writeFileSync } from 'node:fs';\nwriteFileSync('src.txt', 'after');\nwriteFileSync('new.txt', 'made by the check');\n",
     });
-    const snap = takeSnapshot(root)!;
-    const res = await runCheck(ctx, "node change.mjs");
-    expect(res.ok).toBe(true);
-    expect(readFileSync(path.join(root, "src.txt"), "utf8")).toBe("after");
-    const report = restoreSnapshot(root, snap);
-    expect(report.restored).toEqual(["src.txt"]);
-    expect(report.deleted).toEqual(["new.txt"]);
+    const { value, undone, undoable } = await undoableCommand(root, () => runCheck(ctx, "node change.mjs"));
+    expect(value.ok).toBe(true);
+    expect(undoable).toBe(true);
+    expect(undone).toEqual({ restored: ["src.txt"], deleted: ["new.txt"], partial: false });
     expect(readFileSync(path.join(root, "src.txt"), "utf8")).toBe("before");
     expect(existsSync(path.join(root, "new.txt"))).toBe(false);
+  });
+
+  shellTest("a screenshot a browser call writes in the same window survives, and the command's own changes are still undone", async () => {
+    const { root, ctx } = project({
+      "src.txt": "before",
+      "change.mjs": "import { writeFileSync } from 'node:fs';\nwriteFileSync('src.txt', 'after');\nwriteFileSync('new.txt', 'made by the check');\n",
+    });
+    const { undone } = await undoableCommand(root, async () => {
+      writeFileSync(path.join(root, "round2-desktop.png"), "png bytes");
+      keepBrowserOutput(root, "round2-desktop.png");
+      return runCheck(ctx, "node change.mjs");
+    });
+    expect(undone).toEqual({ restored: ["src.txt"], deleted: ["new.txt"], partial: false });
+    expect(readFileSync(path.join(root, "round2-desktop.png"), "utf8")).toBe("png bytes");
+  });
+
+  shellTest("a file written in the window and not recorded as browser output is removed by the undo", async () => {
+    const { root, ctx } = project({
+      "change.mjs": "import { writeFileSync } from 'node:fs';\nwriteFileSync('round2-desktop.png', 'png bytes');\n",
+    });
+    const { undone } = await undoableCommand(root, async () => {
+      writeFileSync(path.join(root, "round2-desktop.png"), "png bytes");
+      return runCheck(ctx, "node change.mjs");
+    });
+    expect(undone?.deleted).toEqual(["round2-desktop.png"]);
+  });
+
+  test("two write-capable calls in one project run one after the other", async () => {
+    const { root } = project({ "a.txt": "original" });
+    const log: string[] = [];
+    const job = (name: string) => undoableCommand(root, async () => {
+      log.push(`${name} start`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      log.push(`${name} end`);
+    });
+    await Promise.all([job("reviewer"), job("designer")]);
+    expect(log).toEqual(["reviewer start", "reviewer end", "designer start", "designer end"]);
+  });
+
+  test("a call that throws releases the project lock", async () => {
+    const { root } = project({ "a.txt": "original" });
+    await expect(inProjectLock(root, async () => { throw new Error("browser closed"); })).rejects.toThrow("browser closed");
+    expect(await inProjectLock(root, async () => "next")).toBe("next");
   });
 
   test("files over 1 MB and ignored folders are not recorded", () => {
@@ -136,41 +176,9 @@ describe("project snapshot", () => {
     const { root } = project(files);
     expect(SNAPSHOT_MAX_TOTAL).toBe(64 * 1024 * 1024);
     expect(takeSnapshot(root)).toBeNull();
-    expect(await enterRound(root, {})).toEqual({ undoable: false });
-    expect(leaveRound(root, {})).toBeNull();
+    expect(await undoableCommand(root, async () => "ran")).toEqual({ value: "ran", undoable: false, undone: null });
   }, 60_000);
 
-  test("rounds of one owner share one record, and the last one to end restores", async () => {
-    const { root } = project({ "a.txt": "original" });
-    const owner = {};
-    await enterRound(root, owner);
-    await enterRound(root, owner);
-    writeFileSync(path.join(root, "a.txt"), "changed");
-    expect(leaveRound(root, owner)).toBeNull();
-    expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("changed");
-    const report = leaveRound(root, owner);
-    expect(report?.restored).toEqual(["a.txt"]);
-    expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("original");
-  });
-
-  test("a round of another owner waits until the first owner's rounds end, so the two never interleave", async () => {
-    const { root } = project({ "a.txt": "original" });
-    const first = {};
-    const second = {};
-    await enterRound(root, first);
-    writeFileSync(path.join(root, "a.txt"), "changed by the first round");
-    let entered = false;
-    const waiting = enterRound(root, second).then(() => { entered = true; });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(entered).toBe(false);
-    expect(leaveRound(root, first)?.restored).toEqual(["a.txt"]);
-    await waiting;
-    expect(entered).toBe(true);
-    expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("original");
-    writeFileSync(path.join(root, "a.txt"), "changed by the second round");
-    expect(leaveRound(root, second)?.restored).toEqual(["a.txt"]);
-    expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("original");
-  });
 });
 
 /** Tools that change state, remember things or ask the user. No specialist may hold one. */
