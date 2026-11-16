@@ -86,7 +86,7 @@ function saveFrame(ctx: ToolContext, dataUrl: string): string {
 }
 
 /** The browser tools a builder gets. Reviewers and acceptance checks keep the whole Playwright list. */
-export const BUILDER_BROWSER_TOOLS = ["browser_navigate", "browser_take_screenshot", "browser_click", "browser_type", "browser_press_key", "browser_evaluate", "browser_console_messages", "browser_snapshot"];
+export const BUILDER_BROWSER_TOOLS = ["browser_navigate", "browser_take_screenshot", "browser_click", "browser_type", "browser_press_key", "browser_evaluate", "browser_console_messages", "browser_snapshot", "browser_resize"];
 
 /** The tools of a browser tool list, or only the named ones, in the list's own order. */
 export function selectBrowserTools(tools: McpToolOut[], names?: readonly string[]): McpToolOut[] {

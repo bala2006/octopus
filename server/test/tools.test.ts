@@ -304,11 +304,12 @@ describe("browser tools by role", () => {
   ];
   const listed = PLAYWRIGHT.map((name) => ({ name, description: name, input_schema: {} })) as McpToolOut[];
 
-  test("a builder gets exactly its eight browser tools, in the list's order", () => {
-    expect(BUILDER_BROWSER_TOOLS).toHaveLength(8);
+  test("a builder gets exactly its nine browser tools, in the list's order", () => {
+    expect(BUILDER_BROWSER_TOOLS).toHaveLength(9);
     const picked = selectBrowserTools(listed, BUILDER_BROWSER_TOOLS).map((t) => t.name);
     expect(picked).toEqual(PLAYWRIGHT.filter((name) => BUILDER_BROWSER_TOOLS.includes(name)));
-    expect(picked).toHaveLength(8);
+    expect(picked).toHaveLength(9);
+    expect(picked).toContain("browser_resize");
   });
 
   test("reviewers and acceptance checks keep the whole list", () => {
