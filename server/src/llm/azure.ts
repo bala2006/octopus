@@ -24,6 +24,8 @@ export interface LlmRequest {
   maxOutputTokens?: number;
   toolChoice?: "auto" | "required" | "none";
   signal?: AbortSignal;
+  /** Groups requests that share a prefix, so the cache can reuse it: conversation, agent and mode. */
+  promptCacheKey?: string;
 }
 export interface StreamHandlers {
   onText?: (delta: string) => void;
@@ -31,7 +33,7 @@ export interface StreamHandlers {
   onToolStart?: (call: { call_id: string; name: string }) => void;
   onToolArgs?: (callId: string, delta: string) => void;
 }
-export interface LlmResult { text: string; thought: string; calls: ToolCall[]; output: Item[]; usage: TokenUsage; costUsd: number; incomplete: string | null; /** Wall-clock from the first attempt to the last streamed byte: network wait, streaming, retries and their waits. */ ms: number }
+export interface LlmResult { text: string; thought: string; calls: ToolCall[]; output: Item[]; usage: TokenUsage; costUsd: number; incomplete: string | null; /** Reasoning items the API removed from the input this call (its input_transformations). */ reasoningDropped: number; /** Wall-clock from the first attempt to the last streamed byte: network wait, streaming, retries and their waits. */ ms: number }
 
 export interface AzureConnection { baseUrl: string; apiKey: string; auth: "key" | "entra"; options: ProviderOptions }
 
@@ -94,6 +96,7 @@ function body(req: LlmRequest, drop: Set<string>): Item {
   const effort = req.effort && req.effort !== "default" ? req.effort : config.defaultEffort;
   if (effort !== "none") b.reasoning = { effort, summary: "auto" };
   else b.reasoning = { effort: "none" };
+  if (req.promptCacheKey) Object.assign(b, { prompt_cache_key: req.promptCacheKey, prompt_cache_retention: "24h" });
   for (const key of drop) {
     if (key === "reasoning.summary") delete b.reasoning?.summary;
     else delete b[key];
@@ -107,7 +110,7 @@ function rejectedParam(message: string, b: Item): string | null {
   if (!/unsupported|not supported|does not support|unrecognized|unknown parameter|invalid value|invalid schema/.test(m)) return null;
   if ((b.tools as FunctionTool[] | undefined)?.some((t) => t.strict) && /strict|additionalproperties|schema|required/.test(m)) return "strict";
   if (m.includes("summary") && b.reasoning?.summary) return "reasoning.summary";
-  for (const key of ["reasoning", "include", "parallel_tool_calls", "max_output_tokens", "tool_choice"]) if (m.includes(key) && key in b) return key;
+  for (const key of ["reasoning", "include", "parallel_tool_calls", "max_output_tokens", "tool_choice", "prompt_cache_key", "prompt_cache_retention"]) if (m.includes(key) && key in b) return key;
   return null;
 }
 
@@ -210,6 +213,9 @@ async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderO
   const calls = output.filter((o) => o.type === "function_call").map((o) => ({ call_id: o.call_id, name: o.name, arguments: o.arguments ?? "{}" }));
   if (!text) text = output.filter((o) => o.type === "message").flatMap((o) => o.content ?? []).map((c: Item) => c.text ?? "").join("");
   const u = resp.usage ?? {};
+  // The API lists the reasoning items it removed when a changed prefix made them unusable; reasoning item ids start with rs_.
+  const transformations: Item[] = Array.isArray(resp.input_transformations) ? resp.input_transformations : [];
+  const reasoningDropped = transformations.filter((t) => String(t.id ?? "").startsWith("rs_") || String(t.type ?? "").includes("reasoning")).length;
   const usage: TokenUsage = {
     input: u.input_tokens ?? 0, cached: u.input_tokens_details?.cached_tokens ?? 0,
     output: u.output_tokens ?? 0, reasoning: u.output_tokens_details?.reasoning_tokens ?? 0,
@@ -219,5 +225,6 @@ async function readStream(stream: ReadableStream<Uint8Array>, options: ProviderO
     // replay everything except plain message items without content; reasoning items carry encrypted content
     output: output.map(({ status: _s, ...item }) => item),
     incomplete: resp.status === "incomplete" ? resp.incomplete_details?.reason ?? "incomplete" : null,
+    reasoningDropped,
   };
 }

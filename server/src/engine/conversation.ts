@@ -122,7 +122,7 @@ const PHASES = [["plan", "Plan"], ["build", "Build"], ["review", "Review"], ["ve
 
 function emptyUsage(): Usage {
   return { tokens: 0, cost_usd: 0, turns: 0,
-    active_seconds: 0, input_tokens: 0, cached_tokens: 0, output_tokens: 0, reasoning_tokens: 0, llm_calls: 0, per_agent: {}, per_agent_cost: {},
+    active_seconds: 0, input_tokens: 0, cached_tokens: 0, output_tokens: 0, reasoning_tokens: 0, reasoning_dropped: 0, llm_calls: 0, per_agent: {}, per_agent_cost: {},
     cost_breakdown: { input: 0, cached_input: 0, output: 0 },
     model_ms: 0, tool_calls: 0, tool_failures: 0, file_reads: 0, redundant_reads: 0, file_writes: 0, files_changed: 0, searches: 0, listings: 0, verifications: 0, agent_runs: 0 };
 }
@@ -438,7 +438,7 @@ export class Conversation {
         const parts = costParts(r.usage, connection(this.reg)?.options);
         u.turns++; u.llm_calls++;
         u.model_ms += r.ms ?? 0;
-        u.input_tokens += r.usage.input; u.cached_tokens += r.usage.cached; u.output_tokens += r.usage.output; u.reasoning_tokens += r.usage.reasoning;
+        u.input_tokens += r.usage.input; u.cached_tokens += r.usage.cached; u.output_tokens += r.usage.output; u.reasoning_tokens += r.usage.reasoning; u.reasoning_dropped += r.reasoningDropped;
         u.tokens += r.usage.input + r.usage.output;
         u.cost_usd += r.costUsd;
         u.cost_breakdown = { input: u.cost_breakdown.input + parts.input, cached_input: u.cost_breakdown.cached_input + parts.cached_input, output: u.cost_breakdown.output + parts.output };
@@ -594,7 +594,7 @@ export class Conversation {
     try {
       return await agentLoop({ reg: this.reg, model: this.model(agent), effort: this.effort(agent, s.mode), instructions: s.instructions, input: s.input, tools: s.tools, inbox: s.inbox,
         ctx: { ...this.context(agent, task, opts.planner, s), answering: opts.answering ?? null }, events: this.loopEvents(agent), maxRounds: opts.maxRounds, keepHead: s.head,
-        requireStop: s.mode !== "consult" && s.mode !== "report" && !opts.answering, stopTools: endingNames(s.tools) });
+        requireStop: s.mode !== "consult" && s.mode !== "report" && !opts.answering, stopTools: endingNames(s.tools), cacheKey: `${this.row.id}:${agent.id}:${s.mode}` });
     } catch (e) {
       if (opts.session) this.sessions.delete(opts.session); // its transcript may end mid-round
       throw e;

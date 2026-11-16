@@ -10,7 +10,9 @@ export interface Question { agent_id: string; question: string; options: { label
 export interface Usage {
   tokens: number; cost_usd: number; turns: number;
   active_seconds: number; input_tokens: number; cached_tokens: number; output_tokens: number;
-  reasoning_tokens: number; llm_calls: number; per_agent: Record<string, number>; per_agent_cost: Record<string, number>;
+  reasoning_tokens: number; llm_calls: number;
+  /** Reasoning items the API removed from the input because a changed prefix made them unusable. */
+  reasoning_dropped: number; per_agent: Record<string, number>; per_agent_cost: Record<string, number>;
   cost_breakdown: { input: number; cached_input: number; output: number };
   /** Execution counters, so the cost of a run can be explained: what it called, changed, searched and re-read. */
   /** Wall-clock of every model request, retries and their waits included. */

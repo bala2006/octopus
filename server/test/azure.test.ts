@@ -48,3 +48,75 @@ describe("model time", () => {
     }
   });
 });
+
+/** A deployment that records each request body and answers with the next reply, repeating the last one. */
+async function recordingServer(replies: { status: number; body: Record<string, unknown> }[]): Promise<{ url: string; bodies: Record<string, unknown>[]; close(): Promise<void> }> {
+  const bodies: Record<string, unknown>[] = [];
+  const server: Server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      bodies.push(JSON.parse(raw));
+      const reply = replies[Math.min(bodies.length, replies.length) - 1]!;
+      if (reply.status !== 200) {
+        res.writeHead(reply.status, { "content-type": "application/json" });
+        res.end(JSON.stringify(reply.body));
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({ type: "response.completed", response: reply.body })}\n\n`);
+      res.end();
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address() as AddressInfo;
+  return { url: `http://127.0.0.1:${port}`, bodies, close: () => new Promise((r) => server.close(() => r())) };
+}
+
+const answer = (text: string, extra: Record<string, unknown> = {}) => ({
+  status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }], usage: { input_tokens: 3, output_tokens: 1 }, ...extra,
+});
+
+function registryAt(url: string) {
+  const reg = openRegistry(path.join(mkdtempSync(path.join(tmpdir(), "azure-cache-")), "registry.db"));
+  reg.setSetting("provider.azure", { base_url: url, key_enc: encrypt("test-key"), options: { auth: "key" }, updated_at: "" });
+  return reg;
+}
+
+describe("prompt cache", () => {
+  test("the request carries the cache key and a 24-hour retention", async () => {
+    const server = await recordingServer([{ status: 200, body: answer("hi") }]);
+    try {
+      await complete(registryAt(server.url), { model: "cache-model", instructions: "Say hi.", input: [{ role: "user", content: "hi" }], promptCacheKey: "conv-1:agent-1:orchestrator" });
+      expect(server.bodies[0]).toMatchObject({ prompt_cache_key: "conv-1:agent-1:orchestrator", prompt_cache_retention: "24h" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("a deployment that rejects the cache key gets the request again without it", async () => {
+    const server = await recordingServer([
+      { status: 400, body: { error: { message: "Unsupported parameter: 'prompt_cache_key'." } } },
+      { status: 200, body: answer("hi") },
+    ]);
+    try {
+      const result = await complete(registryAt(server.url), { model: "cache-model-rejects", instructions: "Say hi.", input: [{ role: "user", content: "hi" }], promptCacheKey: "conv-1:agent-1:worker" });
+      expect(server.bodies).toHaveLength(2);
+      expect(server.bodies[0]).toHaveProperty("prompt_cache_key");
+      expect(server.bodies[1]).not.toHaveProperty("prompt_cache_key");
+      expect(result.text).toBe("hi");
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("input transformations that remove reasoning items are counted", async () => {
+    const server = await recordingServer([{ status: 200, body: answer("hi", { input_transformations: [{ id: "rs_1", reason: "prefix_mismatch" }, { id: "msg_1", reason: "prefix_mismatch" }] }) }]);
+    try {
+      const result = await complete(registryAt(server.url), { model: "cache-model-counts", instructions: "Say hi.", input: [{ role: "user", content: "hi" }] });
+      expect(result.reasoningDropped).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+});

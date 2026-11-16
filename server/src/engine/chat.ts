@@ -70,7 +70,7 @@ export class ChatSession {
     let text = "";
     try {
       const res = await agentLoop({
-        reg: this.reg, model: agent.model || config.defaultModel, effort: agent.behavior.reasoning_effort, tools, ctx, maxRounds: 12, requireStop: false, stopTools: endingNames(tools),
+        reg: this.reg, model: agent.model || config.defaultModel, effort: agent.behavior.reasoning_effort, tools, ctx, maxRounds: 12, requireStop: false, stopTools: endingNames(tools), cacheKey: `${s.id}:${agent.id}:chat`,
         instructions: instructions({ agent, company: company?.name ?? "the company", goal: "", team, overview: projectOverview(this.p.fs), skills: skillsFor(this.reg, agent),
           memory: { own: this.p.db.memory.find("agent_id = ?", [agent.id]), shared: this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]) } }, "chat"),
         input: history,

@@ -42,6 +42,8 @@ export interface LoopOptions {
   keepHead?: number;
   /** The tools in this turn's toolbox that end it (complete_task, submit_review, ...); the wrap-up and nudge name only these. */
   stopTools: string[];
+  /** The prompt cache key of this agent's turns: conversation, agent and mode. */
+  cacheKey?: string;
 }
 
 /** `exhausted`: the agent used every tool round without finishing. */
@@ -170,7 +172,7 @@ async function summarize(o: LoopOptions, functions: FunctionTool[], window: numb
   const res = await complete(o.reg, {
     model: o.model, instructions: o.instructions,
     input: [...input.slice(0, head), ...input.slice(head, start).map(prune), ...input.slice(start), { role: "user", content: CHECKPOINT_REQUEST }],
-    tools: functions, toolChoice: "none", effort: o.effort, signal: o.ctx.signal, maxOutputTokens: 8_000,
+    tools: functions, toolChoice: "none", effort: o.effort, signal: o.ctx.signal, maxOutputTokens: 8_000, promptCacheKey: o.cacheKey,
   });
   o.events.usage(res);
   const summary = res.text.trim();
@@ -246,7 +248,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     }
     const res = await complete(o.reg, {
       model: o.model, instructions: o.instructions, input, tools: functions, effort: o.effort, signal: o.ctx.signal,
-      maxOutputTokens: 48_000,
+      maxOutputTokens: 48_000, promptCacheKey: o.cacheKey,
     }, {
       onText: o.events.text, onThinking: o.events.thinking, onToolStart: o.events.toolStart, onToolArgs: o.events.toolArgs,
     });
