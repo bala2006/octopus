@@ -134,6 +134,8 @@ function innerCommand(argv: string[]): string[] | null {
 }
 
 function outside(root: string, value: string): boolean {
+  // A drive path names another disk on Windows. Elsewhere path.resolve would read it as a folder inside the project.
+  if (process.platform !== "win32" && /^[a-zA-Z]:[\\/]/.test(value)) return true;
   const resolved = path.resolve(root, value);
   return resolved !== root && !resolved.startsWith(root + path.sep) && resolved !== "/dev/null";
 }
