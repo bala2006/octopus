@@ -46,6 +46,7 @@ export interface RunEventMap {
   tool_call: { call_id: string; agent_id: string; tool: string; args: Record<string, unknown> };
   tool_result: { call_id: string; agent_id: string; tool: string; ok: boolean; output: string };
   browser_action: { agent_id: string; call_id: string; tool: string; args: Record<string, unknown>; ok: boolean; url: string; title: string; frame: string | null; note?: string };
+  todo_updated: { agent_id: string; todos: { content: string; status: "pending" | "in_progress" | "completed" }[] };
   task_updated: { task: TaskOut };
   requirements_updated: { requirements: Requirement[] };
   artifact_updated: { artifact: ArtifactOut & { created: boolean; lines: number; previous_lines: number } };

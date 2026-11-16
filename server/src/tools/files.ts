@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { syntaxNote } from "../lib/syntax";
 import { sha1, UserError } from "../lib/util";
 import { isBinaryPath, isSecretPath, WORK_DIR } from "../safety/paths";
 import { trash } from "../workspace/trash";
@@ -158,7 +159,7 @@ export const fileTools = [
       writeText(ctx, rel, a.content);
       ctx.shown.set(rel, { hash: sha1(a.content), ranges: [[1, a.content.split("\n").length]] });
       ctx.recordFile(rel, before, a.content, a.note ?? "");
-      return { text: `${before === null ? "Created" : "Updated"} ${rel} (${a.content.split("\n").length} lines).`, metrics: { wrote: true } };
+      return { text: `${before === null ? "Created" : "Updated"} ${rel} (${a.content.split("\n").length} lines).${await syntaxNote(rel, ctx.fs.abs(rel), a.content)}`, metrics: { wrote: true } };
     },
   }),
   defineTool({
@@ -186,7 +187,7 @@ export const fileTools = [
         ctx.shown.set(rel, { hash: sha1(after), ranges: [[from, Math.max(from, to)]] });
       }
       ctx.recordFile(rel, before, after, a.note ?? "");
-      return { text: `Edited ${rel} (${count > 1 ? `${count} replacements` : "1 replacement"}).`, metrics: { wrote: true } };
+      return { text: `Edited ${rel} (${count > 1 ? `${count} replacements` : "1 replacement"}).${await syntaxNote(rel, ctx.fs.abs(rel), after)}`, metrics: { wrote: true } };
     },
   }),
   defineTool({

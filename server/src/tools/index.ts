@@ -6,6 +6,7 @@ import { browserTools, serverTools } from "../services/mcp";
 import { commandTools } from "./commands";
 import { fileTools } from "./files";
 import { acceptanceTool, askUser, collabTools, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
+import { todoTools } from "./todo";
 import type { Tool } from "./types";
 import { webTools } from "./web";
 
@@ -57,7 +58,7 @@ export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode
   if (mode !== "consult") tools.push(...memoryTools);
   if (checks && t.send_message !== false) tools.push(...collabTools);
   if ((mode === "worker" || mode === "reviewer") && t.ask_user !== false) tools.push(askUser);
-  if (mode === "worker") tools.push(...workerTools);
+  if (mode === "worker") tools.push(...workerTools, ...todoTools);
   if (mode === "reviewer") tools.push(reviewTool, blockTask);
   if (mode === "acceptance") tools.push(acceptanceTool, blockTask);
   if (mode === "orchestrator") tools.push(...plannerTools, askUser);

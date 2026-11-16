@@ -6,6 +6,15 @@ const msg = (id: string, from: string | null, to: string | null, type = "task", 
   type: "message_created", seq: Number(id), data: { message: { id, run_id: "r", session_id: null, sender: from ? "agent" : "user", from_agent_id: from, to_agent_id: to, edge_id: null, type, content, meta: {}, turn_no: 1, created_at: "2026-09-30T10:00:00" } },
 });
 
+describe("todo_updated", () => {
+  it("leaves the run view unchanged, since the view does not show the list yet", () => {
+    const before = initialRun();
+    const after = reduceRun(before, { type: "todo_updated", seq: 1, data: { agent_id: "a", todos: [{ content: "Read the spec", status: "in_progress" }] } } as unknown as RunEvent, {});
+    expect(after.timeline).toEqual(before.timeline);
+    expect(after.steps).toEqual(before.steps);
+  });
+});
+
 describe("reduceRun", () => {
   it("keeps every thought and tool call as a step, in order, and finishes each call with its result", () => {
     const ev = (seq: number, type: string, data: Record<string, unknown>) => ({ type, seq, data }) as unknown as RunEvent;

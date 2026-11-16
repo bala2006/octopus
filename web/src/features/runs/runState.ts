@@ -219,6 +219,8 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
         orgEvents: [...s.orgEvents, { seq, kind: "updated", by: d.by, agent_id: d.agent_id, name: ch.name ?? d.old_name, summary: d.summary, reason: d.reason, self: d.self, persisted: d.persisted, ts: e.ts }],
         timeline: push({ type: e.type, agent_id: d.by, tone: "org", label: d.self ? `${nm(d.by)} edited own config` : `${nm(d.by)} reconfigured ${d.old_name}` }) };
     }
+    // The run view does not show the todo list yet, so the event leaves the state as it is.
+    case "todo_updated":
     case "agent_finished":
       return next;
     default:

@@ -1,9 +1,11 @@
 /** The file tools run against a real folder, with the engine's context reduced to the fields they touch. */
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileTools } from "../src/tools/files";
 import { ProjectFs } from "../src/safety/paths";
+import { todoTools } from "../src/tools/todo";
 import type { Tool, ToolContext } from "../src/tools/types";
 
 function project(files: Record<string, string>): { root: string; ctx: ToolContext } {
@@ -22,7 +24,7 @@ function project(files: Record<string, string>): { root: string; ctx: ToolContex
 
 /** Runs one file tool the way the agent loop does: the arguments pass the tool's schema first. */
 async function run(ctx: ToolContext, name: string, args: Record<string, unknown>) {
-  const tool: Tool = fileTools.find((t) => t.name === name)!;
+  const tool: Tool = [...fileTools, ...todoTools].find((t) => t.name === name)!;
   return tool.run(ctx, tool.args.parse(args), "call");
 }
 
@@ -120,5 +122,61 @@ describe("grep", () => {
     const { ctx } = project({ "a.ts": "x" });
     expect((await run(ctx, "grep", { pattern: "(" })).ok).toBe(false);
     expect((await run(ctx, "grep", { pattern: "nothing" })).text).toBe("No matches.");
+  });
+});
+
+const pythonOnPath = ["python", "python3"].some((cmd) => {
+  try { execFileSync(cmd, ["--version"], { stdio: "ignore" }); return true; } catch { return false; }
+});
+
+describe("syntax check after a write or an edit", () => {
+  test("an edit that breaks a TypeScript file is saved, and the result names the broken line", async () => {
+    const { root, ctx } = project({ "app.ts": "const a = 1;\nexport const b = 2;\n" });
+    const r = await run(ctx, "edit_file", { path: "app.ts", old_string: "export const b = 2;", new_string: "export const b = (2;" });
+    expect(r.text).toMatch(/^Edited app\.ts \(1 replacement\)\.\nSyntax errors in app\.ts\. Fix them before you go on:\n {2}line 2: /);
+    expect(readFileSync(path.join(root, "app.ts"), "utf8")).toContain("(2;");
+  });
+
+  test("a clean edit adds no note", async () => {
+    const { ctx } = project({ "app.ts": "const a = 1;\n" });
+    const r = await run(ctx, "edit_file", { path: "app.ts", old_string: "const a = 1;", new_string: "const a = 2;" });
+    expect(r.text).toBe("Edited app.ts (1 replacement).");
+  });
+
+  test("a JSON file that does not parse is reported with the line of the error", async () => {
+    const { ctx } = project({});
+    const r = await run(ctx, "write_file", { path: "data.json", content: '{\n  "a": 1,\n  "b": \n}' });
+    expect(r.text).toContain("line 4: ");
+  });
+
+  test("a file type this does not check adds no note", async () => {
+    const { ctx } = project({});
+    expect((await run(ctx, "write_file", { path: "notes.md", content: "# not code {" })).text).toBe("Created notes.md (1 lines).");
+  });
+
+  test.runIf(pythonOnPath)("a Python file that does not compile is reported with its line", async () => {
+    const { ctx } = project({});
+    const r = await run(ctx, "write_file", { path: "bad.py", content: "x = 1\ndef f(:\n    pass\n" });
+    expect(r.text).toMatch(/line 2: /);
+  });
+});
+
+describe("todo_write", () => {
+  test("each call replaces the list, and the list reaches the run as todo_updated", async () => {
+    const { ctx } = project({});
+    const emitted: [string, unknown][] = [];
+    ctx.emit = ((type: string, data: unknown) => { emitted.push([type, data]); }) as ToolContext["emit"];
+    const first = await run(ctx, "todo_write", { todos: [{ content: "Read the spec", status: "in_progress" }, { content: "Write the page", status: "pending" }] });
+    expect(first.text).toBe("Updated todo list: 1 pending, 1 in progress, 0 completed.");
+    await run(ctx, "todo_write", { todos: [{ content: "Read the spec", status: "completed" }] });
+    expect(emitted).toEqual([
+      ["todo_updated", { agent_id: "agent-1", todos: [{ content: "Read the spec", status: "in_progress" }, { content: "Write the page", status: "pending" }] }],
+      ["todo_updated", { agent_id: "agent-1", todos: [{ content: "Read the spec", status: "completed" }] }],
+    ]);
+  });
+
+  test("a status outside pending, in_progress and completed is refused", () => {
+    const tool = todoTools[0]!;
+    expect(() => tool.args.parse({ todos: [{ content: "x", status: "doing" }] })).toThrow();
   });
 });
