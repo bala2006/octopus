@@ -7,12 +7,18 @@
  * A regression here is a real regression in cost.
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { CanvasOut, RunDetail, WorkspaceOut } from "@octopus/shared";
+import { effectiveRoles } from "../src/catalog/roles";
 import { openRegistry, type Registry } from "../src/db/registry";
 import { buildServer } from "../src/http/server";
 import { encrypt } from "../src/lib/secrets";
+import { isCheckpoint, loadScenario, scriptFor } from "../eval/scriptedModel";
 import { fakeModel, outputs, turnKind, type FakeModel, type Script } from "./fakeModel";
 
 let app: FastifyInstance;
@@ -60,7 +66,16 @@ const MEASURED = { oneFile: 4, reviewAcceptance: 15, designerQa: 18, followUp: 5
  */
 const INSTRUCTIONS = { oneFile: 15_348, reviewAcceptance: 41_330, designerQa: 52_570 } as const;
 
-interface Result { calls: number; instructions: number; input: number; reads: number; writes: number; checks: number; agents: number; status: string; redundant: number; failures: number }
+interface Result { calls: number; instructions: number; input: number; toolDefs: number; images: number; checkpoints: number; reads: number; writes: number; checks: number; agents: number; status: string; redundant: number; failures: number }
+
+/** Characters of inline images (data URLs) in one request's input, wherever they sit. */
+function imageChars(v: unknown): number {
+  if (Array.isArray(v)) return v.reduce<number>((n, x) => n + imageChars(x), 0);
+  if (!v || typeof v !== "object") return 0;
+  const o = v as Record<string, unknown>;
+  if (o.type === "input_image" && typeof o.image_url === "string") return o.image_url.length;
+  return Object.values(o).reduce<number>((n, x) => n + imageChars(x), 0);
+}
 
 /** Run one scenario and measure the requests the engine made for it. */
 async function measure(name: string, files: Record<string, string>, template: string, goal: string, s: Script, budget?: Record<string, unknown>): Promise<Result> {
@@ -74,16 +89,19 @@ async function measure(name: string, files: Record<string, string>, template: st
   const before = model.requests.length;
   const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal, budget });
   const done = await until(run.id, ["completed", "incomplete", "failed"]);
-  const reqs = model.requests.slice(before) as { instructions: string; input: unknown }[];
+  const reqs = model.requests.slice(before) as { instructions: string; input: unknown; tools?: unknown[] }[];
   const usage = (done.state as { usage?: { file_reads?: number; file_writes?: number; verifications?: number; redundant_reads?: number; agent_runs?: number; tool_failures?: number } }).usage ?? {};
   const result: Result = {
     calls: reqs.length,
     instructions: reqs.reduce((n, r) => n + r.instructions.length, 0),
     input: reqs.reduce((n, r) => n + JSON.stringify(r.input).length, 0),
+    toolDefs: reqs.reduce((n, r) => n + JSON.stringify(r.tools ?? []).length, 0),
+    images: reqs.reduce((n, r) => n + imageChars(r.input), 0),
+    checkpoints: reqs.filter((r) => isCheckpoint(r as { input: unknown[] })).length,
     reads: usage.file_reads ?? 0, writes: usage.file_writes ?? 0, checks: usage.verifications ?? 0,
     redundant: usage.redundant_reads ?? 0, agents: usage.agent_runs ?? 0, status: done.status, failures: usage.tool_failures ?? 0,
   };
-  console.log(`bench ${name.padEnd(26)} calls=${result.calls} instr=${result.instructions} input=${result.input} reads=${result.reads} redundant=${result.redundant} writes=${result.writes} checks=${result.checks} turns=${result.agents} failures=${result.failures} status=${result.status}`);
+  console.log(`bench ${name.padEnd(26)} calls=${result.calls} instr=${result.instructions} input=${result.input} tool_def_chars=${result.toolDefs} image_chars=${result.images} checkpoints=${result.checkpoints} reads=${result.reads} redundant=${result.redundant} writes=${result.writes} checks=${result.checks} turns=${result.agents} failures=${result.failures} status=${result.status}`);
   if (done.status !== "completed") {
     const tasks = await call<{ key: string; kind: string; title: string; status: string; result: string }[]>("GET", `${W()}/runs/${run.id}/tasks`);
     console.log(`  ${name}: ${done.halt_reason ?? "no reason"} | ${tasks.map((t) => `${t.key} ${t.kind}=${t.status}${t.result ? ` (${t.result.replace(/\s+/g, " ").slice(0, 120)})` : ""}`).join(" ; ")}`);
@@ -218,7 +236,7 @@ describe("execution benchmark", () => {
     const done = await until(run.id, ["completed", "incomplete", "failed"]);
     const followUp = model.requests.slice(beforeFollowUp) as { instructions: string; input: unknown[] }[];
     const usage = (done.state as { usage?: { file_reads?: number; file_writes?: number; agent_runs?: number; redundant_reads?: number; tool_failures?: number } }).usage ?? {};
-    console.log(`bench ${"follow-up".padEnd(26)} calls=${followUp.length} reads=${usage.file_reads ?? 0} redundant=${usage.redundant_reads ?? 0} writes=${usage.file_writes ?? 0} turns=${usage.agent_runs ?? 0} status=${done.status}`);
+    console.log(`bench ${"follow-up".padEnd(26)} calls=${followUp.length} tool_def_chars=${followUp.reduce((n, r) => n + JSON.stringify((r as { tools?: unknown[] }).tools ?? []).length, 0)} image_chars=${followUp.reduce((n, r) => n + imageChars(r.input), 0)} checkpoints=${followUp.filter((r) => isCheckpoint(r as { input: unknown[] })).length} reads=${usage.file_reads ?? 0} redundant=${usage.redundant_reads ?? 0} writes=${usage.file_writes ?? 0} turns=${usage.agent_runs ?? 0} status=${done.status}`);
     expect(followUp.length).toBeLessThanOrEqual(MEASURED.followUp);
     // The edit really happened: the file the follow-up changed holds the new markup.
     expect(readFileSync(path.join(dir, "index.html"), "utf8")).toContain("font-size:4rem");
@@ -265,4 +283,55 @@ describe("execution benchmark", () => {
     expect(existsSync(path.join(dir, "CHECK_RAN"))).toBe(false);
     expect(r.status).toBe("completed");
   }, 60_000);
+
+  test("five failing reads in one step end the turn as incomplete", async () => {
+    const scenario = scriptFor(loadScenario("parallel-miss.json"));
+    const r = await measure("parallel-miss", {}, "adaptive", "Read the five config files", scenario.script);
+    expect(scenario.stats.unmatched).toBe(0);
+    expect(r.failures).toBe(5);
+    expect(r.status).toBe("incomplete");
+  }, 60_000);
+
+  test("six screenshots fill the transcript past its summary limit, so one checkpoint call runs", async () => {
+    const shots = await screenshotServer();
+    reg.mcp.upsert({ id: "mcp-shots", name: "shots", transport: "http", command: "", args: [], url: shots.url, env_enc: "", enabled: true, tools: [], last_error: "", updated_at: new Date().toISOString() });
+    const frontend = effectiveRoles(reg).find((x) => x.key === "frontend")!;
+    const { source, ...data } = frontend;
+    reg.roles.upsert({ key: "frontend", data: { ...data, tools: { ...data.tools, mcp_servers: ["shots"] } }, deleted: false, updated_at: new Date().toISOString() });
+    try {
+      const scenario = scriptFor(loadScenario("screenshots.json"));
+      const r = await measure("screenshots", {}, "adaptive", "Check the page after each change", scenario.script);
+      expect(scenario.stats.unmatched).toBe(0);
+      expect(r.images).toBeGreaterThan(5 * 60_903);
+      // Trunk baseline: the six screenshots pass the summary limit, and one checkpoint call runs.
+      expect(r.checkpoints).toBe(1);
+      expect(r.status).toBe("completed");
+    } finally {
+      reg.roles.remove("frontend");
+      reg.mcp.remove("mcp-shots");
+      await shots.close();
+    }
+  }, 60_000);
 });
+
+/** A stand-in MCP server whose one tool returns a 60,903-character screenshot, as an image data URL. */
+async function screenshotServer(): Promise<{ url: string; close(): Promise<void> }> {
+  // A JPEG data URL prefix is 23 characters, so 60,880 base64 characters make a 60,903-character image URL.
+  const data = "A".repeat(60_903 - "data:image/jpeg;base64,".length);
+  const http: Server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const mcp = new McpServer({ name: "shots", version: "1.0.0" });
+    mcp.registerTool("take_screenshot", { description: "Take a screenshot of the page.", inputSchema: {} }, async () => ({ content: [{ type: "image" as const, data, mimeType: "image/jpeg" }] }));
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => { void transport.close(); void mcp.close(); });
+    await mcp.connect(transport);
+    await transport.handleRequest(req, res, raw ? JSON.parse(raw) : undefined);
+  });
+  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+  const { port } = http.address() as AddressInfo;
+  return { url: `http://127.0.0.1:${port}/mcp`, close: () => new Promise((resolve) => { http.closeAllConnections(); http.close(() => resolve()); }) };
+}
+
+
+
