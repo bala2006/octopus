@@ -319,6 +319,117 @@ describe("execution benchmark", () => {
   }, 60_000);
 });
 
+/** Solo variants of the seven scenarios above. One main agent works alone, so these counts are the solo ceilings of their own. */
+const SOLO = { question: 1, oneFile: 2, reviewAcceptance: 3, readBack: 3, followUp: 2, persistentFailure: 2, docsOnly: 2 } as const;
+
+/** Waits until the model has received `count` requests, then until the run is no longer working. */
+async function soloDone(runId: string, count: number): Promise<RunDetail> {
+  const end = Date.now() + 60_000;
+  while (model.requests.length < count) {
+    if (Date.now() > end) throw new Error(`the model received ${model.requests.length} requests, not ${count}`);
+    await new Promise((res) => setTimeout(res, 20));
+  }
+  return until(runId, ["completed", "awaiting_user", "incomplete", "failed", "cancelled"]);
+}
+
+describe("solo execution benchmark", () => {
+  test("solo: a question needs one model call", async () => {
+    const r = await measure("solo question", {}, "solo", "What does this project do?", () => ({ text: "A Vite + Fastify app." }));
+    expect(r.calls).toBeLessThanOrEqual(SOLO.question);
+    expect(r.status).toBe("completed");
+  }, 60_000);
+
+  test("solo: a one-file change is one write and one reply, with no agent beyond the main one", async () => {
+    const r = await measure("solo one-file page", {}, "solo", "Build a landing page", (b) => (outputs(b).length === 0
+      ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] }
+      : { text: "The landing page is in index.html." }));
+    expect(r.calls).toBeLessThanOrEqual(SOLO.oneFile);
+    expect(r.agents).toBe(1);
+    expect(r.writes).toBe(1);
+    expect(r.failures).toBe(0);
+    expect(r.redundant).toBe(0);
+    expect(r.checks).toBe(0);
+    expect(r.status).toBe("completed");
+  }, 60_000);
+
+  test("solo: a page with an empty table is filled in by the same agent, and no review runs", async () => {
+    const r = await measure("solo review + acceptance", {}, "solo", "Build a landing page with a pricing table", (b) => {
+      const n = outputs(b).length;
+      if (n === 0) return { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n<table></table>\n" } }] };
+      if (n === 1) return { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<table></table>", new_string: "<table><tr><td>Basic</td></tr></table>" } }] };
+      return { text: "The pricing table has a row in index.html." };
+    });
+    expect(r.calls).toBeLessThanOrEqual(SOLO.reviewAcceptance);
+    expect(r.redundant).toBe(0);
+    expect(r.status).toBe("completed");
+  }, 90_000);
+
+  test("solo: the agent reads its page back once before it replies", async () => {
+    const r = await measure("solo + read-back", {}, "solo", "Build a landing page with a pricing table", (b) => {
+      const n = outputs(b).length;
+      if (n === 0) return { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n<table></table>\n" } }] };
+      if (n === 1) return { calls: [{ name: "read_file", args: { path: "index.html" } }] };
+      return { text: "The landing page is in index.html." };
+    });
+    expect(r.calls).toBeLessThanOrEqual(SOLO.readBack);
+    expect(r.status).toBe("completed");
+  }, 90_000);
+
+  test("solo: a follow-up continues the transcript, and the agent does not re-read a file it holds", async () => {
+    let phase = 1;
+    script = (b) => {
+      const n = outputs(b).length;
+      if (phase === 1) return n === 0 ? { calls: [{ name: "write_file", args: { path: "index.html", content: "<h1>Acme</h1>\n" } }] } : { text: "The landing page is in index.html." };
+      if (n === 0) return { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "<h1>Acme</h1>", new_string: "<h1 style=\"font-size:4rem\">Acme</h1>" } }] };
+      return { text: "The hero is bigger in index.html." };
+    };
+    dir = path.join(process.env.TEST_BASE_DIR!, `b${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(dir);
+    ws = await call<WorkspaceOut>("POST", "/api/v1/workspaces", { path: dir });
+    reg.setSetting("approval_mode", "auto");
+    const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "solo", name: "Octopus" });
+    const firstTurn = model.requests.length;
+    const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
+    await soloDone(run.id, firstTurn + 2);
+    const beforeFollowUp = model.requests.length;
+    phase = 2;
+    await call("POST", `${W()}/runs/${run.id}/continue`, { content: "Make the hero bigger" });
+    const done = await soloDone(run.id, beforeFollowUp + 2);
+    const followUp = model.requests.slice(beforeFollowUp) as { instructions: string; input: unknown[] }[];
+    const usage = (done.state as { usage?: { file_reads?: number; file_writes?: number; agent_runs?: number; redundant_reads?: number; tool_failures?: number } }).usage ?? {};
+    console.log(`bench ${"solo follow-up".padEnd(26)} calls=${followUp.length} reads=${usage.file_reads ?? 0} redundant=${usage.redundant_reads ?? 0} writes=${usage.file_writes ?? 0} turns=${usage.agent_runs ?? 0} status=${done.status}`);
+    expect(followUp.length).toBeLessThanOrEqual(SOLO.followUp);
+    expect(readFileSync(path.join(dir, "index.html"), "utf8")).toContain("font-size:4rem");
+    expect(usage.tool_failures ?? 0).toBe(0);
+    expect(usage.redundant_reads ?? 0).toBe(0);
+    expect(usage.file_reads ?? 0).toBeLessThanOrEqual(1);
+    expect(done.status).toBe("completed");
+  }, 90_000);
+
+  test("solo: a failing edit returns its error, and the agent answers without repeating it", async () => {
+    const r = await measure("solo persistent failure", {}, "solo", "Edit missing.html", (b) => (outputs(b).length === 0
+      ? { calls: [{ name: "edit_file", args: { path: "missing.html", old_string: "a", new_string: "b" } }] }
+      : { text: "I could not edit missing.html because it does not exist." }));
+    expect(r.calls).toBeLessThanOrEqual(SOLO.persistentFailure);
+    expect(r.failures).toBe(1);
+    expect(r.status).toBe("completed");
+  }, 60_000);
+
+  test("solo: a documents-only change runs no project checks", async () => {
+    const r = await measure("solo docs-only change", {
+      "package.json": JSON.stringify({ name: "x", scripts: { test: "node should-not-run.js" } }),
+      "should-not-run.js": "require('fs').writeFileSync('CHECK_RAN', '1'); process.exit(1);",
+    }, "solo", "Document the project", (b) => (outputs(b).length === 0
+      ? { calls: [{ name: "write_file", args: { path: "README.md", content: "# Project\n\nDocs.\n" } }] }
+      : { text: "Documented the project in README.md." }));
+    expect(r.calls).toBeLessThanOrEqual(SOLO.docsOnly);
+    expect(r.checks).toBe(0);
+    expect(existsSync(path.join(dir, "CHECK_RAN"))).toBe(false);
+    expect(r.status).toBe("completed");
+  }, 60_000);
+});
+
+
 /** A stand-in MCP server whose one tool returns a 60,903-character screenshot, as an image data URL. */
 async function screenshotServer(): Promise<{ url: string; close(): Promise<void> }> {
   // A JPEG data URL prefix is 23 characters, so 60,880 base64 characters make a 60,903-character image URL.
