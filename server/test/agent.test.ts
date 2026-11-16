@@ -77,6 +77,12 @@ async function runLoop(script: Script, tools: Tool[], options: ProviderOptions =
 
 const isCheckpointRequest = (r: { input: Item[] }) => String(r.input.at(-1)?.content ?? "").startsWith(CHECKPOINT_REQUEST.slice(0, 40));
 
+/** A request's stored items: the request without its ephemeral screenshot message, which the loop never stores. */
+function storedPart(sent: Item[]): Item[] {
+  const last = sent.at(-1);
+  return last && JSON.stringify(last).includes('"input_image"') ? sent.slice(0, -1) : sent;
+}
+
 /** A tool that reads one file per call and returns `outputChars` characters of it. */
 function touchTool(outputChars: number): Tool {
   return defineTool({
@@ -143,7 +149,21 @@ test("six 60,903-character screenshots trigger no checkpoint, because an image c
   let calls = 0;
   const { requests } = await runLoop(() => (++calls <= 6 ? { calls: [{ name: "shot", args: {} }] } : { text: "done" }), [shot]);
   expect(requests.some(isCheckpointRequest)).toBe(false);
-  expect(JSON.stringify(requests.at(-1)!.input).length).toBeGreaterThan(6 * 60_000);
+});
+
+test("six screenshots make seven requests: six carry one image each, and no stored item ever changes", async () => {
+  const image = `data:image/jpeg;base64,${"A".repeat(60_903 - "data:image/jpeg;base64,".length)}`;
+  const shot = defineTool({ name: "shot", description: "Take a screenshot.", args: z.object({}), async run() { return { text: "shot", image }; } });
+  let calls = 0;
+  const { requests, input } = await runLoop(() => (++calls <= 6 ? { calls: [{ name: "shot", args: {} }] } : { text: "done" }), [shot]);
+  const imageParts = requests.map((r) => JSON.stringify(r.input).split('"input_image"').length - 1);
+  expect(imageParts).toEqual([0, 1, 1, 1, 1, 1, 1]);
+  expect(input.filter((i) => String(i.content).startsWith("Screenshot taken: shot.")).length).toBe(6);
+  expect(JSON.stringify(input).includes('"input_image"')).toBe(false);
+  const stored = requests.map((r) => storedPart(r.input));
+  for (let i = 1; i < stored.length; i++) {
+    expect(JSON.stringify(stored[i]!.slice(0, stored[i - 1]!.length))).toBe(JSON.stringify(stored[i - 1]));
+  }
 });
 
 test("the compaction trigger reads the input tokens the last response reported", async () => {
@@ -166,12 +186,12 @@ function isCheckpointRequestBody(b: { input: Item[] }) {
   return isCheckpointRequest({ input: b.input });
 }
 
-test("each request's input starts with the previous request's input while nothing is compacted", async () => {
-  const { requests } = await runLoop(touchScript(4), [touchTool(3_000)]);
+test("each request's stored items are a prefix of the stored transcript the loop ends with", async () => {
+  const { requests, input } = await runLoop(touchScript(4), [touchTool(3_000)]);
   expect(requests.length).toBeGreaterThan(3);
-  for (let i = 1; i < requests.length; i++) {
-    const before = requests[i - 1]!.input;
-    expect(JSON.stringify(requests[i]!.input.slice(0, before.length))).toBe(JSON.stringify(before));
+  for (const r of requests) {
+    const stored = JSON.stringify(storedPart(r.input));
+    expect(stored).toBe(JSON.stringify(input.slice(0, storedPart(r.input).length)));
   }
 });
 

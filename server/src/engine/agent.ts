@@ -234,6 +234,8 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   let lastCall = "";
   let repeats = 0;
   let measured: Measure | null = null;
+  /** The screenshot message for the next model call only. It is not stored, so a stored transcript never resends an image. */
+  let pending: Item | null = null;
   /** Once a checkpoint is refused or fails in this turn, the turn does not try again: each try is a model call. */
   let compactionRefused = false;
   for (let round = 1; round <= o.maxRounds; round++) {
@@ -247,11 +249,12 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       else compactionRefused = true;
     }
     const res = await complete(o.reg, {
-      model: o.model, instructions: o.instructions, input, tools: functions, effort: o.effort, signal: o.ctx.signal,
+      model: o.model, instructions: o.instructions, input: pending ? [...input, pending] : input, tools: functions, effort: o.effort, signal: o.ctx.signal,
       maxOutputTokens: 48_000, promptCacheKey: o.cacheKey,
     }, {
       onText: o.events.text, onThinking: o.events.thinking, onToolStart: o.events.toolStart, onToolArgs: o.events.toolArgs,
     });
+    pending = null;
     measured = { tokens: res.usage.input, at: input.length };
     o.events.usage(res);
     if (res.thought) o.events.thought(res.thought);
@@ -266,6 +269,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     }
     let stop: Stop | undefined;
     const images: string[] = [];
+    const shots: string[] = [];
     for (const call of res.calls) {
       if (stop) { input.push({ type: "function_call_output", call_id: call.call_id, output: "Skipped: the turn already ended." }); continue; }
       const position = input.length; // where this call's output goes
@@ -277,7 +281,10 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       // A spilled output holds only its head and tail, so the file it came from is not in the transcript.
       if (kept.path) dropShown(o.ctx.shown, (at) => at === position);
       input.push({ type: "function_call_output", call_id: call.call_id, output: kept.text });
-      if (r.image) images.push(r.image);
+      if (r.image) {
+        images.push(r.image);
+        shots.push(`Screenshot taken: ${r.output}. The image was shown once to the model when it was taken.`);
+      }
       if (r.stop) stop = r.stop;
       const sig = `${call.name}:${call.arguments}`;
       repeats = sig === lastCall ? repeats + 1 : 1;
@@ -287,7 +294,10 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     if (REPEAT_REMINDERS.includes(repeats)) {
       input.push({ role: "user", content: `You have made the same ${lastCall.split(":")[0]} call ${repeats} times in a row with identical arguments, and it keeps giving the same result. Change your approach: try something different, ask a teammate, or finish with what you have.` });
     }
-    if (images.length) input.push({ role: "user", content: [{ type: "input_text", text: "Screenshot from your last tool call:" }, ...images.slice(-2).map((url) => ({ type: "input_image", image_url: url }))] });
+    if (shots.length) {
+      input.push({ role: "user", content: shots.join("\n") });
+      pending = { role: "user", content: [{ type: "input_text", text: "Screenshot from your last tool call:" }, ...images.slice(-2).map((url) => ({ type: "input_image", image_url: url }))] };
+    }
   }
   return { stop: null, text: lastText, rounds: o.maxRounds, exhausted: true };
 }
