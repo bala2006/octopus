@@ -6,7 +6,7 @@ describe("describeCall", () => {
     expect(describeCall("read_file", { path: "index.html" })).toEqual({ kind: "read", title: "Read index.html" });
     expect(describeCall("write_file", { path: "style.css", content: "" })).toEqual({ kind: "write", title: "Wrote style.css" });
     expect(describeCall("move_file", { from: "a.md", to: "b.md" })).toEqual({ kind: "write", title: "Moved a.md to b.md" });
-    expect(describeCall("list_files", {})).toEqual({ kind: "read", title: "Listed the project files" });
+    expect(describeCall("glob", { pattern: "src/**" })).toEqual({ kind: "read", title: "Listed src/**" });
   });
 
   it("names the command that ran", () => {

@@ -6,26 +6,34 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { clip, sha1, UserError } from "../lib/util";
+import { sha1, UserError } from "../lib/util";
 import { isBinaryPath, isSecretPath, WORK_DIR } from "../safety/paths";
 import { trash } from "../workspace/trash";
-import { Denied, defineTool, MAX_TOOL_OUTPUT, type ToolContext } from "./types";
+import { Denied, defineTool, type ToolContext } from "./types";
 
 /** Lockfiles, minified bundles and source maps: large, generated, and almost never worth reading whole. */
 const GENERATED = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock|Cargo\.lock|poetry\.lock|composer\.lock)$|\.min\.(js|css)$|\.map$/;
 
-/**
- * The lines from `from` that fit in one read, stopping at `to`. Always at least one line. A page is deliberately much
- * smaller than the maximum tool result: orienting in a file should cost a few thousand tokens, and the header says
- * where to continue.
- */
-const READ_PAGE = 12_000;
-function page(lines: string[], from: number, to: number, limit = READ_PAGE): number {
-  let size = 0;
-  let end = from - 1;
-  while (end < to && size + lines[end]!.length + 1 <= limit) size += lines[end++]!.length + 1;
-  return Math.max(end, from);
-}
+/** Most lines one read returns, and most characters one line keeps. A longer result is spilled to a file by the agent loop. */
+const READ_LIMIT = 2_000;
+const LINE_LIMIT = 2_000;
+/** Files walked by one glob or grep call, and the largest file grep searches. */
+const WALK_LIMIT = 5_000;
+const GREP_FILE_LIMIT = 1_000_000;
+const GLOB_RESULTS = 100;
+const GREP_MATCHES = 250;
+
+const splitLines = (content: string): string[] => {
+  const lines = content.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+};
+
+const clipLine = (line: string): string =>
+  line.length > LINE_LIMIT ? `${line.slice(0, LINE_LIMIT)}... (line truncated to ${LINE_LIMIT} chars)` : line;
+
+const readFooter = (from: number, to: number, total: number): string =>
+  to < total ? `(Showing lines ${from}-${to} of ${total}. Use offset=${to + 1} to continue.)` : `(End of file - total ${total} lines)`;
 
 const read = (ctx: ToolContext, rel: string): string | null => {
   const abs = ctx.fs.abs(rel);
@@ -54,20 +62,31 @@ function writeText(ctx: ToolContext, rel: string, content: string) {
 
 export const fileTools = [
   defineTool({
-    name: "list_files",
-    description: "List files in the project (dependency and build folders are skipped). Use a folder path to narrow it down.",
-    args: z.object({ path: z.string().optional().describe("Folder relative to the project root; empty for the whole project") }),
+    name: "glob",
+    description: "Find project files by path pattern, such as src/**/*.ts. Returns up to 100 paths, newest first. Dependency and build folders are skipped.",
+    args: z.object({ pattern: z.string().min(1).describe("Glob matched against project-relative paths") }),
     async run(ctx, a) {
-      ctx.setStatus("reading", `Listing ${a.path || "files"}`);
-      const { files, truncated } = ctx.fs.walk({ base: a.path, max: 600, actor: "agent" });
-      if (!files.length) return { text: a.path ? `${a.path} is empty or does not exist.` : "The project folder is empty.", metrics: { listed: true } };
-      return { text: files.map((f) => `${f}  (${ctx.fs.size(f)} B)`).join("\n") + (truncated ? "\n… more files not shown; list a subfolder." : ""), metrics: { listed: true } };
+      ctx.setStatus("reading", `Finding ${a.pattern}`);
+      const { files, truncated } = ctx.fs.walk({ max: WALK_LIMIT, actor: "agent" });
+      const modified = (f: string) => { try { return statSync(ctx.fs.abs(f)).mtimeMs; } catch { return 0; } };
+      const matched = files.filter((f) => path.matchesGlob(f, a.pattern)).map((f) => ({ f, at: modified(f) })).sort((x, y) => y.at - x.at);
+      if (!matched.length) return { text: `No files match ${a.pattern}${truncated ? ` in the first ${WALK_LIMIT} files` : ""}.`, metrics: { listed: true } };
+      const shown = matched.slice(0, GLOB_RESULTS).map((m) => m.f);
+      const notes = [
+        matched.length > GLOB_RESULTS ? `(Showing ${GLOB_RESULTS} of ${matched.length} matching paths, newest first. Use a narrower pattern.)` : "",
+        truncated ? `(The project has more than ${WALK_LIMIT} files; only the first ${WALK_LIMIT} were searched.)` : "",
+      ].filter(Boolean);
+      return { text: [...shown, ...notes].join("\n"), metrics: { listed: true } };
     },
   }),
   defineTool({
     name: "read_file",
-    description: "Read a text file. Large files come back one page at a time: the header says which lines you got and where to continue. Pass start_line/end_line (1-based, inclusive) to read part of a file. Read several files in one step when you need them.",
-    args: z.object({ path: z.string(), start_line: z.number().int().min(1).optional(), end_line: z.number().int().min(1).optional() }),
+    description: "Read a UTF-8 text file and return line-numbered content. Use offset and limit to read a line range or continue a large file. Read several files in one step when you need them.",
+    args: z.object({
+      path: z.string(),
+      offset: z.number().int().min(1).optional().describe("1-based first line to return. Defaults to 1."),
+      limit: z.number().int().min(1).max(READ_LIMIT).optional().describe(`Lines to return, at most ${READ_LIMIT}. Defaults to ${READ_LIMIT}.`),
+    }),
     async run(ctx, a) {
       const rel = ctx.fs.rel(a.path);
       ctx.setStatus("reading", `Reading ${rel}`);
@@ -76,39 +95,50 @@ export const fileTools = [
       const content = read(ctx, rel);
       if (content === null) return { text: `${rel} does not exist.`, ok: false };
       const hash = sha1(content);
-      const lines = content.split("\n");
-      if (GENERATED.test(rel) && a.start_line === undefined && a.end_line === undefined)
-        return { text: `${rel} is a generated file (${lines.length} lines). Use search_project to find what you need in it, or read a line range.` };
+      const lines = splitLines(content);
+      if (GENERATED.test(rel) && a.offset === undefined && a.limit === undefined)
+        return { text: `${rel} is a generated file (${lines.length} lines). Use grep to find what you need in it, or read a range with offset and limit.` };
       ctx.seen.set(rel, hash);
-      const from = Math.min(a.start_line ?? 1, lines.length);
-      // An explicit range was asked for: fill it. Opening a file without one is paged, so orienting stays cheap.
-      const explicit = a.start_line !== undefined || a.end_line !== undefined;
-      const to = page(lines, from, Math.min(a.end_line ?? lines.length, lines.length), explicit ? MAX_TOOL_OUTPUT : READ_PAGE);
+      const from = a.offset ?? 1;
+      if (lines.length && from > lines.length) return { text: `offset ${from} is out of range for ${rel} (${lines.length} lines).`, ok: false };
+      const to = Math.min(lines.length, from - 1 + (a.limit ?? READ_LIMIT));
       const prior = ctx.shown.get(rel);
       if (prior?.hash === hash && prior.ranges.some(([f, t]) => f <= from && t >= to))
         return { text: `${rel} lines ${from}-${to} have not changed since you read them; they are earlier in this conversation.`, metrics: { read: true, redundant: true } };
       ctx.shown.set(rel, { hash, ranges: [...(prior?.hash === hash ? prior.ranges : []), [from, to]] });
-      const range = to < lines.length ? `, showing ${from}-${to}; continue with start_line ${to + 1}` : from > 1 ? `, showing ${from}-${to}` : "";
-      return { text: `${rel} (${lines.length} lines${range})\n${clip(lines.slice(from - 1, to).join("\n"), MAX_TOOL_OUTPUT)}`, metrics: { read: true } };
+      const body = lines.slice(from - 1, to).map((line, i) => `${from + i}: ${clipLine(line)}`);
+      return { text: [...body, readFooter(from, to, lines.length)].join("\n"), metrics: { read: true } };
     },
   }),
   defineTool({
-    name: "search_project",
-    description: "Search file contents for text (case-insensitive) or a regular expression. Returns matching lines with paths.",
-    args: z.object({ query: z.string().min(1), regex: z.boolean().optional(), path: z.string().optional() }),
+    name: "grep",
+    description: "Search file contents with a regular expression. Returns matching lines grouped by file, with line numbers, up to 250 matches. Use include to limit the files by path glob, such as src/**/*.ts.",
+    args: z.object({
+      pattern: z.string().min(1).describe("Regular expression, case-sensitive"),
+      include: z.string().min(1).optional().describe("Glob the file paths must match"),
+    }),
     async run(ctx, a) {
-      ctx.setStatus("reading", `Searching for “${a.query}”`);
+      ctx.setStatus("reading", `Searching for “${a.pattern}”`);
       let re: RegExp;
-      try { re = a.regex ? new RegExp(a.query, "i") : new RegExp(a.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"); }
+      try { re = new RegExp(a.pattern); }
       catch (e) { return { text: `Invalid regular expression: ${(e as Error).message}`, ok: false, metrics: { searched: true } }; }
-      const hits: string[] = [];
-      for (const f of ctx.fs.walk({ base: a.path, max: 4000, actor: "agent" }).files) {
-        if (isBinaryPath(f) || isSecretPath(f) || ctx.fs.size(f) > 1_000_000) continue;
-        const lines = (read(ctx, f) ?? "").split("\n");
-        lines.forEach((l, i) => { if (hits.length < 120 && re.test(l)) hits.push(`${f}:${i + 1}: ${l.trim().slice(0, 200)}`); });
-        if (hits.length >= 120) break;
+      const out: string[] = [];
+      let matches = 0;
+      for (const f of ctx.fs.walk({ max: WALK_LIMIT, actor: "agent" }).files) {
+        if (matches >= GREP_MATCHES) break;
+        if ((a.include && !path.matchesGlob(f, a.include)) || isBinaryPath(f) || isSecretPath(f) || ctx.fs.size(f) > GREP_FILE_LIMIT) continue;
+        const lines = splitLines(read(ctx, f) ?? "");
+        const hits: string[] = [];
+        for (let i = 0; i < lines.length && matches < GREP_MATCHES; i++) {
+          if (!re.test(lines[i]!)) continue;
+          matches++;
+          hits.push(`  ${i + 1}: ${clipLine(lines[i]!.replace(/\r$/, ""))}`);
+        }
+        if (hits.length) out.push(f, ...hits);
       }
-      return { text: hits.length ? hits.join("\n") : "No matches.", metrics: { searched: true } };
+      if (!matches) return { text: "No matches.", metrics: { searched: true } };
+      const note = matches >= GREP_MATCHES ? [`(Stopped at ${GREP_MATCHES} matches. Narrow the pattern or set include to see the rest.)`] : [];
+      return { text: [...out, ...note].join("\n"), metrics: { searched: true } };
     },
   }),
   defineTool({

@@ -14,7 +14,7 @@ import { webTools } from "./web";
  * `acceptance`: checks the finished product against the user's requirements; it can run and look, not write.
  */
 export type Mode = "orchestrator" | "worker" | "reviewer" | "quick_review" | "acceptance" | "chat" | "consult" | "report";
-const READ = ["list_files", "read_file", "search_project"];
+const READ = ["glob", "grep", "read_file"];
 /** The tools that end a turn on its task. A turn that must wrap up names only the ones in its own toolbox. */
 export const ENDING_TOOLS = new Set(["ask_user", "block_task", "complete_task", "reply_to_user", "start_work", "submit_acceptance", "submit_review"]);
 /** The names of the toolbox tools that end a turn. */

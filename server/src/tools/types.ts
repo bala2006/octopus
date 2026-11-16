@@ -39,9 +39,6 @@ export interface ToolMetrics { read?: boolean; redundant?: boolean; wrote?: bool
 
 export interface ToolResult { text: string; ok?: boolean; image?: string; stop?: Stop; metrics?: ToolMetrics }
 
-/** The most one explicit read_file range returns. Longer tool output is spilled to a file by the agent loop. */
-export const MAX_TOOL_OUTPUT = 40_000;
-
 /**
  * File contents already in an agent's transcript: the content hash, the line ranges shown, and the transcript position of
  * the tool output that carries them. The position is what lets compaction forget a file whose output it removed.

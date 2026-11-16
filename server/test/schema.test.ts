@@ -8,13 +8,13 @@ describe("strictParameters", () => {
   test("marks every property required, forbids extras, and makes optional properties nullable", () => {
     const schema = strictParameters({
       type: "object",
-      properties: { path: { type: "string" }, start_line: { type: "integer" } },
+      properties: { path: { type: "string" }, offset: { type: "integer" } },
       required: ["path"],
       additionalProperties: false,
     }) as Record<string, unknown>;
-    expect(schema.required).toEqual(["path", "start_line"]);
+    expect(schema.required).toEqual(["path", "offset"]);
     expect((schema.properties as Record<string, unknown>).path).toEqual({ type: "string" });
-    expect((schema.properties as Record<string, unknown>).start_line).toEqual({ anyOf: [{ type: "integer" }, { type: "null" }] });
+    expect((schema.properties as Record<string, unknown>).offset).toEqual({ anyOf: [{ type: "integer" }, { type: "null" }] });
   });
 
   test("normalises nested objects and arrays of objects", () => {

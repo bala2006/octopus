@@ -262,7 +262,7 @@ test("large files are read in pages, unchanged re-reads cost one line, lockfiles
   writeFileSync(path.join(dir, "big.js"), Array.from({ length: 2000 }, (_, i) => `const line${i} = "${"x".repeat(30)}";`).join("\n"));
   writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: {} }, null, 2));
   const reads = [
-    { path: "big.js" }, { path: "big.js" }, { path: "big.js", start_line: 1500 }, { path: "package-lock.json" },
+    { path: "big.js", limit: 100 }, { path: "big.js", limit: 100 }, { path: "big.js", offset: 1500 }, { path: "package-lock.json" },
   ];
   let seen: { output?: string }[] = [];
   script = (b) => {
@@ -277,10 +277,12 @@ test("large files are read in pages, unchanged re-reads cost one line, lockfiles
   const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Look at big.js" });
   await until(run.id, ["completed", "incomplete"]);
   const [first, again, tail, lock] = seen.map((o) => String(o.output));
-  expect(first).toMatch(/^big\.js \(2000 lines, showing 1-\d+; continue with start_line \d+\)/);
+  expect(first).toMatch(/^1: const line0 /);
+  expect(first).toContain("(Showing lines 1-100 of 2000. Use offset=101 to continue.)");
   expect(first!.length).toBeLessThan(41_000);
   expect(again).toMatch(/have not changed since you read them/);
-  expect(tail).toMatch(/^big\.js \(2000 lines, showing 1500-2000\)/);
+  expect(tail).toMatch(/^1500: const line1499 /);
+  expect(tail).toContain("(End of file - total 2000 lines)");
   expect(lock).toMatch(/generated file/);
 });
 
@@ -350,7 +352,7 @@ test("requirements must all be owned or cut, owned paths let builders run in par
         : n === 1 ? { calls: [{ name: "write_file", args: { path: "src/about/extra.html", content: "mine now" } }] }
         : { calls: [{ name: "complete_task", args: { summary: "Built the home page.", verification: "Opened it" } }] };
       return n === 0 ? { calls: [{ name: "write_file", args: { path: "src/about/index.html", content: "<h1>About</h1>" } }] }
-        : n < 4 ? { calls: [{ name: "read_file", args: { path: "src/about/index.html", start_line: n } }] }
+        : n < 4 ? { calls: [{ name: "read_file", args: { path: "src/about/index.html", offset: n } }] }
         : { calls: [{ name: "complete_task", args: { summary: "Built the about page.", verification: "Opened it" } }] };
     }
     return buildScript(b);
@@ -709,7 +711,7 @@ test("a long turn summarizes its earlier work and keeps going, and repeating the
         return { calls: [{ name: "run_command", args: { command: "node --version" } }] };
       }
       if (step === 4) reminder = JSON.stringify(b.input.at(-1));
-      if (step < 12) return { calls: [{ name: "read_file", args: { path: "big.js", start_line: (step - 4) * 100 + 1, end_line: (step - 3) * 100 } }] };
+      if (step < 12) return { calls: [{ name: "read_file", args: { path: "big.js", offset: (step - 4) * 100 + 1, limit: 100 } }] };
       if (step === 12) return { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] };
       return { calls: [{ name: "complete_task", args: { summary: "Built the page after reading big.js.", verification: "Read it" } }] };
     };
@@ -1019,7 +1021,7 @@ test("usage counts file operations, unique files changed and searches as separat
     const kind = turnKind(b);
     const n = outputs(b).length;
     if (kind === "work") return [
-      { calls: [{ name: "search_project", args: { query: "Acme" } }] },
+      { calls: [{ name: "grep", args: { pattern: "Acme" } }] },
       { calls: [{ name: "write_file", args: { path: "index.html", content: reviewedPage } }] },
       { calls: [{ name: "edit_file", args: { path: "index.html", old_string: "Acme", new_string: "Acme Co" } }] },
       { calls: [{ name: "complete_task", args: { summary: "Named the company.", verification: "Read it" } }] },

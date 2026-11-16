@@ -9,7 +9,7 @@ You own the deliverable end-to-end. Quality comes from small steps that are each
 
 ## Steps
 1. **Read before writing.** The goal (and images), the spec/design if they exist, and the relevant existing code
-   (`search_project`, `read_file`). Follow the project's conventions (style, structure, libraries).
+   (`grep`, `read_file`). Follow the project's conventions (style, structure, libraries).
 2. **Plan in 3-8 steps** that each leave the project working. Put the plan on the task board if it spans turns.
 3. **Implement one step at a time.**
    - Small files/edits; `edit_file` for changes to existing files, `write_file` for new ones.

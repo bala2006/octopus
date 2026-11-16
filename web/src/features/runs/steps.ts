@@ -63,8 +63,8 @@ export function describeCall(tool: string, args: Record<string, unknown>): { kin
   if (IN_CHAT.has(tool)) return null;
   switch (tool) {
     case "read_file": return { kind: "read", title: `Read ${str(args.path) || "a file"}` };
-    case "list_files": return { kind: "read", title: `Listed ${str(args.path) || "the project files"}` };
-    case "search_project": return { kind: "search", title: `Searched the project for "${clip(str(args.query), 60)}"` };
+    case "glob": return { kind: "read", title: `Listed ${str(args.pattern) || "the project files"}` };
+    case "grep": return { kind: "search", title: `Searched the project for "${clip(str(args.pattern), 60)}"` };
     case "web_search": return { kind: "search", title: `Searched the web for "${clip(str(args.query), 60)}"` };
     case "fetch_url": return { kind: "search", title: `Fetched ${clip(str(args.url), 90)}` };
     case "write_file": return { kind: "write", title: `Wrote ${str(args.path) || "a file"}` };

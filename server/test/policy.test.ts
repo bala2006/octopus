@@ -75,7 +75,7 @@ describe("toolbox names", () => {
   test("a critic in review gets read and report tools, never a write or a command", async () => {
     const { tools } = await toolbox({} as Registry, ".", member("qa", { browser: false }), "reviewer");
     const names = tools.map((t) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["read_file", "search_project", "submit_review"]));
+    expect(names).toEqual(expect.arrayContaining(["read_file", "grep", "submit_review"]));
     for (const forbidden of WRITE_AND_RUN) expect(names).not.toContain(forbidden);
   });
 

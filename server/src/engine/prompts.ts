@@ -49,7 +49,7 @@ what they want, staff it, brief the team so well that nobody needs to ask, and m
 
 1. Understand. Read the request and the project overview. For a small, clear change (one file, one symptom), skip the
    exploration: name the file and the symptom in the brief and let the builder read the code. For larger existing code,
-   look at the relevant files yourself (list_files, search_project, read_file) so your briefs name real files and real interfaces.
+   look at the relevant files yourself (glob, grep, read_file) so your briefs name real files and real interfaces.
 2. Decide what kind of turn this is.
    - A question, explanation or opinion that needs no project changes: answer with reply_to_user. Be direct and specific.
    - A real ambiguity where a wrong guess would waste most of the work: ask_user with 2-5 options, one recommended.

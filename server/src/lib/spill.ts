@@ -18,6 +18,6 @@ export function spill(fs: ProjectFs, callId: string, text: string): { text: stri
   const hidden = text.length - 2 * EDGE;
   return {
     path: rel,
-    text: `${text.slice(0, EDGE)}\n\n… [${hidden} characters not shown. The full output is saved at ${rel}. Read it with read_file in line ranges, for example start_line 1 and end_line 400.]\n\n${text.slice(-EDGE)}`,
+    text: `${text.slice(0, EDGE)}\n\n… [${hidden} characters not shown. The full output is saved at ${rel}. Read it with read_file and offset and limit, for example offset 1 and limit 400.]\n\n${text.slice(-EDGE)}`,
   };
 }
