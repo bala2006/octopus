@@ -109,7 +109,7 @@ function packageVerdict(tool: string, args: string[]): Verdict {
 
 const RANK: Record<Risk, number> = { low: 0, medium: 1, high: 2, deny: 3 };
 const worst = (a: Verdict, b: Verdict) => (RANK[b.risk] > RANK[a.risk] ? b : a);
-const exeName = (s: string) => path.basename(s).toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/, "");
+export const exeName = (s: string) => path.basename(s).toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/, "");
 
 /** Programs that only adjust how another command runs: the command after them is what gets classified. */
 const WRAPPERS = new Set(["timeout", "nice", "time", "stdbuf", "ionice", "chrt", "taskset", "unbuffer", "caffeinate", "xvfb-run", "flock", "watch", "strace", "ltrace", "gtimeout"]);
@@ -139,7 +139,7 @@ function outside(root: string, value: string): boolean {
 }
 
 /** Path checks on every argument, including values glued to flags (`-o../x`, `--out=../x`). */
-function argumentVerdict(exe: string, args: string[], root: string): Verdict | null {
+export function argumentVerdict(exe: string, args: string[], root: string): Verdict | null {
   for (const a of args) {
     const values = [a, a.includes("=") ? a.slice(a.indexOf("=") + 1) : a, a.replace(/^-{1,2}[A-Za-z]+/, "")];
     for (const value of values) {
@@ -332,4 +332,75 @@ function segmentVerdict(argv: string[], root: string, depth: number): Verdict {
     ? (argv.some((a) => a.includes("=")) ? v("medium", "Assigns a value, which may change an object") : v("low", "A PowerShell expression"))
     : classify(argv, root, depth);
   return worst(dotnet, body);
+}
+
+/**
+ * The check-only policy, for read-only specialists. A command runs only when it reads, tests, lints or builds. The
+ * policy decides from the command text alone, so it never asks, and it names the rule a refused command broke.
+ */
+export type CheckVerdict = { allowed: true } | { allowed: false; rule: string; reason: string };
+
+const ALLOWED: CheckVerdict = { allowed: true };
+const refuse = (rule: string, reason: string): CheckVerdict => ({ allowed: false, rule, reason });
+
+/** Flags that write a file, update a snapshot or upload one. A check command with any of them is refused. */
+const CHECK_WRITE_FLAGS = ["--fix", "--write", "-u", "--update", "--update-snapshot", "-o", "--output", "--outfile", "-O", "--remote-name", "-T", "--upload-file", "-F", "--form"];
+/** Read-only programs and PowerShell cmdlets that may follow a check command in a pipeline. */
+const CHECK_PIPE_STAGES = new Set(["select-object", "select", "select-string", "where-object", "where", "sort-object", "measure-object", "measure",
+  "format-table", "format-list", "out-string", "foreach-object", "foreach", "%", "?", "get-content", "gc", "head", "tail", "grep", "wc", "cat", "sort", "uniq", "findstr", "more", "less"]);
+const CHECK_SCRIPT = /^(test|typecheck|lint|build|check|validate)(:[\w.-]+)?$/;
+const CHECK_TOOLS = new Set(["vitest", "jest", "pytest", "mypy", "eslint"]);
+const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun"]);
+const PACKAGE_CHANGES = new Set(["install", "i", "add", "ci", "remove", "rm", "uninstall", "un", "update", "up", "upgrade", "link", "unlink", "dedupe", "prune"]);
+const GIT_READS = new Set(["status", "diff", "log", "show"]);
+const PYTHON_MODULES = new Set(["pytest", "unittest", "mypy", "ruff"]);
+const INLINE_CODE = new Set(["-e", "--eval", "-p", "--print", "-c", "--command", "-r"]);
+const CHECK_RUNNERS = new Set(["npx", "pnpx", "bunx", "dlx"]);
+
+const isWriteFlag = (arg: string) => CHECK_WRITE_FLAGS.some((f) => arg === f || (f.startsWith("--") && arg.startsWith(`${f}=`)));
+
+function checkSegment(argv: string[], root: string): CheckVerdict {
+  const exe = exeName(argv[0]!);
+  const args = argv.slice(1);
+  const writeFlag = args.find(isWriteFlag);
+  if (writeFlag) return refuse("write-flag", `${writeFlag} writes files, updates snapshots or uploads, and check-only commands cannot`);
+  if (CHECK_PIPE_STAGES.has(exe)) return ALLOWED;
+  const outside = argumentVerdict(exe, args, root);
+  if (outside?.risk === "deny") return refuse("outside-project", outside.reason);
+  const sub = args[0] ?? "";
+  if (exe === "git") return GIT_READS.has(sub) ? ALLOWED : refuse("git-change", `git ${sub} may change the repository; only status, diff, log and show are allowed`);
+  if (CHECK_RUNNERS.has(exe)) return refuse("not-allowed", `${exe} can download and run packages`);
+  if (PACKAGE_MANAGERS.has(exe)) {
+    if (PACKAGE_CHANGES.has(sub)) return refuse("install", `${exe} ${sub} installs or changes packages`);
+    if (["test", "t", "typecheck", "lint", "build", "check"].includes(sub)) return ALLOWED;
+    if (sub === "run" || sub === "run-script") return CHECK_SCRIPT.test(args[1] ?? "") ? ALLOWED : refuse("not-allowed", `${exe} run ${args[1] ?? ""} is not a test, typecheck, lint or build script`);
+    if (sub === "audit") return args[1] === "fix" ? refuse("write-flag", "npm audit fix changes package files") : ALLOWED;
+    return refuse("not-allowed", `${exe} ${sub} is not a check command`);
+  }
+  if (CHECK_TOOLS.has(exe)) return ALLOWED;
+  if (exe === "tsc") return args.includes("--noEmit") ? ALLOWED : refuse("write-flag", "tsc writes its output unless --noEmit is given");
+  if (exe === "prettier") return args.some((a) => a === "--check" || a === "-c" || a === "-l" || a === "--list-different") ? ALLOWED : refuse("not-allowed", "prettier is allowed only with --check");
+  if (exe === "ruff") return sub === "check" ? ALLOWED : refuse("not-allowed", "ruff is allowed only as ruff check");
+  if (["node", "python", "python3", "py"].includes(exe)) {
+    if (args.some((a) => INLINE_CODE.has(a))) return refuse("inline-code", `${exe} runs code typed on the command line, which cannot be read; put it in a script`);
+    if (args[0] === "-m") return PYTHON_MODULES.has(args[1] ?? "") ? ALLOWED : refuse("not-allowed", `${exe} -m ${args[1] ?? ""} is not a check module`);
+    if (!args.length) return refuse("inline-code", `${exe} needs a script file`);
+    if (exe === "node" && sub === "--test") return ALLOWED;
+    return sub.startsWith("-") ? refuse("not-allowed", `${exe} ${sub} is not a script`) : ALLOWED;
+  }
+  if (exe === "curl") return ALLOWED;
+  return refuse("not-allowed", `${exe} is not a check command. Allowed: tests, typecheck, lint, build, read-only Git, node and python scripts, and curl without upload flags`);
+}
+
+/** Judge a command line for a read-only specialist. Redirects, unreadable constructs and any segment outside the allowed set are refused. */
+export function checkOnly(line: string, root: string): CheckVerdict {
+  const parts = splitShell(line);
+  if (parts.unreadable.length) return refuse("unreadable", `${parts.unreadable[0]}, so the command cannot be checked`);
+  if (parts.targets.length) return refuse("redirect", `a redirect writes to ${parts.targets[0]}`);
+  if (!parts.segments.length) return refuse("not-allowed", "the command is empty");
+  for (const segment of parts.segments) {
+    const verdict = checkSegment(segment, root);
+    if (!verdict.allowed) return verdict;
+  }
+  return ALLOWED;
 }
