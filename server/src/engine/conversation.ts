@@ -9,7 +9,7 @@
  *
  * Follow-ups continue the same conversation with the same team, tasks and files. Everything the user sees is an event.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   DEFAULT_BUDGET, TERMINAL_STATUSES, type AgentOut, type AgentStatus, type Attachment, type EdgeOut, type Effort, type MessageOut, type PendingApproval,
@@ -25,19 +25,16 @@ import { addFindings, answerFindings, blockingOpen, renderFindings, settlePrior,
 import type { Item } from "../llm/azure";
 import { costParts } from "../llm/pricing";
 import { connection, contextWindow } from "../llm/azure";
-import { run as runProcess, safeEnv } from "../lib/proc";
 import { clip, deferred, firstLine, newId, now, sha1, sleep, UserError } from "../lib/util";
 import { changedLines } from "../lib/diff";
-import { parseCommand } from "../safety/commands";
-import { isBinaryPath, isSecretPath } from "../safety/paths";
 import { endingNames, toolbox, type Mode } from "../tools";
 import { Denied, type GuardRequest, type HireSpec, type Planner, type Stop, type TaskSpec, type ToolContext } from "../tools/types";
 import { recordVersion, artifactOut } from "../workspace/artifacts";
-import { projectOverview, projectTasks, verificationChecks } from "../workspace/overview";
+import { projectOverview, projectTasks } from "../workspace/overview";
 import { processes } from "../workspace/processes";
 import type { Project } from "../workspace/projects";
 import { agentLoop, compactable, tokensOf, type LoopEvents } from "./agent";
-import { checksCanBeSkipped, DOC_OR_ASSET, type SourceFile } from "./checkScope";
+import { hashFile, planChecks, runCheckList } from "./checks";
 import { publish } from "./bus";
 import { SoloRun, type SoloHost } from "./solo";
 import { SPECIALIST_DEFS, specialistRole, type Seat, type SpecialistName } from "./specialists";
@@ -535,22 +532,8 @@ export class Conversation {
    */
   private refreshFileState() {
     for (const s of this.sessions.values()) {
-      for (const [rel, hash] of s.seen) if (this.fileHash(rel) !== hash) { s.seen.delete(rel); s.shown.delete(rel); }
+      for (const [rel, hash] of s.seen) if (hashFile(this.p.fs, rel) !== hash) { s.seen.delete(rel); s.shown.delete(rel); }
     }
-  }
-
-  /** The project's text files that are not documents or assets: what a check or a build could read. */
-  private sourceFiles(): SourceFile[] {
-    const files: SourceFile[] = [];
-    for (const f of this.p.fs.walk({ max: 20_000 }).files) {
-      if (DOC_OR_ASSET.test(f) || isBinaryPath(f) || isSecretPath(f) || this.p.fs.size(f) > 1_000_000) continue;
-      try { files.push({ path: f, text: readFileSync(this.p.fs.abs(f), "utf8") }); } catch { continue; }
-    }
-    return files;
-  }
-
-  private fileHash(rel: string): string | null {
-    try { const abs = this.p.fs.abs(rel); return existsSync(abs) ? sha1(readFileSync(abs, "utf8")) : null; } catch { return null; }
   }
 
   private async devServer(): Promise<{ command: string; url: string | null; output: string }> {
@@ -1456,40 +1439,31 @@ export class Conversation {
 
   /** Run the project's own checks. Returns true when a fix task was created. */
   private async runChecks(changedTasks: TaskOut[]): Promise<boolean> {
-    const checks = verificationChecks(this.p.fs);
-    if (!checks.length) { this.phase("verify", "skipped", null, "The project has no automated checks"); return false; }
     const changedFiles = [...new Set(changedTasks.flatMap((t) => this.state.files_by_task[t.id] ?? []))];
-    // Documents and images cannot break a test suite, unless the project reads them: a README edit should not run the
-    // suite, but a fixture that a test loads still needs it.
-    if (changedFiles.every((f) => DOC_OR_ASSET.test(f)) && checksCanBeSkipped(changedFiles, this.sourceFiles())) {
-      this.phase("verify", "skipped", null, "Only documents and assets changed, and nothing in the project reads them");
-      return false;
-    }
+    const plan = planChecks(this.p.fs, changedFiles, this.checksPassed);
+    if (plan.kind === "none") { this.phase("verify", "skipped", null, "The project has no automated checks"); return false; }
+    if (plan.kind === "skipped") { this.phase("verify", "skipped", null, plan.reason); return false; }
     // The same files already passed these checks in this conversation: no new content, no new run.
-    const key = `${checks.map((c) => c.command).join("|")}::${changedFiles.map((f) => `${f}:${this.fileHash(f) ?? "gone"}`).join(",")}`;
-    if (changedFiles.length && this.checksPassed.has(key)) {
-      this.phase("verify", "done", null, "The same changes already passed these checks");
-      return false;
-    }
+    if (plan.kind === "passed") { this.phase("verify", "done", null, "The same changes already passed these checks"); return false; }
     const lead = this.lead;
     this.phase("verify", "active", lead.id);
-    const results: RunState["verification"] = [];
-    for (const c of checks) {
-      if (this.stopped) return false;
-      const callId = newId();
-      this.setStatus(lead, "running", c.command);
-      this.emit("tool_call", { call_id: callId, agent_id: lead.id, tool: "run_code", args: { command: c.command, cwd: c.directory } });
-      const res = await runProcess(parseCommand(c.command), { cwd: this.p.fs.abs(c.directory === "." ? "" : c.directory), env: safeEnv(), timeoutMs: 300_000, maxOutput: 30_000, signal: this.abort.signal });
-      const ok = res.code === 0 && !res.timedOut;
-      results.push({ name: c.name, command: c.command, ok, output: clip(res.output, 6000) });
-      this.emit("tool_result", { call_id: callId, agent_id: lead.id, tool: "run_code", ok, output: clip(res.output, 4000) });
-    }
+    let callId = "";
+    const results = await runCheckList(this.p.fs, plan.checks, this.abort.signal, {
+      stopped: () => this.stopped,
+      started: (c) => {
+        callId = newId();
+        this.setStatus(lead, "running", c.command);
+        this.emit("tool_call", { call_id: callId, agent_id: lead.id, tool: "run_code", args: { command: c.command, cwd: c.directory } });
+      },
+      finished: (_c, ok, output) => this.emit("tool_result", { call_id: callId, agent_id: lead.id, tool: "run_code", ok, output: clip(output, 4000) }),
+    });
+    if (!results) return false;
     this.setStatus(lead, "idle");
     this.state.verification = results;
     this.state.usage.verifications += results.length;
     const failures = results.filter((r) => !r.ok);
     if (!failures.length) {
-      this.checksPassed.add(key);
+      this.checksPassed.add(plan.key);
       this.phase("verify", "done", lead.id, `${results.length} check${results.length > 1 ? "s" : ""} passed`);
       return false;
     }
