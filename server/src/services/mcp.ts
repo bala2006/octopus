@@ -85,10 +85,18 @@ function saveFrame(ctx: ToolContext, dataUrl: string): string {
   return name;
 }
 
-/** Built-in browser tools for an agent (the Playwright MCP tool list, with browser_action events and screenshots). */
-export async function browserTools(root: string): Promise<Tool[]> {
+/** The browser tools a builder gets. Reviewers and acceptance checks keep the whole Playwright list. */
+export const BUILDER_BROWSER_TOOLS = ["browser_navigate", "browser_take_screenshot", "browser_click", "browser_type", "browser_press_key", "browser_evaluate", "browser_console_messages", "browser_snapshot"];
+
+/** The tools of a browser tool list, or only the named ones, in the list's own order. */
+export function selectBrowserTools(tools: McpToolOut[], names?: readonly string[]): McpToolOut[] {
+  return names ? tools.filter((t) => names.includes(t.name)) : tools;
+}
+
+/** Built-in browser tools for an agent (the Playwright MCP tool list, with browser_action events and screenshots), or only `names`. */
+export async function browserTools(root: string, names?: readonly string[]): Promise<Tool[]> {
   const conn = await browserConnection(root);
-  return conn.tools.map((t): Tool => ({
+  return selectBrowserTools(conn.tools, names).map((t): Tool => ({
     name: safeName(t.name), description: t.description ?? t.name, args: z.record(z.string(), z.unknown()),
     parameters: t.input_schema ?? { type: "object", properties: {} },
     async run(ctx, args, callId) {

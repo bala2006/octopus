@@ -24,6 +24,7 @@ function allowedUrl(raw: string): URL {
 export const webTools = [
   defineTool({
     name: "web_search",
+    readOnly: true,
     description: "Search the web. Returns titles, URLs and snippets; use fetch_url to read a result.",
     args: z.object({ query: z.string().min(2) }),
     async run(ctx, a) {
@@ -39,6 +40,7 @@ export const webTools = [
   }),
   defineTool({
     name: "fetch_url",
+    readOnly: true,
     description: "Read a web page or text resource as plain text (docs, articles, API references).",
     args: z.object({ url: z.string().url() }),
     async run(ctx, a) {

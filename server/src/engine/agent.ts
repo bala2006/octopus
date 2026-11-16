@@ -201,7 +201,7 @@ function parseArgs(call: ToolCall): { args: Record<string, unknown> } | { error:
   }
 }
 
-async function runCall(o: LoopOptions, call: ToolCall, byName: Map<string, Tool>): Promise<{ output: string; ok: boolean; image?: string; stop?: Stop; metrics?: import("../tools/types").ToolMetrics }> {
+async function runCall(o: LoopOptions, call: ToolCall, byName: Map<string, Tool>, ctx: ToolContext): Promise<{ output: string; ok: boolean; image?: string; stop?: Stop; metrics?: import("../tools/types").ToolMetrics }> {
   const tool = byName.get(call.name);
   const parsedArgs = parseArgs(call);
   if ("error" in parsedArgs) {
@@ -214,7 +214,7 @@ async function runCall(o: LoopOptions, call: ToolCall, byName: Map<string, Tool>
   const parsed = tool.args.safeParse(args);
   if (!parsed.success) return { output: `Invalid arguments for ${call.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ")}. Arguments received: ${call.arguments.slice(0, 300) || "(none)"}`, ok: false };
   try {
-    const r = await tool.run(o.ctx, parsed.data, call.call_id);
+    const r = await tool.run(ctx, parsed.data, call.call_id);
     return { output: r.text, ok: r.ok !== false, image: r.image, stop: r.stop, metrics: r.metrics };
   } catch (e) {
     if (o.ctx.signal.aborted) throw e;
@@ -222,6 +222,23 @@ async function runCall(o: LoopOptions, call: ToolCall, byName: Map<string, Tool>
     if (e instanceof UserError) return { output: e.message, ok: false };
     return { output: `${call.name} failed: ${(e as Error).message}`, ok: false };
   }
+}
+
+/** Read-only calls one model step may run at once. The rest of a step's calls run one at a time, in order. */
+const PARALLEL_READS = 10;
+
+/** The end of the batch that starts at `start`: a run of read-only calls up to PARALLEL_READS, or the one call that is not read-only. */
+function batchEnd(calls: ToolCall[], start: number, byName: Map<string, Tool>): number {
+  if (!byName.get(calls[start]!.name)?.readOnly) return start + 1;
+  let end = start + 1;
+  while (end < calls.length && end - start < PARALLEL_READS && byName.get(calls[end]!.name)?.readOnly) end++;
+  return end;
+}
+
+/** Writes what one call changed in the file-read ledger back into the turn's ledger: the entries it set, and the ones it removed. */
+function mergeShown(into: Shown, from: Shown, before: Shown) {
+  for (const file of before.keys()) if (!from.has(file)) into.delete(file);
+  for (const [file, entry] of from) if (before.get(file) !== entry) into.set(file, entry);
 }
 
 export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
@@ -270,25 +287,38 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     let stop: Stop | undefined;
     const images: string[] = [];
     const shots: string[] = [];
-    for (const call of res.calls) {
-      if (stop) { input.push({ type: "function_call_output", call_id: call.call_id, output: "Skipped: the turn already ended." }); continue; }
-      const position = input.length; // where this call's output goes
-      const shownBefore = new Map(o.ctx.shown);
-      const r = await runCall(o, call, byName);
-      tagShown(o.ctx.shown, shownBefore, position);
-      o.events.toolResult(call.call_id, call.name, r.ok, r.output, r.metrics);
-      const kept = spill(o.ctx.fs, call.call_id, r.output);
-      // A spilled output holds only its head and tail, so the file it came from is not in the transcript.
-      if (kept.path) dropShown(o.ctx.shown, (at) => at === position);
-      input.push({ type: "function_call_output", call_id: call.call_id, output: kept.text });
-      if (r.image) {
-        images.push(r.image);
-        shots.push(`Screenshot taken: ${r.output}. The image was shown once to the model when it was taken.`);
+    for (let i = 0; i < res.calls.length; ) {
+      const batch = res.calls.slice(i, batchEnd(res.calls, i, byName));
+      i += batch.length;
+      if (stop) {
+        for (const call of batch) input.push({ type: "function_call_output", call_id: call.call_id, output: "Skipped: the turn already ended." });
+        continue;
       }
-      if (r.stop) stop = r.stop;
-      const sig = `${call.name}:${call.arguments}`;
-      repeats = sig === lastCall ? repeats + 1 : 1;
-      lastCall = sig;
+      // Each call in a batch starts from the same file-read ledger and works on its own copy. The copies are merged back in call order.
+      const shownBefore = new Map(o.ctx.shown);
+      const runs = await Promise.all(batch.map((call) => {
+        const shown: Shown = new Map(shownBefore);
+        return runCall(o, call, byName, { ...o.ctx, shown }).then((r) => ({ r, shown }));
+      }));
+      for (const [k, call] of batch.entries()) {
+        const { r, shown } = runs[k]!;
+        const position = input.length; // where this call's output goes
+        tagShown(shown, shownBefore, position);
+        mergeShown(o.ctx.shown, shown, shownBefore);
+        o.events.toolResult(call.call_id, call.name, r.ok, r.output, r.metrics);
+        const kept = spill(o.ctx.fs, call.call_id, r.output);
+        // A spilled output holds only its head and tail, so the file it came from is not in the transcript.
+        if (kept.path) dropShown(o.ctx.shown, (at) => at === position);
+        input.push({ type: "function_call_output", call_id: call.call_id, output: kept.text });
+        if (r.image) {
+          images.push(r.image);
+          shots.push(`Screenshot taken: ${r.output}. The image was shown once to the model when it was taken.`);
+        }
+        if (r.stop) stop = r.stop;
+        const sig = `${call.name}:${call.arguments}`;
+        repeats = sig === lastCall ? repeats + 1 : 1;
+        lastCall = sig;
+      }
     }
     if (stop) return { stop, text: lastText, rounds: round };
     if (REPEAT_REMINDERS.includes(repeats)) {

@@ -2,7 +2,7 @@
 import type { AgentOut } from "@octopus/shared";
 import type { Registry } from "../db/registry";
 import { canWrite, kindOf } from "../catalog/kinds";
-import { browserTools, serverTools } from "../services/mcp";
+import { BUILDER_BROWSER_TOOLS, browserTools, serverTools } from "../services/mcp";
 import { commandTools } from "./commands";
 import { fileTools } from "./files";
 import { acceptanceTool, askUser, collabTools, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
@@ -52,7 +52,7 @@ export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode
   if (policy.commands === "all") tools.push(...commandTools);
   if (policy.commands === "start") tools.push(...commandTools.filter((c) => c.name === "start_dev_server"));
   if (policy.browser) {
-    try { tools.push(...await browserTools(root)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
+    try { tools.push(...await browserTools(root, mode === "worker" ? BUILDER_BROWSER_TOOLS : undefined)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
   }
   if (t.mcp_servers?.length && mode !== "consult" && policy.mcp) tools.push(...await serverTools(reg, t.mcp_servers));
   if (mode !== "consult") tools.push(...memoryTools);

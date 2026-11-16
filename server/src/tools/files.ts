@@ -64,6 +64,7 @@ function writeText(ctx: ToolContext, rel: string, content: string) {
 export const fileTools = [
   defineTool({
     name: "glob",
+    readOnly: true,
     description: "Find project files by path pattern, such as src/**/*.ts. Returns up to 100 paths, newest first. Dependency and build folders are skipped.",
     args: z.object({ pattern: z.string().min(1).describe("Glob matched against project-relative paths") }),
     async run(ctx, a) {
@@ -82,6 +83,7 @@ export const fileTools = [
   }),
   defineTool({
     name: "read_file",
+    readOnly: true,
     description: "Read a UTF-8 text file and return line-numbered content. Use offset and limit to read a line range or continue a large file. Read several files in one step when you need them.",
     args: z.object({
       path: z.string(),
@@ -113,6 +115,7 @@ export const fileTools = [
   }),
   defineTool({
     name: "grep",
+    readOnly: true,
     description: "Search file contents with a regular expression. Returns matching lines grouped by file, with line numbers, up to 250 matches. Use include to limit the files by path glob, such as src/**/*.ts.",
     args: z.object({
       pattern: z.string().min(1).describe("Regular expression, case-sensitive"),

@@ -101,12 +101,14 @@ export interface Tool<A = any> { // eslint-disable-line @typescript-eslint/no-ex
   name: string;
   description: string;
   args: z.ZodType<A>;
+  /** Whether a call changes nothing. Read-only calls in one model step run together; the others run one at a time. */
+  readOnly?: boolean;
   /** JSON Schema sent to the model when it cannot be derived from `args` (MCP tools bring their own). */
   parameters?: Record<string, unknown>;
   run(ctx: ToolContext, args: A, callId: string): Promise<ToolResult>;
 }
 
-export const defineTool = <S extends z.ZodType>(t: { name: string; description: string; args: S; run(ctx: ToolContext, args: z.infer<S>, callId: string): Promise<ToolResult> }): Tool<z.infer<S>> =>
+export const defineTool = <S extends z.ZodType>(t: { name: string; description: string; args: S; readOnly?: boolean; run(ctx: ToolContext, args: z.infer<S>, callId: string): Promise<ToolResult> }): Tool<z.infer<S>> =>
   t as unknown as Tool<z.infer<S>>;
 
 export class Denied extends Error {}

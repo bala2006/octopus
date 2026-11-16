@@ -6,7 +6,15 @@ import path from "node:path";
 import { fileTools } from "../src/tools/files";
 import { ProjectFs } from "../src/safety/paths";
 import { todoTools } from "../src/tools/todo";
-import type { Tool, ToolContext } from "../src/tools/types";
+import { agentLoop } from "../src/engine/agent";
+import { openRegistry } from "../src/db/registry";
+import { encrypt } from "../src/lib/secrets";
+import type { Item } from "../src/llm/azure";
+import type { McpToolOut } from "@octopus/shared";
+import { BUILDER_BROWSER_TOOLS, selectBrowserTools } from "../src/services/mcp";
+import { defineTool, type Tool, type ToolContext } from "../src/tools/types";
+import { z } from "zod";
+import { fakeModel, type Script } from "./fakeModel";
 
 function project(files: Record<string, string>): { root: string; ctx: ToolContext } {
   const root = mkdtempSync(path.join(tmpdir(), "tools-"));
@@ -178,5 +186,108 @@ describe("todo_write", () => {
   test("a status outside pending, in_progress and completed is refused", () => {
     const tool = todoTools[0]!;
     expect(() => tool.args.parse({ todos: [{ content: "x", status: "doing" }] })).toThrow();
+  });
+});
+/** One scripted model step per list of calls, then a plain answer. */
+function stepsOf(...steps: { name: string; args: Record<string, unknown> }[][]): Script {
+  let n = 0;
+  return () => (n < steps.length ? { calls: steps[n++] } : { text: "done" });
+}
+
+const quietEvents = {
+  text() {}, thinking() {}, thought() {}, toolStart() {}, toolArgs() {}, toolCall() {}, toolResult() {}, usage() {},
+  async beforeCall() {},
+};
+
+/** Runs the real agent loop against the scripted model, and returns the transcript it built and what it sent. */
+async function loop(steps: Script, tools: Tool[], ctx: ToolContext): Promise<{ input: Item[]; requests: { input: Item[] }[] }> {
+  const model = await fakeModel(steps);
+  const reg = openRegistry(path.join(mkdtempSync(path.join(tmpdir(), "loop-")), "registry.db"));
+  reg.setSetting("provider.azure", { base_url: model.url, key_enc: encrypt("test-key"), options: { auth: "key" }, updated_at: "" });
+  const input: Item[] = [{ role: "user", content: "brief" }];
+  try {
+    await agentLoop({ reg, model: "test-model", effort: undefined, instructions: "test", input, tools, ctx, events: quietEvents, maxRounds: 6, requireStop: false, stopTools: [], keepHead: 1 });
+    return { input, requests: model.requests as { input: Item[] }[] };
+  } finally {
+    await model.close();
+  }
+}
+
+/** A tool that takes a moment and counts how many of its calls ran at once. */
+function probe(name: string, readOnly: boolean, gauge: { running: number; peak: number }): Tool {
+  return defineTool({
+    name, description: "Takes a moment.", readOnly, args: z.object({ n: z.number() }),
+    async run(_ctx, a) {
+      gauge.running++;
+      gauge.peak = Math.max(gauge.peak, gauge.running);
+      await new Promise((resolve) => setTimeout(resolve, 40 - (a.n % 10) * 3));
+      gauge.running--;
+      return { text: `${name} ${a.n}` };
+    },
+  });
+}
+
+const calls = (name: string, count: number) => Array.from({ length: count }, (_, n) => ({ name, args: { n } }));
+
+describe("parallel calls in one model step", () => {
+  test("read-only calls run together, and their outputs come back in call order", async () => {
+    const gauge = { running: 0, peak: 0 };
+    const { ctx } = project({});
+    const { requests } = await loop(stepsOf(calls("probe", 5)), [probe("probe", true, gauge)], ctx);
+    const outputs = requests[1]!.input.filter((i) => i.type === "function_call_output").map((i) => i.output);
+    expect(outputs).toEqual(["probe 0", "probe 1", "probe 2", "probe 3", "probe 4"]);
+    expect(gauge.peak).toBe(5);
+  });
+
+  test("a step runs at most ten read-only calls at once, and keeps all twelve outputs in order", async () => {
+    const gauge = { running: 0, peak: 0 };
+    const { ctx } = project({});
+    const { requests } = await loop(stepsOf(calls("probe", 12)), [probe("probe", true, gauge)], ctx);
+    const outputs = requests[1]!.input.filter((i) => i.type === "function_call_output").map((i) => i.output);
+    expect(outputs).toEqual(calls("probe", 12).map((c) => `probe ${c.args.n}`));
+    expect(gauge.peak).toBe(10);
+  });
+
+  test("calls that change something run one at a time", async () => {
+    const gauge = { running: 0, peak: 0 };
+    const { ctx } = project({});
+    await loop(stepsOf(calls("write", 3)), [probe("write", false, gauge)], ctx);
+    expect(gauge.peak).toBe(1);
+  });
+
+  test("two reads in one step each keep their own place in the file-read ledger, and a later re-read costs one line", async () => {
+    const { ctx } = project({ "a.txt": "alpha\nbeta", "b.txt": "gamma" });
+    const steps = stepsOf(
+      [{ name: "read_file", args: { path: "a.txt" } }, { name: "read_file", args: { path: "b.txt" } }],
+      [{ name: "read_file", args: { path: "a.txt" } }],
+    );
+    const { input, requests } = await loop(steps, fileTools, ctx);
+    const outputs = input.filter((i) => i.type === "function_call_output");
+    const at = (first: string) => input.indexOf(outputs.find((o) => String(o.output).startsWith(first))!);
+    expect(at("1: alpha")).toBeGreaterThan(0);
+    expect(ctx.shown.get("a.txt")?.at).toBe(at("1: alpha"));
+    expect(ctx.shown.get("b.txt")?.at).toBe(at("1: gamma"));
+    expect(String(requests[2]!.input.at(-1)!.output)).toMatch(/^a\.txt lines 1-2 have not changed since you read them/);
+  });
+});
+
+describe("browser tools by role", () => {
+  const PLAYWRIGHT = [
+    "browser_close", "browser_resize", "browser_console_messages", "browser_handle_dialog", "browser_evaluate",
+    "browser_file_upload", "browser_fill_form", "browser_press_key", "browser_type", "browser_navigate",
+    "browser_navigate_back", "browser_network_requests", "browser_run_code", "browser_take_screenshot", "browser_snapshot",
+    "browser_click", "browser_drag", "browser_hover", "browser_select_option", "browser_tabs", "browser_wait_for",
+  ];
+  const listed = PLAYWRIGHT.map((name) => ({ name, description: name, input_schema: {} })) as McpToolOut[];
+
+  test("a builder gets exactly its eight browser tools, in the list's order", () => {
+    expect(BUILDER_BROWSER_TOOLS).toHaveLength(8);
+    const picked = selectBrowserTools(listed, BUILDER_BROWSER_TOOLS).map((t) => t.name);
+    expect(picked).toEqual(PLAYWRIGHT.filter((name) => BUILDER_BROWSER_TOOLS.includes(name)));
+    expect(picked).toHaveLength(8);
+  });
+
+  test("reviewers and acceptance checks keep the whole list", () => {
+    expect(selectBrowserTools(listed)).toHaveLength(PLAYWRIGHT.length);
   });
 });
