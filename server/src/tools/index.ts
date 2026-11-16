@@ -15,6 +15,10 @@ import { webTools } from "./web";
  */
 export type Mode = "orchestrator" | "worker" | "reviewer" | "quick_review" | "acceptance" | "chat" | "consult" | "report";
 const READ = ["list_files", "read_file", "search_project"];
+/** The tools that end a turn on its task. A turn that must wrap up names only the ones in its own toolbox. */
+export const ENDING_TOOLS = new Set(["ask_user", "block_task", "complete_task", "reply_to_user", "start_work", "submit_acceptance", "submit_review"]);
+/** The names of the toolbox tools that end a turn. */
+export const endingNames = (tools: { name: string }[]) => tools.map((t) => t.name).filter((n) => ENDING_TOOLS.has(n));
 const blockTask = workerTools.find((w) => w.name === "block_task")!;
 
 /** What an agent may change or run in a mode. The only place that decides it. */

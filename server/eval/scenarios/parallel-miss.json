@@ -19,7 +19,11 @@
         { "name": "read_file", "args": { "path": "config/three.json" } },
         { "name": "read_file", "args": { "path": "config/four.json" } },
         { "name": "read_file", "args": { "path": "config/five.json" } }
-      ] }
+      ] },
+      { "calls": [{ "name": "complete_task", "args": { "summary": "None of the five config files exist, so nothing was read.", "verification": "Each read returned an error." } }] }
+    ],
+    "review": [
+      { "calls": [{ "name": "submit_review", "args": { "verdict": "approve", "comments": "Nothing was changed, so there is nothing to review." } }] }
     ],
     "report": [
       { "text": "None of the five config files exist, so nothing could be read." }

@@ -927,22 +927,27 @@ test("a small change is reviewed from its diff in one step, with only the verdic
   expect(JSON.stringify(reviews[0]!.input)).toMatch(/\+.*Acme/);
 }, 30_000);
 
-test("a tool that keeps failing ends the turn instead of spending the planning budget, and the run says so", async () => {
+test("a failing call returns its error to the lead, which answers without repeating the call", async () => {
   let planCalls = 0;
+  let errorsSeen = "";
   script = (b) => {
     if (turnKind(b) !== "plan") return buildScript(b);
     planCalls++;
-    // The lead cannot own a part, so this call fails identically every round.
-    return { calls: [{ name: "create_task", args: { title: "Do the thing", description: "Nothing can own this task.", acceptance_criteria: "- done", assignee: "Octopus", kind: "build" } }] };
+    if (planCalls === 1) {
+      // The lead cannot own a part, so this call fails.
+      return { calls: [{ name: "create_task", args: { title: "Do the thing", description: "Nothing can own this task.", acceptance_criteria: "- done", assignee: "Octopus", kind: "build" } }] };
+    }
+    errorsSeen = JSON.stringify(b.input.filter((i: { type?: string }) => i.type === "function_call_output"));
+    return { calls: [{ name: "reply_to_user", args: { message: "Nobody on the team can own that, so nothing was built." } }] };
   };
   const team = await call<CanvasOut>("POST", `${W()}/companies/from-template`, { template_key: "adaptive" });
   const run = await call<RunDetail>("POST", `${W()}/runs`, { company_id: team.company.id, goal: "Build a landing page" });
   const done = await until(run.id, ["completed", "incomplete", "failed"]);
-  expect(done.status).toBe("incomplete");
-  expect(planCalls).toBeLessThanOrEqual(4);
+  expect(done.status).toBe("completed");
+  expect(planCalls).toBe(2);
+  expect(errorsSeen).toContain("Assign the work to a specialist");
   const messages = await call<MessageOut[]>("GET", `${W()}/runs/${run.id}/messages`);
-  expect(messages.at(-1)!.content).toContain("could not plan this request");
-  expect(messages.at(-1)!.content).toContain("create_task");
+  expect(messages.at(-1)!.content).toContain("Nobody on the team");
   const tasks = await call<TaskOut[]>("GET", `${W()}/runs/${run.id}/tasks`);
   expect(tasks).toHaveLength(0);
 }, 30_000);

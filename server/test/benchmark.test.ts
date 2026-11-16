@@ -59,7 +59,7 @@ let script: Script = () => ({ text: "ok" });
  * this change, the ceiling each scenario is tested against. Every MEASURED value is below its BASELINE.
  */
 const BASELINE = { oneFile: 6, reviewAcceptance: 18, designerQa: 23, followUp: 6, persistentFailure: 30, docsOnly: 9 } as const;
-const MEASURED = { oneFile: 4, reviewAcceptance: 15, designerQa: 18, followUp: 5, persistentFailure: 3, docsOnly: 5 } as const;
+const MEASURED = { oneFile: 4, reviewAcceptance: 15, designerQa: 18, followUp: 5, persistentFailure: 2, docsOnly: 5 } as const;
 /**
  * Instruction characters per scenario, the exact counts after this change (origin/main, same harness: 41k, 109k and 141k).
  * The scripted model is deterministic, so these are exact; a prompt change that adds text fails here on purpose.
@@ -251,13 +251,18 @@ describe("execution benchmark", () => {
     expect(done.status).toBe("completed");
   }, 90_000);
 
-  test("a tool that keeps failing ends the turn in a few calls", async () => {
-    const r = await measure("persistent failure", {}, "adaptive", "Build a landing page",
-      (b) => (turnKind(b) === "plan"
+  test("a failing call returns its error, and the lead answers without repeating it", async () => {
+    let planCalls = 0;
+    const r = await measure("persistent failure", {}, "adaptive", "Build a landing page", (b) => {
+      if (turnKind(b) !== "plan") return buildScript(b);
+      planCalls++;
+      return planCalls === 1
         ? { calls: [{ name: "create_task", args: { title: "Do the thing", description: "Nothing can own this task.", acceptance_criteria: "- done", assignee: "Octopus", kind: "build" } }] }
-        : buildScript(b)));
+        : { calls: [{ name: "reply_to_user", args: { message: "Nobody on the team can own that, so nothing was built." } }] };
+    });
     expect(r.calls).toBeLessThanOrEqual(MEASURED.persistentFailure);
-    expect(r.status).toBe("incomplete");
+    expect(r.failures).toBe(1);
+    expect(r.status).toBe("completed");
   }, 60_000);
 
   test("a cycle that only touches documents runs no project checks", async () => {
@@ -284,12 +289,12 @@ describe("execution benchmark", () => {
     expect(r.status).toBe("completed");
   }, 60_000);
 
-  test("five failing reads in one step end the turn as incomplete", async () => {
+  test("five failing reads in one step do not end the turn; the builder answers with the errors", async () => {
     const scenario = scriptFor(loadScenario("parallel-miss.json"));
     const r = await measure("parallel-miss", {}, "adaptive", "Read the five config files", scenario.script);
     expect(scenario.stats.unmatched).toBe(0);
     expect(r.failures).toBe(5);
-    expect(r.status).toBe("incomplete");
+    expect(r.status).toBe("completed");
   }, 60_000);
 
   test("six screenshots fit the window, so no checkpoint call runs", async () => {

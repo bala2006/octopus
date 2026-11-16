@@ -30,7 +30,7 @@ import { clip, deferred, firstLine, newId, now, sha1, sleep, UserError } from ".
 import { changedLines } from "../lib/diff";
 import { parseCommand } from "../safety/commands";
 import { isBinaryPath, isSecretPath } from "../safety/paths";
-import { toolbox, type Mode } from "../tools";
+import { endingNames, toolbox, type Mode } from "../tools";
 import { Denied, type GuardRequest, type HireSpec, type Planner, type Stop, type TaskSpec, type ToolContext } from "../tools/types";
 import { recordVersion, artifactOut } from "../workspace/artifacts";
 import { projectOverview, projectTasks, verificationChecks } from "../workspace/overview";
@@ -594,7 +594,7 @@ export class Conversation {
     try {
       return await agentLoop({ reg: this.reg, model: this.model(agent), effort: this.effort(agent, s.mode), instructions: s.instructions, input: s.input, tools: s.tools, inbox: s.inbox,
         ctx: { ...this.context(agent, task, opts.planner, s), answering: opts.answering ?? null }, events: this.loopEvents(agent), maxRounds: opts.maxRounds, keepHead: s.head,
-        requireStop: s.mode !== "consult" && s.mode !== "report" && !opts.answering });
+        requireStop: s.mode !== "consult" && s.mode !== "report" && !opts.answering, stopTools: endingNames(s.tools) });
     } catch (e) {
       if (opts.session) this.sessions.delete(opts.session); // its transcript may end mid-round
       throw e;

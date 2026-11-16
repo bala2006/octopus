@@ -59,7 +59,7 @@ const noEvents = {
 };
 
 /** Drive the real loop against the scripted model, and return what it sent and what it ended with. */
-async function runLoop(script: Script, tools: Tool[], options: ProviderOptions = {}, rounds = 12) {
+async function runLoop(script: Script, tools: Tool[], options: ProviderOptions = {}, rounds = 12, loop: { requireStop?: boolean; stopTools?: string[] } = {}) {
   const model = await fakeModel(script);
   const reg = registryFor(model.url, options);
   const root = mkdtempSync(path.join(tmpdir(), "agent-fs-"));
@@ -67,7 +67,7 @@ async function runLoop(script: Script, tools: Tool[], options: ProviderOptions =
   const ctx = { agent: {}, task: null, runId: "run", signal: new AbortController().signal, shown, seen: new Map(), answering: null, fs: new ProjectFs(root) } as unknown as ToolContext;
   const input: Item[] = [{ role: "user", content: "# T1: brief" }];
   try {
-    const result = await agentLoop({ reg, model: "test-model", effort: undefined, instructions: "test", input, tools, ctx, events: noEvents, maxRounds: rounds, requireStop: false, keepHead: 1 });
+    const result = await agentLoop({ reg, model: "test-model", effort: undefined, instructions: "test", input, tools, ctx, events: noEvents, maxRounds: rounds, requireStop: loop.requireStop ?? false, stopTools: loop.stopTools ?? [], keepHead: 1 });
     const requests = model.requests as { input: Item[] }[];
     return { result, input, shown, requests, root };
   } finally {
@@ -175,6 +175,30 @@ test("each request's input starts with the previous request's input while nothin
   }
 });
 
+test("five failed calls in one step do not end the turn, and the model sees every error", async () => {
+  const fail = defineTool({ name: "fail", description: "Always fails.", args: z.object({ n: z.number() }), async run(_ctx, a) { return { text: `no such file ${a.n}`, ok: false }; } });
+  const { result, requests } = await runLoop((b) => (b.input.length === 1
+    ? { calls: [1, 2, 3, 4, 5].map((n) => ({ name: "fail", args: { n } })) }
+    : { text: "done" }), [fail]);
+  expect(result.stop).toBeNull();
+  expect(result.text).toBe("done");
+  const outputs = requests[1]!.input.filter((i) => i.type === "function_call_output").map((i) => String(i.output));
+  expect(outputs).toHaveLength(5);
+  expect(outputs.every((o, i) => o === `no such file ${i + 1}`)).toBe(true);
+});
+
+test("a turn that must end names only the ending tools in its own toolbox, in its nudge and its wrap-up", async () => {
+  const touch = touchTool(10);
+  const nudge = await runLoop(() => ({ text: "I am thinking about it." }), [touch], {}, 12, { requireStop: true, stopTools: ["submit_review"] });
+  const nudged = String(nudge.requests[1]!.input.at(-1)!.content);
+  expect(nudged).toContain("(submit_review)");
+  expect(nudged).not.toContain("complete_task");
+  // With six rounds the wrap-up is due at round two (maxRounds - 5 + 1), before the second call.
+  const wrap = await runLoop((b) => (b.input.some((i: Item) => String(i.content ?? "").includes("almost out of steps")) ? { text: "done" } : { calls: [{ name: "touch", args: { file: "a.ts" } }] }), [touch], {}, 6, { requireStop: true, stopTools: ["block_task"] });
+  const wrapUp = wrap.requests.map((r) => String(r.input.at(-1)?.content ?? "")).find((c) => c.includes("almost out of steps"))!;
+  expect(wrapUp).toContain("(block_task)");
+  expect(wrapUp).not.toContain("submit_review");
+});
 test("a spilled output drops its file from the ledger, since the transcript holds only its head and tail", async () => {
   const { shown, requests } = await runLoop(touchScript(2), [touchTool(45_000)]);
   expect(shown.size).toBe(0);

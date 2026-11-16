@@ -8,7 +8,7 @@ import { config } from "../config";
 import type { Registry } from "../db/registry";
 import { complete, contextWindow, type FunctionTool, type Item, type LlmResult, type ToolCall } from "../llm/azure";
 import { spill } from "../lib/spill";
-import { clip, UserError } from "../lib/util";
+import { UserError } from "../lib/util";
 import { Denied, toFunction, type Shown, type Stop, type Tool, type ToolContext } from "../tools/types";
 
 export interface LoopEvents {
@@ -40,6 +40,8 @@ export interface LoopOptions {
   inbox?: string[];
   /** Leading transcript items that summarizing must keep word for word: the brief and anything sent with it. */
   keepHead?: number;
+  /** The tools in this turn's toolbox that end it (complete_task, submit_review, ...); the wrap-up and nudge name only these. */
+  stopTools: string[];
 }
 
 /** `exhausted`: the agent used every tool round without finishing. */
@@ -60,17 +62,15 @@ const PRUNE_HEAD = 4_096;
 const PRUNE_TAIL = 1_024;
 /** A turn that has not finished is told to wrap up this many steps before its step limit (the last one counts as 1). */
 const WRAP_UP_STEPS = 5;
-const WRAP_UP = "You are almost out of steps for this turn. Stop exploring, testing and polishing. Call the tool that ends the turn now (complete_task, submit_review, start_work or reply_to_user), and say what is done and what is not verified. If the work cannot be finished as specified, say so in that tool.";
 /** Identical consecutive calls at these counts get a reminder that the agent is repeating itself. */
 const REPEAT_REMINDERS = [3, 5, 8];
-/**
- * The same tool failing the same way: at the second time the agent is told exactly what went wrong and how to change
- * approach; at the third the turn ends instead of spending the rest of its budget on a call that cannot succeed.
- */
-const FAILURE_RECOVER = 2;
-const FAILURE_STOP = 3;
-/** Different tools failing in a row before the turn ends: more calls will not help an agent that can do nothing right. */
-const MAX_CONSECUTIVE_FAILURES = 5;
+/** The wrap-up message, naming only the tools in this turn's toolbox that end it. */
+function wrapUp(stopTools: string[]): string {
+  return `You are almost out of steps for this turn. Stop exploring, testing and polishing. Call the tool that ends the turn now${endingList(stopTools)}, and say what is done and what is not verified. If the work cannot be finished as specified, say so in that tool.`;
+}
+function endingList(stopTools: string[]): string {
+  return stopTools.length ? ` (${stopTools.join(", ")})` : "";
+}
 export const CHECKPOINT_REQUEST = `Write a checkpoint of your work so far. It replaces the earlier part of this conversation, so include everything you need to carry on without it:
 ## Primary request and intent: what the user asked for and what you were asked to do
 ## Key technical concepts: the stack, conventions and decisions that matter
@@ -231,16 +231,11 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   let lastText = "";
   let lastCall = "";
   let repeats = 0;
-  /** Failures by signature (tool, arguments, error) this turn, so a hopeless call ends the turn instead of the budget. */
-  const failures = new Map<string, number>();
-  const recovered = new Set<string>();
-  let consecutiveFailures = 0;
-  let lastFailure: { name: string; output: string } | null = null;
   let measured: Measure | null = null;
   /** Once a checkpoint is refused or fails in this turn, the turn does not try again: each try is a model call. */
   let compactionRefused = false;
   for (let round = 1; round <= o.maxRounds; round++) {
-    if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: WRAP_UP });
+    if (o.requireStop && round === o.maxRounds - WRAP_UP_STEPS + 1) input.push({ role: "user", content: wrapUp(o.stopTools) });
     await o.events.beforeCall();
     if (o.inbox?.length) input.push({ role: "user", content: o.inbox.splice(0).join("\n\n") });
     if (!compactionRefused && contextTokens(input, measured) > compactAt(window)) {
@@ -264,7 +259,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       if (res.incomplete === "max_output_tokens") { input.push({ role: "user", content: "Your reply was cut off. Continue, in smaller steps." }); continue; }
       if (!o.requireStop || nudged) return { stop: null, text: lastText, rounds: round };
       nudged = true;
-      input.push({ role: "user", content: "Continue working with your tools. When the task is finished and verified, call the tool that ends it (complete_task, submit_review, start_work or reply_to_user)." });
+      input.push({ role: "user", content: `Continue working with your tools. When the task is finished and verified, call the tool that ends it${endingList(o.stopTools)}.` });
       continue;
     }
     let stop: Stop | undefined;
@@ -282,32 +277,11 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       input.push({ type: "function_call_output", call_id: call.call_id, output: kept.text });
       if (r.image) images.push(r.image);
       if (r.stop) stop = r.stop;
-      if (r.ok) consecutiveFailures = 0;
-      else {
-        consecutiveFailures++;
-        lastFailure = { name: call.name, output: r.output };
-        const failure = `${call.name}:${call.arguments.slice(0, 300)}:${clip(r.output, 160)}`;
-        failures.set(failure, (failures.get(failure) ?? 0) + 1);
-      }
       const sig = `${call.name}:${call.arguments}`;
       repeats = sig === lastCall ? repeats + 1 : 1;
       lastCall = sig;
     }
     if (stop) return { stop, text: lastText, rounds: round };
-    const hopeless = [...failures.values()].some((n) => n >= FAILURE_STOP) || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES;
-    if (hopeless && lastFailure) {
-      return {
-        stop: { kind: "block", reason: `repeated tool failures; the last was ${lastFailure.name}: ${clip(lastFailure.output, 300)}` },
-        text: lastText, rounds: round,
-      };
-    }
-    for (const [failure, count] of failures) {
-      if (count < FAILURE_RECOVER || recovered.has(failure)) continue;
-      recovered.add(failure);
-      const name = failure.slice(0, failure.indexOf(":"));
-      const output = lastFailure?.name === name ? lastFailure.output : failure.slice(failure.lastIndexOf(":") + 1);
-      input.push({ role: "user", content: `${name} has failed ${count} times in a row with the same arguments. The error: ${clip(output, 500)}\nChange the approach instead of repeating it: correct the arguments, use a different tool, or call block_task with exactly what is missing.` });
-    }
     if (REPEAT_REMINDERS.includes(repeats)) {
       input.push({ role: "user", content: `You have made the same ${lastCall.split(":")[0]} call ${repeats} times in a row with identical arguments, and it keeps giving the same result. Change your approach: try something different, ask a teammate, or finish with what you have.` });
     }
