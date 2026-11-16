@@ -112,7 +112,7 @@ export interface RequestFacts {
 }
 
 /** What one review round returns: the message for the main agent, and how many of its findings block the reply. */
-export interface ReviewRound { text: string; blocking: number }
+export interface ReviewRound { text: string; blocking: number; /** The reviewers that ended a round without a verdict. */ silent: ReviewerName[] }
 /** What one verifier round returns: the message for the main agent, and how many asks are not met. */
 export interface VerifyRound { text: string; unmet: number }
 
@@ -140,6 +140,8 @@ export class Specialists {
   private blocking: Finding[] = [];
   /** Minor findings of the last review round. They are listed to the user and never sent back. */
   private minors: Finding[] = [];
+  /** The reviewers of the last review round that ended without a verdict. */
+  private silent: ReviewerName[] = [];
   /** The verifier's asks for this request, with the verdict on each. */
   private asks: Ask[] = [];
   /** Verifier rounds this request has run. */
@@ -177,8 +179,8 @@ export class Specialists {
     this.covered = null;
     this.blocking = [];
     this.minors = [];
+    this.silent = [];
     this.asks = [];
-    this.verifyCount = 0;
     this.verifiedAt = null;
     this.verifiedFrom = new Map();
   }
@@ -195,6 +197,11 @@ export class Specialists {
 
   blockingFindings(): Finding[] {
     return this.blocking;
+  }
+
+  /** The reviewers that ended the last review round without a verdict. */
+  silentReviewers(): ReviewerName[] {
+    return this.silent;
   }
 
   minorFindings(): Finding[] {
@@ -231,16 +238,18 @@ export class Specialists {
     const round = ++this.rounds;
     const first = this.found + 1;
     const brief = await this.brief(round, focus, checks ?? (await this.runChecks()).text);
-    this.covered = this.facts().changes;
+    const changes = this.facts().changes;
     this.reviewed = new Map([...this.facts().before.keys()].map((file) => [file, this.current(file)]));
-    this.blocking = [];
-    this.minors = [];
     const outcomes = await this.inRound(() => Promise.all(names.map((name) => this.round(name, brief))));
     const reports: CriticReport[] = names.map((critic, i) => ({ critic, verdict: outcomes[i]!.verdict, findings: outcomes[i]!.findings }));
     const numbered = numberFindings(reports, first);
     this.found += numbered.length;
-    this.blocking = numbered.filter((f) => f.severity !== "minor");
-    this.minors = numbered.filter((f) => f.severity === "minor");
+    const complete = outcomes.every((o) => o.verdict !== null);
+    // A round missing a verdict keeps the findings still open, and leaves the change uncovered until a complete round runs.
+    this.blocking = complete ? numbered.filter((f) => f.severity !== "minor") : [...this.blocking, ...numbered.filter((f) => f.severity !== "minor")];
+    this.minors = complete ? numbered.filter((f) => f.severity === "minor") : [...this.minors, ...numbered.filter((f) => f.severity === "minor")];
+    this.silent = names.filter((_, i) => outcomes[i]!.verdict === null);
+    if (complete) this.covered = changes;
     this.host.emit("review_round", {
       round,
       specialists: names.map((name, i) => ({
@@ -248,7 +257,8 @@ export class Specialists {
         findings: numbered.filter((f) => f.critic === name).map(({ id, critic, severity, file, lines, problem, evidence, fix }) => ({ id, critic, severity, file, lines, problem, evidence, fix })),
       })),
     });
-    return { text: reviewReport(round, reports, RETURN_LIMIT, first), blocking: this.blocking.length };
+    const gaps = this.silent.map((name) => `\n${name} gave no verdict, so this change is not reviewed yet.`).join("");
+    return { text: reviewReport(round, reports, RETURN_LIMIT, first) + gaps, blocking: this.blocking.length, silent: this.silent };
   }
 
   /** Asks the verifier to check the request: a round lists its asks, checks each one in the running product, and submits them. */

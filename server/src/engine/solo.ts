@@ -367,14 +367,16 @@ export class SoloRun {
     if (reviewers.length && (deep || this.specialists.blockingFindings().length > 0) && this.specialists.reviewDue()) {
       if (this.floorRounds === cap.floor_rounds) {
         const open = this.specialists.blockingFindings().length;
-        this.incomplete = open
-          ? `${sentence(times(cap.floor_rounds, "review round"))} ended with ${open} blocker or major finding${open === 1 ? "" : "s"} open.`
+        const silent = this.specialists.silentReviewers();
+        const gaps = [open ? `${open} blocker or major finding${open === 1 ? "" : "s"} open` : "", silent.length ? `no verdict from ${silent.join(", ")}` : ""].filter(Boolean);
+        this.incomplete = gaps.length
+          ? `${sentence(times(cap.floor_rounds, "review round"))} ended with ${gaps.join(" and ")}.`
           : `The last change was not reviewed: ${times(cap.floor_rounds, "review round")} had already run.`;
         return null;
       }
       this.floorRounds++;
       const round = await this.specialists.check(reviewers, reply, checks.text);
-      if (round.blocking) return { role: "user", content: round.text };
+      if (round.blocking || round.silent.length) return { role: "user", content: round.text };
     }
     const codeChanged = [...this.turnBefore.keys()].some((f) => !DOC_OR_ASSET.test(f));
     if (!deep || !codeChanged || !this.specialists.enabled("verifier") || !this.specialists.verifyDue()) return null;

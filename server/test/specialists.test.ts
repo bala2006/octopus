@@ -545,6 +545,44 @@ describe("review and explore from a solo conversation", () => {
       expect(startsWith(reviewer[1]!, reviewer[0]!)).toBe(true);
     });
 
+    /** A main agent that writes one new file, then answers each review message, and never writes again. */
+    const writeOnce = (rel: string, content: string) => (b: Request): Reply =>
+      !lastUser(b).startsWith("Review of your change") && outputs(b).length === 0 ? { calls: [{ name: "write_file", args: { path: rel, content } }] } : { text: "Checked it again. It stays." };
+
+    test("a reviewer that never submits a verdict leaves the change uncovered, and the floor asks again until its rounds run out", async () => {
+      const before = requests().length;
+      script = (b) => {
+        if (who(b) === "verifier") return verified;
+        if (who(b)) return { text: "I looked at the report module." };
+        return writeOnce("src/report.ts", lines(100))(b);
+      };
+      const done = await settle(await start("Add the report module"));
+      expect(done.status).toBe("incomplete");
+      expect(done.halt_reason).toBe("Two review rounds ended with no verdict from reviewer.");
+      const fresh = requests().slice(before);
+      expect(fresh.filter((b) => who(b) === "reviewer")).toHaveLength(2);
+      const sent = fresh.filter((b) => !who(b)).map(lastUser).filter((text) => text.startsWith("Review of your change"));
+      expect(sent).toHaveLength(2);
+      expect(sent.every((text) => text.includes("reviewer gave no verdict, so this change is not reviewed yet."))).toBe(true);
+    });
+
+    test("a round with no verdict keeps the blockers of the round before it open", async () => {
+      const blocker: Reply = { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "The page is blank.", findings: [{ severity: "major", file: "src/report.ts", lines: "1", problem: "The page is blank.", evidence: "report.ts returns nothing.", fix: "Return the rows." }] } }] };
+      const replies: Reply[] = [blocker, { text: "I looked again." }];
+      script = (b) => {
+        if (who(b) === "verifier") return verified;
+        if (who(b) === "reviewer") {
+          const next = replies.shift();
+          if (!next) throw new Error("the reviewer ran more rounds than the floor allows");
+          return next;
+        }
+        return writeOnce("src/report.ts", lines(100))(b);
+      };
+      const done = await settle(await start("Add the report module"));
+      expect(done.status).toBe("incomplete");
+      expect(done.halt_reason).toBe("Two review rounds ended with 1 blocker or major finding open and no verdict from reviewer.");
+    });
+
     test("minor findings are listed in the reply and never sent back to the main agent", async () => {
       const minor: Reply = { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Fine, with one naming note.", findings: [{ severity: "minor", file: "src/report.ts", lines: "3", problem: "The name could be clearer.", evidence: "line 3 uses x", fix: "rename x" }] } }] };
       const run = await runWrite("src/report.ts", lines(100), () => minor);
