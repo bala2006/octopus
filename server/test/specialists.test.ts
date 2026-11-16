@@ -62,13 +62,28 @@ describe("check-only policy", () => {
     expect(verdict).toMatchObject({ allowed: false, rule });
   });
 
-  test.each(["npm test", "npm run typecheck", "git status", "git diff --stat", "node check.mjs", "curl https://example.com", "npm test 2>&1 | Select-Object -Last 5"])(
+  test.each(["npm test", "npm run typecheck", "git status", "git diff --stat", "node check.mjs", "curl https://example.com", "npm test 2>&1 | Select-Object -Last 5", "ls", "ls src", "dir", "pwd", "node --check check.mjs"])(
     "allows %s", (command) => {
       expect(checkOnly(command, process.cwd())).toEqual({ allowed: true });
     });
 });
 
 describe("check-only shell", () => {
+  shellTest("ls, pwd and node --check run for real, and node -e stays refused", async () => {
+    const { root, ctx } = project({ "check.mjs": "console.log('syntax is fine');\n", "src/app.mjs": "export {};\n" });
+    const listing = await runCheck(ctx, "ls src");
+    expect(listing.ok).toBe(true);
+    expect(listing.text).toContain("app.mjs");
+    expect((await runCheck(ctx, "pwd")).ok).toBe(true);
+    const syntax = await runCheck(ctx, "node --check check.mjs");
+    expect(syntax.ok).toBe(true);
+    expect(syntax.text.endsWith("[exit code: 0]")).toBe(true);
+    const inline = await runCheck(ctx, "node -e \"console.log(1)\"");
+    expect(inline.ok).toBe(false);
+    expect(inline.text).toContain("rule inline-code");
+    expect(existsSync(path.join(root, "check.mjs"))).toBe(true);
+  });
+
   shellTest("a refused command never runs, and the result names the rule", async () => {
     const { root, ctx } = project({ "src.txt": "kept" });
     const res = await runCheck(ctx, "echo x > a.txt");
@@ -405,6 +420,24 @@ describe("review and explore from a solo conversation", () => {
     expect(outs[1]).toContain("A review already ran for this code and reported these blockers or major findings:");
     expect(outs[1]).toContain("F1 major index.html:1 (reviewer): The heading still says Acme.");
     expect(outs[3]).toContain("Review of your change, round 2. reviewer: approve.");
+  });
+
+  test("a reviewer brief says in one line when the project folder is not a Git repository, and not when it is", async () => {
+    script = (b) => {
+      const role = who(b);
+      if (role === "reviewer") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks right.", findings: [] } }] };
+      if (role) throw new Error(`unexpected specialist ${role}`);
+      return outputs(b).length === 0 ? { calls: [{ name: "review", args: { specialists: ["reviewer"], focus: "Checked the heading." } }] } : { text: "Reviewed." };
+    };
+    const first = requests().length;
+    expect((await settle(await start("Check the heading"))).status).toBe("completed");
+    const outside = requests().slice(first).find((b) => who(b) === "reviewer")!;
+    expect(lastUser(outside)).toContain("\n\nThis project folder is not a Git repository. Do not run git commands.");
+    mkdirSync(path.join(dir, ".git"));
+    const second = requests().length;
+    expect((await settle(await start("Check the heading again"))).status).toBe("completed");
+    const inside = requests().slice(second).find((b) => who(b) === "reviewer")!;
+    expect(lastUser(inside)).not.toContain("not a Git repository");
   });
 
   test("an explore answer returns under 6,000 characters", async () => {

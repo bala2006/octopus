@@ -41,7 +41,7 @@ export const checkShellTool = defineTool({
   name: "shell",
   description:
     "Run a check in the project folder: tests, typecheck, lint, build, read-only Git (status, diff, log, show), node or python scripts, " +
-    "or curl without upload flags. Commands that write (redirects, --write, -u, --fix, -o) and installs are refused. " +
+    "ls, pwd, node --check on a file, or curl without upload flags. Commands that write (redirects, --write, -u, --fix, -o) and installs are refused. " +
     "The output ends with `[exit code: N]`.",
   args: shellArgs,
   async run(ctx, a, callId) {

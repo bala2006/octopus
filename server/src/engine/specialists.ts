@@ -80,6 +80,8 @@ export const RETURN_LIMIT = 5_900;
 const ROUND_STEPS = 60;
 /** Written to the transcript when a specialist round cannot be undone. */
 const UNDOABLE_WARNING = "This project is over the 64 MB limit for the undo record, so the checks in this round cannot be undone. Files they change stay changed.";
+/** Added to a specialist's brief when the project folder is not a Git repository, so it does not spend steps on git. */
+const NOT_GIT = "This project folder is not a Git repository. Do not run git commands.";
 /** What a manual review or explore call returns when the turn's token budget is already spent. */
 const BUDGET_SPENT = "The token budget for this turn is spent, so no specialist ran.";
 
@@ -393,7 +395,8 @@ export class Specialists {
       const toolbox = await specialistToolbox(def.tools, this.host.p.root);
       for (const message of toolbox.warnings) this.host.emit("error", { message, kind: "warning", agent_id: agent.id });
       const tools = toolbox.tools.map((tool) => this.guarded(name, tool, warn));
-      session.items.push({ role: "user", content: brief });
+      const isRepo = existsSync(path.join(this.host.p.root, ".git"));
+      session.items.push({ role: "user", content: isRepo ? brief : `${brief}\n\n${NOT_GIT}` });
       const base = this.host.loopEvents(agent);
       const events: LoopEvents = {
         ...base,

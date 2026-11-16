@@ -369,6 +369,8 @@ function checkSegment(argv: string[], root: string): CheckVerdict {
   if (outside?.risk === "deny") return refuse("outside-project", outside.reason);
   const sub = args[0] ?? "";
   if (exe === "git") return GIT_READS.has(sub) ? ALLOWED : refuse("git-change", `git ${sub} may change the repository; only status, diff, log and show are allowed`);
+  if (exe === "ls" || exe === "dir") return args.length === 0 || (args.length === 1 && !args[0]!.startsWith("-")) ? ALLOWED : refuse("not-allowed", `${exe} lists one folder, or the project folder when no path is given`);
+  if (exe === "pwd") return args.length === 0 ? ALLOWED : refuse("not-allowed", "pwd takes no arguments");
   if (CHECK_RUNNERS.has(exe)) return refuse("not-allowed", `${exe} can download and run packages`);
   if (PACKAGE_MANAGERS.has(exe)) {
     if (PACKAGE_CHANGES.has(sub)) return refuse("install", `${exe} ${sub} installs or changes packages`);
@@ -385,11 +387,12 @@ function checkSegment(argv: string[], root: string): CheckVerdict {
     if (args.some((a) => INLINE_CODE.has(a))) return refuse("inline-code", `${exe} runs code typed on the command line, which cannot be read; put it in a script`);
     if (args[0] === "-m") return PYTHON_MODULES.has(args[1] ?? "") ? ALLOWED : refuse("not-allowed", `${exe} -m ${args[1] ?? ""} is not a check module`);
     if (!args.length) return refuse("inline-code", `${exe} needs a script file`);
+    if (exe === "node" && sub === "--check") return args.length === 2 && !args[1]!.startsWith("-") ? ALLOWED : refuse("not-allowed", "node --check takes one script file");
     if (exe === "node" && sub === "--test") return ALLOWED;
     return sub.startsWith("-") ? refuse("not-allowed", `${exe} ${sub} is not a script`) : ALLOWED;
   }
   if (exe === "curl") return ALLOWED;
-  return refuse("not-allowed", `${exe} is not a check command. Allowed: tests, typecheck, lint, build, read-only Git, node and python scripts, and curl without upload flags`);
+  return refuse("not-allowed", `${exe} is not a check command. Allowed: tests, typecheck, lint, build, read-only Git, ls, pwd, node --check, node and python scripts, and curl without upload flags`);
 }
 
 /** Judge a command line for a read-only specialist. Redirects, unreadable constructs and any segment outside the allowed set are refused. */
