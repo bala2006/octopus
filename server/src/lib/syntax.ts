@@ -13,8 +13,15 @@ type Loader = "ts" | "tsx" | "js" | "jsx" | "json";
 const ESBUILD_LOADERS: Record<string, Loader> = {
   ".ts": "ts", ".tsx": "tsx", ".js": "js", ".jsx": "jsx", ".mjs": "js", ".cjs": "js",
 };
-/** Compiles the file named by argv[1] without writing a .pyc next to it, so a check leaves no files in the project. */
-const PYTHON_CHECK = "import py_compile, os, sys; py_compile.compile(sys.argv[1], cfile=os.devnull, doraise=True)";
+/** Compiles the file named by argv[1] in memory, so a check writes nothing and needs no bytecode target. */
+const PYTHON_CHECK = [
+  "import sys",
+  "try:",
+  "    compile(open(sys.argv[1], 'rb').read(), sys.argv[1], 'exec')",
+  "except SyntaxError as e:",
+  "    print(f'line {e.lineno}: {e.msg}', file=sys.stderr)",
+  "    sys.exit(1)",
+].join("\n");
 
 interface SyntaxProblem { line: number | null; message: string }
 
@@ -63,9 +70,10 @@ async function pythonProblems(abs: string): Promise<SyntaxProblem[]> {
     return [];
   } catch (e) {
     const stderr = String((e as { stderr?: string }).stderr ?? "");
+    const found = /line (\d+): (.*)/.exec(stderr);
+    if (found) return [{ line: Number(found[1]), message: found[2]!.trim() }];
     const lines = stderr.split("\n").map((l) => l.trimEnd()).filter(Boolean);
-    const line = /line (\d+)/.exec(stderr);
-    return [{ line: line ? Number(line[1]) : null, message: lines.at(-1) ?? "does not compile" }];
+    return [{ line: null, message: lines.at(-1) ?? "does not compile" }];
   }
 }
 
