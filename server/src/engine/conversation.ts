@@ -118,6 +118,8 @@ const LOCAL_URL = /https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?
 class Halt extends Error {}
 /** A change this small is reviewed from its diff in one step, instead of by reading files. */
 const SMALL_CHANGE = { files: 2, lines: 80, chars: 12000 };
+/** The run's report with one more part: the request as its heading, then the reply. Both the pipeline and the solo path write it. */
+const appendRecap = (report: string, request: string, text: string) => `${report ? `${report}\n\n---\n\n` : ""}## ${firstLine(request, 100)}\n\n${text}`;
 const live = new Map<string, Conversation>();
 const PHASES = [["plan", "Plan"], ["build", "Build"], ["review", "Review"], ["verify", "Verify"], ["report", "Report"]] as const;
 
@@ -245,6 +247,7 @@ export class Conversation {
       p: this.p, reg: this.reg, runId: this.row.id, state: this.state, lead: () => this.lead,
       emit: (type, data) => this.emit(type, data),
       post: (m) => this.post({ from: this.lead.id, to: null, ...m }),
+      recap: (title, text) => { this.row.report_md = appendRecap(this.row.report_md, title, text); },
       setRunStatus: (status, extra) => this.setRunStatus(status, extra),
       setStatus: (agent, status, activity) => this.setStatus(agent, status, activity),
       loopEvents: (agent) => this.loopEvents(agent),
@@ -1620,7 +1623,7 @@ export class Conversation {
     const lead = this.lead;
     this.post({ from: lead.id, to: null, type: "final_report", content: text, meta: { files } });
     this.state.history.push({ role: "assistant", content: text });
-    this.row.report_md = `${this.row.report_md ? `${this.row.report_md}\n\n---\n\n` : ""}## ${firstLine(this.state.history.findLast((h) => h.role === "user")?.content ?? this.row.goal, 100)}\n\n${text}`;
+    this.row.report_md = appendRecap(this.row.report_md, this.state.history.findLast((h) => h.role === "user")?.content ?? this.row.goal, text);
     for (const a of this.team) this.setStatus(a, a.id === lead.id ? "done" : "idle");
     this.state.workflow.ended = true;
     this.setRunStatus(status, { summary: firstLine(text, 300), reason: status === "incomplete" ? "Some tasks could not be finished" : "" });

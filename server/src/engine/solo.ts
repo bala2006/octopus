@@ -28,6 +28,8 @@ export interface SoloHost {
   lead(): AgentOut;
   emit<T extends RunTopic>(type: T, data: RunEventMap[T]): void;
   post(message: { type: string; content: string; meta?: Record<string, unknown> }): MessageOut;
+  /** Adds a turn's reply to the run's report, under the request that started the turn. */
+  recap(title: string, text: string): void;
   setRunStatus(status: RunStatus, extra?: { reason?: string; summary?: string }): void;
   setStatus(agent: AgentOut, status: AgentStatus, activity?: string): void;
   loopEvents(agent: AgentOut): LoopEvents;
@@ -76,7 +78,9 @@ export class SoloRun {
   private transcript: Transcript | null = null;
   private log: SessionLog;
   /** User messages sent during a turn. They reach the model before its next step. */
-  private steer: Item[] = [];
+  private steer: { item: Item; text: string }[] = [];
+  /** The request that started the turn in flight: the heading of its part of the report. */
+  private turnTitle = "";
   private stopping: { reason: string; status: RunStatus } | null = null;
   private turnSteps = 0;
   private turnTools = 0;
@@ -93,8 +97,8 @@ export class SoloRun {
     const item: Item = { role: "user", content: images.length ? [{ type: "input_text", text: content }, ...images] : content };
     // A message sent while a question waits is the answer to it.
     this.host.state.questions.splice(0);
-    if (this.running) this.steer.push(item);
-    else void this.run([item]);
+    if (this.running) this.steer.push({ item, text: content });
+    else void this.run([item], content);
   }
 
   /** Ends the turn in flight, if any. The transcript is trimmed to its last finished step and kept. */
@@ -110,8 +114,9 @@ export class SoloRun {
     if (stop) this.host.finish(stop.reason, stop.status);
   }
 
-  private async run(first: Item[]) {
+  private async run(first: Item[], title: string) {
     this.running = true;
+    this.turnTitle = title;
     this.turnSteps = 0;
     this.turnTools = 0;
     this.turnTokens = 0;
@@ -127,7 +132,7 @@ export class SoloRun {
         const outcome = await this.segment(t);
         if (this.stopping) break;
         if (this.steer.length) {
-          next = this.steer.splice(0);
+          next = this.steer.splice(0).map((s) => s.item);
           continue;
         }
         this.conclude(t, outcome);
@@ -145,7 +150,7 @@ export class SoloRun {
       if (this.stopping) {
         const queued = this.steer.splice(0);
         this.finishStop();
-        if (queued.length) void this.run(queued);
+        if (queued.length) void this.run(queued.map((s) => s.item), queued[0]!.text);
       }
     }
   }
@@ -223,7 +228,7 @@ export class SoloRun {
       const res = await agentLoop({
         reg: this.host.reg, model: this.host.model(lead), effort: this.host.effort(lead), instructions: t.instructions, input: t.items, tools: t.tools,
         ctx: this.toolContext(t), events, maxRounds: Math.max(0, config.soloStepLimit - this.turnSteps), requireStop: false, stopTools: [],
-        keepHead: t.head, steer: () => this.steer.splice(0), cacheKey: `${this.host.runId}:${lead.id}`,
+        keepHead: t.head, steer: () => this.steer.splice(0).map((s) => s.item), cacheKey: `${this.host.runId}:${lead.id}`,
       });
       if (res.stop?.kind === "ask") return { kind: "ask", question: res.stop.question, options: res.stop.options };
       if (res.exhausted) return { kind: "pause", reason: "steps" };
@@ -258,6 +263,7 @@ export class SoloRun {
     if (outcome.kind === "reply") {
       const text = outcome.text || "The model returned no reply.";
       this.host.post({ type: "final_report", content: text });
+      this.host.recap(this.turnTitle, text);
       this.host.setRunStatus("completed", { summary: firstLine(text, 300), reason: "" });
       return;
     }

@@ -229,3 +229,17 @@ test("a turn that spends its token budget pauses with the budget message", async
     config.soloTurnTokens = saved;
   }
 });
+
+test("each turn that ends with a reply is added to the run's report, under the request that began it", async () => {
+  const before = requests().length;
+  script = () => ({ text: "The page says Acme." });
+  const id = await start("What does the page say?");
+  await turnDone(id, before + 1);
+  expect((await call<RunDetail>("GET", `${W()}/runs/${id}`)).report_md).toBe("## What does the page say?\n\nThe page says Acme.");
+  script = () => ({ text: "It is a heading." });
+  await send(id, "What kind of element is it?");
+  await turnDone(id, before + 2);
+  expect((await call<RunDetail>("GET", `${W()}/runs/${id}`)).report_md).toBe(
+    "## What does the page say?\n\nThe page says Acme.\n\n---\n\n## What kind of element is it?\n\nIt is a heading.",
+  );
+});
