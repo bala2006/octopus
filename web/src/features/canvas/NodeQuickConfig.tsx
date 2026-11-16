@@ -8,12 +8,15 @@ import { TOOLS } from "@/lib/meta";
 import { cn } from "@/lib/utils";
 import { useCanvas, type AgentData } from "@/stores/canvas";
 import type { AgentTools } from "@/types";
+import type { SpecialistName } from "@octopus/shared";
 import { AgentAvatar } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Switch } from "@/components/ui/primitives";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Select, Tip } from "@/components/ui/overlays";
 import { Combobox } from "@/components/ui/combobox";
-import { EFFORTS } from "./EffortPicker";
+import { EFFORTS, EffortPicker } from "./EffortPicker";
+import { SPECIALIST_INFO, useDeployments, useSpecialistSave, useSpecialists, withSpecialist } from "@/features/settings/specialistSettings";
+import { useSpecialistToggle } from "./specialistActions";
 import { applyRole, EFFORT_OPTIONS, isLinked, presetOf, roleOptions, TOOL_PRESETS } from "./roleHelpers";
 
 /**
@@ -278,5 +281,43 @@ function AgentSkills({ id, behavior, roleKey }: { id: string; behavior: NonNulla
         </div>
       </div>
     </Field>
+  );
+}
+
+/**
+ * The quick configuration of a specialist card on a solo canvas. Its switch, model and effort are the Settings values, so a
+ * change here is the same change Settings makes.
+ */
+export function SpecialistQuickConfig({ name, data, onClose }: { name: SpecialistName; data: AgentData; onClose: () => void }) {
+  const workspaceId = useWorkspaceId();
+  const companyId = useCanvas((s) => s.companyId) ?? "";
+  const settings = useSpecialists();
+  const models = useDeployments();
+  const save = useSpecialistSave();
+  const toggle = useSpecialistToggle(workspaceId, companyId);
+  if (!settings) return null;
+  const info = SPECIALIST_INFO[name];
+  const current = settings.specialists[name];
+  const options = [...new Set([...models, current.model])].map((m) => ({ value: m, label: m }));
+  return (
+    <div className="nodrag nopan nowheel w-[300px] cursor-auto select-text space-y-3 overflow-hidden rounded-xl border border-border bg-popover p-3 shadow-2xl"
+      role="dialog" aria-label={`Configure ${info.label}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-2">
+        <AgentAvatar name={data.name} color={data.color} avatar={data.avatar} size={24} />
+        <span className="flex-1 truncate text-sm font-semibold">{info.label}</span>
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close"><X /></Button>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs">{current.enabled ? "On the canvas for every conversation" : "Off"}</span>
+        <Switch checked={current.enabled} onCheckedChange={(on) => void toggle(settings, name, on)} aria-label={`Run ${info.label}`} />
+      </div>
+      <Field label="Model">
+        <Select ariaLabel={`Model for ${info.label}`} value={current.model} onValueChange={(model) => save.mutate(withSpecialist(settings, name, { model }))} options={options} className="font-mono text-xs" />
+      </Field>
+      <Field label="Reasoning effort">
+        <EffortPicker compact value={current.effort} onChange={(effort) => save.mutate(withSpecialist(settings, name, { effort }))} />
+      </Field>
+      <p className="text-[10.5px] leading-snug text-muted-foreground">These are the values in Settings, Specialists.</p>
+    </div>
   );
 }

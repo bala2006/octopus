@@ -340,7 +340,7 @@ describe("review and explore from a solo conversation", () => {
       expect(agent?.reports_to).toBe(lead.id);
     }
     expect(effectiveRoles(reg).some((r) => r.key.startsWith("specialist-"))).toBe(false);
-    expect(events(id, "agent_created").length).toBe(2);
+    expect(events(id, "agent_created").length).toBe(5);
     expect(events(id, "agent_status").some((e) => agents.some((a) => a.id === e.agent_id && a.behavior.template_key === "specialist-reviewer"))).toBe(true);
     expect(events(id, "edge_activity").length).toBeGreaterThanOrEqual(4);
   });
@@ -448,6 +448,14 @@ describe("review and explore from a solo conversation", () => {
       }
       const verifier = normal.fresh.filter((b) => who(b) === "verifier");
       expect(verifier.every((b) => b.model === "gpt-6-luna")).toBe(true);
+    });
+    test("a new solo conversation seats one agent per specialist that Settings turns on", async () => {
+      reg.setSetting("specialists", withSettings({ security: { enabled: false, model: "gpt-6-luna", effort: "high" } }));
+      script = () => ({ text: "Hello." });
+      const done = await settle(await start("Say hello"));
+      expect(done.status).toBe("completed");
+      const keys = openWorkspace(reg, ws.id).db.agents.find("company_id = ?", [companyId]).map((a) => a.behavior.template_key).filter((k) => k?.startsWith("specialist-")).sort();
+      expect(keys).toEqual(["specialist-designer", "specialist-explorer", "specialist-reviewer", "specialist-verifier"]);
     });
     test("the floor runs the reviewer at normal and high, and runs nothing at trivial or small", async () => {
       const normal = await runWrite("src/report.ts", lines(100));

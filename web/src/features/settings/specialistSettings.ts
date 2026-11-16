@@ -33,3 +33,8 @@ export function useSpecialistSave() {
     },
   });
 }
+
+/** The settings with one specialist's fields changed. The input is not modified. */
+export function withSpecialist(settings: SpecialistsSettings, name: SpecialistName, patch: Partial<SpecialistsSettings["specialists"][SpecialistName]>): SpecialistsSettings {
+  return { ...settings, specialists: { ...settings.specialists, [name]: { ...settings.specialists[name], ...patch } } };
+}

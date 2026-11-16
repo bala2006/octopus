@@ -1,6 +1,6 @@
 /** Companies: the team on the canvas. Create from a template, design with AI, import/export, autosave, agent memory. */
 import {
-  CanvasExportSchema, CanvasStateSchema, CompanyInSchema, CompanyPatchSchema, GenerateCompanySchema, InstantiateTemplateSchema, MemoryInSchema, UserTemplateInSchema,
+  CanvasExportSchema, CanvasStateSchema, CompanyInSchema, CompanyPatchSchema, GenerateCompanySchema, InstantiateTemplateSchema, MemoryInSchema, SPECIALIST_NAMES, UserTemplateInSchema,
   type AgentIn, type AgentOut, type CanvasExport, type CanvasOut, type CompanyOut, type DepartmentMeta, type EdgeIn, type EdgeOut,
 } from "@octopus/shared";
 import { config } from "../../config";
@@ -9,6 +9,7 @@ import type { Registry } from "../../db/registry";
 import { effectiveRoles, roleByKey } from "../../catalog/roles";
 import { buildTemplate } from "../../catalog/templates";
 import { agentFromRole, departmentColor, departmentsOf, departmentSummaries, freshName, layoutTree, wire } from "../../engine/org";
+import { seatSpecialist } from "../../engine/specialistSeats";
 import { complete } from "../../llm/azure";
 import { newId, notFound, now, parseJson, UserError } from "../../lib/util";
 import type { RouteFn } from "../router";
@@ -147,6 +148,14 @@ export function companyRoutes(route: RouteFn, reg: Registry) {
     return canvasOut(db, c.id);
   });
   route("GET", `${W}/companies/{company_id}/export`, ({ project, params }) => exportCompany(project().db, params.company_id));
+  route("POST", `${W}/companies/{company_id}/specialists/{name}`, ({ project, params }) => {
+    const name = SPECIALIST_NAMES.find((n) => n === params.name);
+    if (!name) throw notFound("Specialist");
+    const p = project();
+    if (!p.db.companies.get(params.company_id)) throw notFound("Team");
+    seatSpecialist(p, params.company_id, name);
+    return canvasOut(p.db, params.company_id);
+  });
   route("POST", `${W}/companies/{company_id}/save-template`, UserTemplateInSchema, ({ project, params, body }) =>
     saveUserTemplate(reg, body.name, body.description ?? "", exportCompany(project().db, params.company_id)));
 

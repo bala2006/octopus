@@ -12,7 +12,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  DEFAULT_BUDGET, TERMINAL_STATUSES, type AgentOut, type AgentStatus, type Attachment, type EdgeOut, type Effort, type MessageOut, type PendingApproval,
+  DEFAULT_BUDGET, SPECIALIST_NAMES, TERMINAL_STATUSES, type AgentOut, type AgentStatus, type Attachment, type EdgeOut, type Effort, type MessageOut, type PendingApproval,
   type Question, type Requirement, type RunCreate, type RunEventMap, type RunStatus, type RunTopic, type SpecialistName, type TaskOut, type Usage, type WorkflowState,
 } from "@octopus/shared";
 import { config } from "../config";
@@ -37,7 +37,8 @@ import { agentLoop, compactable, tokensOf, type LoopEvents } from "./agent";
 import { hashFile, planChecks, runCheckList } from "./checks";
 import { publish } from "./bus";
 import { SoloRun, type SoloHost } from "./solo";
-import { SPECIALIST_DEFS, specialistRole, type Seat } from "./specialists";
+import { SPECIALIST_DEFS, specialistSettings, type Seat } from "./specialists";
+import { seatSpecialist } from "./specialistSeats";
 import { agentFromRole, departmentColor, departmentsOf, freshName, placeHire, wire } from "./org";
 import { tierOf, type Tier } from "./risk";
 import { canRunBeside, owns, writes } from "./ownership";
@@ -209,6 +210,7 @@ export class Conversation {
     p.db.runs.insert(row);
     const c = new Conversation(p, reg, row);
     live.set(row.id, c);
+    if (c.lead.behavior.template_key === MAIN_ROLE) c.seatEnabled();
     c.submit(body.goal, body.attachments ?? [], null);
     return c;
   }
@@ -784,31 +786,32 @@ export class Conversation {
   /** A specialist's seat: its agent, reporting to Octopus, and the two channels between them. The first use adds the agent to the canvas. */
   private seat(name: SpecialistName): Seat {
     const lead = this.lead;
-    const title = SPECIALIST_DEFS[name].title;
-    let agent = this.team.find((a) => a.behavior.template_key === specialistRole(name).key);
-    if (!agent) {
-      const added = agentFromRole(this.row.company_id, specialistRole(name), { name: freshName(this.team.map((a) => a.name), title), department: "Specialists", reports_to: lead.id, created_by: lead.id });
-      placeHire(this.team, added);
-      const edges = wire([...this.team, added], this.edges);
-      const company = this.p.db.companies.get(this.row.company_id)!;
-      this.p.db.tx(() => {
-        this.p.db.agents.insert(added);
-        for (const e of edges) this.p.db.edges.insert(e);
-        this.p.db.companies.update(company.id, { departments: departmentsOf([added], company.departments), revision: company.revision + 1, updated_at: now() });
-      });
-      this.team.push(added);
+    const made = seatSpecialist(this.p, this.row.company_id, name);
+    const { agent, edges } = made;
+    if (made.added) {
+      this.team.push(agent);
       this.edges.push(...edges);
       this.row.snapshot = { ...this.row.snapshot, agents: this.team, edges: this.edges };
-      this.state.agent_status[added.id] = "idle";
-      this.emit("agent_created", { agent: added, edges, created_by: lead.id, persisted: true, reason: `${title} checks the work for ${lead.name}`, department: { name: added.department, color: departmentColor(added.department) } });
+      this.state.agent_status[agent.id] = "idle";
+      this.emit("agent_created", { agent, edges, created_by: lead.id, persisted: true, reason: `${SPECIALIST_DEFS[name].title} checks the work for ${lead.name}`, department: { name: agent.department, color: departmentColor(agent.department) } });
       this.save();
-      agent = added;
+    } else if (!this.team.some((a) => a.id === agent.id)) {
+      // Seated by another conversation or by the palette since this one loaded: take the company's current team.
+      this.team = this.p.db.agents.find("company_id = ?", [this.row.company_id]);
+      this.edges = this.p.db.edges.find("company_id = ?", [this.row.company_id]);
+      this.row.snapshot = { ...this.row.snapshot, agents: this.team, edges: this.edges };
     }
     const id = agent.id;
     const delegate = this.edges.find((e) => e.type === "delegate" && e.source_agent_id === lead.id && e.target_agent_id === id);
     const report = this.edges.find((e) => e.type === "report" && e.source_agent_id === id && e.target_agent_id === lead.id);
-    if (!delegate || !report) throw new Error(`${title} has no channel to ${lead.name}`);
+    if (!delegate || !report) throw new Error(`${SPECIALIST_DEFS[name].title} has no channel to ${lead.name}`);
     return { agent, delegate, report };
+  }
+
+  /** A solo conversation's canvas shows one card per specialist that Settings turns on, so they are seated before the first turn. */
+  private seatEnabled() {
+    const settings = specialistSettings(this.reg);
+    for (const name of SPECIALIST_NAMES) if (settings.specialists[name].enabled) this.seat(name);
   }
   /** Keeps the changed lines of a task's files since its last review, so a reviewer of a small change can read the diff. */
   private recordDiff(taskId: string, rel: string, before: string | null, after: string | null) {

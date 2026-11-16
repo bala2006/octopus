@@ -58,6 +58,7 @@ export interface ApiRoutes {
   };
   "/api/v1/w/{workspace_id}/companies/{company_id}/canvas": { PUT: R<D.CanvasOut, In<typeof D.CanvasStateSchema>> };
   "/api/v1/w/{workspace_id}/companies/{company_id}/export": { GET: R<D.CanvasExport> };
+  "/api/v1/w/{workspace_id}/companies/{company_id}/specialists/{name}": { POST: R<D.CanvasOut> };
   "/api/v1/w/{workspace_id}/companies/{company_id}/save-template": { POST: R<D.TemplateOut, In<typeof D.UserTemplateInSchema>> };
   "/api/v1/w/{workspace_id}/agents/{agent_id}/memory": { GET: R<D.MemoryOut[]>; PUT: R<D.MemoryOut, In<typeof D.MemoryInSchema>> };
   "/api/v1/w/{workspace_id}/agents/{agent_id}/memory/{key}": { DELETE: R<Ok> };

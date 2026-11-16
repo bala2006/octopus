@@ -1,29 +1,60 @@
 import * as React from "react";
 import { GripVertical, Network, Search, UsersRound } from "lucide-react";
+import type { SpecialistName, SpecialistsSettings } from "@octopus/shared";
 import { useRoleTemplates } from "@/hooks/queries";
 import { AgentAvatar } from "@/components/common";
 import { Input } from "@/components/ui/primitives";
 import { Tabs, TabsContent, TabsList, TabsTrigger, Tip } from "@/components/ui/overlays";
 import { SidePanel } from "@/components/ui/surfaces";
+import { Button } from "@/components/ui/button";
+import { SPECIALIST_INFO, SPECIALIST_ORDER } from "@/features/settings/specialistSettings";
 import { OrgPanel } from "./OrgPanel";
 
 export const DND_MIME = "application/x-octopus-role";
 
-/** Left panel: role palette (drag onto the canvas) and the org chart (departments, active/inactive agents). */
-export function Palette({ onAdd }: { onAdd: (roleKey: string) => void }) {
+/** What a solo canvas lists in place of roles: each specialist Settings holds, and a way to turn it on or off. */
+export interface SpecialistPaletteProps { settings: SpecialistsSettings; onToggle: (name: SpecialistName, enabled: boolean) => void }
+
+/** Left panel: role palette (drag onto the canvas) and the org chart (departments, active/inactive agents). A solo canvas lists specialists instead of roles. */
+export function Palette({ onAdd, solo }: { onAdd: (roleKey: string) => void; solo?: SpecialistPaletteProps }) {
   return (
     <SidePanel label="Agents and org">
       <Tabs defaultValue="org" className="flex min-h-0 flex-1 flex-col">
         <div className="side-panel-header">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="org"><Network />Org</TabsTrigger>
-            <TabsTrigger value="roles"><UsersRound />Roles</TabsTrigger>
+            <TabsTrigger value="roles"><UsersRound />{solo ? "Specialists" : "Roles"}</TabsTrigger>
           </TabsList>
         </div>
         <TabsContent value="org" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><OrgPanel /></TabsContent>
-        <TabsContent value="roles" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><RolePalette onAdd={onAdd} /></TabsContent>
+        <TabsContent value="roles" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col">{solo ? <SpecialistPalette {...solo} /> : <RolePalette onAdd={onAdd} />}</TabsContent>
       </Tabs>
     </SidePanel>
+  );
+}
+
+function SpecialistPalette({ settings, onToggle }: SpecialistPaletteProps) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" aria-label="Specialist palette">
+      <ul className="flex-1 space-y-1 overflow-y-auto p-2">
+        {SPECIALIST_ORDER.map((name) => {
+          const info = SPECIALIST_INFO[name];
+          const on = settings.specialists[name].enabled;
+          return (
+            <li key={name} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-medium">{info.label}</div>
+                <div className="truncate text-[10.5px] text-muted-foreground">{on ? "On the canvas" : "Off"}</div>
+              </div>
+              <Button size="xs" variant={on ? "outline" : "default"} onClick={() => onToggle(name, !on)} aria-label={`${on ? "Remove" : "Add"} ${info.label}`}>
+                {on ? "Remove" : "Add"}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="border-t border-border p-3 text-[10.5px] leading-snug text-muted-foreground">Removing a specialist hides its card and turns it off in Settings, for every conversation.</p>
+    </div>
   );
 }
 
