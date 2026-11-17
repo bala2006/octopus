@@ -19,6 +19,10 @@ export interface GitDiff { patch: string }
 export const GitStageSchema = z.object({ path: z.string(), staged: z.boolean() });
 export const GitCommitSchema = z.object({ message: z.string().min(1).max(10_000), expected_index: z.string() });
 export interface GitCommitResult { commit_sha: string; status: GitStatus }
+export interface GitRef { name: string; kind: "branch" | "remote" | "tag" }
+export interface GitCommit { sha: string; parents: string[]; refs: GitRef[]; head: boolean; author: string; date: number; subject: string }
+export interface GitBranch { name: string; kind: "branch" | "remote"; sha: string; current: boolean }
+export interface GitLog { commits: GitCommit[]; branches: GitBranch[] }
 export const LocalBranchSchema = z.object({ branch: z.string().min(1).max(200) });
 export const LocalWorktreeSchema = z.object({ base_branch: z.string().min(1).max(200) });
 export const LocalEnvironmentSchema = z.object({ selected: z.string().nullable().optional() });

@@ -16,6 +16,7 @@ import {
   type Question, type Requirement, type RunCreate, type RunEventMap, type RunStatus, type RunTopic, type SpecialistName, type TaskOut, type Usage, type WorkflowState,
 } from "@octopus/shared";
 import { config } from "../config";
+import { conversationName } from "./naming";
 import { SHARED_MEMORY, type RunRow } from "../db/project";
 import type { Registry } from "../db/registry";
 import { effectiveRoles, MAIN_ROLE, roleByKey } from "../catalog/roles";
@@ -202,7 +203,7 @@ export class Conversation {
     const sessionId = body.session_id ?? newId();
     if (!body.session_id) p.db.sessions.insert({ id: sessionId, company_id: company.id, agent_id: null, mode: "company", title: firstLine(body.goal, 80), created_at: now() });
     const row: RunRow = {
-      id: newId(), company_id: company.id, session_id: sessionId, goal: body.goal, status: "queued", mode: body.mode ?? "autonomous", budget,
+      id: newId(), company_id: company.id, session_id: sessionId, goal: body.goal, title: "", status: "queued", mode: body.mode ?? "autonomous", budget,
       permission_level: reg.setting("approval_mode", "ask"), summary: "", halt_reason: "", report_md: "", tokens_used: 0, cost_usd: 0, turns: 0,
       outcome: null, snapshot: { agents: [], edges: [], departments: company.departments }, state: initialState() as never,
       created_at: now(), started_at: null, ended_at: null,
@@ -212,6 +213,7 @@ export class Conversation {
     live.set(row.id, c);
     if (c.lead.behavior.template_key === MAIN_ROLE) c.seatEnabled();
     c.submit(body.goal, body.attachments ?? [], null);
+    conversationName(reg, body.goal).then((name) => { if (name) c.setName(name); }).catch(() => undefined);
     return c;
   }
 
@@ -809,6 +811,12 @@ export class Conversation {
   }
 
   /** A solo conversation's canvas shows one card per specialist that Settings turns on, so they are seated before the first turn. */
+  /** Sets the name the model wrote for this conversation. Only a row still in the store takes it, so a deleted conversation stays deleted. */
+  setName(title: string) {
+    this.row.title = title;
+    if (this.p.db.runs.get(this.row.id)) this.p.db.runs.upsert(this.row);
+  }
+
   private seatEnabled() {
     const settings = specialistSettings(this.reg);
     for (const name of SPECIALIST_NAMES) if (settings.specialists[name].enabled) this.seat(name);

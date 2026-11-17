@@ -11,7 +11,6 @@ import {
   FileCode2,
   Folder,
   History,
-  Laptop,
   Network,
   Pause,
   Plus,
@@ -24,15 +23,15 @@ import {
   MessageSquare,
   Globe,
   ListTodo,
+  ClipboardCheck,
   Wrench,
-  FileText,
   Minus,
   Square,
   Loader2,
   CircleAlert,
 } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
-import { cn, parseUtc } from "@/lib/utils";
+import { cn, conversationName, parseUtc } from "@/lib/utils";
 import {
   useCanvas,
   useCompanies,
@@ -40,7 +39,6 @@ import {
   useRun,
   useRuns,
   useSettings,
-  useWorkspace,
   qk,
 } from "@/hooks/queries";
 import type {
@@ -64,7 +62,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/overlays";
 import { PromptComposer } from "@/components/ui/surfaces";
-import { ConnectionDot } from "@/components/common";
+
 import { NewCompanyDialog } from "@/features/projects/NewCompanyDialog";
 import {
   useAttachments,
@@ -74,13 +72,13 @@ import {
 } from "@/features/chat/attachments";
 import { RunDialog } from "@/features/runs/RunDialog";
 import { defaultRunBudget } from "@/features/runs/runDefaults";
-import { AgentChatContext, RunFeed, ToolLog } from "@/features/runs/RunFeed";
+import { AgentChatContext, RunFeed } from "@/features/runs/RunFeed";
+import { fileTotals, type FileTotal } from "@/features/runs/steps";
 import { TodoList } from "@/features/runs/TodoList";
-import { BrowserView } from "@/features/runs/BrowserView";
-import { isBrowsing } from "@/features/runs/browserSteps";
 import { RunStrip, conversationStatus } from "./RunStrip";
-import { TaskBoard } from "@/features/runs/RunWidgets";
-import { ReportView } from "@/features/runs/RunReport";
+import { useRunView } from "./runView";
+import { BrowserTab, ReviewTab, TodoTab, ToolsTab } from "./RunViews";
+import { isBrowsing } from "@/features/runs/browserSteps";
 import { ApprovalCard } from "@/features/runs/ApprovalCard";
 import { QuestionCard } from "@/features/runs/QuestionCard";
 import { useRunStream } from "@/features/runs/useRunStream";
@@ -108,7 +106,7 @@ export type FloatingChatState = "expanded" | "compose" | "minimized" | "collapse
 type FloatingWindow = {
   state: FloatingChatState;
   onStateChange: (state: FloatingChatState) => void;
-  menu: React.ReactNode;
+  grip: React.ReactNode;
 };
 
 export function AgentPanel({
@@ -123,6 +121,8 @@ export function AgentPanel({
   focusToken = 0,
   presentation = "panel",
   floatingWindow,
+  onChanges,
+  initialAgent,
 }: {
   workspace: string;
   current?: CodeContext;
@@ -135,6 +135,8 @@ export function AgentPanel({
   onSelectionConsumed?: () => void;
   presentation?: "panel" | "conversation";
   floatingWindow?: FloatingWindow;
+  onChanges?: (files: FileTotal[]) => void;
+  initialAgent?: string;
 }) {
   const { companyId } = useCompanyId();
   const attachments = useAttachments({ images: true });
@@ -158,6 +160,8 @@ export function AgentPanel({
       focusToken={focusToken}
       presentation={presentation}
       floatingWindow={floatingWindow}
+      onChanges={onChanges}
+      initialAgent={initialAgent}
     />
   );
 }
@@ -176,6 +180,8 @@ function CompanyAgentPanel({
   focusToken,
   presentation,
   floatingWindow,
+  onChanges,
+  initialAgent,
 }: {
   workspace: string;
   companyId: string;
@@ -190,11 +196,12 @@ function CompanyAgentPanel({
   onSelectionConsumed?: () => void;
   presentation: "panel" | "conversation";
   floatingWindow?: FloatingWindow;
+  onChanges?: (files: FileTotal[]) => void;
+  initialAgent?: string;
 }) {
   const qc = useQueryClient();
   const companiesQuery = useCompanies(w);
   const canvas = useCanvas(w, companyId);
-  const ws = useWorkspace(w);
   const settings = useSettings();
   const runs = useRuns(w, companyId, true);
   const key = threadKey(w, companyId);
@@ -209,31 +216,47 @@ function CompanyAgentPanel({
     : undefined;
   const run = useRun(w, runId ?? "");
   const retryIdentity = React.useRef<{ fingerprint: string; id: string } | null>(null);
-  const base =
-    (run.data?.snapshot?.agents as AgentOut[] | undefined) ??
-    canvas.data?.agents ??
-    [];
+  const base = React.useMemo(
+    () => (run.data?.snapshot?.agents as AgentOut[] | undefined) ?? canvas.data?.agents ?? [],
+    [run.data, canvas.data],
+  );
   const names = React.useMemo(
     () => Object.fromEntries(base.map((a) => [a.id, a.name])),
     [base],
   );
-  const { state, conn } = useRunStream(w, run.data ? runId : undefined, names);
+  const { state } = useRunStream(w, run.data ? runId : undefined, names);
+  const changes = React.useMemo(() => {
+    const lastRequest = state.messages.filter((m) => m.sender === "user").at(-1)?._seq ?? 0;
+    return fileTotals(state.steps.filter((s) => s.seq > lastRequest));
+  }, [state.messages, state.steps]);
+  React.useEffect(() => {
+    onChanges?.(changes);
+  }, [changes, onChanges]);
   const publishLive = useLiveRun((l) => l.publish);
   React.useEffect(() => {
     const team = [...base, ...state.extraAgents];
     publishLive(runId ?? null, state.extraAgents, runId ? liveOverlay(state, team, { ...canvas.data?.departments, ...state.departments }) : null);
   }, [runId, state, base, canvas.data?.departments, publishLive]);
   React.useEffect(() => () => publishLive(null, [], null), [publishLive]);
-  const agents = Object.fromEntries(
-    [...base, ...state.extraAgents].map((a) => [
-      a.id,
-      { ...a, ...state.agentPatches[a.id] },
-    ]),
+  const agents = React.useMemo(
+    () =>
+      Object.fromEntries(
+        [...base, ...state.extraAgents].map((a) => [a.id, { ...a, ...state.agentPatches[a.id] }]),
+      ),
+    [base, state],
   );
   const status =
     state.replayDone || state.live ? state.status : run.data?.status;
   const active = !!runId && !!status && !TERMINAL.has(status);
-  const browsing = Object.values(state.activity).some(isBrowsing);
+  const publishRun = useRunView((v) => v.publish);
+  React.useEffect(() => {
+    publishRun({ runId: runId ?? null, live: active, state, agents });
+  }, [runId, active, state, agents, publishRun]);
+  React.useEffect(
+    () => () => publishRun({ runId: null, live: false, state: null, agents: {} }),
+    [publishRun],
+  );  const browsing = Object.values(state.activity).some(isBrowsing);
+  const todoCount = Object.keys(state.tasks).length;
   const checklist = state.todos && state.todos.items.length > 0 ? <TodoList todos={state.todos} /> : null;
   const [now, setNow] = React.useState(Date.now);
   React.useEffect(() => {
@@ -265,13 +288,12 @@ function CompanyAgentPanel({
   const [adding, setAdding] = React.useState(false);
   const [browsingFiles, setBrowsingFiles] = React.useState(false);
   const [fileSearch, setFileSearch] = React.useState("");
-  const [conversationTab, setConversationTab] = React.useState<
-    "chat" | "todo" | "browser" | "tools" | "report"
-  >("chat");
-  React.useEffect(() => setConversationTab("chat"), [runId]);
+
   /** The agent whose own chat the panel shows instead of the team chat; null for the team chat. */
-  const [agentChat, setAgentChat] = React.useState<string | null>(null);
-  React.useEffect(() => setAgentChat(null), [runId]);
+  const [conversationTab, setConversationTab] = React.useState<"chat" | "todo" | "browser" | "tools" | "review">("chat");
+  React.useEffect(() => setConversationTab("chat"), [runId]);
+  const [agentChat, setAgentChat] = React.useState<string | null>(initialAgent ?? null);
+  React.useEffect(() => setAgentChat(initialAgent ?? null), [runId, initialAgent]);
   const openAgentChat = React.useCallback((agentId: string) => {
     setAgentChat(agentId);
     setConversationTab("chat");
@@ -288,8 +310,7 @@ function CompanyAgentPanel({
     if (!runId) return;
     const onOpen = (e: Event) => {
       const agentId = (e as CustomEvent<string>).detail;
-      if (!agents[agentId]) return; // not on this conversation's team: let the canvas open the one-on-one chat
-      e.preventDefault();
+      if (!agents[agentId]) return;
       openAgentChat(agentId);
       changeFloatingState?.("expanded");
     };
@@ -372,6 +393,7 @@ function CompanyAgentPanel({
           return { ...c, content: doc.content, dirty: false };
         }),
       );
+      if (!runId && agentChat) throw new Error("Send the team a request first. Then you can chat with this agent.");
       const goal = contextGoal(prompt.content, context);
       if (runId) {
         await unwrap(api.POST("/api/v1/w/{workspace_id}/runs/{run_id}/continue", {
@@ -566,6 +588,21 @@ function CompanyAgentPanel({
         <header className="conversation-chat-heading">
           {floatingWindow && (
             <div className="floating-chat-titlebar">
+              {floatingWindow.grip}
+              <span className="floating-chat-title" title={run.data ? conversationName(run.data) : undefined}>
+                <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span>{run.data ? conversationName(run.data) : "New conversation"}</span>
+                <button
+                  type="button"
+                  className="floating-chat-window-control"
+                  aria-label={floatingState === "expanded" ? "Minimize chat window" : "Expand chat"}
+                  title={floatingState === "expanded" ? "Minimize chat window" : "Expand chat"}
+                  onClick={() => floatingWindow.onStateChange(floatingState === "expanded" ? "minimized" : "expanded")}
+                >
+                  {floatingState === "expanded" ? <ChevronDown /> : <ChevronUp />}
+                </button>
+              </span>
+
               <button
                 type="button"
                 className="floating-chat-window-control"
@@ -574,72 +611,33 @@ function CompanyAgentPanel({
               >
                 <Minus />
               </button>
-              <ConnectionDot state={conn} />
-              <span className="floating-chat-title" title={run.data?.goal}>
-                <span>{run.data?.goal.split("\n")[0] || "New conversation"}</span>
-              </span>
-              {floatingState !== "expanded" && (
-                <button
-                  type="button"
-                  className="floating-chat-window-control"
-                  aria-label="Expand chat"
-                  title="Expand chat"
-                  onClick={() => floatingWindow.onStateChange("expanded")}
-                >
-                  <ChevronUp />
-                </button>
-              )}
-              {floatingWindow.menu}
             </div>
           )}
-          <nav
-            className="conversation-detail-tabs"
-            aria-label="Conversation views"
-          >
-            <button
-              aria-pressed={conversationTab === "chat"}
-              onClick={() => setConversationTab("chat")}
-            >
-              <MessageSquare />
-              Chat
-            </button>
-            <button
-              aria-pressed={conversationTab === "todo"}
-              disabled={!runId}
-              onClick={() => setConversationTab("todo")}
-            >
-              <ListTodo />
-              To do{" "}
-              {!!Object.keys(state.tasks).length && (
-                <span>{Object.keys(state.tasks).length}</span>
-              )}
-            </button>
-            <button
-              aria-pressed={conversationTab === "tools"}
-              disabled={!runId}
-              onClick={() => setConversationTab("tools")}
-            >
-              <Wrench />
-              Tools
-            </button>
-            {(!!state.browser.length || browsing) && (
-              <button
-                aria-pressed={conversationTab === "browser"}
-                onClick={() => setConversationTab("browser")}
-              >
+          {conversation && floatingWindow && (
+            <nav className="conversation-detail-tabs" aria-label="Conversation views">
+              <button type="button" aria-pressed={conversationTab === "chat"} onClick={() => setConversationTab("chat")}>
+                <MessageSquare />
+                Chat
+              </button>
+              <button type="button" aria-pressed={conversationTab === "todo"} disabled={!runId} onClick={() => setConversationTab("todo")}>
+                <ListTodo />
+                To do
+                {todoCount > 0 && <span>{todoCount}</span>}
+              </button>
+              <button type="button" aria-pressed={conversationTab === "tools"} disabled={!runId} onClick={() => setConversationTab("tools")}>
+                <Wrench />
+                Tools
+              </button>
+              <button type="button" aria-pressed={conversationTab === "browser"} onClick={() => setConversationTab("browser")}>
                 <Globe className={cn(browsing && "animate-pulse text-success")} />
                 Browser
               </button>
-            )}
-            <button
-              aria-pressed={conversationTab === "report"}
-              disabled={!runId || active}
-              onClick={() => setConversationTab("report")}
-            >
-              <FileText />
-              Recap
-            </button>
-          </nav>
+              <button type="button" aria-pressed={conversationTab === "review"} disabled={!runId} onClick={() => setConversationTab("review")}>
+                <ClipboardCheck />
+                Review
+              </button>
+            </nav>
+          )}
           {runId && run.data && <RunStrip w={w} runId={runId} mode={run.data.mode} status={status} active={active} state={state} agents={agents} pending={control.isPending} onControl={(action) => control.mutate(action)} />}
         </header>
       )}
@@ -658,7 +656,7 @@ function CompanyAgentPanel({
             )}
           >
             {conversation
-              ? (run.data?.goal.split("\n")[0] ?? "New conversation")
+              ? (run.data ? conversationName(run.data) : "New conversation")
               : "Octopus"}
           </span>
           <div className="ml-auto flex gap-0.5">
@@ -680,23 +678,11 @@ function CompanyAgentPanel({
       )}
       <div className="agent-message-area min-h-0 flex-1 overflow-hidden">
         {conversation && conversationTab !== "chat" ? (
-          <div
-            className="conversation-detail-panel h-full overflow-auto"
-            aria-label={`${conversationTab} view`}
-          >
-            {conversationTab === "browser" && runId && (
-              <div className="flex h-full flex-col"><BrowserView state={state} agents={agents} w={w} runId={runId} live={active} /></div>
-            )}
-            {conversationTab === "todo" && (
-              <>
-                {checklist}
-                <TaskBoard tasks={Object.values(state.tasks)} agents={agents} compact />
-              </>
-            )}
-            {conversationTab === "tools" && (
-              <ToolLog state={state} agents={agents} />
-            )}
-            {conversationTab === "report" && runId && <ReportView w={w} runId={runId} enabled={!active} downloadable />}
+          <div className="h-full min-h-0" role="region" aria-label={`${conversationTab} view`}>
+            {conversationTab === "browser" && <BrowserTab />}
+            {conversationTab === "review" && <ReviewTab />}
+            {conversationTab === "todo" && <TodoTab />}
+            {conversationTab === "tools" && <ToolsTab />}
           </div>
         ) : runId && run.isLoading ? (
           <p
@@ -729,7 +715,7 @@ function CompanyAgentPanel({
               </div>
             )}
             <div className="flex min-h-0 flex-1 flex-col">
-              {!conversation && !agentChat && checklist && <div className="max-h-40 shrink-0 overflow-y-auto">{checklist}</div>}
+              {!conversation && !agentChat && checklist && <div className="max-h-40 shrink-0 overflow-y-auto border-b border-border">{checklist}</div>}
               <AgentChatContext.Provider value={openAgentChat}>
                 <RunFeed
                   state={state}
@@ -835,7 +821,7 @@ function CompanyAgentPanel({
             )}
             {!conversation && (
               <Link
-                to={`/w/${w}/canvas`}
+                to={`/w/${w}/agent?tab=canvas`}
                 className="mt-5 flex items-center gap-2 text-xs text-primary"
               >
                 <Network className="h-3.5 w-3.5" />
@@ -874,11 +860,8 @@ function CompanyAgentPanel({
           />
         </div>
       )}
-      {floatingState !== "collapsed" &&
-        (!conversation ||
-          conversationTab === "chat" ||
-          floatingState === "compose" ||
-          floatingState === "minimized") && (
+      {floatingState !== "collapsed" && (
+
           <PromptComposer
             className={cn(
               "agent-composer",
@@ -908,24 +891,12 @@ function CompanyAgentPanel({
                 {companyId && canvas.data?.agents.length === 0 && (
                   <p className="mb-2 text-xs text-muted-foreground">
                     This team has no agents.{" "}
-                    <Link className="underline" to={`/w/${w}/canvas`}>
+                    <Link className="underline" to={`/w/${w}/agent?tab=canvas`}>
                       Add an agent
                     </Link>{" "}
                     or choose another team.
                   </p>
                 )}
-                <div className="home-composer-context agent-composer-context">
-                  <span className="home-project-trigger inline-flex items-center gap-1.5 text-sm">
-                    <Folder />
-                    <span>{ws.data?.name ?? "Project"}</span>
-                    <ChevronDown />
-                  </span>
-                  <span className="home-computer-context">
-                    <Laptop />
-                    This computer
-                  </span>
-                  {conversationOptions}
-                </div>
               </>
             }
             caption={
@@ -939,6 +910,7 @@ function CompanyAgentPanel({
             }
             controls={
               <>
+                {conversationOptions}
                 <Popover
                   open={adding}
                   onOpenChange={(open) => {
@@ -1165,7 +1137,6 @@ function CompanyAgentPanel({
               onFocus={() => {
                 if (floatingState === "minimized") {
                   changeFloatingState?.("compose");
-                  setConversationTab("chat");
                 }
               }}
               onChange={(event) => {

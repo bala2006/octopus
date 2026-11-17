@@ -352,7 +352,7 @@ const SECTIONS: Section[] = [
       <p>Everything about a conversation is in one window. The chat shows what matters to you: the plan, questions, approvals and the final report. <b>Show the team's internal messages</b> in the message box options adds what agents say to each other.
         Next to it, the team's cards light up as each agent thinks, writes or uses a tool.</p>
       <Tips items={[
-        <>The tabs above the chat show <b>To do</b> (the team's checklist, then each task's owner, status and result), <b>Tools</b> (every command and tool call), <b>Browser</b> (what an agent sees, live, once one uses the browser) and the <b>Recap</b> when the team is done, which you can download as Markdown.</>,
+        <>The <b>Details</b> panel on the right shows the team's <b>To do</b> list (each task's owner, status and result) and <b>Tools</b> (every command and tool call). Add <b>Browser</b> (what an agent sees, live, once one uses the browser) and <b>Review</b> (each review round, with the specialists' verdicts and findings) as tabs with <b>+</b>.</>,
         <>The strip under the tabs shows the workflow phases, what the team is doing, and the calls, tokens and cost so far (click them for the exact breakdown). <b>Pause</b> or <b>Next step</b> is there too.</>,
         <>When an agent needs a decision, it asks with 2 to 5 answers and marks the one it recommends. Pick one or type your own; the rest of the team keeps working meanwhile.</>,
         <>Send a message at any time. While the team works, Octopus plans it in alongside the running tasks.</>,
@@ -421,9 +421,7 @@ const SECTIONS: Section[] = [
   {
     id: "chat", title: "Chat with one agent", icon: MessagesSquare,
     body: <>
-      <p><b>Direct chats</b> are one-on-one conversations with a single teammate: ask your designer about the colour palette or your backend developer how the API works. In a direct chat the agent can read the project and search the web but does not change files; ask in Conversation for changes.</p>
-      <p>Pick an agent from the list, or right-click its card in Team and choose <b>Chat with agent</b>.</p>
-      <Shot name="chat" alt="Direct chat with an agent" />
+      <p>Click an agent on the canvas and choose <b>Chat</b>, or right-click it and choose <b>Chat with agent</b>. The agent's chat opens over the canvas, and your messages go to that agent.</p>
     </>,
   },
   {

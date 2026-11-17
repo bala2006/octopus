@@ -43,3 +43,28 @@ export function resizeBox(
   const top = clamp(start.top + dy, FLOATING_GAP, bottom - FLOATING_MIN_HEIGHT);
   return { ...start, top, height: bottom - top };
 }
+
+/**
+ * Where the window sits. `right` is the gap between the window's right edge and the canvas's right edge, so a window
+ * docked to the right keeps its gap when the canvas resizes. `top` is the gap from the canvas's top edge.
+ */
+export type FloatingPlacement = { right: number; top: number };
+
+/**
+ * The placement after dragging the window by (dx, dy) pixels, kept fully inside the canvas. Positive dx moves it right.
+ * A window low on the canvas shrinks to fit (the CSS does that), so only its minimum height has to fit below its top.
+ */
+export function moveBox(start: FloatingPlacement, dx: number, dy: number, size: FloatingBounds, canvas: FloatingBounds): FloatingPlacement {
+  const shortest = Math.min(size.height, FLOATING_MIN_HEIGHT);
+  return {
+    right: clamp(start.right - dx, FLOATING_GAP, canvas.width - size.width - FLOATING_GAP),
+    top: clamp(start.top + dy, FLOATING_GAP, canvas.height - shortest - FLOATING_GAP),
+  };
+}
+
+/** The side of the canvas the window's centre is on. That side decides where the resize handle and the canvas inset go. */
+export function dockOf(right: number, width: number, canvasWidth: number): FloatingDock {
+  if (canvasWidth <= 0) return "right";
+  const centre = canvasWidth - right - width / 2;
+  return centre < canvasWidth / 2 ? "left" : "right";
+}

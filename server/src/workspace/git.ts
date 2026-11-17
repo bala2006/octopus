@@ -1,7 +1,7 @@
 /** Git for the code workspace: status, diffs, staging, reviewed commits, branches and sibling worktrees. */
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import type { GitStatus, LocalEnvironment } from "@octopus/shared";
+import type { GitBranch, GitCommit, GitLog, GitRef, GitStatus, LocalEnvironment } from "@octopus/shared";
 import { config } from "../config";
 import { run } from "../lib/proc";
 import { sha1, UserError } from "../lib/util";
@@ -65,6 +65,71 @@ export async function commit(root: string, message: string, expectedIndex: strin
   return { commit_sha: (await git(root, "rev-parse", "HEAD")).trim(), status: await status(root) };
 }
 
+const LOG_FORMAT = "%H%x1f%P%x1f%D%x1f%an%x1f%at%x1f%s%x1e";
+
+function refsOf(decorations: string): { refs: GitRef[]; head: boolean } {
+  const refs: GitRef[] = [];
+  let head = false;
+  for (let item of decorations.split(", ")) {
+    if (item === "HEAD") {
+      head = true;
+      continue;
+    }
+    if (item.startsWith("HEAD -> ")) {
+      head = true;
+      item = item.slice("HEAD -> ".length);
+    }
+    if (item.startsWith("tag: refs/tags/")) refs.push({ name: item.slice("tag: refs/tags/".length), kind: "tag" });
+    else if (item.startsWith("refs/heads/")) refs.push({ name: item.slice("refs/heads/".length), kind: "branch" });
+    else if (item.startsWith("refs/remotes/")) refs.push({ name: item.slice("refs/remotes/".length), kind: "remote" });
+  }
+  return { refs, head };
+}
+
+/** Reads the output of `git log` with LOG_FORMAT and --decorate=full. Exported for tests. */
+export function parseLog(output: string): GitCommit[] {
+  return output
+    .split("\x1e")
+    .map((record) => record.replace(/^\n/, ""))
+    .filter((record) => record.trim().length > 0)
+    .map((record) => {
+      const [sha = "", parents = "", decorations = "", author = "", date = "0", subject = ""] = record.split("\x1f");
+      return { sha, parents: parents ? parents.split(" ") : [], ...refsOf(decorations), author, date: Number(date), subject };
+    });
+}
+
+/** Reads `git for-each-ref --format="%(refname) %(objectname) %(HEAD)"`. Git ref names contain no spaces. Exported for tests. */
+export function parseBranches(output: string): GitBranch[] {
+  return output.split("\n").flatMap((line): GitBranch[] => {
+    const [ref = "", sha = "", head = ""] = line.trim().split(" ");
+    if (ref.startsWith("refs/heads/")) return [{ name: ref.slice("refs/heads/".length), kind: "branch" as const, sha, current: head === "*" }];
+    if (ref.startsWith("refs/remotes/") && !ref.endsWith("/HEAD")) {
+      return [{ name: ref.slice("refs/remotes/".length), kind: "remote" as const, sha, current: false }];
+    }
+    return [];
+  });
+}
+/** Recent commits on every local branch, remote, and tag, newest first, with HEAD marked. Every branch tip is listed, even when its commits fall outside the window. */
+export async function log(root: string, limit = 80): Promise<GitLog> {
+  await requireRepo(root);
+  const anyRef = (await git(root, "rev-list", "--count", "--branches", "--remotes", "--tags")).trim();
+  if (anyRef === "0") return { commits: [], branches: [] };
+  const hasHead = await git(root, "rev-parse", "--verify", "--quiet", "HEAD").then(() => true, () => false);
+  const output = await git(
+    root,
+    "log",
+    "--topo-order",
+    `--max-count=${limit}`,
+    "--decorate=full",
+    `--format=${LOG_FORMAT}`,
+    "--branches",
+    "--remotes",
+    "--tags",
+    ...(hasHead ? ["HEAD"] : []),
+  );
+  const branches = parseBranches(await git(root, "for-each-ref", "--format=%(refname) %(objectname) %(HEAD)", "refs/heads", "refs/remotes"));
+  return { commits: parseLog(output), branches };
+}
 async function branches(root: string) {
   return (await git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads")).split("\n").filter(Boolean);
 }

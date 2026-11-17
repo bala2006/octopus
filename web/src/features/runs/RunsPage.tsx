@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowDownUp, GitCompare, History, Play, RotateCw, Search, Square, Trash2 } from "lucide-react";
 import { api, unwrap } from "@/lib/api";
-import { cn, formatTokens, timeAgo, duration, goalTitle, parseUtc } from "@/lib/utils";
+import { cn, conversationName, duration, formatTokens, parseUtc, timeAgo } from "@/lib/utils";
 import { useMoney } from "@/lib/money";
 import { qk, useCompanyId, useRuns, useWorkspaceId } from "@/hooks/queries";
 import type { RunOut } from "@/types";
@@ -114,7 +114,7 @@ function RunRow({ r, w, onDelete, onStop, onRerun }: { r: RunOut; w: string; onD
         </Badge>
       </Tip>
       <Link to={`/w/${w}/runs/${r.id}`} className="min-w-[10rem] flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <div className="truncate text-sm font-medium">{goalTitle(r.goal)}</div>
+        <div className="truncate text-sm font-medium">{conversationName(r)}</div>
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
           <time dateTime={created.toISOString()} title={created.toLocaleString()} className="shrink-0">{timeAgo(r.created_at)}</time>
           <span>·</span><span className="shrink-0 capitalize">{r.mode}</span>{dur && <><span>·</span><span className="shrink-0">{dur}</span></>}

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useStore } from "@xyflow/react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { BookOpenCheck, Crown, Flag, Maximize2, MessageSquare, MoreHorizontal, PenLine, Plug, Power, Trash2, X } from "lucide-react";
 import { useMcpServers, useRoleTemplates, useSettings, useSkills, useWorkspaceId } from "@/hooks/queries";
@@ -65,7 +65,6 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
   const { data: roles = [] } = useRoleTemplates();
   const { data: settings } = useSettings();
   const w = useWorkspaceId();
-  const nav = useNavigate();
   const [customTools, setCustomTools] = React.useState(false);
   const tools = (data.tools ?? {}) as AgentTools;
   const setTool = (key: string, v: boolean | string[]) => update(id, { tools: { ...tools, [key]: v } as AgentTools });
@@ -245,11 +244,7 @@ export function NodeQuickConfig({ id, data, onClose }: { id: string; data: Agent
       </div>
 
       <div className="flex items-center gap-1 border-t border-border bg-surface px-2 py-1.5">
-        <Button variant="ghost" size="xs" onClick={() => {
-          // The open conversation shows this agent's own chat when it can; otherwise the one-on-one chat page.
-          const shown = !window.dispatchEvent(new CustomEvent("octopus:agent-chat", { detail: id, cancelable: true }));
-          if (!shown) nav(`/w/${w}/chat?agent=${id}`);
-        }}><MessageSquare />Chat</Button>
+        <Button variant="ghost" size="xs" onClick={() => window.dispatchEvent(new CustomEvent("octopus:agent-chat", { detail: id }))}><MessageSquare />Chat</Button>
         <Button variant="ghost" size="xs" onClick={() => setInspector(id)}><Maximize2 />All settings</Button>
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" className="ml-auto" aria-label="Agent actions"><MoreHorizontal /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end"><DropdownMenuItem className="text-destructive" onSelect={() => deleteNodes([id])}><Trash2 />Delete agent</DropdownMenuItem></DropdownMenuContent>
@@ -288,7 +283,7 @@ function AgentSkills({ id, behavior, roleKey }: { id: string; behavior: NonNulla
  * The quick configuration of a specialist card on a solo canvas. Its switch, model and effort are the Settings values, so a
  * change here is the same change Settings makes.
  */
-export function SpecialistQuickConfig({ name, data, onClose }: { name: SpecialistName; data: AgentData; onClose: () => void }) {
+export function SpecialistQuickConfig({ id, name, data, onClose }: { id: string; name: SpecialistName; data: AgentData; onClose: () => void }) {
   const workspaceId = useWorkspaceId();
   const companyId = useCanvas((s) => s.companyId) ?? "";
   const settings = useSpecialists();
@@ -317,6 +312,7 @@ export function SpecialistQuickConfig({ name, data, onClose }: { name: Specialis
       <Field label="Reasoning effort">
         <EffortPicker compact value={current.effort} onChange={(effort) => save.mutate(withSpecialist(settings, name, { effort }))} />
       </Field>
+      <Button variant="outline" size="sm" className="w-full" onClick={() => window.dispatchEvent(new CustomEvent("octopus:agent-chat", { detail: id }))}><MessageSquare />Chat</Button>
       <p className="text-[10.5px] leading-snug text-muted-foreground">These are the values in Settings, Specialists.</p>
     </div>
   );

@@ -152,7 +152,7 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
       return { ...next, thinking: { ...s.thinking, [d.agent_id]: ((s.thinking[d.agent_id] ?? "") + d.delta).slice(-8000) } };
     case "thought":
       return { ...next, thoughts: { ...s.thoughts, [d.agent_id]: d.text }, thinking: { ...s.thinking, [d.agent_id]: "" },
-        steps: seq ? [...s.steps, thoughtStep(seq, d.agent_id, d.text)] : s.steps };
+        steps: seq ? [...s.steps, thoughtStep(seq, d.agent_id, d.text, e.ts)] : s.steps };
     case "message_created": {
       const m = d.message as MessageOut;
       if (s.messages.some((x) => x.id === m.id)) return next;
@@ -166,7 +166,7 @@ export function reduceRun(s: RunLive, e: RunEvent, names: Record<string, string>
     case "edge_activity":
       return { ...next, activeEdges: { ...s.activeEdges, [d.edge_id]: { at: now, from: d.from_agent_id, type: d.type, seq } } };
     case "tool_call": {
-      const step = callStep(seq, { call_id: d.call_id, agent_id: d.agent_id, tool: d.tool, args: d.args ?? {} });
+      const step = callStep(seq, { call_id: d.call_id, agent_id: d.agent_id, tool: d.tool, args: d.args ?? {} }, e.ts);
       return { ...next, toolCalls: { ...s.toolCalls, [d.call_id]: { ...d, seq } as ToolCall }, steps: step ? [...s.steps, step] : s.steps };
     }
     case "tool_result": {

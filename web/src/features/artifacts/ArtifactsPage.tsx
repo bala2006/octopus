@@ -9,7 +9,7 @@ import {
   ExternalLink, Code2, Bot, NotebookPen,
 } from "lucide-react";
 import { api, fetchRaw, unwrap } from "@/lib/api";
-import { cn, download, goalTitle, languageFor, timeAgo } from "@/lib/utils";
+import { cn, conversationName, download, languageFor, timeAgo } from "@/lib/utils";
 import { qk, useArtifacts, useCompanyId, useRun, useRuns, useWorkspaceId } from "@/hooks/queries";
 import { Markdown } from "@/components/Markdown";
 import { splitWork } from "./files";
@@ -49,9 +49,10 @@ export function previewKind(path: string | null): "html" | "markdown" | "image" 
   return null;
 }
 
-export default function ArtifactsPage() {
+export default function ArtifactsPage({ runId: shownRun }: { runId?: string } = {}) {
   const w = useWorkspaceId();
-  const { runId } = useParams();
+  const { runId: routeRun } = useParams();
+  const runId = shownRun ?? routeRun;
   const nav = useNavigate();
   const { companyId } = useCompanyId();
   const runs = useRuns(w, companyId || undefined);
@@ -130,7 +131,7 @@ export default function ArtifactsPage() {
       >
         <History className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
         <Select ariaLabel="Conversation" value={selectedRun} onValueChange={(v) => nav(`/w/${w}/artifacts/${v}`)} className="h-8 w-full max-w-96 text-xs"
-          options={(runs.data ?? []).map((r) => ({ value: r.id, label: goalTitle(r.goal).slice(0, 56), hint: `${r.status} \u00b7 ${timeAgo(r.created_at)}` }))} placeholder="Choose a conversation" />
+          options={(runs.data ?? []).map((r) => ({ value: r.id, label: conversationName(r).slice(0, 56), hint: `${r.status} \u00b7 ${timeAgo(r.created_at)}` }))} placeholder="Choose a conversation" />
       </PageToolbar>
       <div className="artifacts-body flex min-h-0 flex-1">
         <SidePanel
@@ -166,7 +167,7 @@ export default function ArtifactsPage() {
               <PageToolbar
                 actions={
                   <>
-                    <Button size="sm" variant="outline" disabled={latest?.deleted} onClick={() => nav(`/w/${w}/workspace?file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
+                    <Button size="sm" variant="outline" disabled={latest?.deleted} onClick={() => nav(`/w/${w}/agent?tab=code&file=${encodeURIComponent(selected)}`)}><FilePen />Edit current file</Button>
                     <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
                       <TabsList>
                         <TabsTrigger value="view"><Code2 />Code</TabsTrigger>

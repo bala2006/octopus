@@ -1,11 +1,10 @@
-import * as React from "react";
 import {
   ExternalLink,
   Globe,
   Monitor,
   RotateCw,
   Smartphone,
-  X,
+  Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
@@ -13,136 +12,155 @@ import { Markdown } from "@/components/Markdown";
 import { cn } from "@/lib/utils";
 import { parsePreviewAddress } from "./previewAddress";
 
-export function PreviewPanel({
-  workspace,
-  path,
-  content,
-  onClose,
-  requestedAddress,
+const PREVIEWABLE = /\.(html?|md|markdown|png|jpe?g|gif|webp|svg|pdf)$/i;
+
+/** The preview's state. The editor header and the preview body both read it, and it belongs to one editor tab. */
+export type PreviewState = {
+  key: string;
+  address: string;
+  external: string;
+  mobile: boolean;
+  reload: number;
+  error: string;
+  /** The frame that finished loading, as `${url}:${reload}`. */
+  loaded: string | null;
+};
+
+export function emptyPreview(key: string): PreviewState {
+  return {
+    key,
+    address: "",
+    external: "",
+    mobile: false,
+    reload: 0,
+    error: "",
+    loaded: null,
+  };
+}
+
+/** The address the frame shows: a typed development-server address, or the selected project file. */
+export function previewUrl(
+  workspace: string,
+  path: string | null,
+  external: string,
+): string {
+  if (external) return external;
+  if (!path || !PREVIEWABLE.test(path)) return "";
+  return `/api/v1/w/${workspace}/preview/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** The address field and the frame controls. They sit in the editor's header row while the preview is on. */
+export function PreviewControls({
+  state,
+  url,
+  onChange,
 }: {
-  workspace: string;
-  path: string | null;
-  content: string;
-  onClose: () => void;
-  requestedAddress?: { url: string };
+  state: PreviewState;
+  url: string;
+  onChange: (patch: Partial<PreviewState>) => void;
 }) {
-  const [address, setAddress] = React.useState("");
-  const [external, setExternal] = React.useState("");
-  const [error, setError] = React.useState("");
-  const [mobile, setMobile] = React.useState(false);
-  const [version, setVersion] = React.useState(0);
-  const [loading, setLoading] = React.useState(true);
-  React.useEffect(() => {
-    if (requestedAddress) {
-      setAddress(requestedAddress.url);
-      setExternal(requestedAddress.url);
-    }
-  }, [requestedAddress]);
-  const previewable =
-    path && /\.(html?|md|markdown|png|jpe?g|gif|webp|svg|pdf)$/i.test(path);
-  const url =
-    external ||
-    (previewable
-      ? `/api/v1/w/${workspace}/preview/${path.split("/").map(encodeURIComponent).join("/")}`
-      : "");
-  // Development servers have their own origin, so they can use storage and fetch
-  // their APIs without gaining access to Octopus. Project-file previews stay opaque.
-  const separateOrigin =
-    !!external && new URL(external).origin !== window.location.origin;
-  React.useEffect(() => {
-    setLoading(true);
-  }, [url, version]);
   return (
-    <section
-      aria-label="Browser preview"
-      className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface"
-    >
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
-        <Globe className="mx-1 h-4 w-4 text-steel" />
-        <span className="text-xs font-medium">Preview</span>
-        <div className="ml-auto flex gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label={mobile ? "Use desktop viewport" : "Use mobile viewport"}
-            onClick={() => setMobile(!mobile)}
-          >
-            {mobile ? <Smartphone /> : <Monitor />}
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="Refresh preview"
-            onClick={() => setVersion((v) => v + 1)}
-          >
-            <RotateCw />
-          </Button>
-          {url && (
-            <Button size="icon" variant="ghost" asChild>
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open preview in new tab"
-              >
-                <ExternalLink />
-              </a>
-            </Button>
-          )}
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="Close preview"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </div>
-      </div>
+    <>
       <form
-        className="flex gap-2 border-b p-2"
+        className="flex min-w-0 flex-1 items-center gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!address.trim()) {
-            setExternal("");
-            setError("");
+          if (!state.address.trim()) {
+            onChange({ external: "", error: "" });
             return;
           }
           try {
-            setExternal(parsePreviewAddress(address));
-            setError("");
+            onChange({ external: parsePreviewAddress(state.address), error: "" });
           } catch {
-            setError(
-              "Enter an http:// or https:// address, such as localhost:3000.",
-            );
+            onChange({
+              error:
+                "Enter an http:// or https:// address, such as localhost:3000.",
+            });
           }
         }}
       >
         <Input
           aria-label="Preview address"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
+          value={state.address}
+          onChange={(e) => onChange({ address: e.target.value })}
           placeholder="localhost:3000 or select an HTML file"
-          className="h-8 min-w-0 text-xs"
+          className="h-8 min-w-0 flex-1 text-xs"
         />
         <Button variant="secondary" size="sm" type="submit">
           Go
         </Button>
+        {state.external && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange({ external: "", address: "", error: "" })}
+          >
+            <Undo2 />
+            Back to file
+          </Button>
+        )}
       </form>
-      {external && (
-        <button
-          className="border-b px-3 py-1.5 text-left text-xs text-primary hover:bg-accent"
-          onClick={() => {
-            setExternal("");
-            setAddress("");
-          }}
-        >
-          Back to selected file
-        </button>
+      <Button
+        size="icon"
+        variant="ghost"
+        aria-label={state.mobile ? "Use desktop viewport" : "Use mobile viewport"}
+        onClick={() => onChange({ mobile: !state.mobile })}
+      >
+        {state.mobile ? <Smartphone /> : <Monitor />}
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        aria-label="Refresh preview"
+        onClick={() => onChange({ reload: state.reload + 1 })}
+      >
+        <RotateCw />
+      </Button>
+      {url && (
+        <Button size="icon" variant="ghost" asChild>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open preview in new tab"
+          >
+            <ExternalLink />
+          </a>
+        </Button>
       )}
-      {error && (
+    </>
+  );
+}
+
+/** The preview page: the frame, a Markdown render, or the empty state. */
+export function PreviewBody({
+  state,
+  url,
+  path,
+  content,
+  onChange,
+}: {
+  state: PreviewState;
+  url: string;
+  path: string | null;
+  content: string;
+  onChange: (patch: Partial<PreviewState>) => void;
+}) {
+  const frame = `${url}:${state.reload}`;
+  const loading = !!url && state.loaded !== frame;
+  // Development servers have their own origin, so they can use storage and fetch
+  // their APIs without gaining access to Octopus. Project-file previews stay opaque.
+  const separateOrigin =
+    !!state.external && new URL(state.external).origin !== window.location.origin;
+  return (
+    <section
+      aria-label="Browser preview"
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface"
+    >
+      {state.error && (
         <p role="alert" className="px-3 py-2 text-xs text-destructive">
-          {error}
+          {state.error}
         </p>
       )}
       {!url ? (
@@ -154,7 +172,7 @@ export function PreviewPanel({
             enter its development server address above.
           </p>
         </div>
-      ) : !external && path && /\.(md|markdown)$/i.test(path) ? (
+      ) : !state.external && path && /\.(md|markdown)$/i.test(path) ? (
         <div className="min-h-0 flex-1 overflow-auto p-5">
           <Markdown>{content}</Markdown>
         </div>
@@ -169,20 +187,20 @@ export function PreviewPanel({
             </div>
           )}
           <iframe
-            key={`${url}:${version}`}
+            key={frame}
             title="Project preview"
             src={url}
-            onLoad={() => setLoading(false)}
+            onLoad={() => onChange({ loaded: frame })}
             sandbox={`allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock${separateOrigin ? " allow-same-origin" : ""}`}
             className={cn(
               "h-full max-w-full rounded-lg border bg-white shadow-sm transition-[width] duration-200",
-              mobile ? "w-[390px]" : "w-full",
+              state.mobile ? "w-[390px]" : "w-full",
             )}
           />
         </div>
       )}
       <p className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-        {external
+        {state.external
           ? "Some sites block embedded previews. Use Open in new tab if needed."
           : "HTML previews use saved files. Markdown previews include your edits."}
       </p>

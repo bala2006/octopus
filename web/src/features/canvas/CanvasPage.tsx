@@ -8,8 +8,8 @@ import { toast } from "sonner";
 import {
   AlertCircle, Check, ClipboardPaste, Cloud, CloudOff, Download, Flag, Grid3x3, LayoutGrid, Loader2, Maximize, MessageSquare, Network,
   Plus, Redo2, Settings2, Trash2, Undo2, Upload, CopyPlus, MousePointerSquareDashed, Building2, BookmarkPlus, MoreHorizontal,
+  PanelLeft,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { api, unwrap } from "@/lib/api";
 import { download, timeAgo } from "@/lib/utils";
 import { qk, useCanvas as useCanvasQuery, useCompanyId, useRoleTemplates, useSettings, useWorkspaceId } from "@/hooks/queries";
@@ -41,7 +41,7 @@ import { useLiveRun } from "@/features/runs/liveRun";
 import { LiveContext } from "./live";
 
 
-export default function CanvasPage({ embedded = false, rightInset = 0, leftInset = 0 }: { embedded?: boolean; rightInset?: number; leftInset?: number }) {
+export default function CanvasPage({ embedded = false, rightInset = 0, leftInset = 0, toolbarInset = 0 }: { embedded?: boolean; rightInset?: number; leftInset?: number; toolbarInset?: number }) {
   const w = useWorkspaceId();
   const { companyId, loading } = useCompanyId();
   const [creating, setCreating] = React.useState(false);
@@ -57,11 +57,12 @@ export default function CanvasPage({ embedded = false, rightInset = 0, leftInset
       </>
     );
   }
-  return <ReactFlowProvider><CanvasEditor key={`${w}:${companyId}`} workspaceId={w} companyId={companyId} embedded={embedded} rightInset={rightInset} leftInset={leftInset} /></ReactFlowProvider>;
+  return <ReactFlowProvider><CanvasEditor key={`${w}:${companyId}`} workspaceId={w} companyId={companyId} embedded={embedded} rightInset={rightInset} leftInset={leftInset} toolbarInset={toolbarInset} /></ReactFlowProvider>;
 }
 
-function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset }: { workspaceId: string; companyId: string; embedded: boolean; rightInset: number; leftInset: number }) {
+function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset, toolbarInset }: { workspaceId: string; companyId: string; embedded: boolean; rightInset: number; leftInset: number; toolbarInset: number }) {
   const q = useCanvasQuery(workspaceId, companyId);
+  const [sidebar, setSidebar] = React.useState(true);
   const s = useCanvas();
   const liveHires = useLiveRun((l) => l.hires);
   const overlay = useLiveRun((l) => l.overlay);
@@ -70,7 +71,6 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   const nodesInitialized = useNodesInitialized();
   const roles = useRoleTemplates();
   const settings = useSettings();
-  const nav = useNavigate();
   const qc = useQueryClient();
   const autosave = useAutosave(workspaceId, companyId);
   const openConversation = useOpenConversation();
@@ -237,7 +237,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
   return (
     <div className={`flex h-full${embedded ? " conversation-embedded-canvas" : ""}`}
       style={canvasStyle}>
-      {!embedded && <Palette onAdd={(k) => addRole(k)} solo={solo && specialists ? { settings: specialists, onToggle: (name, on) => void toggleSpecialist(specialists, name, on) } : undefined} />}
+      {sidebar && <Palette onHide={() => setSidebar(false)} onAdd={(k) => addRole(k)} solo={solo && specialists ? { settings: specialists, onToggle: (name, on) => void toggleSpecialist(specialists, name, on) } : undefined} />}
       <div className="relative min-w-0 flex-1" ref={wrapper}
         tabIndex={embedded ? 0 : undefined} aria-label={embedded ? "Canvas editor" : undefined}
         onDragOver={(e) => { if (e.dataTransfer.types.includes(DND_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
@@ -281,7 +281,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
                 <ContextMenuLabel>{menuNode.data.name}</ContextMenuLabel>
                 <ContextMenuItem onSelect={() => s.setQuickConfig(menuNode.id)}><Settings2 />Configure</ContextMenuItem>
                 <ContextMenuItem onSelect={() => s.setInspector(menuNode.id)}><Maximize />Open inspector</ContextMenuItem>
-                <ContextMenuItem onSelect={() => nav(`/w/${workspaceId}/chat?agent=${menuNode.id}`)}><MessageSquare />Chat with agent</ContextMenuItem>
+                <ContextMenuItem onSelect={() => window.dispatchEvent(new CustomEvent("octopus:agent-chat", { detail: menuNode.id }))}><MessageSquare />Chat with agent</ContextMenuItem>
                 <ContextMenuItem onSelect={() => s.setEntry(menuNode.id, !menuNode.data.is_entry)}><Flag />{menuNode.data.is_entry ? "Remove as team lead" : "Make team lead"}</ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem onSelect={() => s.duplicate([menuNode.id])}><CopyPlus />Duplicate<span className="ml-auto kbd">Ctrl D</span></ContextMenuItem>
@@ -309,8 +309,9 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
         </ContextMenu>
 
         {/* toolbar */}
-        {!embedded && <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex items-start justify-between gap-2">
-          <div className="pointer-events-auto flex items-center gap-0.5 rounded-lg border border-border bg-elevated/95 p-1 shadow-lg backdrop-blur">
+        <div className="pointer-events-none absolute top-3 z-10 flex items-start justify-between gap-2" style={{ left: 12, right: 12 + toolbarInset }}>
+          <div className="pointer-events-auto flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-lg border border-border bg-elevated/95 p-1 shadow-lg backdrop-blur">
+            {!sidebar && <><ToolBtn tip="Show sidebar" onClick={() => setSidebar(true)}><PanelLeft /></ToolBtn><Divider /></>}
             <SaveIndicator state={autosave.state} error={autosave.error} savedAt={autosave.savedAt} onRetry={() => void autosave.saveNow()} />
             <Divider />
             <ToolBtn tip="Undo (Ctrl+Z)" onClick={s.undo} disabled={!s.past.length}><Undo2 /></ToolBtn>
@@ -319,7 +320,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
             <ToolBtn tip="Tidy up: arrange agents by department" onClick={() => { s.autoLayout(); setTimeout(() => fitCanvas(400), 30); }}><LayoutGrid /></ToolBtn>
             <Divider />
             <Tip content="Add a department: a manager plus a small team" side="bottom">
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setDeptOpen(true)} aria-label="Add department"><Building2 />Department</Button>
+              <Button variant="ghost" size="icon-sm" onClick={() => setDeptOpen(true)} aria-label="Add department"><Building2 /></Button>
             </Tip>
             <ToolBtn tip="Save as template" onClick={() => setTplOpen(true)} disabled={!s.nodes.length}><BookmarkPlus /></ToolBtn>
             <DropdownMenu>
@@ -337,7 +338,7 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
             </DropdownMenu>
             <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importJson(f); e.target.value = ""; }} />
           </div>
-          <div className="pointer-events-auto flex items-center gap-2">
+          {!embedded && <div className="pointer-events-auto flex items-center gap-2">
             {noEntry && (
               <Tip content="Mark one agent as the team lead (flag): it plans every request. Without one, the top of the org chart leads.">
                 <span className="flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] font-medium text-warning"><Flag className="h-3 w-3" />No team lead</span>
@@ -345,25 +346,9 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset 
             )}
             <span className="rounded-md border border-border bg-elevated/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm">{s.nodes.length} {s.nodes.length === 1 ? "agent" : "agents"} · {s.edges.length} {s.edges.length === 1 ? "channel" : "channels"}</span>
             <Button onClick={talkToTeam} disabled={!s.nodes.length} className="shadow-lg" data-testid="talk-to-team"><MessageSquare />Talk to the team</Button>
-          </div>
-        </div>}
+          </div>}
+        </div>
 
-        {embedded && <div className="conversation-canvas-toolbar">
-          <div className="canvas-toolbar-actions">
-            <span className="canvas-toolbar-title">Team</span>
-            <SaveIndicator state={autosave.state} error={autosave.error} savedAt={autosave.savedAt} onRetry={() => void autosave.saveNow()} />
-            <Divider />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label="Team actions"><MoreHorizontal /></Button></DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuItem onSelect={() => setDeptOpen(true)}><Building2 />Add department</DropdownMenuItem>
-                {roles.data?.map((role) => <DropdownMenuItem key={role.key} onSelect={() => addRole(role.key)}><Plus />Add {role.role}</DropdownMenuItem>)}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => { s.autoLayout(); requestAnimationFrame(() => fitCanvas(300)); }}><LayoutGrid />Tidy up</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>}
 
         {s.nodes.length === 0 && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

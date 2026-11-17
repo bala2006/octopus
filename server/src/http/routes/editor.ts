@@ -113,6 +113,7 @@ export function editorRoutes(route: RouteFn, app: FastifyInstance, reg: Registry
   });
 
   route("GET", `${E}/git`, ({ project }) => git.status(project().root));
+  route("GET", `${E}/git/log`, ({ project }) => git.log(project().root));
   route("GET", `${E}/git/diff`, async ({ project, query }) => ({ patch: await git.diff(project().fs, query.path, !!query.staged) }));
   route("POST", `${E}/git/stage`, GitStageSchema, ({ project, body }) => git.stage(project().fs, body.path, body.staged));
   route("POST", `${E}/git/commit`, GitCommitSchema, ({ project, body }) => git.commit(project().root, body.message, body.expected_index));

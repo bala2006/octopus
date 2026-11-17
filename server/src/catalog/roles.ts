@@ -20,7 +20,7 @@ const role = (key: string, r: Omit<Role, "key" | "system_prompt">, prompt: strin
 export const MAIN_ROLE = "main";
 
 export const BUILTIN_ROLES: Role[] = [
-  role(MAIN_ROLE, { role: "Main Agent", default_name: "Octopus", category: "Leadership", color: "#D97756", avatar: "sparkles",
+  role(MAIN_ROLE, { role: "Main Agent", default_name: "Octopus", category: "Leadership", color: "#D97756", avatar: "app-logo",
     description: "Works alone on the request: reads, changes, runs and checks the project itself.",
     tools: { ...BUILD, browser: true, send_message: false } }, `
 You work alone on the user's request in their project folder. You read, change, run and check the code yourself, and you

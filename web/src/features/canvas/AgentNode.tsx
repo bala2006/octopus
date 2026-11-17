@@ -149,7 +149,7 @@ function AgentNodeImpl({ id, data, selected }: NodeProps<AgentNodeT>) {
         // NodeToolbar renders inside the React Flow pane: `nopan` keeps a drag in the panel from panning the canvas (React
         // Flow checks these classes on the event target), `nodrag` from moving the node, `nowheel` from zooming.
         <NodeToolbar isVisible position={Position.Right} offset={14} align="start" className={QUICK_CONFIG_GUARDS}>
-          {spec ? <SpecialistQuickConfig name={spec} data={data} onClose={() => setQuick(null)} /> : <NodeQuickConfig id={id} data={data} onClose={() => setQuick(null)} />}
+          {spec ? <SpecialistQuickConfig id={id} name={spec} data={data} onClose={() => setQuick(null)} /> : <NodeQuickConfig id={id} data={data} onClose={() => setQuick(null)} />}
         </NodeToolbar>
       )}
     </>

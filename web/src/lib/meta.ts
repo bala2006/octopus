@@ -2,15 +2,21 @@ import {
   Bot, Brain, Bug, ClipboardList, Code, Container, Crown, DraftingCompass, Eye, Gavel, GitPullRequest, Layout, Lightbulb,
   Palette, PenLine, Server, ShieldAlert, Sparkles, Terminal, Wrench, MessageSquareText, Hourglass, ShieldQuestion, CircleCheck,
   CircleAlert, Moon, FileSearch, FilePen, Calculator, Globe, UserRoundSearch, Send, Plug, UsersRound, Search, Crown as CrownIcon,
-  type LucideIcon,
+  Compass, FlaskConical, type LucideIcon,
 } from "lucide-react";
 import type { AgentStatus, ApprovalMode, EdgeType } from "@/types";
+import type { ComponentType, CSSProperties } from "react";
+import { AppLogo } from "@/components/AppLogo";
 
-export const AVATARS: Record<string, LucideIcon> = {
+/** An avatar: a lucide icon, or the app logo for the main lead. */
+export type AvatarIcon = ComponentType<{ className?: string; style?: CSSProperties }>;
+
+export const AVATARS: Record<string, AvatarIcon> = {
   crown: Crown, "clipboard-list": ClipboardList, "drafting-compass": DraftingCompass, layout: Layout, server: Server, bug: Bug,
   palette: Palette, container: Container, "git-pull-request": GitPullRequest, gavel: Gavel, lightbulb: Lightbulb,
   "shield-alert": ShieldAlert, code: Code, bot: Bot, brain: Brain, sparkles: Sparkles, wrench: Wrench,
-  "pen-line": PenLine, search: Search, calculator: Calculator, users: UsersRound,
+  "pen-line": PenLine, search: Search, calculator: Calculator, users: UsersRound, "app-logo": AppLogo,
+  compass: Compass, "file-search": FileSearch, "flask-conical": FlaskConical,
 };
 export const AVATAR_KEYS = Object.keys(AVATARS);
 export const AGENT_COLORS = ["#D97756", "#66839A", "#6B8440", "#C9A04A", "#8E7AA8", "#5E9C94", "#C0655A", "#8A7F6E", "#B58D5E", "#7B8FB8", "#A36F8C", "#7E9B6A"];

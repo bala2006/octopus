@@ -18,12 +18,9 @@ import {
   useSettings,
   useWorkspace,
   useWorkspaceId,
-  useRun,
-  useRuns,
   qk,
 } from "@/hooks/queries";
 import { api, unwrap } from "@/lib/api";
-import { goalTitle } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
 import {
@@ -45,7 +42,6 @@ import { NewCompanyDialog } from "@/features/projects/NewCompanyDialog";
 import { ProcessIndicator } from "./ProcessIndicator";
 import { DesktopLayout } from "./DesktopLayout";
 import { SPACES, spaceOf } from "./spaces";
-import { threadKey, useWorkbenchStore } from "@/features/conversation/workbenchStore";
 
 export function AppShell() {
   const w = useWorkspaceId();
@@ -69,10 +65,10 @@ export function AppShell() {
   }, [nav, w]);
   return (
     <DesktopLayout
-      header={
+      header={space?.to === "agent" ? null : (
         <>
           <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">
-            {space?.to === "agent" ? <ConversationTitle /> : title}
+            {title}
           </h1>
           <div className="hidden sm:block">
             <TeamSwitcher />
@@ -80,6 +76,7 @@ export function AppShell() {
           <ProcessIndicator />
           <ModelStatus />
         </>
+        )
       }
     >
       {ws.isError ? (
@@ -99,18 +96,8 @@ export function AppShell() {
   );
 }
 
-function ConversationTitle() {
-  const w = useWorkspaceId();
-  const { companyId } = useCompanyId();
-  const { data: runs } = useRuns(w, companyId || undefined, true);
-  const selected = useWorkbenchStore((store) => store.threads[threadKey(w, companyId)]);
-  const id = companyId ? selected === undefined ? runs?.[0]?.id : selected : null;
-  const { data: conversation } = useRun(w, id ?? "");
-  const title = conversation ? goalTitle(conversation.goal, "New chat") : "New chat";
-  return <span title={title}>{title}</span>;
-}
 /** Appears only when no model is connected, and links to the fix. A connected model needs no badge. */
-function ModelStatus() {
+export function ModelStatus() {
   const { data } = useSettings();
   if (!data || data.providers.some((p) => p.configured)) return null;
   return (
@@ -123,7 +110,7 @@ function ModelStatus() {
 }
 
 /** Which team works in this project. Create, rename and delete teams here. */
-function TeamSwitcher() {
+export function TeamSwitcher() {
   const w = useWorkspaceId();
   const { data: companies, isLoading } = useCompanies(w);
   const { companyId, setCompanyId } = useCompanyId();

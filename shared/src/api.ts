@@ -97,6 +97,7 @@ export interface ApiRoutes {
   "/api/v1/w/{workspace_id}/editor/item/restore/{token}": { POST: R<E.FileItem> };
   "/api/v1/w/{workspace_id}/editor/items/trash": { GET: R<E.TrashedItem[]> };
   "/api/v1/w/{workspace_id}/editor/git": { GET: R<E.GitStatus> };
+  "/api/v1/w/{workspace_id}/editor/git/log": { GET: R<E.GitLog> };
   "/api/v1/w/{workspace_id}/editor/git/diff": { GET: R<E.GitDiff, undefined, { path: string; staged?: boolean }> };
   "/api/v1/w/{workspace_id}/editor/git/stage": { POST: R<E.GitStatus, In<typeof E.GitStageSchema>> };
   "/api/v1/w/{workspace_id}/editor/git/commit": { POST: R<E.GitCommitResult, In<typeof E.GitCommitSchema>> };
