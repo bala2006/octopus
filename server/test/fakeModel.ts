@@ -21,8 +21,11 @@ export async function fakeModel(script: Script, listenPort = 0): Promise<FakeMod
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
       const body = JSON.parse(raw);
-      requests.push(body);
-      const reply = script(body);
+      // The conversation's name is a side request the engine makes on its own. It gets a fixed answer, and the scripts and
+      // request logs cover the agent's requests only.
+      const naming = String(body.instructions ?? "").startsWith("Name this conversation.");
+      if (!naming) requests.push(body);
+      const reply = naming ? { text: "Test conversation" } : script(body);
       res.writeHead(200, { "content-type": "text/event-stream" });
       const send = (e: unknown) => res.write(`data: ${JSON.stringify(e)}\n\n`);
       const output: unknown[] = [];

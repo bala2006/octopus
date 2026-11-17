@@ -31,6 +31,8 @@ import { foldVerdicts, toRequirement, verdictMessage, type Ask, type Verdict } f
 export interface SpecialistDef {
   name: SpecialistName;
   title: string;
+  /** The avatar key the team shows for this specialist. */
+  avatar: string;
   effort: Effort;
   tools: readonly SpecialistTool[];
   /** How a round ends: a submit_review call with a verdict, a plain text answer, or a submit_acceptance call with an entry per ask. */
@@ -45,11 +47,11 @@ const instructionsOf = (name: SpecialistName) => `${read(name, "prompt.md")}\n\n
 const CHECKS: readonly SpecialistTool[] = ["read_file", "glob", "grep", "shell"];
 
 export const SPECIALIST_DEFS: Record<SpecialistName, SpecialistDef> = {
-  reviewer: { name: "reviewer", title: "Reviewer", effort: "medium", tools: [...CHECKS, "submit_review"], ends: "review", instructions: instructionsOf("reviewer") },
-  security: { name: "security", title: "Security reviewer", effort: "high", tools: [...CHECKS, "fetch_url", "submit_review"], ends: "review", instructions: instructionsOf("security") },
-  designer: { name: "designer", title: "Designer", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_review"], ends: "review", instructions: instructionsOf("designer") },
-  explorer: { name: "explorer", title: "Explorer", effort: "low", tools: [...CHECKS, "fetch_url"], ends: "answer", instructions: instructionsOf("explorer") },
-  verifier: { name: "verifier", title: "Verifier", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_acceptance"], ends: "verdict", instructions: instructionsOf("verifier") },
+  reviewer: { name: "reviewer", title: "Reviewer", avatar: "file-search", effort: "medium", tools: [...CHECKS, "submit_review"], ends: "review", instructions: instructionsOf("reviewer") },
+  security: { name: "security", title: "Security reviewer", avatar: "shield-alert", effort: "high", tools: [...CHECKS, "fetch_url", "submit_review"], ends: "review", instructions: instructionsOf("security") },
+  designer: { name: "designer", title: "Designer", avatar: "palette", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_review"], ends: "review", instructions: instructionsOf("designer") },
+  explorer: { name: "explorer", title: "Explorer", avatar: "compass", effort: "low", tools: [...CHECKS, "fetch_url"], ends: "answer", instructions: instructionsOf("explorer") },
+  verifier: { name: "verifier", title: "Verifier", avatar: "flask-conical", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_acceptance"], ends: "verdict", instructions: instructionsOf("verifier") },
 };
 
 /** The settings a new conversation uses until Settings saves its own: every specialist on, at its default effort and the configured model. */
@@ -67,7 +69,7 @@ export function specialistSettings(reg: Registry): SpecialistsSettings {
 export function specialistRole(name: SpecialistName): RoleTemplateOut {
   const def = SPECIALIST_DEFS[name];
   return {
-    key: `specialist-${name}`, role: def.title, default_name: def.title, category: "Quality & Ops", color: "#8A8780", avatar: "search",
+    key: `specialist-${name}`, role: def.title, default_name: def.title, category: "Quality & Ops", color: "#8A8780", avatar: def.avatar,
     description: `${def.title}: checks the main agent's work or answers a question, read-only.`, system_prompt: def.instructions,
     tools: { file_read: true, file_write: false, terminal: true, browser: def.tools.includes("browser"), web_search: def.tools.includes("fetch_url"), ask_user: false, send_message: false, mcp_servers: [] },
     source: "builtin",

@@ -1,19 +1,18 @@
 import * as React from "react";
 import { tone } from "@/lib/palette";
-import { ArrowRight, Ban, ChevronDown, ChevronRight, CircleCheck, CircleX, FileCode2, Gavel, Loader2, Settings2, Sparkles, Terminal, User } from "lucide-react";
+import { ArrowRight, Ban, ChevronDown, CircleCheck, CircleX, FileCode2, Gavel, ListTodo, Loader2, Monitor, Pencil, Search, Settings2, Sparkles, Terminal, User, UserPlus, Wrench, type LucideIcon } from "lucide-react";
 import { MESSAGE_TYPE_LABEL, statusMeta } from "@/lib/meta";
-import { clockTime, cn, goalTitle } from "@/lib/utils";
+import { clockTime, cn, goalTitle, parseUtc } from "@/lib/utils";
 import { fetchRaw } from "@/lib/api";
 import { useWorkspaceId } from "@/hooks/queries";
 import type { AgentOut, MessageOut } from "@/types";
 import { AgentAvatar, StatusPill, TypingDots } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/primitives";
-import type { OrgEvent, ReviewRound, RunLive } from "./runState";
+import type { OrgEvent, RunLive } from "./runState";
 import { LiveWriting, ThinkingView } from "./LiveWriting";
-import { ReviewCard } from "./ReviewCard";
 import { humanizeStream } from "./streamView";
-import { countLine, type Step } from "./steps";
+import { activitySummary, fileTotals, narrationParagraphs, phasesOf, segmentsOf, type Phase, type Step, type StepKind } from "./steps";
 
 export type FeedFilter = "all" | "user" | "internal";
 
@@ -44,7 +43,7 @@ export function isUserFacing(m: MessageOut): boolean {
   return m.sender === "user" || !m.to_agent_id || m.type === "final_report";
 }
 
-type Item = ({ kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any> } | { kind: "org"; ev: OrgEvent } | { kind: "step"; step: Step } | { kind: "steps"; steps: Step[] } | { kind: "review"; round: ReviewRound }) & { seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Item = ({ kind: "msg"; m: MessageOut } | { kind: "files"; ms: MessageOut[] } | { kind: "rejected"; r: Record<string, any> } | { kind: "org"; ev: OrgEvent } | { kind: "step"; step: Step } | { kind: "steps"; steps: Step[] }) & { seq: number }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /** The conversation feed. With `agentId` it is that agent's own chat: what it said and was told, and its steps. */
 export function RunFeed({ state, agents, filter, showThoughts = true, agentId }: { state: RunLive; agents: Record<string, AgentOut>; filter: FeedFilter; showThoughts?: boolean; agentId?: string }) {
@@ -61,9 +60,8 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
     });
     if (filter !== "user" && !agentId) for (const r of state.rejected) raw.push({ kind: "rejected", r, seq: r.seq ?? 0 });
     if (!agentId) for (const ev of state.orgEvents) raw.push({ kind: "org", ev, seq: ev.seq });
-    // A review round's specialist steps show inside its card, so the feed leaves them out.
+    // A review round's specialist steps show in the Review tab, so the feed leaves them out.
     const folded = new Set(agentId ? [] : state.reviews.flatMap((r) => r.specialists.flatMap((s) => s.steps.map((x) => x.id))));
-    if (!agentId) for (const round of state.reviews) raw.push({ kind: "review", round, seq: round.seq });
     for (const step of state.steps) if ((showThoughts || step.kind !== "thought") && (!agentId || step.agent_id === agentId) && !folded.has(step.id)) raw.push({ kind: "step", step, seq: step.seq });
     raw.sort((a, b) => a.seq - b.seq); // every item carries its event's seq, so the feed reads in the order things happened
     const out: Item[] = [];
@@ -93,7 +91,6 @@ export function RunFeed({ state, agents, filter, showThoughts = true, agentId }:
             : it.kind === "files" ? <FileGroup key={it.ms[0].id} ms={it.ms} agents={agents} />
             : it.kind === "org" ? <OrgItem key={`o${it.seq}`} ev={it.ev} agents={agents} />
             : it.kind === "steps" ? <StepRun key={`s${it.seq}`} steps={it.steps} agents={agents} />
-            : it.kind === "review" ? <ReviewCard key={`v${it.seq}`} round={it.round} />
             : it.kind === "rejected" ? <Rejected key={`r${it.seq}`} r={it.r} agents={agents} />
             : null)}
           {active.map(([aid, st]) => {
@@ -272,84 +269,143 @@ function Rejected({ r, agents }: { r: Record<string, any>; agents: Record<string
   );
 }
 
+const KIND_ICON: Record<StepKind, LucideIcon> = {
+  thought: Sparkles, read: FileCode2, write: Pencil, command: Terminal, browser: Monitor, task: ListTodo,
+  team: UserPlus, review: Gavel, search: Search, other: Wrench,
+};
+
+/** A span as the feed shows it: "35m 26s", or "42s" under a minute. */
+function formatSpan(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
+}
+
 /**
- * One agent's consecutive steps. The count line opens to each step; the line under it says what the agent is doing now,
- * which is its latest thought.
+ * One agent's steps between two messages. A header says how long the agent worked; then each thought, in full, is
+ * followed by what it led to: file changes as one card, other actions as a list, in the order they ran.
  */
 function StepRun({ steps, agents }: { steps: Step[]; agents: Record<string, AgentOut> }) {
   const a = agents[steps[0].agent_id];
-  const thoughts = steps.filter((s) => s.kind === "thought");
-  const now = thoughts[thoughts.length - 1];
+  const failed = steps.filter((s) => s.status === "failed").length;
   const running = steps.some((s) => s.status === "running");
-  const failed = steps.some((s) => s.status === "failed");
+  const first = steps.find((s) => s.ts)?.ts;
+  const last = steps[steps.length - 1]?.ts;
+  const since = first ? parseUtc(first) : null;
+  const span = since !== null && last ? parseUtc(last) - since : null;
   return (
-    <div className="flex gap-2.5 px-2 animate-fade-up text-[12px]" data-testid="step-run">
-      <div className="flex w-7 shrink-0 justify-center">
-        {a && <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} size={22} />}
+    <div className="min-w-0 space-y-2.5 px-4 py-0.5 animate-fade-up text-[11px]" data-testid="step-run">
+      <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+        {a && <AgentAvatar name={a.name} color={a.color} avatar={a.avatar} size={18} />}
+        {a && <AgentName agent={a} className="font-medium" style={{ color: tone(a.color) }} />}
+        {since !== null && running && <span>Worked for <Elapsed since={since} /></span>}
+        {since !== null && !running && span !== null && span >= 1000 && <span>Worked for {formatSpan(span)}</span>}
+        {failed > 0 && <span className="inline-flex items-center gap-1 text-destructive"><CircleX className="h-3 w-3" aria-hidden="true" />{failed} failed</span>}
       </div>
-      <div className="min-w-0 flex-1">
-      <details className="group">
-        <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground hover:text-foreground">
-          {a && <AgentName agent={a} className="font-medium" style={{ color: tone(a.color) }} />}
-          <span className="font-medium text-foreground/90">{countLine(steps)}</span>
-          {running && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-warning" aria-label="a step is running" />}
-          {failed && <CircleX className="h-3.5 w-3.5 shrink-0 text-destructive" aria-label="a step failed" />}
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 transition group-open:rotate-180" />
-        </summary>
-        <ul className="mt-1 space-y-1 border-l border-border/60 pl-3">
-          {steps.map((s) => <StepLine key={s.id} step={s} />)}
-        </ul>
-      </details>
-      {now && <p className="truncate text-foreground/80" data-testid="step-narration">{now.title}</p>}
-      </div>
+      {phasesOf(steps).map((phase) => <PhaseBlock key={phase.key} phase={phase} />)}
     </div>
   );
 }
 
-/** One step in plain words. A thought or a tool's output opens to its full text. */
-function StepLine({ step }: { step: Step }) {
-  const status = step.status === "running" ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-warning" />
-    : step.status === "failed" ? <CircleX className="h-3 w-3 shrink-0 text-destructive" />
-    : step.kind === "thought" ? null : <CircleCheck className="h-3 w-3 shrink-0 text-success" />;
-  const body = step.detail.trim();
-  if (!body) return <li className="flex items-center gap-2 text-foreground/90">{status}<span className="min-w-0 truncate">{step.title}</span></li>;
+/** One thought as readable paragraphs, in plain text, then the steps that followed it. A heading line is its own paragraph. */
+function PhaseBlock({ phase }: { phase: Phase }) {
+  const text = (phase.thought?.detail ?? "").trim().replace(/^[ \t]*#{1,6}[ \t]+(.+)$/gm, "$1\n\n").replace(/^[ \t]*\*\*(.+?)\*\*[ \t]*$/gm, "$1\n\n");
+  const paragraphs = narrationParagraphs(text).join("\n\n");
+  return (
+    <div className="space-y-2">
+      {phase.thought && <div className="text-[11px] leading-[1.45] text-foreground/90 [&_p+p]:mt-3"><Markdown>{paragraphs}</Markdown></div>}
+      {segmentsOf(phase.steps).map((seg) => seg.kind === "files"
+        ? <FileChanges key={seg.steps[0]!.id} steps={seg.steps} />
+        : <ActionGroup key={seg.steps[0]!.id} steps={seg.steps} />)}
+    </div>
+  );
+}
+/** Open while its steps run, and closed once they finish. A reader can still open or close it. */
+function useOpenWhileRunning(running: boolean): [boolean, (open: boolean) => void] {
+  const [open, setOpen] = React.useState(running);
+  React.useEffect(() => {
+    if (!running) setOpen(false);
+  }, [running]);
+  return [open, setOpen];
+}
+
+/** The files a run of edits and writes changed: a summary with the file count and totals, then each file's lines added and removed. */
+function FileChanges({ steps }: { steps: Step[] }) {
+  const [all, setAll] = React.useState(false);
+  const [open, setOpen] = useOpenWhileRunning(steps.some((s) => s.status === "running"));
+  const files = fileTotals(steps);
+  const added = files.reduce((n, f) => n + f.added, 0);
+  const removed = files.reduce((n, f) => n + f.removed, 0);
+  const shown = all ? files : files.slice(0, 5);
+  return (
+    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className="group overflow-hidden rounded-xl border border-border bg-card text-[11px]">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="font-medium">Edited {files.length} file{files.length === 1 ? "" : "s"}</span>
+        <span className="tabular-nums text-success">+{added}</span>
+        <span className="tabular-nums text-destructive">-{removed}</span>
+        <ChevronDown className="ml-auto h-3 w-3 shrink-0 text-muted-foreground transition group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <ul className="divide-y divide-border/60 border-t border-border/60">
+        {shown.map((f) => (
+          <li key={f.path} className="flex items-center gap-2 px-3 py-1">
+            <span className="min-w-0 flex-1 truncate font-mono text-[10px]">{f.path}</span>
+            <span className="tabular-nums text-success">+{f.added}</span>
+            <span className="tabular-nums text-destructive">-{f.removed}</span>
+          </li>
+        ))}
+      </ul>
+      {files.length > 5 && (
+        <button type="button" onClick={() => setAll(!all)} className="w-full border-t border-border/60 px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:text-foreground">
+          {all ? "Show fewer files" : `Show ${files.length - 5} more files`}
+        </button>
+      )}
+    </details>
+  );
+}
+/** The other actions one thought led to: a line saying what they did, then each action. Open while they run, closed once they finish. */
+function ActionGroup({ steps }: { steps: Step[] }) {
+  const Icon = KIND_ICON[steps[0]!.kind];
+  const failed = steps.some((s) => s.status === "failed");
+  const running = steps.some((s) => s.status === "running");
+  const [open, setOpen] = useOpenWhileRunning(running);
+  return (
+    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">{activitySummary(steps)}</span>
+        {running && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-warning" aria-label="a step is running" />}
+        {failed && <CircleX className="h-3 w-3 shrink-0 text-destructive" aria-label="a step failed" />}
+        <ChevronDown className="h-3 w-3 shrink-0 transition group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <ul className="mt-1.5 space-y-1 border-l border-border/60 pl-3.5">
+        {steps.map((s) => <ActivityRow key={s.id} step={s} />)}
+      </ul>
+    </details>
+  );
+}
+/** One action: its kind's icon and title. An action with output opens to show it. */
+function ActivityRow({ step }: { step: Step }) {
+  const Icon = KIND_ICON[step.kind];
+  const failed = step.status === "failed";
+  const output = step.detail.trim();
+  const label = (
+    <>
+      <Icon className={cn("h-3 w-3 shrink-0", failed ? "text-destructive" : "text-muted-foreground")} aria-hidden="true" />
+      <span className={cn("min-w-0 flex-1 truncate text-foreground/85", failed && "text-destructive")}>{step.title}</span>
+      {failed && <span className="shrink-0 text-[10px] text-destructive">failed</span>}
+    </>
+  );
+  if (!output) return <li className="flex items-center gap-2">{label}</li>;
   return (
     <li>
       <details className="group/step">
-        <summary className="flex cursor-pointer list-none items-center gap-2 text-foreground/90 hover:text-foreground">
-          {status}
-          <span className="min-w-0 flex-1 truncate">{step.title}</span>
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground transition group-open/step:rotate-90" />
-        </summary>
-        {step.kind === "thought"
-          ? <div className="mt-1 pl-5 text-[12px] text-muted-foreground"><Markdown>{body}</Markdown></div>
-          : <pre className="ml-5 mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-2 font-mono text-[11px]">{body}</pre>}
+        <summary className="flex cursor-pointer list-none items-center gap-2 hover:text-foreground">{label}</summary>
+        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-2 font-mono text-[10px]">{output}</pre>
       </details>
     </li>
   );
 }
 
-export function ToolLog({ state, agents }: { state: RunLive; agents: Record<string, AgentOut> }) {
-  const calls = Object.values(state.toolCalls).sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0));
-  return (
-    <div className="space-y-1.5 p-3">
-      {!calls.length && <p className="py-8 text-center text-sm text-muted-foreground">No tool calls yet.</p>}
-      {calls.map((c) => (
-        <details key={c.call_id} className="group rounded-lg border border-border text-xs">
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5">
-            {c.ok === undefined ? <span className="h-2 w-2 animate-pulse rounded-full bg-warning" /> : c.ok ? <CircleCheck className="h-3.5 w-3.5 text-success" /> : <CircleX className="h-3.5 w-3.5 text-destructive" />}
-            {c.tool === "run_code" && <Terminal className="h-3.5 w-3.5 text-muted-foreground" />}
-            <span className="font-mono font-medium">{c.tool}</span>
-            <span className="truncate text-muted-foreground">{String(c.args?.path ?? c.args?.command ?? c.args?.tool ?? c.args?.query ?? "")}</span>
-            <span className="ml-auto shrink-0 text-muted-foreground">{agents[c.agent_id]?.name}</span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 transition group-open:rotate-180" />
-          </summary>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-border bg-muted/30 p-2.5 font-mono text-[11px]">{c.output ?? JSON.stringify(c.args, null, 2)}</pre>
-        </details>
-      ))}
-    </div>
-  );
-}
 
 /** "· 1m 05s" since the agent's turn started: tells a long reasoning call apart from a run that is stuck. */
 function Elapsed({ since }: { since: number }) {

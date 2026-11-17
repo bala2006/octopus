@@ -14,7 +14,7 @@ const agents = { riley: agent("riley", "Riley"), ben: agent("ben", "Ben") };
 // jsdom has no layout engine, and RunFeed scrolls to the latest item on mount.
 Element.prototype.scrollIntoView = () => undefined;
 
-it("groups one agent's consecutive steps under one count line, with its latest thought as the line under it", () => {
+it("groups one agent's consecutive steps under one header, with each thought followed by its activity", () => {
   const read = finishStep(callStep(2, { call_id: "c1", agent_id: "riley", tool: "read_file", args: { path: "a.ts" } })!, true, "");
   const steps: Step[] = [
     thoughtStep(1, "riley", "Check the spec first."),
@@ -25,8 +25,20 @@ it("groups one agent's consecutive steps under one count line, with its latest t
   render(<RunFeed state={{ ...initialRun(), steps }} agents={agents} filter="all" />);
   const runs = screen.getAllByTestId("step-run");
   expect(runs).toHaveLength(1);
-  expect(within(runs[0]).getByText("+ 1 read, 1 command")).toBeVisible();
-  expect(within(runs[0]).getByTestId("step-narration")).toHaveTextContent("Now build it.");
+  expect(within(runs[0]).getByText("Read files")).toBeVisible();
+  expect(within(runs[0]).getByText("Ran commands")).toBeVisible();
+  expect(within(runs[0]).getByText("Check the spec first.")).toBeVisible();
+  expect(within(runs[0]).getByText("Now build it.")).toBeVisible();
+});
+
+it("opens an action group while its steps run, and closes it once they finish", () => {
+  const running: Step[] = [thoughtStep(1, "riley", "Run the tests."), callStep(2, { call_id: "c2", agent_id: "riley", tool: "shell", args: { command: "npm test" } })!];
+  const { rerender } = render(<RunFeed state={{ ...initialRun(), steps: running }} agents={agents} filter="all" />);
+  const group = () => screen.getByText("Ran commands").closest("details")!;
+  expect(group().open).toBe(true);
+  const done: Step[] = [running[0]!, finishStep(running[1]!, true, "")];
+  rerender(<RunFeed state={{ ...initialRun(), steps: done }} agents={agents} filter="all" />);
+  expect(group().open).toBe(false);
 });
 
 it("starts a new group when a different agent takes the next step", () => {
@@ -74,7 +86,7 @@ it("shows one agent's own chat: what it said and was told, and its steps, but no
   expect(screen.getByText("Which colour is the hero?")).toBeVisible();
   expect(screen.queryByText("Posting to everyone.")).toBeNull();
   expect(screen.getAllByTestId("step-run")).toHaveLength(1);
-  expect(screen.getByTestId("step-narration")).toHaveTextContent("Reading the brief.");
+  expect(screen.getByText("Reading the brief.")).toBeVisible();
 });
 
 it("opens an agent's chat from its name when the host offers it", async () => {

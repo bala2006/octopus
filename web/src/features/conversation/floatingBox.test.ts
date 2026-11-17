@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLOATING_GAP, FLOATING_MIN_HEIGHT, FLOATING_MIN_WIDTH, resizeBox, type FloatingBox } from "./floatingBox";
+import { FLOATING_GAP, FLOATING_MIN_HEIGHT, FLOATING_MIN_WIDTH, dockOf, moveBox, resizeBox, type FloatingBox } from "./floatingBox";
 
 const start: FloatingBox = { top: 16, width: 400, height: 600 };
 const bounds = { width: 1200, height: 800 };
@@ -37,5 +37,44 @@ describe("resizeBox", () => {
     const tall = resizeBox("top", "right", start, 0, 5000, bounds);
     expect(tall.height).toBe(FLOATING_MIN_HEIGHT);
     expect(tall.top + tall.height).toBe(start.top + start.height);
+  });
+});
+
+describe("moveBox", () => {
+  const size = { width: 400, height: 300 };
+  const canvas = { width: 1200, height: 800 };
+  const start = { right: 16, top: 16 };
+
+  it("moves the window with the pointer: left for a negative dx, down for a positive dy", () => {
+    expect(moveBox(start, -300, 120, size, canvas)).toEqual({ right: 316, top: 136 });
+  });
+
+  it("keeps the window inside the canvas on every side", () => {
+    expect(moveBox(start, 5000, -5000, size, canvas)).toEqual({ right: FLOATING_GAP, top: FLOATING_GAP });
+    expect(moveBox(start, -5000, 5000, size, canvas)).toEqual({
+      right: canvas.width - size.width - FLOATING_GAP,
+      top: canvas.height - FLOATING_MIN_HEIGHT - FLOATING_GAP,
+    });
+  });
+
+  it("lets an expanded window reach the lower part of the canvas, shrinking to fit", () => {
+    expect(moveBox(start, 0, 400, size, canvas).top).toBe(416);
+    expect(moveBox(start, 0, 5000, size, canvas).top).toBe(canvas.height - FLOATING_MIN_HEIGHT - FLOATING_GAP);
+  });
+
+  it("lets a minimized window, shorter than the minimum height, reach the bottom edge", () => {
+    const minimized = { width: 380, height: 34 };
+    expect(moveBox(start, 0, 5000, minimized, canvas).top).toBe(canvas.height - minimized.height - FLOATING_GAP);
+  });
+});
+
+describe("dockOf", () => {
+  it("docks by the side of the canvas that the window's centre is on", () => {
+    expect(dockOf(16, 400, 1200)).toBe("right");
+    expect(dockOf(784, 400, 1200)).toBe("left");
+  });
+
+  it("docks right until the canvas has a width", () => {
+    expect(dockOf(784, 400, 0)).toBe("right");
   });
 });

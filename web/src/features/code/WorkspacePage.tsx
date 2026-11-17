@@ -7,21 +7,20 @@ import { toast } from "sonner";
 import {
   Code2,
   Bot,
+  ChevronRight,
+  ChevronsDownUp,
   Download,
   FileCode2,
   FilePlus2,
+  FolderOpen,
   FolderPlus,
   Globe,
   Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   RefreshCw,
-  Save,
   Search,
   Terminal,
   Trash2,
-  Upload,
   X,
 } from "lucide-react";
 import { api, ApiError, unwrap } from "@/lib/api";
@@ -30,7 +29,7 @@ import { useWorkspaceId, useWorkspace } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
-import { PageToolbar, SidePanel, ToolbarToggle } from "@/components/ui/surfaces";
+import { SidePanel, ToolbarToggle } from "@/components/ui/surfaces";
 import {
   ConfirmDialog,
   Dialog,
@@ -38,14 +37,16 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/overlays";
-import { Explorer } from "./Explorer";
-import { PreviewPanel } from "./PreviewPanel";
+import { Explorer, type ExplorerHandle } from "./Explorer";
+import { PreviewBody, PreviewControls, emptyPreview, previewUrl, type PreviewState } from "./PreviewPanel";
 import { CommandPanel } from "./CommandPanel";
-import { GitPanel } from "./GitPanel";
+import { useGitStatus } from "./GitPanel";
+import { changesByPath, NO_CHANGES } from "./gitMarks";
 import { TrashPanel } from "./TrashPanel";
 import { FileActionDialogs, useFileActions } from "./FileActions";
 import { PanelResize, usePanelSize } from "./PanelResize";
 import { emptyProject, useEditorStore, type Document } from "./editorStore";
+import { isImagePath } from "./fileKinds";
 import { AgentPanel } from "@/features/conversation/AgentPanel";
 import type { CodeContext } from "@/features/conversation/agentContext";
 import { threadKey, useWorkbenchStore } from "@/features/conversation/workbenchStore";
@@ -54,10 +55,9 @@ import { useCompanyId } from "@/hooks/queries";
 type FileAction = { kind: "create" } | { kind: "folder" };
 type PanelStyle = React.CSSProperties & {
   "--panel-size": string;
-  "--preview-width": string;
 };
 
-export default function WorkspacePage() {
+export default function WorkspacePage({ embedded = false }: { embedded?: boolean } = {}) {
   const w = useWorkspaceId();
   const { data: workspace } = useWorkspace(w);
   const theme = useApp((s) => s.theme);
@@ -78,12 +78,38 @@ export default function WorkspacePage() {
       ),
     refetchInterval: 5000,
   });
-  const [sidebar, setSidebar] = React.useState(true);
+  const gitStatus = useGitStatus(w);
+  const changes = React.useMemo(
+    () => (gitStatus.data ? changesByPath(gitStatus.data.files) : NO_CHANGES),
+    [gitStatus.data],
+  );
   const [panel, setPanel] = React.useState<
-    "files" | "search" | "git" | "trash"
+    "files" | "search" | "trash"
   >("files");
-  const [preview, setPreview] = React.useState(false);
-  const [previewAddress, setPreviewAddress] = React.useState<{ url: string }>();
+  // Preview is a view of one tab. The empty key is the editor with no file open.
+  const [previewTabs, setPreviewTabs] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const previewKey = project.active ?? "";
+  const preview = previewTabs.has(previewKey);
+  const setPreview = (on: boolean) =>
+    setPreviewTabs((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(previewKey);
+      else next.delete(previewKey);
+      return next;
+    });
+  const [previewView, setPreviewView] = React.useState<PreviewState>(() =>
+    emptyPreview(""),
+  );
+  const view =
+    previewView.key === previewKey ? previewView : emptyPreview(previewKey);
+  const previewLink = previewUrl(w, project.active, view.external);
+  const patchPreview = (patch: Partial<PreviewState>) =>
+    setPreviewView((prev) => ({
+      ...(prev.key === previewKey ? prev : emptyPreview(previewKey)),
+      ...patch,
+    }));
   const [commands, setCommands] = React.useState(false);
   const [commandsMounted, setCommandsMounted] = React.useState(false);
   const [agentsOpen, setAgentsOpen] = React.useState(
@@ -106,6 +132,7 @@ export default function WorkspacePage() {
   const [opening, setOpening] = React.useState(false);
   const [openError, setOpenError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const openFile = opening || openError ? undefined : current;
   const [action, setAction] = React.useState<FileAction | null>(null);
   const [name, setName] = React.useState("");
   const [actionError, setActionError] = React.useState("");
@@ -113,15 +140,13 @@ export default function WorkspacePage() {
   const [conflict, setConflict] = React.useState<Document | null>(null);
   const request = React.useRef(0);
   const searchInput = React.useRef<HTMLInputElement>(null);
-  const uploadInput = React.useRef<HTMLInputElement>(null);
+  const explorer = React.useRef<ExplorerHandle>(null);
   const body = React.useRef<HTMLDivElement>(null);
   const explorerWidth = usePanelSize("explorer", 264, 200, 420);
-  const previewWidth = usePanelSize("preview", 45, 25, 65);
   const commandHeight = usePanelSize("commands", 256, 160, 600);
   const agentWidth = usePanelSize("agent", 380, 300, 620);
   const panelStyle: PanelStyle = {
     "--panel-size": `${explorerWidth.size}px`,
-    "--preview-width": `${previewWidth.size}%`,
   };
   const selectedPath = params.get("file");
   const tool = params.get("tool");
@@ -133,10 +158,6 @@ export default function WorkspacePage() {
     setSelection(undefined);
   }, [current?.path]);
   React.useEffect(() => {
-    if (tool === "git") {
-      setSidebar(true);
-      setPanel("git");
-    }
     if (tool === "server" || tool === "commands") {
       setCommands(true);
       setCommandsMounted(true);
@@ -174,11 +195,14 @@ export default function WorkspacePage() {
       }
       setOpening(true);
       try {
-        const doc = await unwrap(
-          api.GET("/api/v1/w/{workspace_id}/editor/document", {
-            params: { path: { workspace_id: w }, query: { path } },
-          }),
-        );
+        // Images are drawn from the preview route, so their bytes never load as text.
+        const doc = isImagePath(path)
+          ? { path, content: "", revision: "", size: 0 }
+          : await unwrap(
+              api.GET("/api/v1/w/{workspace_id}/editor/document", {
+                params: { path: { workspace_id: w }, query: { path } },
+              }),
+            );
         if (request.current === id) useEditorStore.getState().open(w, doc);
       } catch (e) {
         if (request.current === id) {
@@ -257,7 +281,7 @@ export default function WorkspacePage() {
       setBusy(false);
     }
   }, [current, dirty, busy, w, qc]);
-  const saveAll = React.useCallback(async () => {
+  const saveAll = React.useCallback(async (options?: { quiet?: boolean }) => {
     if (busy) return;
     const documents =
       useEditorStore
@@ -290,14 +314,22 @@ export default function WorkspacePage() {
         description:
           "Drafts are preserved. Open each file and save to review any disk conflict.",
       });
-    else
+    else if (!options?.quiet)
       toast.success(
         `Saved ${documents.length} file${documents.length === 1 ? "" : "s"}`,
       );
   }, [busy, w, refresh]);
+  // Autosave: a tab's edits reach disk once typing pauses. A failed write stays unsaved, so the header keeps showing Unsaved.
+  const saveAllRef = React.useRef(saveAll);
+  saveAllRef.current = saveAll;
+  React.useEffect(() => {
+    if (!project.tabs.some((tab) => tab.draft !== tab.content)) return;
+    const timer = setTimeout(() => void saveAllRef.current({ quiet: true }), 800);
+    return () => clearTimeout(timer);
+  }, [project.tabs]);
   // Agent edits refresh clean tabs; a draft or an in-flight save always wins over this read.
   React.useEffect(() => {
-    if (!current || dirty) return;
+    if (!current || dirty || isImagePath(current.path)) return;
     const path = current.path;
     let cancelled = false;
     let reading = false;
@@ -346,7 +378,6 @@ export default function WorkspacePage() {
       }
       if (e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        setSidebar(true);
         setPanel("search");
         setTimeout(() => searchInput.current?.focus(), 0);
       }
@@ -404,6 +435,11 @@ export default function WorkspacePage() {
   };
   const closeTab = (path: string) => {
     store.close(w, path);
+    setPreviewTabs((prev) => {
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
     monaco.editor.getModel(monaco.Uri.parse(`${w}/${path}`))?.dispose();
     setParams({});
     setOpenError("");
@@ -425,130 +461,95 @@ export default function WorkspacePage() {
       )}
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <PageToolbar
-            actions={
-              <>
-                <ToolbarToggle pressed={preview} onClick={() => setPreview(!preview)}>
-                  <Globe />
-                  Preview
-                </ToolbarToggle>
-                <ToolbarToggle
-                  pressed={commands}
-                  aria-label="Commands"
-                  onClick={() => {
-                    setCommandsMounted(true);
-                    setCommands(!commands);
-                  }}
-                >
-                  <Terminal />
-                  <span className="hidden sm:inline">Commands</span>
-                </ToolbarToggle>
-                <ToolbarToggle
-                  pressed={agentsOpen}
-                  aria-label="Toggle agent panel"
-                  title="Ask Octopus (Ctrl+L)"
-                  onClick={() => (agentsOpen ? setAgentsOpen(false) : focusAgent())}
-                >
-                  <Bot />
-                  <span className="hidden sm:inline">Agent</span>
-                </ToolbarToggle>
-                <span className="toolbar-divider" aria-hidden />
-                <Button
-                  size="sm"
-                  onClick={() => void save()}
-                  disabled={!dirty || busy}
-                  loading={busy}
-                >
-                  <Save />
-                  Save
-                </Button>
-              </>
-            }
-          >
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={sidebar ? "Hide explorer" : "Show explorer"}
-              onClick={() => setSidebar(!sidebar)}
-            >
-              {sidebar ? <PanelLeftClose /> : <PanelLeftOpen />}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => startAction({ kind: "create" })}
-            >
-              <FilePlus2 />
-              <span className="hidden sm:inline">New file</span>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              aria-label="Save all files"
-              onClick={() => void saveAll()}
-              disabled={busy || !project.tabs.some((t) => t.draft !== t.content)}
-              title="Save all (Ctrl+Shift+S)"
-            >
-              Save all
-            </Button>
-          </PageToolbar>
           <div ref={body} style={panelStyle} className="flex min-h-0 flex-1">
-            {sidebar && (
-              <SidePanel
-                label="Explorer"
-                className="is-sized"
-                header={
-                  <div className="segmented" role="group" aria-label="Explorer view">
-                    <button type="button" aria-pressed={panel === "files"} aria-label="Files" onClick={() => setPanel("files")}>Files</button>
-                    <button type="button" aria-pressed={panel === "search"} aria-label="Search project" title="Search project (Ctrl+Shift+F)" onClick={() => setPanel("search")}>Search</button>
-                    <button type="button" aria-pressed={panel === "git"} aria-label="Git changes" title="Review Git changes" onClick={() => setPanel("git")}>Git</button>
-                    <button type="button" aria-pressed={panel === "trash"} aria-label="Project trash" title="Restore deleted files and folders" onClick={() => setPanel("trash")}>Trash</button>
-                  </div>
-                }
-              >
-                <div className="flex h-10 shrink-0 items-center gap-1 border-b px-3">
-                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground" title={workspace?.name}>
+            <SidePanel
+              label="Explorer"
+              className="is-sized"
+              header={
+                <>
+                  <FolderOpen
+                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <span
+                    className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+                    title={workspace?.name}
+                  >
                     {workspace?.name ?? "Project"}
                   </span>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="New folder"
-                    title="New folder"
-                    onClick={() => startAction({ kind: "folder" })}
-                  >
-                    <FolderPlus />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Upload file"
-                    title="Upload a file or asset"
-                    onClick={() => uploadInput.current?.click()}
-                  >
-                    <Upload />
-                  </Button>
-                  <input
-                    ref={uploadInput}
-                    type="file"
-                    className="hidden"
-                    aria-label="Choose upload file"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) fileActions.upload(file);
-                      e.target.value = "";
-                    }}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Refresh files"
-                    title="Refresh files"
-                    onClick={refresh}
-                  >
-                    <RefreshCw className={tree.isFetching ? "animate-spin" : ""} />
-                  </Button>
-                </div>
+                  <div className="flex items-center gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6"
+                      aria-label="New file"
+                      title="New file"
+                      onClick={() => startAction({ kind: "create" })}
+                    >
+                      <FilePlus2 />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6"
+                      aria-label="New folder"
+                      title="New folder"
+                      onClick={() => startAction({ kind: "folder" })}
+                    >
+                      <FolderPlus />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6"
+                      aria-label="Refresh files"
+                      title="Refresh files"
+                      onClick={refresh}
+                    >
+                      <RefreshCw
+                        className={tree.isFetching ? "animate-spin" : ""}
+                      />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6"
+                      aria-label="Collapse all folders"
+                      title="Collapse all folders"
+                      onClick={() => explorer.current?.collapseAll()}
+                    >
+                      <ChevronsDownUp />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6 aria-pressed:bg-accent"
+                      aria-label="Project trash"
+                      aria-pressed={panel === "trash"}
+                      title="Restore deleted files and folders"
+                      onClick={() =>
+                        setPanel(panel === "trash" ? "files" : "trash")
+                      }
+                    >
+                      <Trash2 />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6 aria-pressed:bg-accent"
+                      aria-label="Search project"
+                      aria-pressed={panel === "search"}
+                      title="Search project (Ctrl+Shift+F)"
+                      onClick={() =>
+                        setPanel(panel === "search" ? "files" : "search")
+                      }
+                    >
+                      <Search />
+                    </Button>
+                  </div>
+                </>
+              }
+            >
                 {tree.isError && (
                   <p role="alert" className="p-3 text-xs text-destructive">
                     {tree.error.message}
@@ -564,15 +565,15 @@ export default function WorkspacePage() {
                 )}
                 {panel === "files" ? (
                   <Explorer
+                    ref={explorer}
                     files={tree.data?.files ?? []}
+                    changes={changes}
                     folders={tree.data?.folders ?? []}
                     selected={project.active}
                     onOpen={pick}
                     onAction={fileActions.start}
                     onDownload={fileActions.download}
                   />
-                ) : panel === "git" ? (
-                  <GitPanel workspace={w} onOpen={pick} />
                 ) : panel === "trash" ? (
                   <TrashPanel workspace={w} onOpen={pick} onRefresh={refresh} />
                 ) : (
@@ -643,24 +644,18 @@ export default function WorkspacePage() {
                   secrets hidden
                 </div>
               </SidePanel>
-            )}
-            {sidebar && (
-              <PanelResize
+            <PanelResize
                 label="Resize explorer"
                 orientation="vertical"
                 panel={explorerWidth}
               />
-            )}
             <section
-              className={cn(
-                "flex min-w-0 flex-1 flex-col",
-                preview && "hidden md:flex",
-              )}
+              className="flex min-w-0 flex-1 flex-col"
               aria-label="Code editor"
             >
               <div
                 className={cn(
-                  "h-[var(--toolbar-h)] shrink-0 overflow-x-auto border-b bg-surface/30",
+                  "h-[calc(var(--toolbar-h)*2/3)] shrink-0 overflow-x-auto border-b bg-surface/30",
                   project.tabs.length ? "flex" : "hidden",
                 )}
                 aria-label="Open files"
@@ -703,48 +698,40 @@ export default function WorkspacePage() {
                   </div>
                 ))}
               </div>
-              {opening ? (
-                <div
-                  role="status"
-                  className="m-auto flex items-center gap-2 text-sm text-muted-foreground"
-                >
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Opening file…
-                </div>
-              ) : openError ? (
-                <div
-                  role="alert"
-                  className="m-auto max-w-md p-6 text-center text-sm"
-                >
-                  <p>{openError}</p>
-                  <div className="mt-3 flex flex-wrap justify-center gap-2">
-                    <Button variant="outline" onClick={() => setPreview(true)}>
-                      <Globe />
-                      Open preview
-                    </Button>
-                    {project.active && (
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          if (project.active)
-                            void fileActions.download(project.active);
-                        }}
-                      >
-                        <Download />
-                        Download file
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ) : current ? (
-                <>
-                  <div className="flex min-h-9 shrink-0 items-center gap-2 border-b px-3 text-xs">
-                    <span
-                      title={current.path}
-                      className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
-                    >
-                      {current.path}
-                    </span>
+              <div className="flex min-h-9 shrink-0 items-center gap-2 border-b px-3 text-xs">
+                {preview ? (
+                  <PreviewControls
+                    state={view}
+                    url={previewLink}
+                    onChange={patchPreview}
+                  />
+                ) : openFile ? (
+                  <nav
+                    aria-label="Breadcrumb"
+                    title={openFile.path}
+                    className="flex min-w-0 flex-1 items-center gap-1 font-mono text-muted-foreground"
+                  >
+                    {openFile.path.split("/").map((part, i, parts) => (
+                      <React.Fragment key={`${i}-${part}`}>
+                        {i > 0 && (
+                          <ChevronRight className="h-3 w-3 shrink-0 opacity-60" />
+                        )}
+                        <span
+                          className={cn(
+                            "truncate",
+                            i === parts.length - 1 && "text-foreground",
+                          )}
+                        >
+                          {part}
+                        </span>
+                      </React.Fragment>
+                    ))}
+                  </nav>
+                ) : (
+                  <span className="flex-1" />
+                )}
+                {openFile && !preview && (
+                  <>
                     <span
                       className={cn(
                         "shrink-0 text-[11px]",
@@ -753,6 +740,7 @@ export default function WorkspacePage() {
                     >
                       {dirty ? "Unsaved" : "Saved"}
                     </span>
+                    {!isImagePath(openFile.path) && (
                     <Button
                       variant="ghost"
                       size="icon"
@@ -772,12 +760,12 @@ export default function WorkspacePage() {
                               {
                                 params: {
                                   path: pathParams,
-                                  query: { path: current.path },
+                                  query: { path: openFile.path },
                                 },
                               },
                             ),
                           );
-                          store.saved(w, doc, current.draft);
+                          store.saved(w, doc, openFile.draft);
                           toast.success("Reloaded from disk");
                         } catch (e) {
                           toast.error(
@@ -790,6 +778,7 @@ export default function WorkspacePage() {
                     >
                       <RefreshCw />
                     </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -801,7 +790,7 @@ export default function WorkspacePage() {
                           : "Rename or move file"
                       }
                       onClick={() =>
-                        void fileActions.start("move", current.path)
+                        void fileActions.start("move", openFile.path)
                       }
                     >
                       <Pencil />
@@ -817,12 +806,95 @@ export default function WorkspacePage() {
                           : "Delete file"
                       }
                       onClick={() =>
-                        void fileActions.start("trash", current.path)
+                        void fileActions.start("trash", openFile.path)
                       }
                     >
                       <Trash2 />
                     </Button>
+                  </>
+                )}
+                {(openFile || preview) && (
+                  <span className="toolbar-divider" aria-hidden />
+                )}
+                <ToolbarToggle
+                  pressed={preview}
+                  onClick={() => setPreview(!preview)}
+                >
+                  <Globe />
+                  Preview
+                </ToolbarToggle>
+                <ToolbarToggle
+                  pressed={commands}
+                  aria-label="Commands"
+                  onClick={() => {
+                    setCommandsMounted(true);
+                    setCommands(!commands);
+                  }}
+                >
+                  <Terminal />
+                  <span className="hidden sm:inline">Commands</span>
+                </ToolbarToggle>
+                {!embedded && (
+                  <ToolbarToggle
+                    pressed={agentsOpen}
+                    aria-label="Toggle agent panel"
+                    title="Ask Octopus (Ctrl+L)"
+                    onClick={() =>
+                      agentsOpen ? setAgentsOpen(false) : focusAgent()
+                    }
+                  >
+                    <Bot />
+                    <span className="hidden sm:inline">Agent</span>
+                  </ToolbarToggle>
+                )}
+              </div>
+              {preview ? (
+                <PreviewBody
+                  state={view}
+                  url={previewLink}
+                  path={project.active}
+                  content={current?.draft ?? ""}
+                  onChange={patchPreview}
+                />
+              ) : opening ? (
+                <div
+                  role="status"
+                  className="m-auto flex items-center gap-2 text-sm text-muted-foreground"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Opening file…
+                </div>
+              ) : openError ? (
+                <div
+                  role="alert"
+                  className="m-auto max-w-md p-6 text-center text-sm"
+                >
+                  <p>{openError}</p>
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                    {project.active && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          if (project.active)
+                            void fileActions.download(project.active);
+                        }}
+                      >
+                        <Download />
+                        Download file
+                      </Button>
+                    )}
                   </div>
+                </div>
+              ) : current && isImagePath(current.path) ? (
+                <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
+                  <img
+                    src={`/api/v1/w/${w}/preview/${current.path.split("/").map(encodeURIComponent).join("/")}`}
+                    alt={current.path}
+                    className="max-h-full max-w-full object-contain"
+                  />
+                </div>
+              ) : current ? (
+                <>
                   {conflict && conflict.path === current.path && (
                     <div
                       role="alert"
@@ -942,7 +1014,7 @@ export default function WorkspacePage() {
                       />
                     )}
                   </div>
-                  <div className="flex h-7 shrink-0 items-center gap-3 border-t px-3 text-[10px] text-muted-foreground">
+                  <div className="flex h-6 shrink-0 items-center gap-3 border-t bg-surface/40 px-3 text-[11px] text-muted-foreground">
                     <Code2 className="h-3 w-3" />
                     {languageFor(current.path)}
                     <span>UTF-8</span>
@@ -985,10 +1057,7 @@ export default function WorkspacePage() {
                     </Button>
                     <Button
                       variant="ghost"
-                      onClick={() => {
-                        setPanel("search");
-                        setSidebar(true);
-                      }}
+                      onClick={() => setPanel("search")}
                     >
                       <Search />
                       Search project
@@ -1000,28 +1069,6 @@ export default function WorkspacePage() {
                 </div>
               )}
             </section>
-            {preview && (
-              <>
-                <PanelResize
-                  label="Resize preview"
-                  orientation="vertical"
-                  panel={previewWidth}
-                  unit="percent"
-                  pixelsToUnits={(delta) =>
-                    (-delta * 100) / Math.max(1, body.current?.clientWidth ?? 1)
-                  }
-                />
-                <div className="flex min-w-0 flex-1 border-l md:w-[var(--preview-width)] md:flex-none">
-                  <PreviewPanel
-                    workspace={w}
-                    path={project.active}
-                    content={current?.draft ?? ""}
-                    requestedAddress={previewAddress}
-                    onClose={() => setPreview(false)}
-                  />
-                </div>
-              </>
-            )}
           </div>
           {commandsMounted && (
             <div className={commands ? "" : "hidden"}>
@@ -1040,7 +1087,7 @@ export default function WorkspacePage() {
                 onClose={() => setCommands(false)}
                 onComplete={refresh}
                 onPreview={(url) => {
-                  setPreviewAddress({ url });
+                  patchPreview({ address: url, external: url });
                   setPreview(true);
                 }}
                 onExplain={(command, output) => {
@@ -1056,7 +1103,7 @@ export default function WorkspacePage() {
             </div>
           )}
         </div>
-        {agentsOpen && (
+        {!embedded && agentsOpen && (
           <>
             <PanelResize
               label="Resize agent panel"

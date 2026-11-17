@@ -56,7 +56,7 @@ export function CommandPalette() {
       .map((p) => ({
         label: p,
         detail: "Open file",
-        to: `/w/${w}/workspace?file=${encodeURIComponent(p)}`,
+        to: `/w/${w}/agent?tab=code&file=${encodeURIComponent(p)}`,
         file: true,
       })),
   ];

@@ -278,7 +278,7 @@ export type RunAction = (typeof RUN_ACTIONS)[number];
 
 export interface RunOutcome { tasks_total: number; tasks_done: number; tasks_open: number; tasks_blocked: number; files: number; errors: number; final_report: boolean }
 export interface RunOut {
-  id: string; company_id: string; session_id: string | null; goal: string; status: RunStatus; mode: string;
+  id: string; company_id: string; session_id: string | null; goal: string; title: string; status: RunStatus; mode: string;
   budget: RunBudget; permission_level: ApprovalMode; summary: string; halt_reason: string;
   tokens_used: number; cost_usd: number; turns: number; outcome: RunOutcome | null;
   created_at: string; started_at: string | null; ended_at: string | null;

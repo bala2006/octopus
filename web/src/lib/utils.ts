@@ -57,6 +57,11 @@ export function goalTitle(goal: string | null | undefined, fallback = "New conve
   return line || fallback;
 }
 
+/** A conversation's name: the title the model wrote for it, or else its goal's first line. */
+export function conversationName(run: { title?: string; goal: string | null | undefined }, fallback?: string): string {
+  return run.title || goalTitle(run.goal, fallback);
+}
+
 export function download(filename: string, content: BlobPart, type = "application/octet-stream"): void {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const a = document.createElement("a");

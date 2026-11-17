@@ -46,6 +46,7 @@ const MIGRATIONS = [
    ALTER TABLE tasks ADD COLUMN files TEXT NOT NULL DEFAULT '[]';
    ALTER TABLE tasks ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';`,
   `ALTER TABLE tasks ADD COLUMN specialists TEXT NOT NULL DEFAULT '[]';`,
+  `ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT '';`,
 ];
 
 export type CompanyRow = {

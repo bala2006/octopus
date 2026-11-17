@@ -1,5 +1,5 @@
 import * as React from "react";
-import { GripVertical, Network, Search, UsersRound } from "lucide-react";
+import { GripVertical, Network, PanelLeftClose, Search, UsersRound } from "lucide-react";
 import type { SpecialistName, SpecialistsSettings } from "@octopus/shared";
 import { useRoleTemplates } from "@/hooks/queries";
 import { AgentAvatar } from "@/components/common";
@@ -16,15 +16,16 @@ export const DND_MIME = "application/x-octopus-role";
 export interface SpecialistPaletteProps { settings: SpecialistsSettings; onToggle: (name: SpecialistName, enabled: boolean) => void }
 
 /** Left panel: role palette (drag onto the canvas) and the org chart (departments, active/inactive agents). A solo canvas lists specialists instead of roles. */
-export function Palette({ onAdd, solo }: { onAdd: (roleKey: string) => void; solo?: SpecialistPaletteProps }) {
+export function Palette({ onAdd, solo, onHide }: { onAdd: (roleKey: string) => void; solo?: SpecialistPaletteProps; onHide: () => void }) {
   return (
     <SidePanel label="Agents and org">
       <Tabs defaultValue="org" className="flex min-h-0 flex-1 flex-col">
-        <div className="side-panel-header">
-          <TabsList className="grid w-full grid-cols-2">
+        <div className="side-panel-header flex items-center gap-1.5">
+          <TabsList className="grid min-w-0 flex-1 grid-cols-2">
             <TabsTrigger value="org"><Network />Org</TabsTrigger>
             <TabsTrigger value="roles"><UsersRound />{solo ? "Specialists" : "Roles"}</TabsTrigger>
           </TabsList>
+          <Button variant="ghost" size="icon-sm" onClick={onHide} aria-label="Hide sidebar" title="Hide sidebar"><PanelLeftClose /></Button>
         </div>
         <TabsContent value="org" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"><OrgPanel /></TabsContent>
         <TabsContent value="roles" className="min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col">{solo ? <SpecialistPalette {...solo} /> : <RolePalette onAdd={onAdd} />}</TabsContent>

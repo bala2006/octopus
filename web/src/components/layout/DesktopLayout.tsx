@@ -9,7 +9,7 @@ import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { qk, useCompanyId, useRuns, useWorkspaceId, useWorkspaces } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
-import { cn, goalTitle, initials, parseUtc } from "@/lib/utils";
+import { cn, conversationName, initials, parseUtc } from "@/lib/utils";
 import { api, unwrap } from "@/lib/api";
 import {
   ConfirmDialog, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
@@ -93,14 +93,16 @@ export function DesktopLayout({ children, header }: {
             <ProjectSidebar mobile={mobile} collapsed={!open} onClose={() => setDrawer(false)} onNewConversation={newConversation} panelRef={sidebarRef} />
           )}
           <div className="desktop-main">
-            <header className="desktop-topbar">
-              <div className="desktop-header">
-                {project && <span className="topbar-project" title={project.path}><span>{project.name}</span></span>}
-                {project && <span className="topbar-breadcrumb-separator" aria-hidden>/</span>}
-                {header}
-                {w && <div className="topbar-actions"><TeamPulse /><CommandPalette /></div>}
-              </div>
-            </header>
+            {header !== null && (
+              <header className="desktop-topbar">
+                <div className="desktop-header">
+                  {project && <span className="topbar-project" title={project.path}><span>{project.name}</span></span>}
+                  {project && <span className="topbar-breadcrumb-separator" aria-hidden>/</span>}
+                  {header}
+                  {w && <div className="topbar-actions"><TeamPulse /><CommandPalette /></div>}
+                </div>
+              </header>
+            )}
             <main id="main-content" className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
           </div>
         </div>
@@ -329,7 +331,7 @@ function ConversationRow({ run, child, active, pinned, onOpen, onTogglePin }: {
   onOpen: () => void;
   onTogglePin: () => void;
 }) {
-  const title = goalTitle(run.goal);
+  const title = conversationName(run);
   return (
     <div className={cn("side-row side-conversation", child && "is-child", pinned && "is-pinned", active && "is-selected")}>
       <button type="button" className="side-conversation-open" title={title} aria-current={active ? "true" : undefined} onClick={onOpen}>
@@ -388,7 +390,7 @@ function ProjectItem({ project, selected, children }: { project: WorkspaceOut; s
  * The one place that shows what the team is doing right now. Hidden while nothing runs; amber when the team
  * waits on you. Clicking it opens that conversation.
  */
-function TeamPulse() {
+export function TeamPulse() {
   const w = useWorkspaceId();
   const { data } = useRuns(w, undefined, true);
   const openConversation = useOpenConversation();
@@ -400,7 +402,7 @@ function TeamPulse() {
     : live.length === 1 ? (first.status === "paused" ? "Team paused" : "Team working") : `${live.length} working`;
   return (
     <button type="button" className={cn("team-pulse", waiting.length && "is-waiting")} onClick={() => openConversation(w, first)}
-      title={`${goalTitle(first.goal)}: open the conversation`} aria-label={`${label}: open the conversation`}>
+      title={`${conversationName(first)}: open the conversation`} aria-label={`${label}: open the conversation`}>
       {waiting.length ? <CircleAlert /> : first.status === "paused" ? <span className="team-pulse-dot" /> : <Loader2 className="animate-spin" />}
       <span>{label}</span>
     </button>

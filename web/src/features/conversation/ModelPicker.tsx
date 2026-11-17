@@ -6,7 +6,6 @@ import {
   ChevronDown,
   Cloud,
   Settings2,
-  Sparkles,
   RotateCcw,
   Zap,
 } from "lucide-react";
@@ -64,11 +63,10 @@ export function ModelPicker({
         <Button
           size="xs"
           variant="ghost"
-          className={compact ? "w-full justify-center" : "composer-model"}
-          data-tooltip-managed={compact ? true : undefined}
+          className="w-full justify-center"
+          data-tooltip-managed
           aria-label={`Select model: ${label}`}
         >
-          {!compact && <Sparkles />}
           <span className={compact ? "max-w-56 truncate" : "max-w-36 truncate"}>
             {label}
           </span>
@@ -128,20 +126,27 @@ export function ModelPicker({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-  if (compact)
-    return (
+  return (
       <Popover>
         <PopoverTrigger asChild>
           <Button
             type="button"
-            size="icon"
+            size={compact ? "icon" : "xs"}
             variant="ghost"
-            className="composer-model composer-model--compact"
+            className={compact ? "composer-model composer-model--compact" : "composer-model"}
             data-tooltip-managed
             aria-label={`Select model and thinking level: ${label}, ${effortLabel}`}
             title={`Model: ${label} · Thinking: ${effortLabel}`}
           >
-            <Brain />
+            {compact ? (
+              <Brain />
+            ) : (
+              <>
+                <span className="max-w-36 truncate">{label}</span>
+                <span className="text-primary">{effortLabel}</span>
+                <ChevronDown />
+              </>
+            )}
           </Button>
         </PopoverTrigger>
         <PopoverContent side="top" align="end" className="thinking-popover">
@@ -204,42 +209,4 @@ export function ModelPicker({
         </PopoverContent>
       </Popover>
     );
-  return (
-    <>
-      {modelPicker}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            size="xs"
-            variant="ghost"
-            aria-label={`Reasoning effort: ${effortLabel}`}
-          >
-            <Brain />
-            <span>{effortLabel}</span>
-            <ChevronDown />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" side="top" className="w-64">
-          <DropdownMenuLabel>Reasoning effort</DropdownMenuLabel>
-          {locked && (
-            <p className="px-3 pb-2 text-xs text-muted-foreground">
-              Start a new conversation to change reasoning effort.
-            </p>
-          )}
-          {EFFORTS.map((effort) => (
-            <DropdownMenuItem
-              key={effort.value}
-              disabled={locked}
-              onSelect={() =>
-                onChange({ ...value, reasoning_effort: effort.value })
-              }
-            >
-              <span className="flex-1">{effort.label}</span>
-              {value.reasoning_effort === effort.value && <Check />}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
-  );
 }
