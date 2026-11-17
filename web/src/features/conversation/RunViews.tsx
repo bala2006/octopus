@@ -1,9 +1,9 @@
 import * as React from "react";
-import { Bot, CheckCheck, Circle, CircleCheck, Coins, FilePen, FileText, FolderOpen, Layers, Loader2, Search, Sparkles, Timer, Wrench, type LucideIcon } from "lucide-react";
+import { Bot, CheckCheck, Circle, CircleCheck, Coins, FilePen, FileText, FolderOpen, Layers, Loader2, Search, ShieldCheck, Sparkles, Timer, Wrench, type LucideIcon } from "lucide-react";
 import { formatTokens } from "@/lib/utils";
 import { useMoney } from "@/lib/money";
 import { useWorkspaceId } from "@/hooks/queries";
-import { AgentAvatar } from "@/components/common";
+import { AgentAvatar, EmptyState } from "@/components/common";
 import { BrowserView } from "@/features/runs/BrowserView";
 import { ReviewRounds } from "@/features/runs/ReviewRounds";
 import type { RunLive, ToolCall } from "@/features/runs/runState";
@@ -149,7 +149,7 @@ function UsageKpi({ icon: Icon, label, value, hint }: { icon: LucideIcon; label:
   );
 }
 
-/** The Review tab: each review round, opened to the specialists' verdicts and findings. */
+/** The Review tab: the latest verdict, every review round, and the findings of the round picked from them. */
 export function ReviewTab() {
   const state = useRunView((v) => v.state);
   return (
@@ -157,7 +157,7 @@ export function ReviewTab() {
       {state && state.reviews.length > 0 ? (
         <ReviewRounds rounds={state.reviews} />
       ) : (
-        <p className="conversation-detail-empty">No review rounds yet.</p>
+        <EmptyState icon={ShieldCheck} title="No review rounds yet" description="When an owner finishes a round, its specialists review the work. Their verdicts and findings appear here." />
       )}
     </div>
   );
