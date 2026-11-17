@@ -13,7 +13,7 @@ describe("browser view", () => {
     { type: "tool_result", seq: 2, data: { call_id: "c2", agent_id: "a", tool: "mcp_call", ok: true, output: "…" } },
     act(3, "a", "browser_navigate", { url: "http://127.0.0.1:8000/" }, { frame: "000001.jpeg" }),
     act(4, "b", "browser_snapshot"),
-    act(5, "a", "browser_click", { element: "Start button", target: "e12" }, { ok: false, frame: null, note: "Ref e12 not found" }),
+    act(5, "a", "browser_click", { element: "Start button", target: "e12" }, { ok: false, frame: null, output: "Ref e12 not found" }),
   ] as RunEvent[];
 
   it("records each step in order with one timeline entry per step", () => {

@@ -28,7 +28,7 @@ export interface Usage {
 /** One thing an agent did in its browser tab, and (when the page changed) a screenshot of what the tab showed afterwards. */
 export interface BrowserAction {
   seq: number; ts?: string; agent_id: string; call_id?: string; tool: string; args: Record<string, unknown>; ok: boolean;
-  url: string; title: string; frame?: string | null; note?: string;
+  url: string; title: string; frame?: string | null; output?: string;
 }
 /** The company workflow of the run (phases with owners), from `workflow_updated` events. */
 export interface WorkflowPhase { key: string; title: string; owner: string | null; status: "pending" | "active" | "done" | "skipped" | "failed"; loops?: number; summary?: string }
