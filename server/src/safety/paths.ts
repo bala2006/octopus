@@ -97,6 +97,27 @@ export class ProjectFs {
     return { files, folders, truncated: !complete };
   }
 
+  /** The files and folders directly inside one project folder, sorted by name, with the same ignore rules as walk. */
+  list(dirRel: string, actor: Actor = "user"): { files: string[]; folders: string[] } {
+    const base = dirRel ? this.rel(dirRel, actor) : "";
+    let entries;
+    try { entries = readdirSync(path.join(this.root, base), { withFileTypes: true }); } catch { return { files: [], folders: [] }; }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    const files: string[] = [];
+    const folders: string[] = [];
+    for (const e of entries) {
+      const rel = base ? `${base}/${e.name}` : e.name;
+      if (e.isSymbolicLink()) continue;
+      if (e.isDirectory()) {
+        if (IGNORED_DIRS.has(e.name) || rel === ".octopus") continue;
+        folders.push(rel);
+      } else if (e.isFile()) {
+        files.push(rel);
+      }
+    }
+    return { files, folders };
+  }
+
   size(rel: string, actor: Actor = "agent"): number { try { return statSync(this.abs(rel, actor)).size; } catch { return 0; } }
   isDir(rel: string): boolean { try { return lstatSync(this.abs(rel)).isDirectory(); } catch { return false; } }
 }

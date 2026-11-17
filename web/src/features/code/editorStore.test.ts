@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useEditorStore } from "./editorStore";
-import { buildExplorer } from "./Explorer";
 import { parsePreviewAddress } from "./previewAddress";
 
 const document = {
@@ -45,13 +44,6 @@ describe("workspace drafts", () => {
     store.open("one", { ...document, path: "second.ts" });
     store.close("one", "second.ts");
     expect(useEditorStore.getState().projects.one.active).toBe("src/app.ts");
-  });
-  it("includes empty and nested folders in the explorer", () => {
-    const tree = buildExplorer(["src/app.ts"], ["src", "empty"]);
-    expect(tree.children.get("empty")?.kind).toBe("folder");
-    expect(tree.children.get("src")?.children.get("app.ts")?.path).toBe(
-      "src/app.ts",
-    );
   });
 });
 

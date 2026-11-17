@@ -1,7 +1,7 @@
 import { monaco } from "@/lib/monaco";
 import * as React from "react";
 import Editor, { DiffEditor } from "@monaco-editor/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -68,16 +68,6 @@ export default function WorkspacePage({ embedded = false }: { embedded?: boolean
   const [params, setParams] = useSearchParams();
   const qc = useQueryClient();
   const pathParams = { workspace_id: w };
-  const tree = useQuery({
-    queryKey: ["editor-tree", w],
-    queryFn: () =>
-      unwrap(
-        api.GET("/api/v1/w/{workspace_id}/editor/tree", {
-          params: { path: pathParams },
-        }),
-      ),
-    refetchInterval: 5000,
-  });
   const gitStatus = useGitStatus(w);
   const changes = React.useMemo(
     () => (gitStatus.data ? changesByPath(gitStatus.data.files) : NO_CHANGES),
@@ -148,6 +138,18 @@ export default function WorkspacePage({ embedded = false }: { embedded?: boolean
   const panelStyle: PanelStyle = {
     "--panel-size": `${explorerWidth.size}px`,
   };
+  const treeFetching = useIsFetching({ queryKey: ["editor-tree", w] }) > 0;
+  // The flat file list feeds only the agent aside. The Files tab loads folders as they open.
+  const agentFiles = useQuery({
+    queryKey: ["editor-files", w, ""],
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/v1/w/{workspace_id}/editor/files", {
+          params: { path: pathParams, query: { q: "" } },
+        }),
+      ),
+    enabled: !embedded && agentsOpen,
+  });
   const selectedPath = params.get("file");
   const tool = params.get("tool");
   const focusAgent = React.useCallback(() => {
@@ -231,6 +233,7 @@ export default function WorkspacePage({ embedded = false }: { embedded?: boolean
   const refresh = React.useCallback(() => {
     for (const key of [
       "editor-tree",
+      "editor-files",
       "files",
       "editor-search",
       "git-status",
@@ -507,7 +510,7 @@ export default function WorkspacePage({ embedded = false }: { embedded?: boolean
                       onClick={refresh}
                     >
                       <RefreshCw
-                        className={tree.isFetching ? "animate-spin" : ""}
+                        className={treeFetching ? "animate-spin" : ""}
                       />
                     </Button>
                     <Button
@@ -550,25 +553,11 @@ export default function WorkspacePage({ embedded = false }: { embedded?: boolean
                 </>
               }
             >
-                {tree.isError && (
-                  <p role="alert" className="p-3 text-xs text-destructive">
-                    {tree.error.message}
-                  </p>
-                )}
-                {tree.isLoading && (
-                  <p
-                    role="status"
-                    className="p-3 text-xs text-muted-foreground"
-                  >
-                    Loading project files…
-                  </p>
-                )}
                 {panel === "files" ? (
                   <Explorer
                     ref={explorer}
-                    files={tree.data?.files ?? []}
+                    workspace={w}
                     changes={changes}
-                    folders={tree.data?.folders ?? []}
                     selected={project.active}
                     onOpen={pick}
                     onAction={fileActions.start}
@@ -639,8 +628,7 @@ export default function WorkspacePage({ embedded = false }: { embedded?: boolean
                   </>
                 )}
                 <div className="side-panel-footer">
-                  {tree.data?.files.length ?? 0}
-                  {tree.data?.truncated ? "+" : ""} files · dependencies and
+                  dependencies and
                   secrets hidden
                 </div>
               </SidePanel>
@@ -1125,7 +1113,7 @@ export default function WorkspacePage({ embedded = false }: { embedded?: boolean
                 selection={selection}
                 selectionToken={selectionRequest}
                 onSelectionConsumed={() => setSelectionRequest(0)}
-                files={tree.data?.files ?? []}
+                files={agentFiles.data?.files ?? []}
                 onOpen={pick}
                 onClose={() => setAgentsOpen(false)}
                 focusToken={agentFocus}
