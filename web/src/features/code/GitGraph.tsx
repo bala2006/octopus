@@ -44,6 +44,7 @@ export function GitGraph({
     return found ? rowColor(found) : CURRENT_COLOR;
   };
   const height = Math.max(1, rows.length) * ROW_H;
+  const occupied = new Set(nodes.map((n) => n.row));
   const width = cols ? xOf(showWorking ? -1 : 0) + PAD + (showWorking ? WORKING_W : 0) : 0;
 
   React.useEffect(() => {
@@ -95,6 +96,13 @@ export function GitGraph({
               strokeWidth={1}
             />
           ))}
+          {rows.map((row, r) =>
+            occupied.has(r) ? null : (
+              <text key={`older:${row.kind}:${row.name}`} x={PAD} y={yOf(r) + 4} fontSize={10} fontStyle="italic" className="fill-muted-foreground">
+                older history not loaded
+              </text>
+            ),
+          )}
           {links.map(({ from, to }) => {
             const x1 = xOf(from.col);
             const y1 = yOf(from.row);
