@@ -438,13 +438,13 @@ export default function AgentPage() {
           ) : activeKind === "review" ? (
             <ReviewTab />
           ) : activeKind === "code" ? (
-            <div className="conversation-page-tab" style={{ paddingRight: chatReserve }}>
+            <div className="conversation-page-tab">
               <React.Suspense fallback={<p className="conversation-detail-empty">Loading code.</p>}>
                 <WorkspacePage embedded />
               </React.Suspense>
             </div>
           ) : activeKind === "git" ? (
-            <GitTab onOpen={openFile} reserveRight={chatReserve} />
+            <GitTab onOpen={openFile} />
           ) : activeKind === "usage" ? (
             <UsageTab />
           ) : activeKind === "new" ? (
