@@ -6,6 +6,7 @@ import path from "node:path";
 import type {
   AgentOut, ArtifactOut, DepartmentInfo, EdgeOut, MemoryOut, MessageOut, RunBudget, RunDetail, SessionOut, TaskOut,
 } from "@octopus/shared";
+import { publish } from "../engine/bus";
 import { Db } from "./sqlite";
 
 const MIGRATIONS = [
@@ -60,11 +61,12 @@ export type EventRow = { seq: number; run_id: string; type: string; data: unknow
 /** Agent id used for notes every agent in the project can read. */
 export const SHARED_MEMORY = "*";
 
+/** Why a run is paused when the process that was running it stopped. */
+export const RESTART_REASON = "Octopus was restarted";
+
 export function openProject(root: string) {
   const db = new Db(path.join(root, ".octopus", "octopus.db"), MIGRATIONS);
-  // A process that stopped mid-conversation leaves it "running"; it can be continued, so show it as paused.
-  db.run("UPDATE runs SET status = 'paused', halt_reason = 'Octopus was restarted' WHERE status IN ('running', 'queued')");
-  return {
+  const project = {
     db,
     root,
     tx: <T>(fn: () => T) => db.tx(fn),
@@ -79,5 +81,33 @@ export function openProject(root: string) {
     artifacts: db.table<ArtifactRow>("artifacts", { bool: ["deleted", "created"] }),
     memory: db.table<MemoryOut>("memory"),
   };
+  // A process that stopped mid-conversation leaves its runs "running". They can be continued, so show them as paused.
+  pauseOrphanedRuns(project);
+  return project;
 }
 export type ProjectDb = ReturnType<typeof openProject>;
+
+/**
+ * Pauses the runs a stopped process left running or queued. The pause goes into the run's event log as well as the runs
+ * row, because browsers rebuild a run's status from that log: a pause that exists only in the row never reaches them.
+ * A paused run whose log does not end in a pause (written before this change) gets the event too. After one pass the
+ * log ends in a pause, so running it again writes nothing.
+ */
+export function pauseOrphanedRuns(project: ProjectDb) {
+  const orphans = project.db.all<{ id: string; state: string }>(
+    `SELECT id, state FROM runs WHERE status IN ('running', 'queued') OR (status = 'paused' AND halt_reason = ? AND COALESCE(
+       (SELECT json_extract(e.data, '$.status') FROM run_events e WHERE e.run_id = runs.id AND e.type = 'run_status' ORDER BY e.seq DESC LIMIT 1), '') <> 'paused')`,
+    RESTART_REASON,
+  );
+  for (const run of orphans) {
+    project.tx(() => {
+      const state = JSON.parse(run.state || "{}") as { agent_status?: Record<string, string> };
+      const agentStatus = Object.fromEntries(Object.entries(state.agent_status ?? {}).map(([id, s]) => [id, s === "done" ? s : "idle"]));
+      project.db.run("UPDATE runs SET status = 'paused', halt_reason = ?, state = ? WHERE id = ?", RESTART_REASON, JSON.stringify({ ...state, agent_status: agentStatus }), run.id);
+      publish(project, run.id, "run_status", { status: "paused", reason: RESTART_REASON, final: false, awaiting: null, pending_approval: null });
+      for (const [agent_id, status] of Object.entries(state.agent_status ?? {})) {
+        if (status !== "idle" && status !== "done") publish(project, run.id, "agent_status", { agent_id, status: "idle", activity: "" });
+      }
+    });
+  }
+}
