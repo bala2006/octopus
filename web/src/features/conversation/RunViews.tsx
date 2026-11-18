@@ -6,6 +6,8 @@ import { useWorkspaceId } from "@/hooks/queries";
 import { AgentAvatar, EmptyState } from "@/components/common";
 import { BrowserView } from "@/features/runs/BrowserView";
 import { ReviewRounds } from "@/features/runs/ReviewRounds";
+import { KIND_ICON } from "@/features/runs/RunFeed";
+import { describeCall } from "@/features/runs/steps";
 import type { RunLive, ToolCall } from "@/features/runs/runState";
 import type { AgentOut, TaskOut } from "@/types";
 import { useRunView } from "./runView";
@@ -181,11 +183,10 @@ export function TodoTab() {
 /** The Tools tab of the floating chat: every tool call the run made, newest first. */
 export function ToolsTab() {
   const state = useRunView((v) => v.state);
-  const agents = useRunView((v) => v.agents);
   return (
     <div className="conversation-detail-panel">
       {state ? (
-        <ToolsBody state={state} agents={agents} rows={Infinity} />
+        <ToolsBody state={state} rows={Infinity} />
       ) : (
         <p className="conversation-detail-empty">No tool calls yet.</p>
       )}
@@ -235,7 +236,7 @@ function RunSections({ state, agents }: { state: RunLive; agents: Record<string,
       </Section>
 
       <Section title="Tools" meta={`${calls.length} calls`}>
-        <ToolsBody state={state} agents={agents} rows={6} />
+        <ToolsBody state={state} rows={6} />
       </Section>
     </>
   );
@@ -271,29 +272,28 @@ function TodoBody({ state, agents }: { state: RunLive; agents: Record<string, Ag
   );
 }
 
-/** Tool calls as one dot each (passed, failed, pending), then the newest `rows` calls by name and agent. */
-function ToolsBody({ state, agents, rows }: { state: RunLive; agents: Record<string, AgentOut>; rows: number }) {
+/** The newest `rows` tool calls: each one's kind icon, its name, and whether it succeeded. */
+function ToolsBody({ state, rows }: { state: RunLive; rows: number }) {
   const calls = Object.values(state.toolCalls).sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
   if (!calls.length) return <p className="details-empty">No tool calls yet.</p>;
   return (
-    <>
-      <div className="details-dots" aria-hidden="true">
-        {calls.slice(-24).map((call) => (
-          <span key={call.call_id} data-tone={toolTone(call)} title={call.tool} />
-        ))}
-      </div>
-      <ul className="details-list">
-        {calls.slice(-rows).reverse().map((call) => (
-          <li key={call.call_id} className="details-row">
-            <span className="details-dot" data-tone={toolTone(call)} aria-hidden="true" />
+    <ul className="details-list">
+      {calls.slice(-rows).reverse().map((call) => {
+        const tone = toolTone(call);
+        const Icon = KIND_ICON[describeCall(call.tool, call.args ?? {})?.kind ?? "other"];
+        return (
+          <li key={call.call_id} className="details-row" data-tone={tone}>
+            <Icon className="details-icon" aria-hidden="true" />
             <span className="details-text details-mono">{call.tool}</span>
-            <span className="details-muted">{agents[call.agent_id]?.name}</span>
+            <span className="details-muted">{TOOL_STATUS[tone]}</span>
           </li>
-        ))}
-      </ul>
-    </>
+        );
+      })}
+    </ul>
   );
 }
+
+const TOOL_STATUS: Record<ReturnType<typeof toolTone>, string> = { pending: "Running", ok: "Success", failed: "Failed" };
 
 function Section({ title, meta, children }: { title: string; meta?: React.ReactNode; children: React.ReactNode }) {
   return (

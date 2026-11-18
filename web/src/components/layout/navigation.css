@@ -46,13 +46,8 @@
 .rail-item > span { max-width: 100%; overflow: hidden; padding: 0 1px; font-size: 10.5px; font-weight: 500; line-height: 1; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .rail-item:hover, .rail-item.is-active { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
 .rail-item.is-active { box-shadow: inset 3px 0 0 hsl(var(--primary)); }
-.rail-home { height: 44px; }
-.rail-home img { width: 24px; height: 24px; transition: transform 220ms ease; }
-.rail-home:hover img { transform: scale(1.08); }
-.rail-home.is-active { box-shadow: none; }
 .rail-divider { width: 32px; height: 1px; margin: 3px 0; background: hsl(var(--border)); }
-.rail-profile { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; margin-top: 8px; border-radius: 50%; background: hsl(var(--teal-panel)); color: hsl(var(--background)); font-size: 11px; font-weight: 700; transition: box-shadow 150ms, transform 150ms; }
-.rail-profile:hover { box-shadow: 0 0 0 3px hsl(var(--teal-panel) / .25); transform: translateY(-1px); }
+.rail-item:disabled { opacity: .4; cursor: default; }
 
 /* Project sidebar: a plain top action, then Pinned, Projects (the open project lists its conversations) and Recents. */
 .project-sidebar { --side: 12px; --sidebar-motion: clamp(180ms, 16vw, 280ms); z-index: 30; display: flex; width: var(--nav); min-width: var(--nav); min-height: 0; flex: 0 0 var(--nav); flex-direction: column; overflow: hidden; border-right: 1px solid hsl(var(--border)); background: hsl(var(--background)); transition: flex-basis var(--sidebar-motion) cubic-bezier(.2, .7, .2, 1), width var(--sidebar-motion) cubic-bezier(.2, .7, .2, 1), opacity 150ms ease, visibility 0s linear var(--sidebar-motion); }

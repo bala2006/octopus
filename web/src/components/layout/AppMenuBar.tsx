@@ -1,7 +1,7 @@
 /**
  * The window bar: history navigation, the sidebar toggle and the File / View / Help menus. Every entry does something;
  * entries that need an open project are disabled with a hint until one is open. Settings, your profile and the theme
- * live in the profile menu on the rail, so they are not repeated here.
+ * live on the rail, so they are not repeated here.
  */
 import * as React from "react";
 import { useLocation, useNavigate, useNavigationType } from "react-router-dom";

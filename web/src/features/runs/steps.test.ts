@@ -13,6 +13,11 @@ describe("describeCall", () => {
     expect(describeCall("shell", { command: "npm test" })).toEqual({ kind: "command", title: "npm test" });
   });
 
+  it("classes a browser tool as a browser step, under its plain name or the MCP name", () => {
+    expect(describeCall("browser_navigate", { url: "http://127.0.0.1:8000/" })).toEqual({ kind: "browser", title: "Opened http://127.0.0.1:8000/" });
+    expect(describeCall("mcp:browser/browser_evaluate", {})).toEqual({ kind: "browser", title: "Browser: evaluate" });
+  });
+
   it("describes browser calls from both recorded forms", () => {
     expect(describeCall("mcp:browser/browser_navigate", { url: "http://127.0.0.1:8000/" })).toEqual({ kind: "browser", title: "Opened http://127.0.0.1:8000/" });
     expect(describeCall("mcp_call", { server: "browser", tool: "browser_snapshot" })).toEqual({ kind: "browser", title: "Read the page" });

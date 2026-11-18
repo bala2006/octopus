@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from "react";
-import { ClipboardCheck, Code2, FileCode2, Gauge, GitBranch, Globe, MessageSquare, Network, Plus, X, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { ChevronLeft, ChevronRight, ClipboardCheck, Code2, FileCode2, Gauge, GitBranch, Globe, MessageSquare, Network, Plus, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FileTotal } from "@/features/runs/steps";
 import type { AgentOut } from "@/types";
@@ -57,9 +58,21 @@ export function ChangesSummary({ changes }: { changes: FileTotal[] }) {
   );
 }
 
+/** One circular arrow at an edge of the tab bar. It is shown only while tabs are hidden on that side. */
+function ScrollButton({ direction, onClick }: { direction: "left" | "right"; onClick: () => void }) {
+  const Icon = direction === "left" ? ChevronLeft : ChevronRight;
+  const label = `Scroll tabs ${direction}`;
+  return (
+    <button type="button" aria-label={label} title={label} className="conversation-tabs-scroll" onClick={onClick}>
+      <Icon aria-hidden="true" />
+    </button>
+  );
+}
+
 /**
  * The conversation's tab bar. The chat is the home tab: an icon, and it cannot close. The active tab has a box and its
- * close button. Dividers separate the other tabs. Changes previews its summary when hovered.
+ * close button. Dividers separate the other tabs. When the tabs are wider than the bar, a circular arrow at each edge
+ * scrolls them, and the selected tab scrolls into view. Changes previews its summary when hovered.
  */
 export function ConversationTabs({
   tabs,
@@ -81,32 +94,64 @@ export function ConversationTabs({
   actions?: ReactNode;
 }) {
   const [dragging, setDragging] = useState<string | null>(null);
+  const [preview, setPreview] = useState<DOMRect | null>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  const track = useRef<HTMLDivElement>(null);
+
+  const measure = useCallback(() => {
+    const el = track.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setEdges((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+
+  useLayoutEffect(() => {
+    measure();
+    const el = track.current;
+    if (!el) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measure, tabs]);
+
+  useEffect(() => {
+    track.current?.querySelector<HTMLElement>(".is-selected")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeId]);
+
+  const scrollTabs = (direction: -1 | 1) => track.current?.scrollBy({ left: direction * 160, behavior: "smooth" });
+
   return (
     <nav className="conversation-tabs" aria-label="Conversation tabs">
-      {tabs.map((tab, index) => {
-        const Icon = ICON[tab.kind];
-        const label = tab.kind === "agent" && tab.title ? tab.title : LABEL[tab.kind];
-        const selected = tab.id === activeId;
-        const divided = index > 1 && !selected && tabs[index - 1]?.id !== activeId;
-        return (
-          <div key={tab.id} className={cn("conversation-tab-item", divided && "is-divided", selected && "is-selected", dragging === tab.id && "is-dragging")} draggable={tab.kind !== "chat"} onDragStart={(e) => { e.dataTransfer.setData("text/plain", tab.id); setDragging(tab.id); }} onDragOver={(e) => { if (dragging) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (dragging && dragging !== tab.id) onMove(dragging, index); setDragging(null); }} onDragEnd={() => setDragging(null)}>
-            <button type="button" role="tab" aria-selected={selected} aria-label={label} title={label} className="conversation-tab" onClick={() => onSelect(tab.id)}>
-              <Icon aria-hidden="true" />
-              {tab.kind !== "chat" && label}
-            </button>
-            {tab.kind !== "chat" && (
-              <button type="button" aria-label={`Close ${label}`} className="conversation-tab-close" onClick={() => onClose(tab.id)}>
-                <X aria-hidden="true" />
+      {edges.left && <ScrollButton direction="left" onClick={() => scrollTabs(-1)} />}
+      <div ref={track} className="conversation-tabs-track" onScroll={() => { measure(); setPreview(null); }}>
+        {tabs.map((tab, index) => {
+          const Icon = ICON[tab.kind];
+          const label = tab.kind === "agent" && tab.title ? tab.title : LABEL[tab.kind];
+          const selected = tab.id === activeId;
+          const divided = index > 1 && !selected && tabs[index - 1]?.id !== activeId;
+          return (
+            <div key={tab.id} className={cn("conversation-tab-item", divided && "is-divided", selected && "is-selected", dragging === tab.id && "is-dragging")} draggable={tab.kind !== "chat"} onDragStart={(e) => { e.dataTransfer.setData("text/plain", tab.id); setDragging(tab.id); }} onDragOver={(e) => { if (dragging) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (dragging && dragging !== tab.id) onMove(dragging, index); setDragging(null); }} onDragEnd={() => setDragging(null)} onMouseEnter={tab.kind === "changes" ? (e) => setPreview(e.currentTarget.getBoundingClientRect()) : undefined} onMouseLeave={() => setPreview(null)}>
+              <button type="button" role="tab" aria-selected={selected} aria-label={label} title={label} className="conversation-tab" onClick={() => onSelect(tab.id)}>
+                <Icon aria-hidden="true" />
+                {tab.kind !== "chat" && label}
               </button>
-            )}
-            {tab.kind === "changes" && (
-              <div className="conversation-tab-preview" role="tooltip">
-                <ChangesSummary changes={changes} />
-              </div>
-            )}
-          </div>
-        );
-      })}
+              {tab.kind !== "chat" && (
+                <button type="button" aria-label={`Close ${label}`} className="conversation-tab-close" onClick={() => onClose(tab.id)}>
+                  <X aria-hidden="true" />
+                </button>
+              )}
+              {tab.kind === "changes" && preview && createPortal(
+                <div className="conversation-tab-preview" role="tooltip" style={{ top: preview.bottom + 8, left: preview.left }}>
+                  <ChangesSummary changes={changes} />
+                </div>,
+                document.body,
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {edges.right && <ScrollButton direction="right" onClick={() => scrollTabs(1)} />}
       <button type="button" aria-label="New tab" title="New tab" className="conversation-tab-new" onClick={onNew}>
         <Plus aria-hidden="true" />
       </button>
@@ -173,5 +218,3 @@ export function NewTabPage({ onChoose, onChooseAgent, openKinds, openAgentIds, a
     </div>
   );
 }
-
-
