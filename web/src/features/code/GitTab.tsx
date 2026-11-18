@@ -1,14 +1,11 @@
 import { useWorkspaceId } from "@/hooks/queries";
 import { GitPanel } from "./GitPanel";
 
-/**
- * The Git changes tab: the branch graph, the changed files, each diff, staging, and commit.
- * reserveRight keeps the tab clear of the floating chat when the chat is docked on the right.
- */
-export function GitTab({ onOpen, reserveRight = 0 }: { onOpen: (path: string) => void; reserveRight?: number }) {
+/** The Git changes tab: the branch graph, the changed files, each diff, staging, and commit. */
+export function GitTab({ onOpen }: { onOpen: (path: string) => void }) {
   const workspace = useWorkspaceId();
   return (
-    <div className="conversation-page-tab" style={{ paddingRight: reserveRight }}>
+    <div className="conversation-page-tab">
       <GitPanel workspace={workspace} onOpen={onOpen} />
     </div>
   );

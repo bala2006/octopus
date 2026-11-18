@@ -1,7 +1,8 @@
 /** The code workspace (IDE) contract: documents, file items, git, commands and the dev server. */
 import { z } from "zod";
 
-export interface EditorTree { files: string[]; folders: string[]; truncated: boolean }
+export interface EditorTree { files: string[]; folders: string[] }
+export interface FileMatches { files: string[]; truncated: boolean }
 export interface Document { path: string; content: string; revision: string; size: number }
 export const SaveDocumentSchema = z.object({ path: z.string(), content: z.string().max(5_000_000), revision: z.string().nullable().optional() });
 export const FolderInSchema = z.object({ path: z.string().min(1) });

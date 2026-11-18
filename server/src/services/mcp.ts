@@ -107,7 +107,7 @@ export async function browserTools(root: string, names?: readonly string[]): Pro
       const res = render(await (await browserConnection(root)).client.callTool({ name: t.name, arguments: shot }));
       const url = /Page URL: (\S+)/.exec(res.text)?.[1] ?? "";
       const title = /Page Title: (.+)/.exec(res.text)?.[1]?.trim() ?? "";
-      ctx.emit("browser_action", { agent_id: ctx.agent.id, call_id: callId, tool: t.name, args, ok: res.ok, url, title, frame: res.image ? saveFrame(ctx, res.image) : null });
+      ctx.emit("browser_action", { agent_id: ctx.agent.id, call_id: callId, tool: t.name, args, ok: res.ok, url, title, frame: res.image ? saveFrame(ctx, res.image) : null, output: clip(res.text, 6_000) });
       return { text: res.text, ok: res.ok, image: res.image };
     },
   }));

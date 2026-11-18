@@ -87,7 +87,8 @@ export interface ApiRoutes {
   "/api/v1/w/{workspace_id}/tree": { GET: R<D.ProjectTreeOut> };
 
   // Code workspace
-  "/api/v1/w/{workspace_id}/editor/tree": { GET: R<E.EditorTree> };
+  "/api/v1/w/{workspace_id}/editor/tree": { GET: R<E.EditorTree, undefined, { path?: string }> };
+  "/api/v1/w/{workspace_id}/editor/files": { GET: R<E.FileMatches, undefined, { q?: string }> };
   "/api/v1/w/{workspace_id}/editor/document": { GET: R<E.Document, undefined, { path: string }>; PUT: R<E.Document, In<typeof E.SaveDocumentSchema>> };
   "/api/v1/w/{workspace_id}/editor/search": { GET: R<E.SearchResults, undefined, { q: string }> };
   "/api/v1/w/{workspace_id}/editor/folder": { POST: R<{ path: string }, In<typeof E.FolderInSchema>> };

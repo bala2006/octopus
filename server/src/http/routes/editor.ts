@@ -41,7 +41,21 @@ function readDoc(fs: ProjectFs, rel: string) {
 
 export function editorRoutes(route: RouteFn, app: FastifyInstance, reg: Registry) {
   const E = "/api/v1/w/{workspace_id}/editor" as const;
-  route("GET", `${E}/tree`, ({ project }) => project().fs.walk({ max: 10_000, actor: "user" }));
+  route("GET", `${E}/tree`, ({ project, query }) => project().fs.list(query.path ?? ""));
+  // Search reads the whole project, so the file list is kept briefly and reused while the user types.
+  const fileIndex = new Map<string, { at: number; files: string[] }>();
+  route("GET", `${E}/files`, ({ project, query }) => {
+    const limit = 2_000;
+    const current = project();
+    let index = fileIndex.get(current.root);
+    if (!index || Date.now() - index.at > 2_000) {
+      index = { at: Date.now(), files: current.fs.walk({ max: 200_000, actor: "user" }).files };
+      fileIndex.set(current.root, index);
+    }
+    const needle = (query.q ?? "").trim().toLowerCase();
+    const matches = needle ? index.files.filter((f) => f.toLowerCase().includes(needle)) : index.files;
+    return { files: matches.slice(0, limit), truncated: matches.length > limit };
+  });
   route("GET", `${E}/document`, ({ project, query }) => readDoc(project().fs, query.path));
   route("PUT", `${E}/document`, SaveDocumentSchema, ({ project, body }) => {
     const fs = project().fs;
