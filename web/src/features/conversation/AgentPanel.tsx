@@ -216,10 +216,17 @@ function CompanyAgentPanel({
     : undefined;
   const run = useRun(w, runId ?? "");
   const retryIdentity = React.useRef<{ fingerprint: string; id: string } | null>(null);
-  const base = React.useMemo(
-    () => (run.data?.snapshot?.agents as AgentOut[] | undefined) ?? canvas.data?.agents ?? [],
-    [run.data, canvas.data],
-  );
+  const snapshotAgents = run.data?.snapshot?.agents as AgentOut[] | undefined;
+  const base = React.useMemo(() => {
+    if (!snapshotAgents) return canvas.data?.agents ?? [];
+    // A run keeps the team it started with. Its icons and colors follow the company's current agents, so a run made
+    // before a specialist had its avatar still shows that avatar.
+    const current = new Map((canvas.data?.agents ?? []).map((agent) => [agent.id, agent] as const));
+    return snapshotAgents.map((agent) => {
+      const now = current.get(agent.id);
+      return now ? { ...agent, avatar: now.avatar, color: now.color } : agent;
+    });
+  }, [snapshotAgents, canvas.data]);
   const names = React.useMemo(
     () => Object.fromEntries(base.map((a) => [a.id, a.name])),
     [base],

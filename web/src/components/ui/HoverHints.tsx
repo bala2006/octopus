@@ -25,9 +25,10 @@ export function HoverHints() {
       if (timer) clearTimeout(timer);
       setHint(null);
       if (!control) return;
-      const label = getLabel(control);
-      if (!label) return;
       timer = setTimeout(() => {
+        // The label is read when the hint appears: a press can change the control's label before then.
+        const label = getLabel(control);
+        if (!label || !control.isConnected) return;
         const rect = control.getBoundingClientRect();
         const rail = control.matches(".activity-rail .rail-item");
         const below = rect.top < 42;
@@ -50,17 +51,25 @@ export function HoverHints() {
       if (control && event.relatedTarget instanceof Node && control.contains(event.relatedTarget)) return;
       if (control) showFor(null);
     };
-    const onFocusIn = (event: FocusEvent) => showFor(getTarget(event.target));
+    const onFocusIn = (event: FocusEvent) => {
+      // A press focuses the control too; only keyboard focus shows a hint, so a click never leaves one behind.
+      const control = getTarget(event.target);
+      if (control?.matches(":focus-visible")) showFor(control);
+    };
     const onFocusOut = (event: FocusEvent) => {
       const control = getTarget(event.target);
       if (control) showFor(null);
     };
     const onScroll = () => showFor(null);
+    // A press ends the hint: a control can be replaced by the press itself (the chat window's minimize and expand button), and
+    // then no pointer-out reaches the hint, so it would stay on screen.
+    const onPointerDown = () => showFor(null);
     document.addEventListener("pointerover", onPointerOver, true);
     document.addEventListener("pointerout", onPointerOut, true);
     document.addEventListener("focusin", onFocusIn, true);
     document.addEventListener("focusout", onFocusOut, true);
     document.addEventListener("scroll", onScroll, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       if (timer) clearTimeout(timer);
       document.removeEventListener("pointerover", onPointerOver, true);
@@ -68,6 +77,7 @@ export function HoverHints() {
       document.removeEventListener("focusin", onFocusIn, true);
       document.removeEventListener("focusout", onFocusOut, true);
       document.removeEventListener("scroll", onScroll, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, []);
 

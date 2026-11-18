@@ -691,6 +691,43 @@
   background: hsl(var(--background));
   overflow: visible;
 }
+.conversation-tabs-track {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.conversation-tabs-track::-webkit-scrollbar {
+  display: none;
+}
+.conversation-tabs-scroll {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 9999px;
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+}
+.conversation-tabs-scroll svg {
+  width: 12px;
+  height: 12px;
+}
+.conversation-tabs-scroll:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+.conversation-tabs-scroll:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--ring));
+}
 .conversation-tabs-actions {
   display: flex;
   align-items: center;
@@ -787,12 +824,10 @@
   height: 28px;
   margin-left: -4px;
 }
+/* Rendered in a portal under the hovered tab, so the scrolling tab track cannot clip it. */
 .conversation-tab-preview {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
+  position: fixed;
   z-index: 30;
-  display: none;
   width: 340px;
   padding: 14px 16px;
   border: 1px solid hsl(var(--border));
@@ -800,9 +835,6 @@
   background: hsl(var(--card));
   box-shadow: 0 10px 30px #0005;
   font-size: 12px;
-}
-.conversation-tab-item:hover .conversation-tab-preview {
-  display: block;
 }
 .conversation-change-row {
   display: flex;
@@ -1074,37 +1106,14 @@
   font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
-.details-dot {
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: hsl(var(--muted-foreground));
+.details-row[data-tone="pending"] .details-muted {
+  color: hsl(var(--primary));
 }
-.details-dots {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 3px;
-  margin-top: 10px;
+.details-row[data-tone="ok"] .details-muted {
+  color: hsl(var(--success));
 }
-.details-dots > span,
-.details-dot[data-tone] {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: hsl(var(--muted-foreground));
-}
-.details-dots > span[data-tone="pending"],
-.details-dot[data-tone="pending"] {
-  background: hsl(var(--primary));
-}
-.details-dots > span[data-tone="ok"],
-.details-dot[data-tone="ok"] {
-  background: hsl(var(--success));
-}
-.details-dots > span[data-tone="failed"],
-.details-dot[data-tone="failed"] {
-  background: hsl(var(--destructive));
+.details-row[data-tone="failed"] .details-muted {
+  color: hsl(var(--destructive));
 }
 .details-team {
   display: flex;

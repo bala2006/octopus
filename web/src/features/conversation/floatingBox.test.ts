@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLOATING_GAP, FLOATING_MIN_HEIGHT, FLOATING_MIN_WIDTH, dockOf, moveBox, resizeBox, type FloatingBox } from "./floatingBox";
+import { FLOATING_GAP, FLOATING_MIN_HEIGHT, FLOATING_MIN_WIDTH, dockOf, fitPlacement, moveBox, resizeBox, snapPlacement, type FloatingBox } from "./floatingBox";
 
 const start: FloatingBox = { top: 16, width: 400, height: 600 };
 const bounds = { width: 1200, height: 800 };
@@ -53,18 +53,46 @@ describe("moveBox", () => {
     expect(moveBox(start, 5000, -5000, size, canvas)).toEqual({ right: FLOATING_GAP, top: FLOATING_GAP });
     expect(moveBox(start, -5000, 5000, size, canvas)).toEqual({
       right: canvas.width - size.width - FLOATING_GAP,
-      top: canvas.height - FLOATING_MIN_HEIGHT - FLOATING_GAP,
+      top: canvas.height - size.height - FLOATING_GAP,
     });
   });
 
-  it("lets an expanded window reach the lower part of the canvas, shrinking to fit", () => {
+  it("keeps a window's full height inside the canvas by moving it up, before it would shrink", () => {
     expect(moveBox(start, 0, 400, size, canvas).top).toBe(416);
-    expect(moveBox(start, 0, 5000, size, canvas).top).toBe(canvas.height - FLOATING_MIN_HEIGHT - FLOATING_GAP);
+    expect(moveBox(start, 0, 5000, size, canvas).top).toBe(canvas.height - size.height - FLOATING_GAP);
   });
 
   it("lets a minimized window, shorter than the minimum height, reach the bottom edge", () => {
     const minimized = { width: 380, height: 34 };
     expect(moveBox(start, 0, 5000, minimized, canvas).top).toBe(canvas.height - minimized.height - FLOATING_GAP);
+  });
+});
+
+describe("fitPlacement", () => {
+  it("moves a window that would run off the bottom up, so its height stays", () => {
+    expect(fitPlacement({ right: 16, top: 700 }, { width: 380, height: 600 }, { width: 1200, height: 800 })).toEqual({ right: 16, top: 184 });
+  });
+
+  it("puts a window taller than the canvas at the top, where the CSS trims it", () => {
+    expect(fitPlacement({ right: 16, top: 300 }, { width: 380, height: 900 }, { width: 1200, height: 800 }).top).toBe(FLOATING_GAP);
+  });
+});
+
+describe("snapPlacement", () => {
+  const canvas = { width: 1200, height: 800 };
+  const minimized = { width: 380, height: 89 };
+
+  it("moves a minimized window to the nearer side and keeps its height on that side", () => {
+    expect(snapPlacement({ right: 800, top: 300 }, minimized, canvas)).toEqual({ right: 1200 - 380 - FLOATING_GAP, top: 300 });
+    expect(snapPlacement({ right: 300, top: 300 }, minimized, canvas)).toEqual({ right: FLOATING_GAP, top: 300 });
+  });
+
+  it("takes the bottom corner when the window is near the bottom edge", () => {
+    expect(snapPlacement({ right: 30, top: 650 }, minimized, canvas)).toEqual({ right: FLOATING_GAP, top: canvas.height - minimized.height - FLOATING_GAP });
+  });
+
+  it("takes the top corner when the window is near the top edge, even past the left side", () => {
+    expect(snapPlacement({ right: 900, top: 40 }, minimized, canvas)).toEqual({ right: 1200 - 380 - FLOATING_GAP, top: FLOATING_GAP });
   });
 });
 

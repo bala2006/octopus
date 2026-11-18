@@ -51,15 +51,36 @@ export function resizeBox(
 export type FloatingPlacement = { right: number; top: number };
 
 /**
- * The placement after dragging the window by (dx, dy) pixels, kept fully inside the canvas. Positive dx moves it right.
- * A window low on the canvas shrinks to fit (the CSS does that), so only its minimum height has to fit below its top.
+ * The placement with a window of `size` fully inside the canvas. A window low on the canvas moves up to fit, so its height
+ * survives its position. Only a canvas shorter than the window shrinks it (the CSS does that).
  */
-export function moveBox(start: FloatingPlacement, dx: number, dy: number, size: FloatingBounds, canvas: FloatingBounds): FloatingPlacement {
-  const shortest = Math.min(size.height, FLOATING_MIN_HEIGHT);
+export function fitPlacement(place: FloatingPlacement, size: FloatingBounds, canvas: FloatingBounds): FloatingPlacement {
   return {
-    right: clamp(start.right - dx, FLOATING_GAP, canvas.width - size.width - FLOATING_GAP),
-    top: clamp(start.top + dy, FLOATING_GAP, canvas.height - shortest - FLOATING_GAP),
+    right: clamp(place.right, FLOATING_GAP, canvas.width - size.width - FLOATING_GAP),
+    top: clamp(place.top, FLOATING_GAP, canvas.height - size.height - FLOATING_GAP),
   };
+}
+
+/** The placement after dragging the window by (dx, dy) pixels, kept fully inside the canvas. Positive dx moves it right. */
+export function moveBox(start: FloatingPlacement, dx: number, dy: number, size: FloatingBounds, canvas: FloatingBounds): FloatingPlacement {
+  return fitPlacement({ right: start.right - dx, top: start.top + dy }, size, canvas);
+}
+
+/** How close, as a share of the canvas height, a window must be to the top or bottom edge to take that corner. */
+const CORNER_REACH = 0.25;
+
+/**
+ * Where a minimized window rests: against the nearer side of the canvas, and in that side's corner when it is close to the
+ * top or the bottom edge. Otherwise it keeps its height on the side.
+ */
+export function snapPlacement(place: FloatingPlacement, size: FloatingBounds, canvas: FloatingBounds): FloatingPlacement {
+  const left = canvas.width - place.right - size.width;
+  const nextRight = left + size.width / 2 < canvas.width / 2 ? canvas.width - size.width - FLOATING_GAP : FLOATING_GAP;
+  const reach = CORNER_REACH * canvas.height;
+  let top = place.top;
+  if (top - FLOATING_GAP <= reach) top = FLOATING_GAP;
+  else if (canvas.height - (top + size.height) - FLOATING_GAP <= reach) top = canvas.height - size.height - FLOATING_GAP;
+  return fitPlacement({ right: nextRight, top }, size, canvas);
 }
 
 /** The side of the canvas the window's centre is on. That side decides where the resize handle and the canvas inset go. */
