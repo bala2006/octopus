@@ -58,7 +58,8 @@ function mcpTarget(tool: string, args: Record<string, unknown>): { server: strin
 
 /** A short line for one tool call, or null when the call already shows in the conversation. */
 export function describeCall(tool: string, args: Record<string, unknown>): { kind: StepKind; title: string } | null {
-  const mcp = mcpTarget(tool, args);
+  // Browser tools arrive under their own names, and also as mcp:browser/<name> through the MCP proxy.
+  const mcp = mcpTarget(tool, args) ?? (tool.startsWith("browser_") ? { server: "browser", tool } : null);
   if (mcp?.server === "browser") {
     const describe = BROWSER[mcp.tool];
     return { kind: "browser", title: describe ? describe(args) : `Browser: ${mcp.tool.replace(/^browser_/, "").replace(/_/g, " ")}` };

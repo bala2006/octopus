@@ -75,6 +75,22 @@ async function runLoop(script: Script, tools: Tool[], options: ProviderOptions =
   }
 }
 
+test("a turn that must end offers only the tools that end it on its last step", async () => {
+  const look = defineTool({ name: "look", description: "look", args: z.object({}), async run() { return { text: "looked" }; } });
+  const done = defineTool({ name: "done", description: "done", args: z.object({}), async run() { return { text: "done", stop: { kind: "reply", message: "ok" } }; } });
+  const { requests } = await runLoop(() => ({ calls: [{ name: "look", args: {} }] }), [look, done], {}, 3, { requireStop: true, stopTools: ["done"] });
+  const names = (r: unknown) => ((r as { tools: { name: string }[] }).tools ?? []).map((t) => t.name);
+  expect(names(requests[0])).toEqual(["look", "done"]);
+  expect(names(requests.at(-1))).toEqual(["done"]);
+});
+
+test("a turn that does not have to end offers every tool on its last step", async () => {
+  const look = defineTool({ name: "look", description: "look", args: z.object({}), async run() { return { text: "looked" }; } });
+  const done = defineTool({ name: "done", description: "done", args: z.object({}), async run() { return { text: "done", stop: { kind: "reply", message: "ok" } }; } });
+  const { requests } = await runLoop(() => ({ calls: [{ name: "look", args: {} }] }), [look, done], {}, 3, { requireStop: false, stopTools: ["done"] });
+  expect(((requests.at(-1) as unknown) as { tools: { name: string }[] }).tools.map((t) => t.name)).toEqual(["look", "done"]);
+});
+
 const isCheckpointRequest = (r: { input: Item[] }) => String(r.input.at(-1)?.content ?? "").startsWith(CHECKPOINT_REQUEST.slice(0, 40));
 
 /** A request's stored items: the request without its ephemeral screenshot message, which the loop never stores. */

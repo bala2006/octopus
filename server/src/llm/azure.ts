@@ -26,6 +26,8 @@ export interface LlmRequest {
   signal?: AbortSignal;
   /** Groups requests that share a prefix, so the cache can reuse it: conversation, agent and mode. */
   promptCacheKey?: string;
+  /** How long to wait for the response to start. Defaults to two minutes. */
+  headersTimeoutMs?: number;
 }
 export interface StreamHandlers {
   onText?: (delta: string) => void;
@@ -119,6 +121,8 @@ async function headers(c: AzureConnection): Promise<Record<string, string>> {
 }
 
 /** One model call, streamed. Throws UserError with a readable message on configuration problems. */
+const HEADERS_TIMEOUT_MS = 120_000;
+
 export async function complete(reg: Registry, req: LlmRequest, on: StreamHandlers = {}): Promise<LlmResult> {
   const started = Date.now();
   const c = connection(reg);
@@ -128,15 +132,23 @@ export async function complete(reg: Registry, req: LlmRequest, on: StreamHandler
   for (let attempt = 0; attempt < 6; attempt++) {
     const b = body(req, drop);
     let res: Response;
+    const noResponse = new AbortController();
+    const timeoutMs = req.headersTimeoutMs ?? HEADERS_TIMEOUT_MS;
+    const timer = setTimeout(() => noResponse.abort(), timeoutMs);
     try {
       res = await fetch(`${c.baseUrl}/responses`, {
-        method: "POST", headers: { "content-type": "application/json", ...(await headers(c)) }, body: JSON.stringify(b), signal: req.signal,
+        method: "POST", headers: { "content-type": "application/json", ...(await headers(c)) }, body: JSON.stringify(b),
+        signal: req.signal ? AbortSignal.any([req.signal, noResponse.signal]) : noResponse.signal,
       });
     } catch (e) {
       if (req.signal?.aborted) throw e;
+      if (noResponse.signal.aborted) throw new UserError(`Azure OpenAI sent no response within ${Math.round(timeoutMs / 1000)} seconds`);
       lastError = `Could not reach Azure OpenAI: ${(e as Error).message}`;
       await sleep(1000 * 2 ** attempt);
       continue;
+    } finally {
+      // Only the wait for headers is bounded. A stream that is already open is bounded by its own idle timer.
+      clearTimeout(timer);
     }
     if (res.ok && res.body) {
       const result = await readStream(res.body, c.options, on);

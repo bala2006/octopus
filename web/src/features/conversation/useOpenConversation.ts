@@ -4,7 +4,10 @@ import { create } from "zustand";
 import { useApp } from "@/stores/app";
 import { threadKey, useWorkbenchStore } from "./workbenchStore";
 
-/** Bumped whenever a conversation is opened on purpose, so the chat window opens up to show it. */
+/**
+ * Bumped when a new conversation is started on purpose, so the chat window opens up for the user to type into. Opening an
+ * existing conversation keeps the window as the user left it.
+ */
 export const useChatFocus = create<{ token: number; bump: () => void }>()((set, get) => ({ token: 0, bump: () => set({ token: get().token + 1 }) }));
 
 /**
@@ -19,7 +22,7 @@ export function useOpenConversation() {
     const company = run?.company_id || companyId || "";
     if (company) setCompany(w, company);
     selectThread(threadKey(w, company), run ? run.id : null);
-    useChatFocus.getState().bump();
+    if (!run) useChatFocus.getState().bump();
     navigate(`/w/${w}/agent`, { replace });
   }, [navigate, selectThread, setCompany]);
 }

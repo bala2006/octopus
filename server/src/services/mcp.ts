@@ -18,7 +18,8 @@ import type { Tool, ToolContext } from "../tools/types";
 
 interface Connection { client: Client; tools: McpToolOut[]; lastUsed: number }
 const connections = new Map<string, Promise<Connection>>();
-export const BROWSER_PACKAGE = "@playwright/mcp@latest";
+/** Pinned so every run uses the same version. A floating `latest` can change the browser tool set between runs. */
+export const BROWSER_PACKAGE = "@playwright/mcp@0.0.85";
 
 async function connect(transport: () => StdioClientTransport | StreamableHTTPClientTransport): Promise<Connection> {
   const client = new Client({ name: "octopus", version: "2.0.0" });

@@ -31,6 +31,9 @@ export type PhaseStatus = "pending" | "active" | "done" | "skipped" | "failed";
 export interface WorkflowPhase { key: string; title: string; owner: string | null; status: PhaseStatus; loops?: number; summary?: string }
 export interface WorkflowState { track: string | null; index: number; ended: boolean; reason?: string; phases: WorkflowPhase[] }
 
+/** One step of a plan: the role that does it, what it reads and leaves behind, and why the role is in the plan. */
+export interface PlanStep { id: string; role: string; purpose: string; depends_on: string[]; produces: string[]; inputs: string[]; reason: string; skip?: string }
+
 /** One finding a review specialist reported, with the id the review round gave it. */
 export interface ReviewFinding { id: string; critic: string; severity: "blocker" | "major" | "minor"; file?: string; lines?: string; problem: string; evidence: string; fix: string }
 /** One specialist of a review round: its verdict, or null when it ended without one, and its findings. */
@@ -52,6 +55,7 @@ export interface RunEventMap {
   tool_result: { call_id: string; agent_id: string; tool: string; ok: boolean; output: string };
   browser_action: { agent_id: string; call_id: string; tool: string; args: Record<string, unknown>; ok: boolean; url: string; title: string; frame: string | null; output?: string };
   todo_updated: { agent_id: string; todos: { content: string; status: "pending" | "in_progress" | "completed" }[] };
+  plan_updated: { agent_id: string; steps: PlanStep[] };
   task_updated: { task: TaskOut };
   requirements_updated: { requirements: Requirement[] };
   review_round: { round: number; specialists: ReviewSpecialist[] };

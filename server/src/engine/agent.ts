@@ -149,6 +149,50 @@ function tagShown(shown: Shown, before: Shown, position: number) {
  * reasoning that produced it, and the newest step is always kept whole. Null when nothing worth summarizing lies
  * between the head and that point.
  */
+/**
+ * A browser snapshot or a file read that a later copy replaces: only the newest copy of each stays in the transcript.
+ * Old snapshots describe a page that has since changed, and an old read of a file that is read again says nothing the
+ * newer read does not. Short outputs are left alone, and a removed read is dropped from `shown`, so a later read
+ * cannot answer "unchanged, see above" for text that is no longer there. Returns how many outputs it replaced.
+ */
+const SUPERSEDE_MIN = 400;
+export function supersedeStale(input: Item[], shown: Shown): number {
+  const calls = new Map<string, { name: string; args: string }>();
+  for (const item of input) {
+    if (item.type !== "function_call") continue;
+    calls.set(item.call_id, { name: item.name, args: item.arguments || "{}" });
+  }
+  const keyOf = (i: number): string | null => {
+    const item = input[i]!;
+    if (item.type !== "function_call_output" || typeof item.output !== "string") return null;
+    const call = calls.get(item.call_id);
+    if (call?.name === "browser_snapshot") return "snapshot";
+    // The same arguments read the same lines. A different page of the same file is a different read.
+    if (call?.name === "read_file") return `read:${call.args}`;
+    return null;
+  };
+  // Only a copy that carries content can replace another. A short "unchanged" answer points at the copy above it.
+  const newest = new Map<string, number>();
+  for (let i = 0; i < input.length; i++) {
+    const key = keyOf(i);
+    if (key && (input[i]!.output as string).length > SUPERSEDE_MIN) newest.set(key, i);
+  }
+  let replaced = 0;
+  for (let i = 0; i < input.length; i++) {
+    const key = keyOf(i);
+    if (!key || newest.get(key) === i) continue;
+    const item = input[i]!;
+    if ((item.output as string).length <= SUPERSEDE_MIN) continue;
+    const isRead = key.startsWith("read:");
+    item.output = isRead
+      ? `[Superseded by a later read of these lines. Read them again if you need an earlier copy.]`
+      : `[Superseded by a later browser snapshot of the page.]`;
+    if (isRead) dropShown(shown, (at) => at === i);
+    replaced++;
+  }
+  return replaced;
+}
+
 export function keptFrom(input: Item[], head: number, keepTail: number): number | null {
   let start = input.length;
   for (let size = 0; start > head && size < keepTail; ) size += JSON.stringify(input[--start]).length;
@@ -274,8 +318,11 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       }
       else compactionRefused = true;
     }
+    supersedeStale(input, o.ctx.shown);
+    // The last step offers only the tools that end the turn, so a turn that has to end does end, with a verdict or an answer.
+    const offered = o.requireStop && round === o.maxRounds ? functions.filter((f) => o.stopTools.includes(f.name)) : functions;
     const res = await complete(o.reg, {
-      model: o.model, instructions: o.instructions, input: pending ? [...input, pending] : input, tools: functions, effort: o.effort, signal: o.ctx.signal,
+      model: o.model, instructions: o.instructions, input: pending ? [...input, pending] : input, tools: offered, effort: o.effort, signal: o.ctx.signal,
       maxOutputTokens: 48_000, promptCacheKey: o.cacheKey,
     }, {
       onText: o.events.text, onThinking: o.events.thinking, onToolStart: o.events.toolStart, onToolArgs: o.events.toolArgs,

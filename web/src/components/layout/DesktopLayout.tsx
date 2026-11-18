@@ -3,17 +3,16 @@ import "./navigation.css";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   CircleAlert, Folder, FolderOpen, Home, Loader2, Moon, Pencil, Pin, PinOff, Plus, Settings,
-  SquarePen, Sun, Trash2, User, UserRound, X,
+  SquarePen, Sun, Trash2, UserRound, X,
 } from "lucide-react";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { qk, useCompanyId, useRuns, useWorkspaceId, useWorkspaces } from "@/hooks/queries";
 import { useApp } from "@/stores/app";
-import { cn, conversationName, initials, parseUtc } from "@/lib/utils";
+import { cn, conversationName, parseUtc } from "@/lib/utils";
 import { api, unwrap } from "@/lib/api";
 import {
   ConfirmDialog, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/overlays";
 import { Input } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,7 @@ const LIVE = ["running", "paused", "awaiting_user", "queued"];
 /**
  * The frame around every page:
  * - the menu bar (history, the one sidebar toggle, File / Edit / View / Help);
- * - the rail: Home, the project's spaces, and your profile menu;
+ * - the rail: Home, the project's spaces, then your profile, settings and theme;
  * - the sidebar: projects and recent conversations;
  * - the page header: project / page title, the page's own controls, team status and quick open.
  */
@@ -111,41 +110,49 @@ export function DesktopLayout({ children, header }: {
   );
 }
 
-/** Home, then one icon per project space, then you. */
+/** Home, the chats of the open project (or the most recent one on Home), then your profile, settings, and theme at the bottom. */
 function Rail() {
   const w = useWorkspaceId();
   const location = useLocation();
   const { theme, toggleTheme } = useApp();
-  const profileName = useApp((s) => s.profileName);
+  const dark = theme === "dark";
+  const workspaces = useWorkspaces();
+  // On Home no project is open, so Chats opens the project that was opened last (the list is newest first).
+  const chatsWorkspace = w || workspaces.data?.[0]?.id || "";
   return (
     <nav className="activity-rail" aria-label="Main navigation">
-      <Link to="/" aria-label="Home: all projects" title="Home" className={cn("rail-item rail-home", location.pathname === "/" && "is-active")}>
-        <img src="/octopus.svg" alt="" />
+      <Link to="/" aria-label="Home: all projects" title="Home" className={cn("rail-item", location.pathname === "/" && "is-active")}>
+        <Home />
+        <span>Home</span>
       </Link>
-      {w && <span className="rail-divider" aria-hidden />}
-      {w && SPACES.map((s) => (
-        <NavLink key={s.to} to={`/w/${w}/${s.to}`} title={`${s.label} (Alt+${s.key})`}
-          className={() => cn("rail-item", spaceOf(location.pathname)?.to === s.to && "is-active")}>
-          <s.icon />
-          <span>{s.label}</span>
-        </NavLink>
-      ))}
-      <div className="flex-1" />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className="rail-profile" aria-label="Open profile menu" title={profileName || "Your profile"}>
-            {profileName ? <span>{initials(profileName)}</span> : <User className="h-4 w-4" />}
+      <span className="rail-divider" aria-hidden />
+      {SPACES.filter((s) => s.rail).map((s) =>
+        chatsWorkspace ? (
+          <NavLink key={s.to} to={`/w/${chatsWorkspace}/${s.to}`} title={`${s.label} (Alt+${s.key})`}
+            className={() => cn("rail-item", spaceOf(location.pathname)?.to === s.to && "is-active")}>
+            <s.icon />
+            <span>{s.label}</span>
+          </NavLink>
+        ) : (
+          <button key={s.to} type="button" disabled title="Open a project to see its chats" className="rail-item">
+            <s.icon />
+            <span>{s.label}</span>
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" side="right" className="w-64">
-          <DropdownMenuLabel className="flex flex-col gap-1"><span className="text-foreground">{profileName || "You"}</span><span className="font-normal">Everything stays on this computer</span></DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem asChild><Link to="/activity"><UserRound />Profile and activity</Link></DropdownMenuItem>
-          <DropdownMenuItem asChild><Link to={w ? `/w/${w}/settings` : "/settings"}><Settings />Settings</Link></DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={toggleTheme}>{theme === "dark" ? <Sun /> : <Moon />}{theme === "dark" ? "Light mode" : "Dark mode"}</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        ),
+      )}
+      <div className="flex-1" />
+      <NavLink to="/activity" title="Profile and activity" className={({ isActive }) => cn("rail-item", isActive && "is-active")}>
+        <UserRound />
+        <span>Profile</span>
+      </NavLink>
+      <NavLink to={w ? `/w/${w}/settings` : "/settings"} title="Settings" className={({ isActive }) => cn("rail-item", isActive && "is-active")}>
+        <Settings />
+        <span>Settings</span>
+      </NavLink>
+      <button type="button" onClick={toggleTheme} title={dark ? "Light mode" : "Dark mode"} className="rail-item">
+        {dark ? <Sun /> : <Moon />}
+        <span>{dark ? "Light" : "Dark"}</span>
+      </button>
     </nav>
   );
 }
@@ -245,13 +252,11 @@ function ProjectSidebar({ mobile, collapsed, onClose, onNewConversation, panelRe
 
   return (
     <aside ref={panelRef} className={cn("project-sidebar", collapsed && !mobile && "is-collapsed")} aria-label="Projects and conversations">
-      {mobile && (
-        <div className="sidebar-heading">
-          <Link to="/" className="flex items-center gap-2.5 text-lg font-semibold tracking-tight"><img src="/octopus.svg" alt="" className="h-6 w-6" />Octopus</Link>
-          <span className="flex-1" />
-          <Button variant="ghost" size="icon-sm" aria-label="Close sidebar" onClick={onClose}><X /></Button>
-        </div>
-      )}
+      <div className="sidebar-heading">
+        <Link to="/" className="flex items-center gap-2.5 text-lg font-semibold tracking-tight"><img src="/octopus.svg" alt="" className="h-6 w-6" />Octopus</Link>
+        <span className="flex-1" />
+        {mobile && <Button variant="ghost" size="icon-sm" aria-label="Close sidebar" onClick={onClose}><X /></Button>}
+      </div>
       <div className="sidebar-top">
         <button className="sidebar-new-chat" onClick={onNewConversation}>
           <SquarePen />

@@ -269,7 +269,7 @@ function Rejected({ r, agents }: { r: Record<string, any>; agents: Record<string
   );
 }
 
-const KIND_ICON: Record<StepKind, LucideIcon> = {
+export const KIND_ICON: Record<StepKind, LucideIcon> = {
   thought: Sparkles, read: FileCode2, write: Pencil, command: Terminal, browser: Monitor, task: ListTodo,
   team: UserPlus, review: Gavel, search: Search, other: Wrench,
 };

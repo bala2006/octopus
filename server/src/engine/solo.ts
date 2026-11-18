@@ -24,6 +24,7 @@ import type { Shown, Tool, ToolContext } from "../tools/types";
 import type { Project } from "../workspace/projects";
 import { CHECK_LIMIT, projectOverview } from "../workspace/overview";
 import { rulesUpdate, type RulesSent } from "../workspace/instructions";
+import { uncheckedChangeReason } from "./acceptance";
 import { agentLoop, type LoopEvents } from "./agent";
 import { checkBlockMessage, describeChecks, planChecks, runCheckList, type ChecksOutcome } from "./checks";
 import { DOC_OR_ASSET } from "./checkScope";
@@ -65,6 +66,10 @@ export interface SoloHost {
   notes(): { key: string; value: string }[];
   model(agent: AgentOut): string;
   effort(agent: AgentOut): Effort | undefined;
+  /** Starts the project's dev server. `fresh` stops a running one first, so a check sees the files as they are now. */
+  devServer(fresh: boolean): Promise<{ command: string; url: string | null; output: string }>;
+  /** The effort the conversation's budget sets, or undefined when each agent keeps its own. */
+  budgetEffort(): Effort | undefined;
   finish(reason: string, status: RunStatus): void;
 }
 
@@ -396,17 +401,16 @@ export class SoloRun {
       }
       if (this.budgetSpent()) return "paused";
       this.floorRounds++;
-      const round = await this.specialists.check(reviewers, reply, checks.text);
+      // A later round asks the reviewer again, with the critics whose findings are still open. The approvals of the others stand.
+      const open = this.specialists.openCritics();
+      const again = this.floorRounds === 1 ? reviewers : reviewers.filter((n) => n === "reviewer" || open.has(n));
+      const round = await this.specialists.check(again, reply, checks.text);
       if (round.blocking || round.silent.length) return { role: "user", content: round.text };
     }
     const codeChanged = [...this.turnBefore.keys()].some((f) => !DOC_OR_ASSET.test(f));
     if (!deep || !codeChanged || !this.specialists.enabled("verifier") || !this.specialists.verifyDue()) return null;
     if (this.specialists.verifyRoundCount() === cap.verify_rounds) {
-      this.incomplete = this.notMetReason();
-      return null;
-    }
-    if (this.specialists.verifyRoundCount() === cap.verify_rounds) {
-      this.incomplete = this.notMetReason();
+      this.incomplete = uncheckedChangeReason(cap.verify_rounds, this.specialists.unmetAsks().map((a) => a.id));
       return null;
     }
     if (this.budgetSpent()) return "paused";

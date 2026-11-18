@@ -90,14 +90,19 @@ function CanvasEditor({ workspaceId, companyId, embedded, rightInset, leftInset,
   // covered them. Embedded, the agents are centered between the insets: the canvas edge and the chat edge.
   const fitCanvas = React.useCallback((duration = 0) => {
     const box = wrapper.current;
-    const nodes = rf.getNodes();
+    const nodes = rf.getNodes().filter((n) => !n.hidden); // cards the solo view hides do not count toward the fit
     if (!embedded || !box || !nodes.length) return rf.fitView({ ...fitOptions, duration });
     const bounds = rf.getNodesBounds(nodes);
-    const left = leftInset + 24;
-    const right = box.clientWidth - rightInset - 24;
+    // The zoom comes from the whole canvas, so an open chat never changes it. The agents centre between the insets when they
+    // fit there. Otherwise they centre on the whole canvas, so none is cut off at an edge.
     const top = 72;
     const bottom = box.clientHeight - 56;
-    const zoom = Math.min(1, Math.max(0.2, Math.min((right - left) / bounds.width, (bottom - top) / bounds.height)));
+    const zoom = Math.min(1, Math.max(0.2, Math.min((box.clientWidth - 48) / bounds.width, (bottom - top) / bounds.height)));
+    const freeLeft = leftInset + 24;
+    const freeRight = box.clientWidth - rightInset - 24;
+    const fits = freeRight - freeLeft >= bounds.width * zoom;
+    const left = fits ? freeLeft : 24;
+    const right = fits ? freeRight : box.clientWidth - 24;
     const x = (left + right) / 2 - (bounds.x + bounds.width / 2) * zoom;
     const y = (top + bottom) / 2 - (bounds.y + bounds.height / 2) * zoom;
     return rf.setViewport({ x, y, zoom }, { duration });

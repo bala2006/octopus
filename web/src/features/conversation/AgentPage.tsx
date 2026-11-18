@@ -21,8 +21,10 @@ import {
   FLOATING_GAP,
   FLOATING_MIN_HEIGHT,
   FLOATING_MIN_WIDTH,
+  fitPlacement,
   moveBox,
   resizeBox,
+  snapPlacement,
   type FloatingBox,
   type FloatingDock,
   type FloatingEdge,
@@ -44,6 +46,18 @@ const TABS_KEY = "octopus-conversation-tabs";
 const DEFAULT_LAYOUT: TabLayout = { tabs: [{ id: "chat", kind: "chat" }, { id: "canvas", kind: "canvas" }], activeId: "canvas" };
 
 const DETAILS_KEY = "octopus-conversation-details";
+const WINDOW_KEY = "octopus-chat-window";
+
+/** Whether the chat window was last minimized, collapsed to an orb, or expanded. A reload keeps that state. */
+function readWindowState(): FloatingChatState {
+  try {
+    const saved = localStorage.getItem(WINDOW_KEY);
+    if (saved === "expanded" || saved === "minimized" || saved === "collapsed") return saved;
+  } catch {
+    /* The window still starts minimized. */
+  }
+  return "minimized";
+}
 
 
 /** Whether the details panel is open. It starts open. */
@@ -141,11 +155,13 @@ function WindowGrip({
   container,
   placement,
   onMove,
+  onDrop,
 }: {
   target: React.RefObject<HTMLDivElement>;
   container: React.RefObject<HTMLDivElement>;
   placement: FloatingPlacement;
   onMove: (next: FloatingPlacement) => void;
+  onDrop: () => void;
 }) {
   const drag = React.useRef<{ x: number; y: number; start: FloatingPlacement } | null>(null);
   const size = () => ({
@@ -157,6 +173,7 @@ function WindowGrip({
     height: container.current?.clientHeight ?? 0,
   });
   const end = () => {
+    if (drag.current) onDrop();
     drag.current = null;
   };
   return (
@@ -214,7 +231,6 @@ export default function AgentPage() {
   const height = usePanelSize("floating-conversation-height", 620, FLOATING_MIN_HEIGHT, 4000);
   const top = usePanelSize("floating-conversation-top", FLOATING_GAP, FLOATING_GAP, 4000);
   const right = usePanelSize("floating-conversation-right", FLOATING_GAP, FLOATING_GAP, 10000);
-  const box: FloatingBox = { top: top.size, width: width.size, height: height.size };
   const [frame, setFrame] = React.useState({ canvas: { width: 0, height: 0 }, window: { width: 0, height: 0 } });
   const [details, setDetails] = React.useState(readDetailsOpen);
   React.useEffect(() => {
@@ -224,11 +240,8 @@ export default function AgentPage() {
       /* The panel still works without remembering it. */
     }
   }, [details]);
-  // The stored place is kept as the user left it. What shows is clamped to the canvas as it is now, so a browser that shrinks
-  // never leaves the window below the screen, and the window returns to its place when the browser grows again.
-  const stored: FloatingPlacement = { right: right.size, top: top.size };
-  const placement = frame.canvas.width ? moveBox(stored, 0, 0, frame.window, frame.canvas) : stored;
-  const dock = dockOf(placement.right, width.size, frame.canvas.width);  const move = (next: FloatingPlacement) => {
+  // The stored place is kept as the user left it. The placement changes only through the window's own moves and snaps.
+  const move = (next: FloatingPlacement) => {
     right.setSize(next.right);
     top.setSize(next.top);
   };
@@ -239,7 +252,7 @@ export default function AgentPage() {
   };
   const focus = useChatFocus((s) => s.token);
   const [windowState, setWindowState] =
-    React.useState<FloatingChatState>(() => (focus > consumedFocus ? "expanded" : "minimized"));
+    React.useState<FloatingChatState>(() => (focus > consumedFocus ? "expanded" : readWindowState()));
   React.useEffect(() => {
     if (focus <= consumedFocus) return;
     consumedFocus = focus;
@@ -248,6 +261,45 @@ export default function AgentPage() {
   const changeWindowState = React.useCallback((state: FloatingChatState) => {
     setWindowState(state);
   }, []);
+  React.useEffect(() => {
+    if (windowState === "compose") return;
+    try {
+      localStorage.setItem(WINDOW_KEY, windowState);
+    } catch {
+      /* The window still works without remembering its state. */
+    }
+  }, [windowState]);
+  // What shows fits the canvas as it is now. A window that does not fit moves up, so an expanded window keeps its height;
+  // only a canvas shorter than the window shrinks it. A minimized or collapsed window is as tall as it renders.
+  const stored: FloatingPlacement = { right: right.size, top: top.size };
+  const fitsCanvas = frame.canvas.width > 0 && frame.canvas.height > 0;
+  const shownHeight =
+    windowState === "expanded"
+      ? fitsCanvas ? Math.min(height.size, frame.canvas.height - 2 * FLOATING_GAP) : height.size
+      : frame.window.height;
+  const placement = fitsCanvas ? fitPlacement(stored, { width: width.size, height: shownHeight }, frame.canvas) : stored;
+  // The resize handles work from what shows, so a window moved low still grows downward from its own top.
+  const box: FloatingBox = { top: placement.top, width: width.size, height: shownHeight };
+  const dock = dockOf(placement.right, width.size, frame.canvas.width);
+  // A minimized or collapsed window rests against the nearest side or corner. It snaps when its state changes and when it is
+  // dropped. Snapping works from the stored place, since the displayed place of an expanded window is clamped to fit.
+  const latestStored = React.useRef(stored);
+  latestStored.current = stored;
+  const snapWindow = () => {
+    const panel = floatingChat.current;
+    const container = split.current;
+    if (!panel || !container || !container.clientWidth) return;
+    move(
+      snapPlacement(
+        latestStored.current,
+        { width: panel.offsetWidth, height: panel.offsetHeight },
+        { width: container.clientWidth, height: container.clientHeight },
+      ),
+    );
+  };
+  React.useLayoutEffect(() => {
+    if (windowState === "minimized" || windowState === "collapsed") snapWindow();
+  }, [windowState]);
   const [canvasInsets, setCanvasInsets] = React.useState({ left: 0, right: 0 });
   // The room the toolbar keeps clear on the right: the chat window in any visible state, when it is docked right.
   const [chatReserve, setChatReserve] = React.useState(0);
@@ -319,7 +371,7 @@ export default function AgentPage() {
     });
   const style: ConversationStyle = {
     "--conversation-chat-width": `${width.size}px`,
-    "--conversation-chat-height": `${height.size}px`,
+    "--conversation-chat-height": `${box.height}px`,
     "--conversation-chat-top": `${placement.top}px`,
     "--conversation-chat-right": `${placement.right}px`,
   };
@@ -342,7 +394,10 @@ export default function AgentPage() {
       move(moveBox(press.start, dx, dy, orbSize(), canvasBounds()));
     };
     const onUp = () => {
-      if (press.moved) orbSuppressClick.current = true;
+      if (press.moved) {
+        orbSuppressClick.current = true;
+        snapWindow();
+      }
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
@@ -501,6 +556,9 @@ export default function AgentPage() {
                       container={split}
                       placement={placement}
                       onMove={move}
+                      onDrop={() => {
+                        if (windowState !== "expanded") snapWindow();
+                      }}
                     />
                   ),
                 }}

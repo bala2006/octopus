@@ -119,4 +119,22 @@ describe("prompt cache", () => {
       await server.close();
     }
   });
+
+  test("a call whose response never starts fails with a message, without retrying", async () => {
+    const sockets = new Set<import("node:net").Socket>();
+    let requests = 0;
+    const silent = createServer((req) => { requests++; req.resume(); });
+    silent.on("connection", (s) => sockets.add(s));
+    await new Promise<void>((r) => silent.listen(0, "127.0.0.1", r));
+    const { port } = silent.address() as AddressInfo;
+    const started = Date.now();
+    try {
+      await expect(complete(registryAt(`http://127.0.0.1:${port}`), { model: "silent-model", instructions: "Say hi.", input: [{ role: "user", content: "hi" }], headersTimeoutMs: 1000 })).rejects.toThrow(/sent no response within/);
+      expect(Date.now() - started).toBeLessThan(5000);
+      expect(requests).toBe(1);
+    } finally {
+      for (const s of sockets) s.destroy();
+      await new Promise<void>((r) => silent.close(() => r()));
+    }
+  });
 });

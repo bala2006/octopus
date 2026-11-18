@@ -97,7 +97,7 @@ type Budget = typeof DEFAULT_BUDGET;
  * Steps per turn. Owners get room to build, look and fix in one go; context stays bounded by summarizing, not by
  * cutting the work off. The limit is a backstop against a runaway turn.
  */
-const STEPS: Partial<Record<Mode, number>> = { worker: 150, reviewer: 60, acceptance: 60, quick_review: 3 };
+const STEPS: Partial<Record<Mode, number>> = { worker: 150, reviewer: 30, acceptance: 40, quick_review: 3 };
 /**
  * How much reasoning each kind of turn is worth. Planning and building get depth; a verdict on a diff, a one-paragraph
  * report and a teammate's factual answer do not. An agent or the conversation budget can still override this.
@@ -259,6 +259,8 @@ export class Conversation {
       notes: () => [...this.p.db.memory.find("agent_id = ?", [SHARED_MEMORY]), ...this.p.db.memory.find("agent_id = ?", [this.lead.id])],
       model: (agent) => this.model(agent),
       effort: (agent) => this.effort(agent, "worker"),
+      devServer: (fresh) => this.devServer(fresh),
+      budgetEffort: () => (this.budget.reasoning_effort === "default" ? undefined : this.budget.reasoning_effort),
       finish: (reason, status) => this.finishHalted(reason, status),
     };
   }
@@ -541,8 +543,12 @@ export class Conversation {
     }
   }
 
-  private async devServer(): Promise<{ command: string; url: string | null; output: string }> {
+  private async devServer(fresh = false): Promise<{ command: string; url: string | null; output: string }> {
     const server = processes(this.p.id).server;
+    if (fresh && server.status === "running") {
+      server.stop();
+      for (let i = 0; i < 40 && server.status === "running"; i++) await sleep(250);
+    }
     if (server.status !== "running") {
       // Only the conventional dev scripts: anything else named like a server (deploy, release) is not ours to start.
       const scripts = projectTasks(this.p.fs).filter((t) => t.kind === "server");

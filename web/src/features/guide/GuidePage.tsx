@@ -303,7 +303,7 @@ const SECTIONS: Section[] = [
       <Tips items={[
         <>The <b>sidebar</b> lists your projects and recent conversations. Show or hide it with the panel button at the top left.</>,
         <>The top bar shows where you are, which <b>team</b> works in this project, and a status pill while the team works. It turns amber when the team needs you.</>,
-        <><b>Ctrl K</b> opens any file or page. Your avatar at the bottom of the rail holds your profile, Settings and the theme; <b>Help</b> holds this guide.</>,
+        <><b>Ctrl K</b> opens any file or page. The bottom of the rail holds your profile, Settings and the theme; <b>Help</b> holds this guide.</>,
       ]} />
     </>,
   },
@@ -447,7 +447,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "history", title: "Profile and activity", icon: History,
-    body: <p>Click your avatar at the bottom of the rail and choose <b>Profile and activity</b> to see your tokens over time, your projects and the tools your teams use most. Add your name there; it appears on your avatar. Settings and the light or dark theme are in the same menu. Everything stays on this computer.</p>,
+    body: <p>Click <b>Profile</b> on the left rail to see your tokens over time, your projects and the tools your teams use most. Add your name there. Settings and the light or dark theme are on the rail too. Everything stays on this computer.</p>,
   },
   {
     id: "shortcuts", title: "Keyboard shortcuts", icon: Keyboard,
