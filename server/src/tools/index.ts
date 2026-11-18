@@ -3,11 +3,13 @@ import type { AgentOut } from "@octopus/shared";
 import type { Registry } from "../db/registry";
 import { canWrite, kindOf } from "../catalog/kinds";
 import { BUILDER_BROWSER_TOOLS, browserTools, serverTools } from "../services/mcp";
+import { browserBudget } from "./budget";
 import { checkShellTool, commandTools } from "./commands";
 import { fileTools } from "./files";
 import { skillTool } from "./skill";
 import { acceptanceTool, askUser, collabTools, memoryTools, plannerTools, reviewTool, workerTools } from "./team";
 import { todoTools } from "./todo";
+import { setPlanTool } from "./plan";
 import { askVerdictTool, exploreTool, reviewCallTool } from "./review";
 import type { Tool } from "./types";
 import { webTools } from "./web";
@@ -54,7 +56,7 @@ export async function toolbox(reg: Registry, root: string, agent: AgentOut, mode
   if (policy.commands === "all") tools.push(...commandTools);
   if (policy.commands === "start") tools.push(...commandTools.filter((c) => c.name === "start_dev_server"));
   if (policy.browser) {
-    try { tools.push(...await browserTools(root, mode === "worker" ? BUILDER_BROWSER_TOOLS : undefined)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
+    try { tools.push(...browserBudget(await browserTools(root, mode === "worker" ? BUILDER_BROWSER_TOOLS : undefined), mode === "acceptance" ? 20 : 15)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
   }
   if (t.mcp_servers?.length && mode !== "consult" && policy.mcp) tools.push(...await serverTools(reg, t.mcp_servers));
   if (mode !== "consult") tools.push(...memoryTools);
@@ -81,7 +83,7 @@ export async function soloToolbox(reg: Registry, root: string, agent: AgentOut):
     try { tools.push(...await browserTools(root, BUILDER_BROWSER_TOOLS)); } catch (e) { warnings.push(`Browser unavailable: ${(e as Error).message}`); }
   }
   if (t.mcp_servers?.length) tools.push(...await serverTools(reg, t.mcp_servers));
-  tools.push(skillTool, ...memoryTools, askUser, ...todoTools, reviewCallTool, exploreTool);
+  tools.push(skillTool, ...memoryTools, askUser, ...todoTools, setPlanTool, reviewCallTool, exploreTool);
   return { tools, warnings };
 }
 

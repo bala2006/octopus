@@ -208,7 +208,12 @@ describe("specialist definitions", () => {
   });
 
   test("each specialist has the effort the plan sets", () => {
-    expect(Object.fromEntries(SPECIALIST_NAMES.map((n) => [n, SPECIALIST_DEFS[n].effort]))).toEqual({ reviewer: "medium", security: "high", designer: "high", explorer: "low", verifier: "high" });
+    expect(Object.fromEntries(SPECIALIST_NAMES.map((n) => [n, SPECIALIST_DEFS[n].effort]))).toEqual({ reviewer: "medium", security: "high", designer: "medium", explorer: "low", verifier: "high" });
+  });
+
+  test("each round has a step cap, and only the designer and verifier get a browser budget", () => {
+    expect(Object.fromEntries(SPECIALIST_NAMES.map((n) => [n, SPECIALIST_DEFS[n].browser]))).toEqual({ reviewer: 0, security: 0, designer: 15, explorer: 0, verifier: 15 });
+    for (const name of SPECIALIST_NAMES) expect(SPECIALIST_DEFS[name].steps).toBeLessThanOrEqual(30);
   });
 
   test("the explorer ends with a plain text answer, and no prompt names a tool its toolbox lacks", () => {
@@ -369,7 +374,7 @@ describe("review and explore from a solo conversation", () => {
     expect(events(id, "edge_activity").length).toBeGreaterThanOrEqual(4);
   });
 
-  test("a second review continues the reviewer's first session and numbers the round", async () => {
+  test("a second review starts the reviewer fresh from its brief, and numbers the round", async () => {
     script = (b) => {
       const role = who(b);
       if (role === "reviewer") return { calls: [{ name: "submit_review", args: { verdict: "approve", comments: "Looks right.", findings: [] } }] };
@@ -386,8 +391,8 @@ describe("review and explore from a solo conversation", () => {
     const fresh = requests().slice(before);
     const reviewer = fresh.filter((b) => who(b) === "reviewer");
     expect(reviewer).toHaveLength(2);
-    expect(startsWith(reviewer[1]!, reviewer[0]!)).toBe(true);
-    expect(reviewer[1]!.input.length).toBeGreaterThan(reviewer[0]!.input.length);
+    expect(startsWith(reviewer[1]!, reviewer[0]!)).toBe(false);
+    expect(reviewer[1]!.input).toHaveLength(1);
     expect(lastOutput(fresh.filter((b) => !who(b)).at(-1)!)).toContain("round 2");
   });
 
@@ -640,14 +645,15 @@ describe("review and explore from a solo conversation", () => {
       expect(report.content).toContain("Open items:\n- F2 major src/report.ts:1-100 (reviewer): The page ignores the filter.");
     });
 
-    test("the second floor round continues the reviewer's first session", async () => {
+    test("the second floor round starts the reviewer fresh from its brief", async () => {
       const blocker: Reply = { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "Still wrong.", findings: [{ severity: "major", file: "src/report.ts", lines: "1", problem: "The page is blank.", evidence: "report.ts returns nothing.", fix: "Return the rows." }] } }] };
       const before = requests().length;
       script = (b) => (who(b) === "verifier" ? verified : who(b) ? blocker : mainTurn({ path: "src/report.ts", content: lines(100) }, "Kept it.")(b));
       await settle(await start("Add the report module"));
       const reviewer = requests().slice(before).filter((b) => who(b) === "reviewer");
       expect(reviewer).toHaveLength(2);
-      expect(startsWith(reviewer[1]!, reviewer[0]!)).toBe(true);
+      expect(startsWith(reviewer[1]!, reviewer[0]!)).toBe(false);
+      expect(reviewer[1]!.input).toHaveLength(1);
     });
 
     /** A main agent that writes one new file, then answers each review message, and never writes again. */
@@ -665,7 +671,8 @@ describe("review and explore from a solo conversation", () => {
       expect(done.status).toBe("incomplete");
       expect(done.halt_reason).toBe("Two review rounds ended with no verdict from reviewer.");
       const fresh = requests().slice(before);
-      expect(fresh.filter((b) => who(b) === "reviewer")).toHaveLength(2);
+      // A reviewer that replies without a verdict is asked once more for it in each round, so each round makes two calls.
+      expect(fresh.filter((b) => who(b) === "reviewer")).toHaveLength(4);
       const sent = fresh.filter((b) => !who(b)).map(lastUser).filter((text) => text.startsWith("Review of your change"));
       expect(sent).toHaveLength(2);
       expect(sent.every((text) => text.includes("reviewer gave no verdict, so this change is not reviewed yet."))).toBe(true);
@@ -673,7 +680,7 @@ describe("review and explore from a solo conversation", () => {
 
     test("a round with no verdict keeps the blockers of the round before it open", async () => {
       const blocker: Reply = { calls: [{ name: "submit_review", args: { verdict: "request_changes", comments: "The page is blank.", findings: [{ severity: "major", file: "src/report.ts", lines: "1", problem: "The page is blank.", evidence: "report.ts returns nothing.", fix: "Return the rows." }] } }] };
-      const replies: Reply[] = [blocker, { text: "I looked again." }];
+      const replies: Reply[] = [blocker, { text: "I looked again." }, { text: "Still nothing to add." }];
       script = (b) => {
         if (who(b) === "verifier") return verified;
         if (who(b) === "reviewer") {

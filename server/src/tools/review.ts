@@ -4,6 +4,7 @@
  * engine restores any file a check changed.
  */
 import { z } from "zod";
+import { fragmentAsks } from "../engine/acceptance";
 import { defineTool } from "./types";
 
 export const reviewCallTool = defineTool({
@@ -36,6 +37,8 @@ export const askVerdictTool = defineTool({
     })).min(1),
   }),
   async run(_ctx, a) {
+    const fragments = fragmentAsks(a.asks.map((x) => x.ask));
+    if (fragments.length) return { text: `These are fragments, not whole asks: ${fragments.map((f) => `"${f}"`).join(", ")}. Submit each ask whole, in the user's words, with the words it shares with the ask before it.`, ok: false };
     return { text: "Acceptance submitted.", stop: { kind: "asks", asks: a.asks.map((x) => ({ id: x.id?.trim().toUpperCase(), ask: x.ask, met: x.met, evidence: x.evidence })) } };
   },
 });

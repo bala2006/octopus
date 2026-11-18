@@ -279,7 +279,8 @@ describe("the verifier", () => {
     const done = await settle(await start("Add the report module"));
     expect(done.status).toBe("incomplete");
     expect(done.halt_reason).toBe("Two acceptance checks did not submit their asks.");
-    expect(requests().slice(before).filter((b) => who(b) === "verifier")).toHaveLength(2);
+    // Each acceptance check is asked once more for its asks when it replies without them, so each check makes two calls.
+    expect(requests().slice(before).filter((b) => who(b) === "verifier")).toHaveLength(4);
   }, 120_000);
 
   test("review with verifier runs the verifier once, and the floor does not run it again for the same change", async () => {

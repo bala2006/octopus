@@ -2,9 +2,8 @@
  * The read-only specialists: reviewer (correctness), security, designer (how the UI looks), explorer (answers one
  * question) and verifier (checks each ask of the user's messages by running the product). Each has one prompt and one
  * skill under catalog/specialists, a toolbox and an effort. Its instructions are the prompt followed by the skill, and they
- * never change, so every round reuses the cached prefix. Each specialist keeps
- * one session per conversation, so a later round continues the earlier one. A call that finds the session busy, such as a
- * second explore in the same step, gets a fresh session for itself.
+ * never change, so every round reuses the cached prefix. Each round starts a fresh session from its brief: the earlier
+ * rounds of a request reach it as findings and answers, not as a transcript that every later call would re-read.
  *
  * A review round briefs its reviewers from the request's facts. The first round of a request sends the user's messages,
  * the main agent's account, the project checks and the diff since the request started. A later round sends the findings
@@ -23,6 +22,7 @@ import { numberFindings, renderFindings, renderOpenItems, reviewReport, type Cri
 import { keepBrowserOutput, inProjectLock, undoableCommand, type Restored } from "../workspace/snapshot";
 import type { Project } from "../workspace/projects";
 import { specialistToolbox, type SpecialistTool } from "../tools";
+import { browserBudget } from "../tools/budget";
 import type { ReviewerName, Shown, Tool, ToolContext } from "../tools/types";
 import { agentLoop, type LoopEvents } from "./agent";
 import type { ChecksOutcome } from "./checks";
@@ -37,6 +37,10 @@ export interface SpecialistDef {
   tools: readonly SpecialistTool[];
   /** How a round ends: a submit_review call with a verdict, a plain text answer, or a submit_acceptance call with an entry per ask. */
   ends: "review" | "answer" | "verdict";
+  /** Steps one round may take. The last step offers only the tool that ends the round. */
+  steps: number;
+  /** Browser calls one round may make. The rest are refused, and the round must report what it did not check. */
+  browser: number;
   instructions: string;
 }
 
@@ -45,13 +49,15 @@ const read = (name: SpecialistName, file: "prompt.md" | "SKILL.md") => readFileS
 const instructionsOf = (name: SpecialistName) => `${read(name, "prompt.md")}\n\n${read(name, "SKILL.md")}`;
 
 const CHECKS: readonly SpecialistTool[] = ["read_file", "glob", "grep", "shell"];
+/** The tool that ends each kind of round. The last step of a round offers only this tool. */
+const STOP_TOOLS: Record<SpecialistDef["ends"], string[]> = { review: ["submit_review"], verdict: ["submit_acceptance"], answer: [] };
 
 export const SPECIALIST_DEFS: Record<SpecialistName, SpecialistDef> = {
-  reviewer: { name: "reviewer", title: "Reviewer", avatar: "file-search", effort: "medium", tools: [...CHECKS, "submit_review"], ends: "review", instructions: instructionsOf("reviewer") },
-  security: { name: "security", title: "Security reviewer", avatar: "shield-alert", effort: "high", tools: [...CHECKS, "fetch_url", "submit_review"], ends: "review", instructions: instructionsOf("security") },
-  designer: { name: "designer", title: "Designer", avatar: "palette", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_review"], ends: "review", instructions: instructionsOf("designer") },
-  explorer: { name: "explorer", title: "Explorer", avatar: "compass", effort: "low", tools: [...CHECKS, "fetch_url"], ends: "answer", instructions: instructionsOf("explorer") },
-  verifier: { name: "verifier", title: "Verifier", avatar: "flask-conical", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_acceptance"], ends: "verdict", instructions: instructionsOf("verifier") },
+  reviewer: { name: "reviewer", title: "Reviewer", avatar: "file-search", effort: "medium", tools: [...CHECKS, "submit_review"], ends: "review", steps: 30, browser: 0, instructions: instructionsOf("reviewer") },
+  security: { name: "security", title: "Security reviewer", avatar: "shield-alert", effort: "high", tools: [...CHECKS, "fetch_url", "submit_review"], ends: "review", steps: 30, browser: 0, instructions: instructionsOf("security") },
+  designer: { name: "designer", title: "Designer", avatar: "palette", effort: "medium", tools: [...CHECKS, "start_dev_server", "browser", "submit_review"], ends: "review", steps: 30, browser: 15, instructions: instructionsOf("designer") },
+  explorer: { name: "explorer", title: "Explorer", avatar: "compass", effort: "low", tools: [...CHECKS, "fetch_url"], ends: "answer", steps: 20, browser: 0, instructions: instructionsOf("explorer") },
+  verifier: { name: "verifier", title: "Verifier", avatar: "flask-conical", effort: "high", tools: [...CHECKS, "start_dev_server", "browser", "submit_acceptance"], ends: "verdict", steps: 30, browser: 15, instructions: instructionsOf("verifier") },
 };
 
 /** The settings a new conversation uses until Settings saves its own: every specialist on, at its default effort and the configured model. */
@@ -78,8 +84,6 @@ export function specialistRole(name: SpecialistName): RoleTemplateOut {
 
 /** The most one round returns to the main agent, in characters. A message is kept under 6,000 characters with room to spare. */
 export const RETURN_LIMIT = 5_900;
-/** Steps one specialist round may take before it is stopped. */
-const ROUND_STEPS = 60;
 /** Written to the transcript when a specialist round cannot be undone. */
 const UNDOABLE_WARNING = "This project is over the 64 MB limit for the undo record, so the checks in this round cannot be undone. Files they change stay changed.";
 /** Added to a specialist's brief when the project folder is not a Git repository, so it does not spend steps on git. */
@@ -103,6 +107,10 @@ export interface SpecialistHost {
   toolContext(agent: AgentOut, memory: { seen: Map<string, string>; shown: Shown }): ToolContext;
   requirements(): Requirement[];
   setRequirements(list: Requirement[]): void;
+  /** Starts the project's dev server. `fresh` stops a running one first, so a check sees the files as they are now. */
+  devServer(fresh: boolean): Promise<{ command: string; url: string | null; output: string }>;
+  /** The effort the conversation's budget sets, or undefined when each agent keeps its own. */
+  budgetEffort(): Effort | undefined;
 }
 
 /** The request a review is about. The solo path keeps these up to date as the turn runs. */
@@ -124,14 +132,10 @@ export interface ReviewRound { text: string; blocking: number; /** The reviewers
 /** What one verifier round returns: the message for the main agent, and how many asks are not met. */
 export interface VerifyRound { text: string; unmet: number }
 
-interface Session { items: Item[]; busy: boolean; seen: Map<string, string>; shown: Shown }
 interface Outcome { verdict: CriticReport["verdict"]; findings: FindingInput[]; text: string; asks?: Verdict[] }
-
-const fresh = (): Session => ({ items: [], busy: false, seen: new Map(), shown: new Map() });
 
 /** Each conversation holds one of these. It runs specialist rounds and answers the main agent's review and explore calls. */
 export class Specialists {
-  private sessions = new Map<SpecialistName, Session>();
   /** Review rounds this request has run, numbered from one. */
   private rounds = 0;
   /** Findings this request has numbered, so ids run on across its review rounds. */
@@ -208,6 +212,11 @@ export class Specialists {
     return this.silent;
   }
 
+  /** The critics whose blocker or major findings from the last round are still open, or who gave it no verdict. */
+  openCritics(): Set<string> {
+    return new Set([...this.blocking.map((f) => f.critic), ...this.silent]);
+  }
+
   minorFindings(): Finding[] {
     return this.minors;
   }
@@ -274,7 +283,7 @@ export class Specialists {
     this.verifiedFrom = new Map([...this.facts().before.keys()].map((file) => [file, this.current(file)]));
     const outcome = await this.round("verifier", brief);
     let next = this.host.requirements().length;
-    this.asks = foldVerdicts(this.asks, outcome.asks ?? [], () => `R${++next}`);
+    this.asks = foldVerdicts(this.asks, outcome.asks ?? [], () => `R${++next}`, round > 1);
     this.publishAsks();
     // A round that submitted no asks checked nothing, so the change stays due for another round.
     if (!this.asks.length) return { text: "The acceptance check submitted no asks.", unmet: 1 };
@@ -323,7 +332,7 @@ export class Specialists {
     const since = (file: string) => (this.verifiedFrom.has(file) ? this.verifiedFrom.get(file)! : facts.before.get(file) ?? null);
     const asks = this.asks.map((a) => `${a.id} [${a.met ? "met" : "not met"}] ${a.ask}\n  Evidence: ${a.evidence}`).join("\n");
     return [
-      `Verify round ${round} of this request. Check each ask below again in the running product, and submit every one with its id. Add an ask only for a request in the user's messages that is not listed.`,
+      `Verify round ${round} of this request. Check only the asks marked not met, in the running product, and submit each one with its id. The asks marked met stand. Add an ask only for a request in the user's messages that is not listed.`,
       `Asks so far:\n${asks}`,
       messages,
       `What the main agent says it did and how it checked it:\n${focus}`,
@@ -385,7 +394,7 @@ export class Specialists {
     const def = SPECIALIST_DEFS[name];
     const seat = this.host.seat(name);
     const agent = seat.agent;
-    const session = this.take(name);
+    const memory = { seen: new Map<string, string>(), shown: new Map() as Shown };
     let warned = false;
     const warn = () => {
       if (warned) return;
@@ -396,9 +405,9 @@ export class Specialists {
     try {
       const toolbox = await specialistToolbox(def.tools, this.host.p.root);
       for (const message of toolbox.warnings) this.host.emit("error", { message, kind: "warning", agent_id: agent.id });
-      const tools = toolbox.tools.map((tool) => this.guarded(name, tool, warn));
+      const tools = browserBudget(toolbox.tools.map((tool) => this.guarded(name, tool, warn)), def.browser);
       const isRepo = existsSync(path.join(this.host.p.root, ".git"));
-      session.items.push({ role: "user", content: isRepo ? brief : `${brief}\n\n${NOT_GIT}` });
+      const items: Item[] = [{ role: "user", content: isRepo ? brief : `${brief}\n\n${NOT_GIT}` }];
       const base = this.host.loopEvents(agent);
       const events: LoopEvents = {
         ...base,
@@ -408,9 +417,12 @@ export class Specialists {
         },
       };
       const setting = this.policy.specialists[name];
+      // The first dev server call of a round restarts the server, so the check runs on the files as they are now.
+      let restarted = false;
+      const ctx: ToolContext = { ...this.host.toolContext(agent, memory), devServer: () => { const fresh = !restarted; restarted = true; return this.host.devServer(fresh); } };
       const res = await agentLoop({
-        reg: this.host.reg, model: setting.model, effort: setting.effort, instructions: def.instructions, input: session.items, tools,
-        ctx: this.host.toolContext(agent, session), events, maxRounds: ROUND_STEPS, requireStop: false, stopTools: [], keepHead: 1,
+        reg: this.host.reg, model: setting.model, effort: this.host.budgetEffort() ?? setting.effort, instructions: def.instructions, input: items, tools,
+        ctx, events, maxRounds: def.steps, requireStop: def.ends !== "answer", stopTools: STOP_TOOLS[def.ends], keepHead: 1,
         cacheKey: `${this.host.runId}:${agent.id}:specialist`,
       });
       this.host.setStatus(agent, "done", "Reported");
@@ -421,19 +433,8 @@ export class Specialists {
       this.host.setStatus(agent, "error", (e as Error).message);
       throw e;
     } finally {
-      session.busy = false;
       this.host.emit("edge_activity", { edge_id: seat.report.id, from_agent_id: agent.id, type: seat.report.type });
     }
-  }
-
-  /** The session a round continues: the kept one, unless a round is still using it. */
-  private take(name: SpecialistName): Session {
-    const kept = this.sessions.get(name);
-    if (kept?.busy) return { ...fresh(), busy: true };
-    const session = kept ?? fresh();
-    this.sessions.set(name, session);
-    session.busy = true;
-    return session;
   }
 
   /** The first round sends the request. A later round sends what changed since the last one and the answers to its findings. */
