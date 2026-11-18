@@ -19,3 +19,7 @@ eval-results/
 .DS_Store
 .idea/
 .vscode/
+
+# Private study material: never committed
+/harness-study/
+/reference harness/
