@@ -1,0 +1,3796 @@
+{
+ "scenes": [
+  {
+   "id": "hook",
+   "start": 0.0,
+   "lines": [
+    {
+     "text": "What if you could open a folder on your laptop, type one message, and a whole software team gets to work?",
+     "start": 0.0,
+     "end": 7.366,
+     "words": [
+      {
+       "w": "What",
+       "t": 0.0
+      },
+      {
+       "w": "if",
+       "t": 0.252
+      },
+      {
+       "w": "you",
+       "t": 0.473
+      },
+      {
+       "w": "could",
+       "t": 0.71
+      },
+      {
+       "w": "open",
+       "t": 0.977
+      },
+      {
+       "w": "a",
+       "t": 1.419
+      },
+      {
+       "w": "folder",
+       "t": 1.625
+      },
+      {
+       "w": "on",
+       "t": 2.098
+      },
+      {
+       "w": "your",
+       "t": 2.32
+      },
+      {
+       "w": "laptop,",
+       "t": 2.572
+      },
+      {
+       "w": "type",
+       "t": 3.111
+      },
+      {
+       "w": "one",
+       "t": 3.554
+      },
+      {
+       "w": "message,",
+       "t": 3.981
+      },
+      {
+       "w": "and",
+       "t": 4.727
+      },
+      {
+       "w": "a",
+       "t": 4.964
+      },
+      {
+       "w": "whole",
+       "t": 5.17
+      },
+      {
+       "w": "software",
+       "t": 5.628
+      },
+      {
+       "w": "team",
+       "t": 6.322
+      },
+      {
+       "w": "gets",
+       "t": 6.574
+      },
+      {
+       "w": "to",
+       "t": 6.826
+      },
+      {
+       "w": "work?",
+       "t": 7.047
+      }
+     ]
+    },
+    {
+     "text": "Not one chatbot. A team.",
+     "start": 7.646,
+     "end": 9.607,
+     "words": [
+      {
+       "w": "Not",
+       "t": 7.646
+      },
+      {
+       "w": "one",
+       "t": 7.912
+      },
+      {
+       "w": "chatbot.",
+       "t": 8.393
+      },
+      {
+       "w": "A",
+       "t": 9.017
+      },
+      {
+       "w": "team.",
+       "t": 9.249
+      }
+     ]
+    },
+    {
+     "text": "A developer, a designer, a reviewer and a tester, all working on your project.",
+     "start": 9.887,
+     "end": 15.616,
+     "words": [
+      {
+       "w": "A",
+       "t": 9.887
+      },
+      {
+       "w": "developer,",
+       "t": 10.091
+      },
+      {
+       "w": "a",
+       "t": 11.051
+      },
+      {
+       "w": "designer,",
+       "t": 11.255
+      },
+      {
+       "w": "a",
+       "t": 12.01
+      },
+      {
+       "w": "reviewer",
+       "t": 12.214
+      },
+      {
+       "w": "and",
+       "t": 12.903
+      },
+      {
+       "w": "a",
+       "t": 13.138
+      },
+      {
+       "w": "tester,",
+       "t": 13.342
+      },
+      {
+       "w": "all",
+       "t": 13.877
+      },
+      {
+       "w": "working",
+       "t": 14.112
+      },
+      {
+       "w": "on",
+       "t": 14.596
+      },
+      {
+       "w": "your",
+       "t": 14.816
+      },
+      {
+       "w": "project.",
+       "t": 15.066
+      }
+     ]
+    },
+    {
+     "text": "That is Octopus.",
+     "start": 15.896,
+     "end": 17.896,
+     "words": [
+      {
+       "w": "That",
+       "t": 15.896
+      },
+      {
+       "w": "is",
+       "t": 16.309
+      },
+      {
+       "w": "Octopus.",
+       "t": 16.672
+      }
+     ]
+    },
+    {
+     "text": "And today I'll show you a real run, start to finish. Nothing staged.",
+     "start": 18.176,
+     "end": 24.47,
+     "words": [
+      {
+       "w": "And",
+       "t": 18.176
+      },
+      {
+       "w": "today",
+       "t": 18.527
+      },
+      {
+       "w": "I'll",
+       "t": 19.208
+      },
+      {
+       "w": "show",
+       "t": 19.559
+      },
+      {
+       "w": "you",
+       "t": 19.933
+      },
+      {
+       "w": "a",
+       "t": 20.284
+      },
+      {
+       "w": "real",
+       "t": 20.59
+      },
+      {
+       "w": "run,",
+       "t": 20.964
+      },
+      {
+       "w": "start",
+       "t": 21.415
+      },
+      {
+       "w": "to",
+       "t": 21.812
+      },
+      {
+       "w": "finish.",
+       "t": 22.141
+      },
+      {
+       "w": "Nothing",
+       "t": 22.942
+      },
+      {
+       "w": "staged.",
+       "t": 23.668
+      }
+     ]
+    }
+   ],
+   "end": 24.4695
+  },
+  {
+   "id": "problem",
+   "start": 25.1695,
+   "lines": [
+    {
+     "text": "Most AI coding tools work like one very fast intern.",
+     "start": 25.169,
+     "end": 29.142,
+     "words": [
+      {
+       "w": "Most",
+       "t": 25.169
+      },
+      {
+       "w": "AI",
+       "t": 25.45
+      },
+      {
+       "w": "coding",
+       "t": 25.697
+      },
+      {
+       "w": "tools",
+       "t": 26.223
+      },
+      {
+       "w": "work",
+       "t": 26.52
+      },
+      {
+       "w": "like",
+       "t": 26.8
+      },
+      {
+       "w": "one",
+       "t": 27.293
+      },
+      {
+       "w": "very",
+       "t": 27.768
+      },
+      {
+       "w": "fast",
+       "t": 28.261
+      },
+      {
+       "w": "intern.",
+       "t": 28.541
+      }
+     ]
+    },
+    {
+     "text": "You ask, it writes, and then you check everything yourself.",
+     "start": 29.422,
+     "end": 34.447,
+     "words": [
+      {
+       "w": "You",
+       "t": 29.422
+      },
+      {
+       "w": "ask,",
+       "t": 29.737
+      },
+      {
+       "w": "it",
+       "t": 30.14
+      },
+      {
+       "w": "writes,",
+       "t": 30.434
+      },
+      {
+       "w": "and",
+       "t": 31.152
+      },
+      {
+       "w": "then",
+       "t": 31.466
+      },
+      {
+       "w": "you",
+       "t": 31.801
+      },
+      {
+       "w": "check",
+       "t": 32.116
+      },
+      {
+       "w": "everything",
+       "t": 32.471
+      },
+      {
+       "w": "yourself.",
+       "t": 33.688
+      }
+     ]
+    },
+    {
+     "text": "But real software is not built like that.",
+     "start": 34.727,
+     "end": 36.797,
+     "words": [
+      {
+       "w": "But",
+       "t": 34.727
+      },
+      {
+       "w": "real",
+       "t": 34.91
+      },
+      {
+       "w": "software",
+       "t": 35.106
+      },
+      {
+       "w": "is",
+       "t": 35.644
+      },
+      {
+       "w": "not",
+       "t": 35.816
+      },
+      {
+       "w": "built",
+       "t": 36.0
+      },
+      {
+       "w": "like",
+       "t": 36.207
+      },
+      {
+       "w": "that.",
+       "t": 36.55
+      }
+     ]
+    },
+    {
+     "text": "Real teams split the work. Someone builds. Someone reviews the code. Someone checks the design.",
+     "start": 37.077,
+     "end": 44.195,
+     "words": [
+      {
+       "w": "Real",
+       "t": 37.077
+      },
+      {
+       "w": "teams",
+       "t": 37.375
+      },
+      {
+       "w": "split",
+       "t": 37.69
+      },
+      {
+       "w": "the",
+       "t": 38.006
+      },
+      {
+       "w": "work.",
+       "t": 38.286
+      },
+      {
+       "w": "Someone",
+       "t": 38.663
+      },
+      {
+       "w": "builds.",
+       "t": 39.465
+      },
+      {
+       "w": "Someone",
+       "t": 39.878
+      },
+      {
+       "w": "reviews",
+       "t": 40.681
+      },
+      {
+       "w": "the",
+       "t": 41.259
+      },
+      {
+       "w": "code.",
+       "t": 41.538
+      },
+      {
+       "w": "Someone",
+       "t": 42.14
+      },
+      {
+       "w": "checks",
+       "t": 42.943
+      },
+      {
+       "w": "the",
+       "t": 43.277
+      },
+      {
+       "w": "design.",
+       "t": 43.557
+      }
+     ]
+    },
+    {
+     "text": "And someone actually clicks through the product before it ships.",
+     "start": 44.475,
+     "end": 47.965,
+     "words": [
+      {
+       "w": "And",
+       "t": 44.475
+      },
+      {
+       "w": "someone",
+       "t": 44.675
+      },
+      {
+       "w": "actually",
+       "t": 45.248
+      },
+      {
+       "w": "clicks",
+       "t": 45.834
+      },
+      {
+       "w": "through",
+       "t": 46.072
+      },
+      {
+       "w": "the",
+       "t": 46.323
+      },
+      {
+       "w": "product",
+       "t": 46.523
+      },
+      {
+       "w": "before",
+       "t": 46.935
+      },
+      {
+       "w": "it",
+       "t": 47.496
+      },
+      {
+       "w": "ships.",
+       "t": 47.682
+      }
+     ]
+    }
+   ],
+   "end": 47.96452083333333
+  },
+  {
+   "id": "idea",
+   "start": 48.664520833333334,
+   "lines": [
+    {
+     "text": "Octopus copies that structure.",
+     "start": 48.665,
+     "end": 50.304,
+     "words": [
+      {
+       "w": "Octopus",
+       "t": 48.665
+      },
+      {
+       "w": "copies",
+       "t": 49.176
+      },
+      {
+       "w": "that",
+       "t": 49.532
+      },
+      {
+       "w": "structure.",
+       "t": 49.721
+      }
+     ]
+    },
+    {
+     "text": "You talk to one team lead, called Octopus.",
+     "start": 50.584,
+     "end": 53.326,
+     "words": [
+      {
+       "w": "You",
+       "t": 50.584
+      },
+      {
+       "w": "talk",
+       "t": 50.806
+      },
+      {
+       "w": "to",
+       "t": 51.041
+      },
+      {
+       "w": "one",
+       "t": 51.249
+      },
+      {
+       "w": "team",
+       "t": 51.649
+      },
+      {
+       "w": "lead,",
+       "t": 51.885
+      },
+      {
+       "w": "called",
+       "t": 52.183
+      },
+      {
+       "w": "Octopus.",
+       "t": 52.626
+      }
+     ]
+    },
+    {
+     "text": "It reads your request, writes it down as numbered requirements, and hires the specialists the job needs.",
+     "start": 53.606,
+     "end": 62.111,
+     "words": [
+      {
+       "w": "It",
+       "t": 53.606
+      },
+      {
+       "w": "reads",
+       "t": 53.889
+      },
+      {
+       "w": "your",
+       "t": 54.231
+      },
+      {
+       "w": "request,",
+       "t": 54.553
+      },
+      {
+       "w": "writes",
+       "t": 55.263
+      },
+      {
+       "w": "it",
+       "t": 55.869
+      },
+      {
+       "w": "down",
+       "t": 56.152
+      },
+      {
+       "w": "as",
+       "t": 56.474
+      },
+      {
+       "w": "numbered",
+       "t": 56.757
+      },
+      {
+       "w": "requirements,",
+       "t": 57.645
+      },
+      {
+       "w": "and",
+       "t": 58.941
+      },
+      {
+       "w": "hires",
+       "t": 59.244
+      },
+      {
+       "w": "the",
+       "t": 59.83
+      },
+      {
+       "w": "specialists",
+       "t": 60.132
+      },
+      {
+       "w": "the",
+       "t": 61.079
+      },
+      {
+       "w": "job",
+       "t": 61.382
+      },
+      {
+       "w": "needs.",
+       "t": 61.685
+      }
+     ]
+    },
+    {
+     "text": "Then the cycle runs. Plan, build, review, verify, and report.",
+     "start": 62.391,
+     "end": 67.443,
+     "words": [
+      {
+       "w": "Then",
+       "t": 62.391
+      },
+      {
+       "w": "the",
+       "t": 62.712
+      },
+      {
+       "w": "cycle",
+       "t": 63.013
+      },
+      {
+       "w": "runs.",
+       "t": 63.597
+      },
+      {
+       "w": "Plan,",
+       "t": 64.003
+      },
+      {
+       "w": "build,",
+       "t": 64.409
+      },
+      {
+       "w": "review,",
+       "t": 64.834
+      },
+      {
+       "w": "verify,",
+       "t": 65.522
+      },
+      {
+       "w": "and",
+       "t": 66.454
+      },
+      {
+       "w": "report.",
+       "t": 66.755
+      }
+     ]
+    },
+    {
+     "text": "Every part has one owner, and nothing is called done until someone has checked it.",
+     "start": 67.723,
+     "end": 74.533,
+     "words": [
+      {
+       "w": "Every",
+       "t": 67.723
+      },
+      {
+       "w": "part",
+       "t": 68.447
+      },
+      {
+       "w": "has",
+       "t": 68.728
+      },
+      {
+       "w": "one",
+       "t": 68.992
+      },
+      {
+       "w": "owner,",
+       "t": 69.469
+      },
+      {
+       "w": "and",
+       "t": 70.055
+      },
+      {
+       "w": "nothing",
+       "t": 70.319
+      },
+      {
+       "w": "is",
+       "t": 70.864
+      },
+      {
+       "w": "called",
+       "t": 71.111
+      },
+      {
+       "w": "done",
+       "t": 71.639
+      },
+      {
+       "w": "until",
+       "t": 72.133
+      },
+      {
+       "w": "someone",
+       "t": 72.644
+      },
+      {
+       "w": "has",
+       "t": 73.402
+      },
+      {
+       "w": "checked",
+       "t": 73.666
+      },
+      {
+       "w": "it.",
+       "t": 74.211
+      }
+     ]
+    }
+   ],
+   "end": 74.533125
+  },
+  {
+   "id": "setup",
+   "start": 75.233125,
+   "lines": [
+    {
+     "text": "Let's see it working. This is the actual Octopus app, running locally on this machine.",
+     "start": 75.233,
+     "end": 80.465,
+     "words": [
+      {
+       "w": "Let's",
+       "t": 75.233
+      },
+      {
+       "w": "see",
+       "t": 75.459
+      },
+      {
+       "w": "it",
+       "t": 75.672
+      },
+      {
+       "w": "working.",
+       "t": 75.871
+      },
+      {
+       "w": "This",
+       "t": 76.371
+      },
+      {
+       "w": "is",
+       "t": 76.597
+      },
+      {
+       "w": "the",
+       "t": 76.796
+      },
+      {
+       "w": "actual",
+       "t": 77.009
+      },
+      {
+       "w": "Octopus",
+       "t": 77.434
+      },
+      {
+       "w": "app,",
+       "t": 78.045
+      },
+      {
+       "w": "running",
+       "t": 78.318
+      },
+      {
+       "w": "locally",
+       "t": 78.757
+      },
+      {
+       "w": "on",
+       "t": 79.368
+      },
+      {
+       "w": "this",
+       "t": 79.567
+      },
+      {
+       "w": "machine.",
+       "t": 79.794
+      }
+     ]
+    },
+    {
+     "text": "First, the model. I paste my Azure OpenAI endpoint, add the key, and save.",
+     "start": 80.745,
+     "end": 86.719,
+     "words": [
+      {
+       "w": "First,",
+       "t": 80.745
+      },
+      {
+       "w": "the",
+       "t": 81.115
+      },
+      {
+       "w": "model.",
+       "t": 81.378
+      },
+      {
+       "w": "I",
+       "t": 81.96
+      },
+      {
+       "w": "paste",
+       "t": 82.188
+      },
+      {
+       "w": "my",
+       "t": 82.696
+      },
+      {
+       "w": "Azure",
+       "t": 82.942
+      },
+      {
+       "w": "OpenAI",
+       "t": 83.661
+      },
+      {
+       "w": "endpoint,",
+       "t": 84.398
+      },
+      {
+       "w": "add",
+       "t": 85.031
+      },
+      {
+       "w": "the",
+       "t": 85.293
+      },
+      {
+       "w": "key,",
+       "t": 85.555
+      },
+      {
+       "w": "and",
+       "t": 85.892
+      },
+      {
+       "w": "save.",
+       "t": 86.154
+      }
+     ]
+    },
+    {
+     "text": "Then, test connection.",
+     "start": 86.999,
+     "end": 88.923,
+     "words": [
+      {
+       "w": "Then,",
+       "t": 86.999
+      },
+      {
+       "w": "test",
+       "t": 87.449
+      },
+      {
+       "w": "connection.",
+       "t": 87.805
+      }
+     ]
+    },
+    {
+     "text": "Connected to GPT 6 Luna, in under two seconds.",
+     "start": 89.203,
+     "end": 92.707,
+     "words": [
+      {
+       "w": "Connected",
+       "t": 89.203
+      },
+      {
+       "w": "to",
+       "t": 89.944
+      },
+      {
+       "w": "GPT",
+       "t": 90.176
+      },
+      {
+       "w": "6",
+       "t": 90.423
+      },
+      {
+       "w": "Luna,",
+       "t": 90.638
+      },
+      {
+       "w": "in",
+       "t": 91.17
+      },
+      {
+       "w": "under",
+       "t": 91.401
+      },
+      {
+       "w": "two",
+       "t": 91.88
+      },
+      {
+       "w": "seconds.",
+       "t": 92.127
+      }
+     ]
+    },
+    {
+     "text": "And the key stays encrypted on this computer. It is never sent back to the browser.",
+     "start": 92.987,
+     "end": 99.132,
+     "words": [
+      {
+       "w": "And",
+       "t": 92.987
+      },
+      {
+       "w": "the",
+       "t": 93.259
+      },
+      {
+       "w": "key",
+       "t": 93.532
+      },
+      {
+       "w": "stays",
+       "t": 93.804
+      },
+      {
+       "w": "encrypted",
+       "t": 94.112
+      },
+      {
+       "w": "on",
+       "t": 94.929
+      },
+      {
+       "w": "this",
+       "t": 95.183
+      },
+      {
+       "w": "computer.",
+       "t": 95.473
+      },
+      {
+       "w": "It",
+       "t": 96.35
+      },
+      {
+       "w": "is",
+       "t": 96.604
+      },
+      {
+       "w": "never",
+       "t": 96.859
+      },
+      {
+       "w": "sent",
+       "t": 97.386
+      },
+      {
+       "w": "back",
+       "t": 97.676
+      },
+      {
+       "w": "to",
+       "t": 97.966
+      },
+      {
+       "w": "the",
+       "t": 98.221
+      },
+      {
+       "w": "browser.",
+       "t": 98.493
+      }
+     ]
+    }
+   ],
+   "end": 99.13247916666667
+  },
+  {
+   "id": "prompt",
+   "start": 99.83247916666667,
+   "lines": [
+    {
+     "text": "Now, the request.",
+     "start": 99.832,
+     "end": 101.742,
+     "words": [
+      {
+       "w": "Now,",
+       "t": 99.832
+      },
+      {
+       "w": "the",
+       "t": 100.361
+      },
+      {
+       "w": "request.",
+       "t": 100.773
+      }
+     ]
+    },
+    {
+     "text": "I'm asking for a landing page for Chai Tapri, a small chai cafe in Bengaluru.",
+     "start": 102.022,
+     "end": 108.158,
+     "words": [
+      {
+       "w": "I'm",
+       "t": 102.022
+      },
+      {
+       "w": "asking",
+       "t": 102.272
+      },
+      {
+       "w": "for",
+       "t": 102.806
+      },
+      {
+       "w": "a",
+       "t": 103.073
+      },
+      {
+       "w": "landing",
+       "t": 103.305
+      },
+      {
+       "w": "page",
+       "t": 103.856
+      },
+      {
+       "w": "for",
+       "t": 104.356
+      },
+      {
+       "w": "Chai",
+       "t": 104.623
+      },
+      {
+       "w": "Tapri,",
+       "t": 104.907
+      },
+      {
+       "w": "a",
+       "t": 105.499
+      },
+      {
+       "w": "small",
+       "t": 105.732
+      },
+      {
+       "w": "chai",
+       "t": 106.033
+      },
+      {
+       "w": "cafe",
+       "t": 106.318
+      },
+      {
+       "w": "in",
+       "t": 106.817
+      },
+      {
+       "w": "Bengaluru.",
+       "t": 107.067
+      }
+     ]
+    },
+    {
+     "text": "A warm hero section, a menu with prices in rupees, an order counter where I can add and remove cups, and a contact section with opening hours.",
+     "start": 108.438,
+     "end": 120.101,
+     "words": [
+      {
+       "w": "A",
+       "t": 108.438
+      },
+      {
+       "w": "warm",
+       "t": 108.683
+      },
+      {
+       "w": "hero",
+       "t": 108.983
+      },
+      {
+       "w": "section,",
+       "t": 109.51
+      },
+      {
+       "w": "a",
+       "t": 110.171
+      },
+      {
+       "w": "menu",
+       "t": 110.416
+      },
+      {
+       "w": "with",
+       "t": 110.943
+      },
+      {
+       "w": "prices",
+       "t": 111.242
+      },
+      {
+       "w": "in",
+       "t": 111.806
+      },
+      {
+       "w": "rupees,",
+       "t": 112.069
+      },
+      {
+       "w": "an",
+       "t": 112.712
+      },
+      {
+       "w": "order",
+       "t": 112.975
+      },
+      {
+       "w": "counter",
+       "t": 113.52
+      },
+      {
+       "w": "where",
+       "t": 114.101
+      },
+      {
+       "w": "I",
+       "t": 114.646
+      },
+      {
+       "w": "can",
+       "t": 114.891
+      },
+      {
+       "w": "add",
+       "t": 115.173
+      },
+      {
+       "w": "and",
+       "t": 115.455
+      },
+      {
+       "w": "remove",
+       "t": 115.736
+      },
+      {
+       "w": "cups,",
+       "t": 116.526
+      },
+      {
+       "w": "and",
+       "t": 116.906
+      },
+      {
+       "w": "a",
+       "t": 117.187
+      },
+      {
+       "w": "contact",
+       "t": 117.432
+      },
+      {
+       "w": "section",
+       "t": 118.014
+      },
+      {
+       "w": "with",
+       "t": 118.595
+      },
+      {
+       "w": "opening",
+       "t": 118.895
+      },
+      {
+       "w": "hours.",
+       "t": 119.703
+      }
+     ]
+    },
+    {
+     "text": "Responsive, and plain HTML, CSS and JavaScript.",
+     "start": 120.381,
+     "end": 126.181,
+     "words": [
+      {
+       "w": "Responsive,",
+       "t": 120.381
+      },
+      {
+       "w": "and",
+       "t": 122.238
+      },
+      {
+       "w": "plain",
+       "t": 122.685
+      },
+      {
+       "w": "HTML,",
+       "t": 123.189
+      },
+      {
+       "w": "CSS",
+       "t": 123.792
+      },
+      {
+       "w": "and",
+       "t": 124.239
+      },
+      {
+       "w": "JavaScript.",
+       "t": 124.686
+      }
+     ]
+    },
+    {
+     "text": "I give it an empty folder, create the project, and send.",
+     "start": 126.461,
+     "end": 129.915,
+     "words": [
+      {
+       "w": "I",
+       "t": 126.461
+      },
+      {
+       "w": "give",
+       "t": 126.643
+      },
+      {
+       "w": "it",
+       "t": 127.034
+      },
+      {
+       "w": "an",
+       "t": 127.23
+      },
+      {
+       "w": "empty",
+       "t": 127.425
+      },
+      {
+       "w": "folder,",
+       "t": 127.83
+      },
+      {
+       "w": "create",
+       "t": 128.307
+      },
+      {
+       "w": "the",
+       "t": 128.725
+      },
+      {
+       "w": "project,",
+       "t": 128.934
+      },
+      {
+       "w": "and",
+       "t": 129.424
+      },
+      {
+       "w": "send.",
+       "t": 129.633
+      }
+     ]
+    }
+   ],
+   "end": 129.915375
+  },
+  {
+   "id": "staff",
+   "start": 130.615375,
+   "lines": [
+    {
+     "text": "Within fifteen seconds, Octopus has turned my message into seven requirements, in my own words.",
+     "start": 130.615,
+     "end": 135.6,
+     "words": [
+      {
+       "w": "Within",
+       "t": 130.615
+      },
+      {
+       "w": "fifteen",
+       "t": 130.965
+      },
+      {
+       "w": "seconds,",
+       "t": 131.327
+      },
+      {
+       "w": "Octopus",
+       "t": 131.738
+      },
+      {
+       "w": "has",
+       "t": 132.241
+      },
+      {
+       "w": "turned",
+       "t": 132.416
+      },
+      {
+       "w": "my",
+       "t": 132.766
+      },
+      {
+       "w": "message",
+       "t": 132.93
+      },
+      {
+       "w": "into",
+       "t": 133.433
+      },
+      {
+       "w": "seven",
+       "t": 133.761
+      },
+      {
+       "w": "requirements,",
+       "t": 134.1
+      },
+      {
+       "w": "in",
+       "t": 134.85
+      },
+      {
+       "w": "my",
+       "t": 135.014
+      },
+      {
+       "w": "own",
+       "t": 135.177
+      },
+      {
+       "w": "words.",
+       "t": 135.353
+      }
+     ]
+    },
+    {
+     "text": "Then it hires.",
+     "start": 135.88,
+     "end": 136.983,
+     "words": [
+      {
+       "w": "Then",
+       "t": 135.88
+      },
+      {
+       "w": "it",
+       "t": 136.158
+      },
+      {
+       "w": "hires.",
+       "t": 136.403
+      }
+     ]
+    },
+    {
+     "text": "Maya, a frontend developer. Ira, a UI and UX designer. And Dev, a QA engineer.",
+     "start": 137.263,
+     "end": 145.631,
+     "words": [
+      {
+       "w": "Maya,",
+       "t": 137.263
+      },
+      {
+       "w": "a",
+       "t": 137.718
+      },
+      {
+       "w": "frontend",
+       "t": 138.012
+      },
+      {
+       "w": "developer.",
+       "t": 138.73
+      },
+      {
+       "w": "Ira,",
+       "t": 140.11
+      },
+      {
+       "w": "a",
+       "t": 140.816
+      },
+      {
+       "w": "UI",
+       "t": 141.11
+      },
+      {
+       "w": "and",
+       "t": 141.425
+      },
+      {
+       "w": "UX",
+       "t": 141.763
+      },
+      {
+       "w": "designer.",
+       "t": 142.079
+      },
+      {
+       "w": "And",
+       "t": 143.165
+      },
+      {
+       "w": "Dev,",
+       "t": 143.502
+      },
+      {
+       "w": "a",
+       "t": 143.935
+      },
+      {
+       "w": "QA",
+       "t": 144.229
+      },
+      {
+       "w": "engineer.",
+       "t": 144.545
+      }
+     ]
+    },
+    {
+     "text": "Look at the canvas. The org chart builds itself as each person joins, grouped into engineering, design, and quality.",
+     "start": 145.911,
+     "end": 154.48,
+     "words": [
+      {
+       "w": "Look",
+       "t": 145.911
+      },
+      {
+       "w": "at",
+       "t": 146.2
+      },
+      {
+       "w": "the",
+       "t": 146.453
+      },
+      {
+       "w": "canvas.",
+       "t": 146.724
+      },
+      {
+       "w": "The",
+       "t": 147.343
+      },
+      {
+       "w": "org",
+       "t": 147.614
+      },
+      {
+       "w": "chart",
+       "t": 147.885
+      },
+      {
+       "w": "builds",
+       "t": 148.191
+      },
+      {
+       "w": "itself",
+       "t": 148.515
+      },
+      {
+       "w": "as",
+       "t": 149.057
+      },
+      {
+       "w": "each",
+       "t": 149.311
+      },
+      {
+       "w": "person",
+       "t": 149.6
+      },
+      {
+       "w": "joins,",
+       "t": 150.142
+      },
+      {
+       "w": "grouped",
+       "t": 150.524
+      },
+      {
+       "w": "into",
+       "t": 151.084
+      },
+      {
+       "w": "engineering,",
+       "t": 151.591
+      },
+      {
+       "w": "design,",
+       "t": 152.735
+      },
+      {
+       "w": "and",
+       "t": 153.354
+      },
+      {
+       "w": "quality.",
+       "t": 153.625
+      }
+     ]
+    }
+   ],
+   "end": 154.4796875
+  },
+  {
+   "id": "build",
+   "start": 155.1796875,
+   "lines": [
+    {
+     "text": "Maya owns the whole page, so she builds it end to end.",
+     "start": 155.18,
+     "end": 159.229,
+     "words": [
+      {
+       "w": "Maya",
+       "t": 155.18
+      },
+      {
+       "w": "owns",
+       "t": 155.477
+      },
+      {
+       "w": "the",
+       "t": 155.775
+      },
+      {
+       "w": "whole",
+       "t": 156.054
+      },
+      {
+       "w": "page,",
+       "t": 156.594
+      },
+      {
+       "w": "so",
+       "t": 157.196
+      },
+      {
+       "w": "she",
+       "t": 157.457
+      },
+      {
+       "w": "builds",
+       "t": 157.736
+      },
+      {
+       "w": "it",
+       "t": 158.07
+      },
+      {
+       "w": "end",
+       "t": 158.331
+      },
+      {
+       "w": "to",
+       "t": 158.61
+      },
+      {
+       "w": "end.",
+       "t": 158.871
+      }
+     ]
+    },
+    {
+     "text": "She writes the HTML, then the styles, then the script.",
+     "start": 159.509,
+     "end": 163.606,
+     "words": [
+      {
+       "w": "She",
+       "t": 159.509
+      },
+      {
+       "w": "writes",
+       "t": 159.819
+      },
+      {
+       "w": "the",
+       "t": 160.438
+      },
+      {
+       "w": "HTML,",
+       "t": 160.747
+      },
+      {
+       "w": "then",
+       "t": 161.164
+      },
+      {
+       "w": "the",
+       "t": 161.494
+      },
+      {
+       "w": "styles,",
+       "t": 161.804
+      },
+      {
+       "w": "then",
+       "t": 162.51
+      },
+      {
+       "w": "the",
+       "t": 162.84
+      },
+      {
+       "w": "script.",
+       "t": 163.149
+      }
+     ]
+    },
+    {
+     "text": "She checks the JavaScript, starts a small local server, and opens the page in a real browser.",
+     "start": 163.886,
+     "end": 170.405,
+     "words": [
+      {
+       "w": "She",
+       "t": 163.886
+      },
+      {
+       "w": "checks",
+       "t": 164.147
+      },
+      {
+       "w": "the",
+       "t": 164.459
+      },
+      {
+       "w": "JavaScript,",
+       "t": 164.72
+      },
+      {
+       "w": "starts",
+       "t": 165.593
+      },
+      {
+       "w": "a",
+       "t": 165.905
+      },
+      {
+       "w": "small",
+       "t": 166.132
+      },
+      {
+       "w": "local",
+       "t": 166.427
+      },
+      {
+       "w": "server,",
+       "t": 166.932
+      },
+      {
+       "w": "and",
+       "t": 167.527
+      },
+      {
+       "w": "opens",
+       "t": 167.788
+      },
+      {
+       "w": "the",
+       "t": 168.294
+      },
+      {
+       "w": "page",
+       "t": 168.555
+      },
+      {
+       "w": "in",
+       "t": 169.043
+      },
+      {
+       "w": "a",
+       "t": 169.287
+      },
+      {
+       "w": "real",
+       "t": 169.515
+      },
+      {
+       "w": "browser.",
+       "t": 169.792
+      }
+     ]
+    },
+    {
+     "text": "She clicks plus and minus on the menu, reads the totals back, and resizes the window to test mobile.",
+     "start": 170.685,
+     "end": 177.552,
+     "words": [
+      {
+       "w": "She",
+       "t": 170.685
+      },
+      {
+       "w": "clicks",
+       "t": 170.933
+      },
+      {
+       "w": "plus",
+       "t": 171.228
+      },
+      {
+       "w": "and",
+       "t": 171.492
+      },
+      {
+       "w": "minus",
+       "t": 171.74
+      },
+      {
+       "w": "on",
+       "t": 172.219
+      },
+      {
+       "w": "the",
+       "t": 172.451
+      },
+      {
+       "w": "menu,",
+       "t": 172.699
+      },
+      {
+       "w": "reads",
+       "t": 173.232
+      },
+      {
+       "w": "the",
+       "t": 173.512
+      },
+      {
+       "w": "totals",
+       "t": 173.76
+      },
+      {
+       "w": "back,",
+       "t": 174.255
+      },
+      {
+       "w": "and",
+       "t": 174.589
+      },
+      {
+       "w": "resizes",
+       "t": 174.836
+      },
+      {
+       "w": "the",
+       "t": 175.548
+      },
+      {
+       "w": "window",
+       "t": 175.795
+      },
+      {
+       "w": "to",
+       "t": 176.291
+      },
+      {
+       "w": "test",
+       "t": 176.523
+      },
+      {
+       "w": "mobile.",
+       "t": 176.786
+      }
+     ]
+    },
+    {
+     "text": "All of this, before she even says she is done.",
+     "start": 177.832,
+     "end": 182.635,
+     "words": [
+      {
+       "w": "All",
+       "t": 177.832
+      },
+      {
+       "w": "of",
+       "t": 178.172
+      },
+      {
+       "w": "this,",
+       "t": 178.491
+      },
+      {
+       "w": "before",
+       "t": 178.949
+      },
+      {
+       "w": "she",
+       "t": 179.904
+      },
+      {
+       "w": "even",
+       "t": 180.244
+      },
+      {
+       "w": "says",
+       "t": 180.881
+      },
+      {
+       "w": "she",
+       "t": 181.243
+      },
+      {
+       "w": "is",
+       "t": 181.584
+      },
+      {
+       "w": "done.",
+       "t": 181.902
+      }
+     ]
+    }
+   ],
+   "end": 182.634875
+  },
+  {
+   "id": "review",
+   "start": 183.334875,
+   "lines": [
+    {
+     "text": "When Maya finishes, the reviewers step in, in parallel.",
+     "start": 183.335,
+     "end": 187.681,
+     "words": [
+      {
+       "w": "When",
+       "t": 183.335
+      },
+      {
+       "w": "Maya",
+       "t": 183.628
+      },
+      {
+       "w": "finishes,",
+       "t": 183.921
+      },
+      {
+       "w": "the",
+       "t": 184.808
+      },
+      {
+       "w": "reviewers",
+       "t": 185.083
+      },
+      {
+       "w": "step",
+       "t": 185.909
+      },
+      {
+       "w": "in,",
+       "t": 186.202
+      },
+      {
+       "w": "in",
+       "t": 186.538
+      },
+      {
+       "w": "parallel.",
+       "t": 186.795
+      }
+     ]
+    },
+    {
+     "text": "Kai, the tech lead, reviews the code.",
+     "start": 187.961,
+     "end": 190.581,
+     "words": [
+      {
+       "w": "Kai,",
+       "t": 187.961
+      },
+      {
+       "w": "the",
+       "t": 188.3
+      },
+      {
+       "w": "tech",
+       "t": 188.564
+      },
+      {
+       "w": "lead,",
+       "t": 188.846
+      },
+      {
+       "w": "reviews",
+       "t": 189.202
+      },
+      {
+       "w": "the",
+       "t": 189.748
+      },
+      {
+       "w": "code.",
+       "t": 190.012
+      }
+     ]
+    },
+    {
+     "text": "Ira opens the page at desktop and phone widths, and judges the design.",
+     "start": 190.861,
+     "end": 195.884,
+     "words": [
+      {
+       "w": "Ira",
+       "t": 190.861
+      },
+      {
+       "w": "opens",
+       "t": 191.308
+      },
+      {
+       "w": "the",
+       "t": 191.787
+      },
+      {
+       "w": "page",
+       "t": 192.034
+      },
+      {
+       "w": "at",
+       "t": 192.497
+      },
+      {
+       "w": "desktop",
+       "t": 192.728
+      },
+      {
+       "w": "and",
+       "t": 193.239
+      },
+      {
+       "w": "phone",
+       "t": 193.486
+      },
+      {
+       "w": "widths,",
+       "t": 193.965
+      },
+      {
+       "w": "and",
+       "t": 194.33
+      },
+      {
+       "w": "judges",
+       "t": 194.577
+      },
+      {
+       "w": "the",
+       "t": 195.072
+      },
+      {
+       "w": "design.",
+       "t": 195.319
+      }
+     ]
+    },
+    {
+     "text": "And Dev, the QA engineer, play-tests the edge cases, at six screen widths, and with the keyboard alone.",
+     "start": 196.164,
+     "end": 203.283,
+     "words": [
+      {
+       "w": "And",
+       "t": 196.164
+      },
+      {
+       "w": "Dev,",
+       "t": 196.422
+      },
+      {
+       "w": "the",
+       "t": 196.754
+      },
+      {
+       "w": "QA",
+       "t": 197.012
+      },
+      {
+       "w": "engineer,",
+       "t": 197.254
+      },
+      {
+       "w": "play-tests",
+       "t": 198.086
+      },
+      {
+       "w": "the",
+       "t": 198.653
+      },
+      {
+       "w": "edge",
+       "t": 198.912
+      },
+      {
+       "w": "cases,",
+       "t": 199.395
+      },
+      {
+       "w": "at",
+       "t": 199.969
+      },
+      {
+       "w": "six",
+       "t": 200.21
+      },
+      {
+       "w": "screen",
+       "t": 200.469
+      },
+      {
+       "w": "widths,",
+       "t": 200.777
+      },
+      {
+       "w": "and",
+       "t": 201.159
+      },
+      {
+       "w": "with",
+       "t": 201.417
+      },
+      {
+       "w": "the",
+       "t": 201.693
+      },
+      {
+       "w": "keyboard",
+       "t": 201.951
+      },
+      {
+       "w": "alone.",
+       "t": 202.501
+      }
+     ]
+    },
+    {
+     "text": "All three of them sign off. If anyone had asked for changes, the notes would go back to Maya together, in one revision.",
+     "start": 203.563,
+     "end": 211.773,
+     "words": [
+      {
+       "w": "All",
+       "t": 203.563
+      },
+      {
+       "w": "three",
+       "t": 203.806
+      },
+      {
+       "w": "of",
+       "t": 204.081
+      },
+      {
+       "w": "them",
+       "t": 204.309
+      },
+      {
+       "w": "sign",
+       "t": 204.568
+      },
+      {
+       "w": "off.",
+       "t": 204.827
+      },
+      {
+       "w": "If",
+       "t": 205.139
+      },
+      {
+       "w": "anyone",
+       "t": 205.366
+      },
+      {
+       "w": "had",
+       "t": 206.049
+      },
+      {
+       "w": "asked",
+       "t": 206.292
+      },
+      {
+       "w": "for",
+       "t": 206.763
+      },
+      {
+       "w": "changes,",
+       "t": 207.007
+      },
+      {
+       "w": "the",
+       "t": 207.578
+      },
+      {
+       "w": "notes",
+       "t": 207.821
+      },
+      {
+       "w": "would",
+       "t": 208.292
+      },
+      {
+       "w": "go",
+       "t": 208.567
+      },
+      {
+       "w": "back",
+       "t": 208.794
+      },
+      {
+       "w": "to",
+       "t": 209.053
+      },
+      {
+       "w": "Maya",
+       "t": 209.281
+      },
+      {
+       "w": "together,",
+       "t": 209.54
+      },
+      {
+       "w": "in",
+       "t": 210.323
+      },
+      {
+       "w": "one",
+       "t": 210.55
+      },
+      {
+       "w": "revision.",
+       "t": 210.99
+      }
+     ]
+    }
+   ],
+   "end": 211.77310416666666
+  },
+  {
+   "id": "verify",
+   "start": 212.47310416666667,
+   "lines": [
+    {
+     "text": "Then comes the part I like the most.",
+     "start": 212.473,
+     "end": 214.868,
+     "words": [
+      {
+       "w": "Then",
+       "t": 212.473
+      },
+      {
+       "w": "comes",
+       "t": 212.724
+      },
+      {
+       "w": "the",
+       "t": 213.181
+      },
+      {
+       "w": "part",
+       "t": 213.416
+      },
+      {
+       "w": "I",
+       "t": 213.667
+      },
+      {
+       "w": "like",
+       "t": 213.873
+      },
+      {
+       "w": "the",
+       "t": 214.314
+      },
+      {
+       "w": "most.",
+       "t": 214.55
+      }
+     ]
+    },
+    {
+     "text": "A verifier runs the actual product, and judges every requirement with evidence.",
+     "start": 215.148,
+     "end": 220.295,
+     "words": [
+      {
+       "w": "A",
+       "t": 215.148
+      },
+      {
+       "w": "verifier",
+       "t": 215.327
+      },
+      {
+       "w": "runs",
+       "t": 215.932
+      },
+      {
+       "w": "the",
+       "t": 216.152
+      },
+      {
+       "w": "actual",
+       "t": 216.358
+      },
+      {
+       "w": "product,",
+       "t": 216.77
+      },
+      {
+       "w": "and",
+       "t": 217.253
+      },
+      {
+       "w": "judges",
+       "t": 217.459
+      },
+      {
+       "w": "every",
+       "t": 217.871
+      },
+      {
+       "w": "requirement",
+       "t": 218.436
+      },
+      {
+       "w": "with",
+       "t": 219.247
+      },
+      {
+       "w": "evidence.",
+       "t": 219.466
+      }
+     ]
+    },
+    {
+     "text": "On the first try, Dev could not open the running page. So he did not tick the boxes.",
+     "start": 220.575,
+     "end": 226.668,
+     "words": [
+      {
+       "w": "On",
+       "t": 220.575
+      },
+      {
+       "w": "the",
+       "t": 220.826
+      },
+      {
+       "w": "first",
+       "t": 221.094
+      },
+      {
+       "w": "try,",
+       "t": 221.397
+      },
+      {
+       "w": "Dev",
+       "t": 221.741
+      },
+      {
+       "w": "could",
+       "t": 222.009
+      },
+      {
+       "w": "not",
+       "t": 222.312
+      },
+      {
+       "w": "open",
+       "t": 222.58
+      },
+      {
+       "w": "the",
+       "t": 223.082
+      },
+      {
+       "w": "running",
+       "t": 223.35
+      },
+      {
+       "w": "page.",
+       "t": 223.904
+      },
+      {
+       "w": "So",
+       "t": 224.481
+      },
+      {
+       "w": "he",
+       "t": 224.732
+      },
+      {
+       "w": "did",
+       "t": 224.983
+      },
+      {
+       "w": "not",
+       "t": 225.251
+      },
+      {
+       "w": "tick",
+       "t": 225.519
+      },
+      {
+       "w": "the",
+       "t": 225.805
+      },
+      {
+       "w": "boxes.",
+       "t": 226.073
+      }
+     ]
+    },
+    {
+     "text": "He marked them as not met, and the work went back to Maya.",
+     "start": 226.948,
+     "end": 230.991,
+     "words": [
+      {
+       "w": "He",
+       "t": 226.948
+      },
+      {
+       "w": "marked",
+       "t": 227.205
+      },
+      {
+       "w": "them",
+       "t": 227.756
+      },
+      {
+       "w": "as",
+       "t": 228.049
+      },
+      {
+       "w": "not",
+       "t": 228.306
+      },
+      {
+       "w": "met,",
+       "t": 228.581
+      },
+      {
+       "w": "and",
+       "t": 228.934
+      },
+      {
+       "w": "the",
+       "t": 229.209
+      },
+      {
+       "w": "work",
+       "t": 229.484
+      },
+      {
+       "w": "went",
+       "t": 229.777
+      },
+      {
+       "w": "back",
+       "t": 230.07
+      },
+      {
+       "w": "to",
+       "t": 230.363
+      },
+      {
+       "w": "Maya.",
+       "t": 230.62
+      }
+     ]
+    },
+    {
+     "text": "She added a proper start command, and Dev checked again.",
+     "start": 231.271,
+     "end": 234.641,
+     "words": [
+      {
+       "w": "She",
+       "t": 231.271
+      },
+      {
+       "w": "added",
+       "t": 231.488
+      },
+      {
+       "w": "a",
+       "t": 231.907
+      },
+      {
+       "w": "proper",
+       "t": 232.095
+      },
+      {
+       "w": "start",
+       "t": 232.528
+      },
+      {
+       "w": "command,",
+       "t": 232.773
+      },
+      {
+       "w": "and",
+       "t": 233.281
+      },
+      {
+       "w": "Dev",
+       "t": 233.498
+      },
+      {
+       "w": "checked",
+       "t": 233.714
+      },
+      {
+       "w": "again.",
+       "t": 234.161
+      }
+     ]
+    },
+    {
+     "text": "This time, seven out of seven requirements met, each one with a note on how it was tested.",
+     "start": 234.921,
+     "end": 241.607,
+     "words": [
+      {
+       "w": "This",
+       "t": 234.921
+      },
+      {
+       "w": "time,",
+       "t": 235.183
+      },
+      {
+       "w": "seven",
+       "t": 235.714
+      },
+      {
+       "w": "out",
+       "t": 236.191
+      },
+      {
+       "w": "of",
+       "t": 236.437
+      },
+      {
+       "w": "seven",
+       "t": 236.668
+      },
+      {
+       "w": "requirements",
+       "t": 237.144
+      },
+      {
+       "w": "met,",
+       "t": 238.13
+      },
+      {
+       "w": "each",
+       "t": 238.446
+      },
+      {
+       "w": "one",
+       "t": 238.708
+      },
+      {
+       "w": "with",
+       "t": 239.153
+      },
+      {
+       "w": "a",
+       "t": 239.416
+      },
+      {
+       "w": "note",
+       "t": 239.63
+      },
+      {
+       "w": "on",
+       "t": 240.091
+      },
+      {
+       "w": "how",
+       "t": 240.322
+      },
+      {
+       "w": "it",
+       "t": 240.568
+      },
+      {
+       "w": "was",
+       "t": 240.798
+      },
+      {
+       "w": "tested.",
+       "t": 241.045
+      }
+     ]
+    }
+   ],
+   "end": 241.60747916666668
+  },
+  {
+   "id": "numbers",
+   "start": 242.30747916666667,
+   "lines": [
+    {
+     "text": "The whole run took about fifteen minutes.",
+     "start": 242.307,
+     "end": 245.46,
+     "words": [
+      {
+       "w": "The",
+       "t": 242.307
+      },
+      {
+       "w": "whole",
+       "t": 242.566
+      },
+      {
+       "w": "run",
+       "t": 243.069
+      },
+      {
+       "w": "took",
+       "t": 243.328
+      },
+      {
+       "w": "about",
+       "t": 243.604
+      },
+      {
+       "w": "fifteen",
+       "t": 244.106
+      },
+      {
+       "w": "minutes.",
+       "t": 244.642
+      }
+     ]
+    },
+    {
+     "text": "Five agents. One hundred and thirteen model calls. Two point four million tokens.",
+     "start": 245.74,
+     "end": 250.927,
+     "words": [
+      {
+       "w": "Five",
+       "t": 245.74
+      },
+      {
+       "w": "agents.",
+       "t": 246.18
+      },
+      {
+       "w": "One",
+       "t": 246.717
+      },
+      {
+       "w": "hundred",
+       "t": 247.143
+      },
+      {
+       "w": "and",
+       "t": 247.628
+      },
+      {
+       "w": "thirteen",
+       "t": 247.864
+      },
+      {
+       "w": "model",
+       "t": 248.365
+      },
+      {
+       "w": "calls.",
+       "t": 248.82
+      },
+      {
+       "w": "Two",
+       "t": 249.152
+      },
+      {
+       "w": "point",
+       "t": 249.388
+      },
+      {
+       "w": "four",
+       "t": 249.653
+      },
+      {
+       "w": "million",
+       "t": 249.904
+      },
+      {
+       "w": "tokens.",
+       "t": 250.39
+      }
+     ]
+    },
+    {
+     "text": "And the cost, shown live in the header, five rupees and forty nine paise.",
+     "start": 251.207,
+     "end": 256.53,
+     "words": [
+      {
+       "w": "And",
+       "t": 251.207
+      },
+      {
+       "w": "the",
+       "t": 251.455
+      },
+      {
+       "w": "cost,",
+       "t": 251.703
+      },
+      {
+       "w": "shown",
+       "t": 252.037
+      },
+      {
+       "w": "live",
+       "t": 252.317
+      },
+      {
+       "w": "in",
+       "t": 252.781
+      },
+      {
+       "w": "the",
+       "t": 253.013
+      },
+      {
+       "w": "header,",
+       "t": 253.261
+      },
+      {
+       "w": "five",
+       "t": 253.827
+      },
+      {
+       "w": "rupees",
+       "t": 254.292
+      },
+      {
+       "w": "and",
+       "t": 254.788
+      },
+      {
+       "w": "forty",
+       "t": 255.036
+      },
+      {
+       "w": "nine",
+       "t": 255.516
+      },
+      {
+       "w": "paise.",
+       "t": 255.98
+      }
+     ]
+    },
+    {
+     "text": "That is cheaper than one cutting chai.",
+     "start": 256.81,
+     "end": 259.128,
+     "words": [
+      {
+       "w": "That",
+       "t": 256.81
+      },
+      {
+       "w": "is",
+       "t": 257.048
+      },
+      {
+       "w": "cheaper",
+       "t": 257.258
+      },
+      {
+       "w": "than",
+       "t": 257.721
+      },
+      {
+       "w": "one",
+       "t": 257.959
+      },
+      {
+       "w": "cutting",
+       "t": 258.364
+      },
+      {
+       "w": "chai.",
+       "t": 258.826
+      }
+     ]
+    }
+   ],
+   "end": 259.1281666666667
+  },
+  {
+   "id": "output",
+   "start": 259.8281666666667,
+   "lines": [
+    {
+     "text": "So, what came out?",
+     "start": 259.828,
+     "end": 261.45,
+     "words": [
+      {
+       "w": "So,",
+       "t": 259.828
+      },
+      {
+       "w": "what",
+       "t": 260.191
+      },
+      {
+       "w": "came",
+       "t": 260.509
+      },
+      {
+       "w": "out?",
+       "t": 261.067
+      }
+     ]
+    },
+    {
+     "text": "Here is the page, exactly as the team left it.",
+     "start": 261.73,
+     "end": 265.83,
+     "words": [
+      {
+       "w": "Here",
+       "t": 261.73
+      },
+      {
+       "w": "is",
+       "t": 262.274
+      },
+      {
+       "w": "the",
+       "t": 262.545
+      },
+      {
+       "w": "page,",
+       "t": 262.836
+      },
+      {
+       "w": "exactly",
+       "t": 263.462
+      },
+      {
+       "w": "as",
+       "t": 264.296
+      },
+      {
+       "w": "the",
+       "t": 264.568
+      },
+      {
+       "w": "team",
+       "t": 264.858
+      },
+      {
+       "w": "left",
+       "t": 265.168
+      },
+      {
+       "w": "it.",
+       "t": 265.477
+      }
+     ]
+    },
+    {
+     "text": "A deep green hero, with a little chai glass drawn entirely in CSS.",
+     "start": 266.11,
+     "end": 272.022,
+     "words": [
+      {
+       "w": "A",
+       "t": 266.11
+      },
+      {
+       "w": "deep",
+       "t": 266.389
+      },
+      {
+       "w": "green",
+       "t": 266.731
+      },
+      {
+       "w": "hero,",
+       "t": 267.093
+      },
+      {
+       "w": "with",
+       "t": 267.783
+      },
+      {
+       "w": "a",
+       "t": 268.124
+      },
+      {
+       "w": "little",
+       "t": 268.404
+      },
+      {
+       "w": "chai",
+       "t": 269.045
+      },
+      {
+       "w": "glass",
+       "t": 269.386
+      },
+      {
+       "w": "drawn",
+       "t": 269.749
+      },
+      {
+       "w": "entirely",
+       "t": 270.111
+      },
+      {
+       "w": "in",
+       "t": 271.31
+      },
+      {
+       "w": "CSS.",
+       "t": 271.61
+      }
+     ]
+    },
+    {
+     "text": "The menu, with cutting chai at fifteen rupees, and filter coffee at twenty five.",
+     "start": 272.302,
+     "end": 277.463,
+     "words": [
+      {
+       "w": "The",
+       "t": 272.302
+      },
+      {
+       "w": "menu,",
+       "t": 272.529
+      },
+      {
+       "w": "with",
+       "t": 273.018
+      },
+      {
+       "w": "cutting",
+       "t": 273.26
+      },
+      {
+       "w": "chai",
+       "t": 273.729
+      },
+      {
+       "w": "at",
+       "t": 273.971
+      },
+      {
+       "w": "fifteen",
+       "t": 274.183
+      },
+      {
+       "w": "rupees,",
+       "t": 274.652
+      },
+      {
+       "w": "and",
+       "t": 275.171
+      },
+      {
+       "w": "filter",
+       "t": 275.398
+      },
+      {
+       "w": "coffee",
+       "t": 275.852
+      },
+      {
+       "w": "at",
+       "t": 276.307
+      },
+      {
+       "w": "twenty",
+       "t": 276.519
+      },
+      {
+       "w": "five.",
+       "t": 276.974
+      }
+     ]
+    },
+    {
+     "text": "Let me add three cutting chai, and two ginger chai.",
+     "start": 277.743,
+     "end": 280.741,
+     "words": [
+      {
+       "w": "Let",
+       "t": 277.743
+      },
+      {
+       "w": "me",
+       "t": 277.977
+      },
+      {
+       "w": "add",
+       "t": 278.196
+      },
+      {
+       "w": "three",
+       "t": 278.429
+      },
+      {
+       "w": "cutting",
+       "t": 278.693
+      },
+      {
+       "w": "chai,",
+       "t": 279.176
+      },
+      {
+       "w": "and",
+       "t": 279.491
+      },
+      {
+       "w": "two",
+       "t": 279.725
+      },
+      {
+       "w": "ginger",
+       "t": 279.959
+      },
+      {
+       "w": "chai.",
+       "t": 280.427
+      }
+     ]
+    },
+    {
+     "text": "The order card updates right away. Eighty five rupees, total.",
+     "start": 281.021,
+     "end": 284.839,
+     "words": [
+      {
+       "w": "The",
+       "t": 281.021
+      },
+      {
+       "w": "order",
+       "t": 281.227
+      },
+      {
+       "w": "card",
+       "t": 281.626
+      },
+      {
+       "w": "updates",
+       "t": 281.845
+      },
+      {
+       "w": "right",
+       "t": 282.437
+      },
+      {
+       "w": "away.",
+       "t": 282.67
+      },
+      {
+       "w": "Eighty",
+       "t": 283.114
+      },
+      {
+       "w": "five",
+       "t": 283.526
+      },
+      {
+       "w": "rupees,",
+       "t": 283.911
+      },
+      {
+       "w": "total.",
+       "t": 284.382
+      }
+     ]
+    },
+    {
+     "text": "Scroll down, and there's the contact section, with the opening hours.",
+     "start": 285.119,
+     "end": 289.679,
+     "words": [
+      {
+       "w": "Scroll",
+       "t": 285.119
+      },
+      {
+       "w": "down,",
+       "t": 285.434
+      },
+      {
+       "w": "and",
+       "t": 285.789
+      },
+      {
+       "w": "there's",
+       "t": 286.052
+      },
+      {
+       "w": "the",
+       "t": 286.579
+      },
+      {
+       "w": "contact",
+       "t": 286.843
+      },
+      {
+       "w": "section,",
+       "t": 287.387
+      },
+      {
+       "w": "with",
+       "t": 288.006
+      },
+      {
+       "w": "the",
+       "t": 288.287
+      },
+      {
+       "w": "opening",
+       "t": 288.55
+      },
+      {
+       "w": "hours.",
+       "t": 289.307
+      }
+     ]
+    },
+    {
+     "text": "And on a phone, everything stacks neatly into one column.",
+     "start": 289.959,
+     "end": 295.021,
+     "words": [
+      {
+       "w": "And",
+       "t": 289.959
+      },
+      {
+       "w": "on",
+       "t": 290.239
+      },
+      {
+       "w": "a",
+       "t": 290.502
+      },
+      {
+       "w": "phone,",
+       "t": 290.746
+      },
+      {
+       "w": "everything",
+       "t": 291.368
+      },
+      {
+       "w": "stacks",
+       "t": 292.454
+      },
+      {
+       "w": "neatly",
+       "t": 292.789
+      },
+      {
+       "w": "into",
+       "t": 293.35
+      },
+      {
+       "w": "one",
+       "t": 293.874
+      },
+      {
+       "w": "column.",
+       "t": 294.381
+      }
+     ]
+    }
+   ],
+   "end": 295.02127083333335
+  },
+  {
+   "id": "safety",
+   "start": 295.72127083333334,
+   "lines": [
+    {
+     "text": "Now, these agents work in your real folder. So the server enforces the limits, not the model.",
+     "start": 295.721,
+     "end": 301.479,
+     "words": [
+      {
+       "w": "Now,",
+       "t": 295.721
+      },
+      {
+       "w": "these",
+       "t": 296.005
+      },
+      {
+       "w": "agents",
+       "t": 296.434
+      },
+      {
+       "w": "work",
+       "t": 296.877
+      },
+      {
+       "w": "in",
+       "t": 297.112
+      },
+      {
+       "w": "your",
+       "t": 297.319
+      },
+      {
+       "w": "real",
+       "t": 297.555
+      },
+      {
+       "w": "folder.",
+       "t": 297.791
+      },
+      {
+       "w": "So",
+       "t": 298.296
+      },
+      {
+       "w": "the",
+       "t": 298.504
+      },
+      {
+       "w": "server",
+       "t": 298.725
+      },
+      {
+       "w": "enforces",
+       "t": 299.168
+      },
+      {
+       "w": "the",
+       "t": 299.818
+      },
+      {
+       "w": "limits,",
+       "t": 300.04
+      },
+      {
+       "w": "not",
+       "t": 300.545
+      },
+      {
+       "w": "the",
+       "t": 300.766
+      },
+      {
+       "w": "model.",
+       "t": 300.988
+      }
+     ]
+    },
+    {
+     "text": "Every file is versioned, and the Changes view lets you revert any of them in one click.",
+     "start": 301.759,
+     "end": 308.229,
+     "words": [
+      {
+       "w": "Every",
+       "t": 301.759
+      },
+      {
+       "w": "file",
+       "t": 302.442
+      },
+      {
+       "w": "is",
+       "t": 302.908
+      },
+      {
+       "w": "versioned,",
+       "t": 303.141
+      },
+      {
+       "w": "and",
+       "t": 303.958
+      },
+      {
+       "w": "the",
+       "t": 304.207
+      },
+      {
+       "w": "Changes",
+       "t": 304.456
+      },
+      {
+       "w": "view",
+       "t": 304.97
+      },
+      {
+       "w": "lets",
+       "t": 305.235
+      },
+      {
+       "w": "you",
+       "t": 305.5
+      },
+      {
+       "w": "revert",
+       "t": 305.749
+      },
+      {
+       "w": "any",
+       "t": 306.247
+      },
+      {
+       "w": "of",
+       "t": 306.697
+      },
+      {
+       "w": "them",
+       "t": 306.93
+      },
+      {
+       "w": "in",
+       "t": 307.195
+      },
+      {
+       "w": "one",
+       "t": 307.428
+      },
+      {
+       "w": "click.",
+       "t": 307.877
+      }
+     ]
+    },
+    {
+     "text": "Agent commands are checked before they run, and they never see your keys. Dangerous ones, like R M, or git reset hard, are simply refused.",
+     "start": 308.509,
+     "end": 318.465,
+     "words": [
+      {
+       "w": "Agent",
+       "t": 308.509
+      },
+      {
+       "w": "commands",
+       "t": 308.971
+      },
+      {
+       "w": "are",
+       "t": 309.479
+      },
+      {
+       "w": "checked",
+       "t": 309.91
+      },
+      {
+       "w": "before",
+       "t": 310.402
+      },
+      {
+       "w": "they",
+       "t": 311.072
+      },
+      {
+       "w": "run,",
+       "t": 311.326
+      },
+      {
+       "w": "and",
+       "t": 311.632
+      },
+      {
+       "w": "they",
+       "t": 311.87
+      },
+      {
+       "w": "never",
+       "t": 312.124
+      },
+      {
+       "w": "see",
+       "t": 312.586
+      },
+      {
+       "w": "your",
+       "t": 312.825
+      },
+      {
+       "w": "keys.",
+       "t": 313.079
+      },
+      {
+       "w": "Dangerous",
+       "t": 313.4
+      },
+      {
+       "w": "ones,",
+       "t": 314.116
+      },
+      {
+       "w": "like",
+       "t": 314.63
+      },
+      {
+       "w": "R",
+       "t": 315.076
+      },
+      {
+       "w": "M,",
+       "t": 315.284
+      },
+      {
+       "w": "or",
+       "t": 315.559
+      },
+      {
+       "w": "git",
+       "t": 315.782
+      },
+      {
+       "w": "reset",
+       "t": 316.021
+      },
+      {
+       "w": "hard,",
+       "t": 316.483
+      },
+      {
+       "w": "are",
+       "t": 316.804
+      },
+      {
+       "w": "simply",
+       "t": 317.235
+      },
+      {
+       "w": "refused.",
+       "t": 317.712
+      }
+     ]
+    },
+    {
+     "text": "And the app only listens on your own machine.",
+     "start": 318.745,
+     "end": 322.269,
+     "words": [
+      {
+       "w": "And",
+       "t": 318.745
+      },
+      {
+       "w": "the",
+       "t": 319.014
+      },
+      {
+       "w": "app",
+       "t": 319.284
+      },
+      {
+       "w": "only",
+       "t": 319.553
+      },
+      {
+       "w": "listens",
+       "t": 320.057
+      },
+      {
+       "w": "on",
+       "t": 320.612
+      },
+      {
+       "w": "your",
+       "t": 320.864
+      },
+      {
+       "w": "own",
+       "t": 321.151
+      },
+      {
+       "w": "machine.",
+       "t": 321.42
+      }
+     ]
+    }
+   ],
+   "end": 322.26877083333335
+  },
+  {
+   "id": "honest",
+   "start": 322.96877083333334,
+   "lines": [
+    {
+     "text": "One more thing. Octopus does not pretend.",
+     "start": 322.969,
+     "end": 325.839,
+     "words": [
+      {
+       "w": "One",
+       "t": 322.969
+      },
+      {
+       "w": "more",
+       "t": 323.388
+      },
+      {
+       "w": "thing.",
+       "t": 323.822
+      },
+      {
+       "w": "Octopus",
+       "t": 324.15
+      },
+      {
+       "w": "does",
+       "t": 324.816
+      },
+      {
+       "w": "not",
+       "t": 325.063
+      },
+      {
+       "w": "pretend.",
+       "t": 325.295
+      }
+     ]
+    },
+    {
+     "text": "Two follow-up tasks stayed open in this run, and the report says so, right below the requirements table.",
+     "start": 326.119,
+     "end": 333.664,
+     "words": [
+      {
+       "w": "Two",
+       "t": 326.119
+      },
+      {
+       "w": "follow-up",
+       "t": 326.389
+      },
+      {
+       "w": "tasks",
+       "t": 327.18
+      },
+      {
+       "w": "stayed",
+       "t": 327.485
+      },
+      {
+       "w": "open",
+       "t": 327.807
+      },
+      {
+       "w": "in",
+       "t": 328.311
+      },
+      {
+       "w": "this",
+       "t": 328.564
+      },
+      {
+       "w": "run,",
+       "t": 328.851
+      },
+      {
+       "w": "and",
+       "t": 329.197
+      },
+      {
+       "w": "the",
+       "t": 329.466
+      },
+      {
+       "w": "report",
+       "t": 329.736
+      },
+      {
+       "w": "says",
+       "t": 330.275
+      },
+      {
+       "w": "so,",
+       "t": 330.563
+      },
+      {
+       "w": "right",
+       "t": 330.891
+      },
+      {
+       "w": "below",
+       "t": 331.195
+      },
+      {
+       "w": "the",
+       "t": 331.717
+      },
+      {
+       "w": "requirements",
+       "t": 331.987
+      },
+      {
+       "w": "table.",
+       "t": 333.066
+      }
+     ]
+    },
+    {
+     "text": "You always see what actually happened.",
+     "start": 333.944,
+     "end": 336.856,
+     "words": [
+      {
+       "w": "You",
+       "t": 333.944
+      },
+      {
+       "w": "always",
+       "t": 334.204
+      },
+      {
+       "w": "see",
+       "t": 334.723
+      },
+      {
+       "w": "what",
+       "t": 334.983
+      },
+      {
+       "w": "actually",
+       "t": 335.259
+      },
+      {
+       "w": "happened.",
+       "t": 336.021
+      }
+     ]
+    }
+   ],
+   "end": 336.8565
+  },
+  {
+   "id": "close",
+   "start": 337.5565,
+   "lines": [
+    {
+     "text": "You ask. The team plans, builds, reviews and verifies.",
+     "start": 337.557,
+     "end": 343.186,
+     "words": [
+      {
+       "w": "You",
+       "t": 337.557
+      },
+      {
+       "w": "ask.",
+       "t": 337.974
+      },
+      {
+       "w": "The",
+       "t": 338.508
+      },
+      {
+       "w": "team",
+       "t": 338.924
+      },
+      {
+       "w": "plans,",
+       "t": 339.367
+      },
+      {
+       "w": "builds,",
+       "t": 339.955
+      },
+      {
+       "w": "reviews",
+       "t": 340.57
+      },
+      {
+       "w": "and",
+       "t": 341.43
+      },
+      {
+       "w": "verifies.",
+       "t": 341.846
+      }
+     ]
+    },
+    {
+     "text": "You get an honest report, and the same team is ready for your next message.",
+     "start": 343.466,
+     "end": 348.31,
+     "words": [
+      {
+       "w": "You",
+       "t": 343.466
+      },
+      {
+       "w": "get",
+       "t": 343.693
+      },
+      {
+       "w": "an",
+       "t": 343.921
+      },
+      {
+       "w": "honest",
+       "t": 344.133
+      },
+      {
+       "w": "report,",
+       "t": 344.588
+      },
+      {
+       "w": "and",
+       "t": 345.107
+      },
+      {
+       "w": "the",
+       "t": 345.334
+      },
+      {
+       "w": "same",
+       "t": 345.562
+      },
+      {
+       "w": "team",
+       "t": 345.987
+      },
+      {
+       "w": "is",
+       "t": 346.229
+      },
+      {
+       "w": "ready",
+       "t": 346.442
+      },
+      {
+       "w": "for",
+       "t": 346.882
+      },
+      {
+       "w": "your",
+       "t": 347.109
+      },
+      {
+       "w": "next",
+       "t": 347.351
+      },
+      {
+       "w": "message.",
+       "t": 347.593
+      }
+     ]
+    },
+    {
+     "text": "That's Octopus. Your AI company, in one folder.",
+     "start": 348.59,
+     "end": 352.714,
+     "words": [
+      {
+       "w": "That's",
+       "t": 348.59
+      },
+      {
+       "w": "Octopus.",
+       "t": 348.912
+      },
+      {
+       "w": "Your",
+       "t": 349.811
+      },
+      {
+       "w": "AI",
+       "t": 350.115
+      },
+      {
+       "w": "company,",
+       "t": 350.382
+      },
+      {
+       "w": "in",
+       "t": 351.281
+      },
+      {
+       "w": "one",
+       "t": 351.548
+      },
+      {
+       "w": "folder.",
+       "t": 352.063
+      }
+     ]
+    }
+   ],
+   "end": 352.71372916666667
+  }
+ ],
+ "duration": 354.21372916666667
+}

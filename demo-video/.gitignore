@@ -1,0 +1,8 @@
+node_modules
+out/*
+!out/octopus-demo.mp4
+video/public/footage
+narration/cache
+capture/out*
+capture/tour
+.env

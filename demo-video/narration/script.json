@@ -1,0 +1,149 @@
+{
+ "voice": {
+  "model": "bulbul:v4-flash",
+  "speaker": "shubh_en_narration",
+  "language_code": "en-IN",
+  "pace": 1.07
+ },
+ "gapLine": 0.28,
+ "gapScene": 0.7,
+ "scenes": [
+  {
+   "id": "hook",
+   "lines": [
+    "What if you could open a folder on your laptop, type one message, and a whole software team gets to work?",
+    "Not one chatbot. A team.",
+    "A developer, a designer, a reviewer and a tester, all working on your project.",
+    "That is Octopus.",
+    "And today I'll show you a real run, start to finish. Nothing staged."
+   ]
+  },
+  {
+   "id": "problem",
+   "lines": [
+    "Most AI coding tools work like one very fast intern.",
+    "You ask, it writes, and then you check everything yourself.",
+    "But real software is not built like that.",
+    "Real teams split the work. Someone builds. Someone reviews the code. Someone checks the design.",
+    "And someone actually clicks through the product before it ships."
+   ]
+  },
+  {
+   "id": "idea",
+   "lines": [
+    "Octopus copies that structure.",
+    "You talk to one team lead, called Octopus.",
+    "It reads your request, writes it down as numbered requirements, and hires the specialists the job needs.",
+    "Then the cycle runs. Plan, build, review, verify, and report.",
+    "Every part has one owner, and nothing is called done until someone has checked it."
+   ]
+  },
+  {
+   "id": "setup",
+   "lines": [
+    "Let's see it working. This is the actual Octopus app, running locally on this machine.",
+    "First, the model. I paste my Azure OpenAI endpoint, add the key, and save.",
+    "Then, test connection.",
+    "Connected to GPT 6 Luna, in under two seconds.",
+    "And the key stays encrypted on this computer. It is never sent back to the browser."
+   ]
+  },
+  {
+   "id": "prompt",
+   "lines": [
+    "Now, the request.",
+    "I'm asking for a landing page for Chai Tapri, a small chai cafe in Bengaluru.",
+    "A warm hero section, a menu with prices in rupees, an order counter where I can add and remove cups, and a contact section with opening hours.",
+    "Responsive, and plain HTML, CSS and JavaScript.",
+    "I give it an empty folder, create the project, and send."
+   ]
+  },
+  {
+   "id": "staff",
+   "lines": [
+    "Within fifteen seconds, Octopus has turned my message into seven requirements, in my own words.",
+    "Then it hires.",
+    "Maya, a frontend developer. Ira, a UI and UX designer. And Dev, a QA engineer.",
+    "Look at the canvas. The org chart builds itself as each person joins, grouped into engineering, design, and quality."
+   ]
+  },
+  {
+   "id": "build",
+   "lines": [
+    "Maya owns the whole page, so she builds it end to end.",
+    "She writes the HTML, then the styles, then the script.",
+    "She checks the JavaScript, starts a small local server, and opens the page in a real browser.",
+    "She clicks plus and minus on the menu, reads the totals back, and resizes the window to test mobile.",
+    "All of this, before she even says she is done."
+   ]
+  },
+  {
+   "id": "review",
+   "lines": [
+    "When Maya finishes, the reviewers step in, in parallel.",
+    "Kai, the tech lead, reviews the code.",
+    "Ira opens the page at desktop and phone widths, and judges the design.",
+    "And Dev, the QA engineer, play-tests the edge cases, at six screen widths, and with the keyboard alone.",
+    "All three of them sign off. If anyone had asked for changes, the notes would go back to Maya together, in one revision."
+   ]
+  },
+  {
+   "id": "verify",
+   "lines": [
+    "Then comes the part I like the most.",
+    "A verifier runs the actual product, and judges every requirement with evidence.",
+    "On the first try, Dev could not open the running page. So he did not tick the boxes.",
+    "He marked them as not met, and the work went back to Maya.",
+    "She added a proper start command, and Dev checked again.",
+    "This time, seven out of seven requirements met, each one with a note on how it was tested."
+   ]
+  },
+  {
+   "id": "numbers",
+   "lines": [
+    "The whole run took about fifteen minutes.",
+    "Five agents. One hundred and thirteen model calls. Two point four million tokens.",
+    "And the cost, shown live in the header, five rupees and forty nine paise.",
+    "That is cheaper than one cutting chai."
+   ]
+  },
+  {
+   "id": "output",
+   "lines": [
+    "So, what came out?",
+    "Here is the page, exactly as the team left it.",
+    "A deep green hero, with a little chai glass drawn entirely in CSS.",
+    "The menu, with cutting chai at fifteen rupees, and filter coffee at twenty five.",
+    "Let me add three cutting chai, and two ginger chai.",
+    "The order card updates right away. Eighty five rupees, total.",
+    "Scroll down, and there's the contact section, with the opening hours.",
+    "And on a phone, everything stacks neatly into one column."
+   ]
+  },
+  {
+   "id": "safety",
+   "lines": [
+    "Now, these agents work in your real folder. So the server enforces the limits, not the model.",
+    "Every file is versioned, and the Changes view lets you revert any of them in one click.",
+    "Agent commands are checked before they run, and they never see your keys. Dangerous ones, like R M, or git reset hard, are simply refused.",
+    "And the app only listens on your own machine."
+   ]
+  },
+  {
+   "id": "honest",
+   "lines": [
+    "One more thing. Octopus does not pretend.",
+    "Two follow-up tasks stayed open in this run, and the report says so, right below the requirements table.",
+    "You always see what actually happened."
+   ]
+  },
+  {
+   "id": "close",
+   "lines": [
+    "You ask. The team plans, builds, reviews and verifies.",
+    "You get an honest report, and the same team is ready for your next message.",
+    "That's Octopus. Your AI company, in one folder."
+   ]
+  }
+ ]
+}
